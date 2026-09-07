@@ -1,0 +1,52 @@
+{
+  "restore_after_failed_stop": {
+    "rc": 0,
+    "ok": true,
+    "originalPreserved": false,
+    "stderr": "injected compose down failure\n"
+  },
+  "stage_reason_lost": {
+    "rc": 0,
+    "stdout": "staged-tar false|",
+    "stderr": ""
+  },
+  "tsdb_layout_misclassified": {
+    "rc": 0,
+    "stdout": "staged-tar true\n",
+    "stderr": ""
+  },
+  "late_pair_a_marks_b": {
+    "selected": "b",
+    "pair": true,
+    "pairDetail": {
+      "alias": "b"
+    },
+    "step": "profile",
+    "command": [
+      "hosts",
+      "ping",
+      "b",
+      "--json"
+    ]
+  },
+  "different_profiles_same_apps": {
+    "edge": {
+      "profile": "edge",
+      "apps": [
+        "jellyfin",
+        "syncthing",
+        "vaultwarden",
+        "uptime-kuma"
+      ]
+    },
+    "assistant-private": {
+      "profile": "assistant-private",
+      "apps": [
+        "jellyfin",
+        "syncthing",
+        "vaultwarden",
+        "uptime-kuma"
+      ]
+    }
+  }
+}

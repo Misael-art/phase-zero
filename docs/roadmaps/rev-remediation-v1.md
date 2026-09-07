@@ -88,3 +88,7 @@ narrativo não muda estado.
 REV-001..018 `verified` ou `deferred` com razão aceita; R5 com CI verde no
 SHA final e asset validado em host limpo; gates físicos registrados com o
 operador; handoff no formato obrigatório.
+
+## Contrarrevisão independente — 2026-09-07
+
+Base `a82e2cc`: 78 pytest e suíte Homelab verdes; cinco lacunas adicionais reproduzidas, incluindo P0 de propagação de falha na parada do restore. R0/R1 têm aceite parcial. Ver `reports/review-r0-r1-2026-09-07/README.md` e backlog R01-001..005. Revisão documental, sem correção de produto ou mutação do host.

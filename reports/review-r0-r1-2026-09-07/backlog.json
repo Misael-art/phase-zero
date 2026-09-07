@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "reviewedHead": "a82e2cc",
+  "status": "partial-acceptance",
+  "items": [
+    {
+      "id": "R01-001",
+      "priority": "P0",
+      "title": "Restore prossegue quando Compose down falha",
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 742
+      },
+      "related": "REV-001/003",
+      "status": "pending",
+      "finding": "cmd_restore chama cmd_down dentro de if !. Bash suprime errexit nesse contexto; run_compose down retorna 42, mas pz_info devolve 0. Snapshot e restauração continuam sobre possível escritor vivo. Probe usa funções reais, set -e e Compose fake; resultado rc=0/ok=true, original substituído.",
+      "proposedWork": "Adicionar propagação explícita (run_compose down || return) e provar parada do conjunto correto antes do snapshot; nenhuma escrita após falha.",
+      "acceptance": "cmd_down real + run_compose fake exit42: restore não captura/aplica arquivos e devolve erro. Não substituir cmd_down por stub que já retorna falha."
+    },
+    {
+      "id": "R01-002",
+      "priority": "P1",
+      "title": "Pareamento tardio associa sucesso ao host errado",
+      "source": {
+        "file": "linux/ui_native/pages/homelab.py",
+        "line": 587
+      },
+      "related": "REV-005/006",
+      "status": "pending",
+      "finding": "Callback lê _selected_host; não captura alias iniciado e ignora hostAlias da resposta. Troca A→B durante pairing; resposta A pareada marca B e avança a profile. Reproduzido.",
+      "proposedWork": "Capturar alias e operationId na criação do processo; comparar resposta e seleção; invalidar _pair_advance/callback ao trocar host.",
+      "acceptance": "Pair A em voo, selecionar B, entregar sucesso/falha A: B continua não pareado, etapa não avança, nenhum ping/execução em B por resposta A."
+    },
+    {
+      "id": "R01-003",
+      "priority": "P1",
+      "title": "Prepare persiste perfil, mas não resolve seus serviços",
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 1439
+      },
+      "related": "REV-007",
+      "status": "pending",
+      "finding": "--profile é ecoado/persistido; apps ainda vêm de PREPARE_APPS ou default_prepare_apps. Planos reais edge e assistant-private retornam Jellyfin/Syncthing/Vaultwarden/Uptime Kuma iguais. Assistant-private declara outros serviços no registry. Perfis não instaláveis continuam aceitos por prepare: known não é installable.",
+      "proposedWork": "Resolver conjunto/dependências/maturidade/recursos do perfil no plano; bloquear perfil não instalável antes de mutação, ou deixar explícito que seleção é só orçamento. Não declarar appliance entregue por profile.active.",
+      "acceptance": "Perfis distintos com conjuntos distintos produzem plano e execução respectivos; preview bloqueado com razão; plano inclui seleção de apps e orçamento, execução usa exatamente conjunto revisado."
+    },
+    {
+      "id": "R01-004",
+      "priority": "P2",
+      "title": "Reason de backup desaparece na subshell",
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 966
+      },
+      "related": "REV-002",
+      "status": "pending",
+      "finding": "stage_volume_consistent atribui STAGE_REASON dentro de $(...). A variável não retorna ao pai. Probe de PG_VERSION retorna staged-tar false e reason vazio.",
+      "proposedWork": "Retornar método/consistência/motivo em documento estruturado único; não usar variável lateral de subshell.",
+      "acceptance": "Backup de marcador PostgreSQL e falha sqlite geram manifest e resultado com reason não vazio e correto."
+    },
+    {
+      "id": "R01-005",
+      "priority": "P1",
+      "title": "TSDB Prometheus classificada como consistente",
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 869
+      },
+      "related": "REV-002",
+      "status": "pending",
+      "finding": "Detecção exige wal e chunks/index diretamente na raiz; layout normal usa chunks_head e diretórios de blocos com chunks/index internos. Fixture desse layout retorna staged-tar true.",
+      "proposedWork": "Classificar engine pelo manifesto/receita e usar snapshot suportado; heurística residual deve reconhecer layout real e falhar conservadoramente.",
+      "acceptance": "Raiz com wal/, chunks_head/, <block>/index e <block>/chunks nunca recebe consistent:true por mera cópia viva; snapshot real por API tem teste próprio."
+    }
+  ]
+}

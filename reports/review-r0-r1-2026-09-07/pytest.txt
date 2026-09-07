@@ -1,0 +1,40 @@
+.....................................................F.................. [ 92%]
+......                                                                   [100%]
+=================================== FAILURES ===================================
+__________________ test_install_starts_unit_and_proves_https ___________________
+
+tmp_path = PosixPath('/tmp/pytest-of-misael/pytest-31/test_install_starts_unit_and_p0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7feb7cb925d0>
+
+    def test_install_starts_unit_and_proves_https(tmp_path, monkeypatch):
+        """PZ-AUD-015: install chains daemon-reload/start and proves serving."""
+        monkeypatch.setenv("PZ_HOMELAB_AGENT_STATE", str(tmp_path / "agent"))
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        monkeypatch.setenv("PZ_HOMELAB_AGENT_UNIT_DIR", str(tmp_path / "units"))
+        from linux.server import homelab_agent as mod
+
+        calls = []
+        monkeypatch.setattr(mod, "_systemctl", lambda *a: (calls.append(a) or (0, "")))
+        monkeypatch.setattr(mod, "_loginctl", lambda *a: (0, "Linger=yes"))
+        monkeypatch.setattr(mod, "_probe_https", lambda host, port: True)
+        agent = mod.HomelabAgent(state_dir=tmp_path / "agent2", bind="127.0.0.1", port=17432)
+        payload = agent.install()
+        assert ("daemon-reload",) in calls
+        assert ("enable", "--now", "phasezero-agent.service") in calls
+        assert payload["systemdStarted"] is True
+        assert payload["httpsReachable"] is True
+>       assert payload["linger"] == {"active": True, "detail": "linger already on"}
+E       AssertionError: assert {'active': Fa...s at logout)'} == {'active': Tr...r already on'}
+E
+E         Differing items:
+E         {'active': False} != {'active': True}
+E         {'detail': 'no user'} != {'detail': 'linger already on'}
+E         Left contains 1 more item:
+E         {'nextAction': 'run once with privilege: loginctl enable-linger $USER (else '
+E                        'the agent stops at logout)'}
+E         Use -v to get more diff
+
+tests/test_homelab_agent_contract.py:208: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_homelab_agent_contract.py::test_install_starts_unit_and_proves_https
+1 failed, 77 passed in 13.96s

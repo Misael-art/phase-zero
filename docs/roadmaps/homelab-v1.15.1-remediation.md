@@ -502,6 +502,7 @@ sem evidência.
 
 | Item | Estado atual | Verificado por | Data |
 |---|---|---|---|
+| Contrarrevisão R0/R1 | Aceite parcial em a82e2cc: 5 lacunas reproduzidas, P0 stop/restore; 78 pytest e shell Homelab verdes | `reports/review-r0-r1-2026-09-07/README.md` | 2026-09-07 |
 | `main` | `31642be`, alinhada com `origin/main` | `git status`, `ls-remote` | 2026-08-07 |
 | `main` | `c11155b`, alinhada com `origin/main` | `git status`, `ls-remote` | 2026-08-08 |
 | PR #38 | mergeada via squash (`fc7ede8`); branch local/remota apagadas; worktree `pz-homelab-f9` preservado | `gh pr view 38`, `git ls-remote`, `git worktree list` | 2026-08-08 |
@@ -576,6 +577,7 @@ Adicionar uma linha por sessão material. Não apagar histórico.
 
 | Data | Agente | Branch/worktree | Fase | Commit/PR | Gates | Resultado/próximo passo |
 |---|---|---|---|---|---|---|
+| 2026-09-07 | Codex | `codex/review-r0-r1`, worktree dedicada | contrarrevisão R0/R1 | base a82e2cc; docs via git log | 78 pytest + shell verde; 5 probes residuais | R01-001..005 pendentes; próximo P0 propagação de cmd_down; sem mutação de host |
 | 2026-09-06 | Codex | `codex/portfolio-clean-host-audit` / `pz-portfolio-clean-host-audit` | diagnóstico transversal | docs sobre `2180c94` | 364 pytest; 4 shell; 12 registros reproduzidos; 2 contratos PS; 13 Compose; asset Arch verificado | PZ-AUD-001..031 pending; [plano/handoff](../../reports/portfolio-clean-host-2026-09-06/PLANO.md); P0 restore aberto. Sem mutação de runtime |
 | 2026-09-07 | opencode | `codex/aud-fase0` / `pz-aud-fase0` | Fase 0 (005,006,009,010,011,012) | `076b4ba`, `1a47c15`, `98b75a1`, `7fc3564` | linux-homelab/ai-proxies/9router/agent-workspaces exit 0; pytest Homelab 76; diff-check | 6 itens verified no backlog; P0 restore fechado em fixture. Sem workload/container/servidor tocado. Próximo: Fase 1 (001,002,003,004,026,027) em worktree novo |
 | 2026-09-07 | opencode | `codex/aud-fase1` / `pz-aud-fase1` | Fase 1 (001,002,003,004,026,027) | `b9523da`, `134a3a3`, `c13a304`, `7e7435c`, `209524d`, `ba3a12a`, `b23c0a9`, `1a48cda` | linux-homelab exit 0; pytest 153; diff-check | 6 itens verified no backlog. Daemon real intocado. Próximo: Fase 2 (007,008,015,025,030,031) em worktree novo |
