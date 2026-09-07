@@ -1,0 +1,19 @@
+{
+  "volatile_plan": {
+    "memory": [
+      16000,
+      15999
+    ],
+    "sameApps": true,
+    "verdicts": [
+      "pass",
+      "pass"
+    ],
+    "executeCalled": false,
+    "message": "Plano mudou — revise de novo e pressione Aplicar para executar"
+  },
+  "review_button": {
+    "confirmed": false,
+    "step": "review"
+  }
+}

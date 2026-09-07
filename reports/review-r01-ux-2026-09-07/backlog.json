@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "reviewedHead": "ba6adaa",
+  "items": [
+    {
+      "id": "UX-001",
+      "priority": "P1",
+      "title": "Confirmar revisão pelo fluxo visível",
+      "source": "linux/ui_native/pages/homelab.py:326",
+      "finding": "onboard_confirm_review só é chamado por testes; nenhum controle de produção conecta a confirmação. Em review, Avançar retorna enquanto confirmed=false. Clique reproduzido permanece preso.",
+      "proposedWork": "Revisão com resumo e botão explícito Confirmar e instalar, conectado à máquina de estados.",
+      "acceptance": "E2E Qt somente por cliques/teclado chega ao apply; proibido setar flags privadas ou chamar confirmação diretamente no teste.",
+      "status": "pending",
+      "owner": null
+    },
+    {
+      "id": "UX-002",
+      "priority": "P1",
+      "title": "Plano estável apesar de telemetria variável",
+      "source": "linux/ui_native/pages/homelab.py:466",
+      "finding": "Hash serializa payload inteiro; budget novo inclui availableMB e diskAvailableMB. Planos reais com 16000→15999 MiB, mesmos apps e verdict pass, impedem execução e exigem revisar de novo.",
+      "proposedWork": "Separar intenção estável e observação; hash de host/apps/config/versão/política; revalidar recursos na execução e pedir nova revisão só por mudança material.",
+      "acceptance": "Variação inofensiva de RAM/disco não invalida aceite; cruzar limite bloqueia; mudança de apps/host/permissão exige nova confirmação.",
+      "status": "pending",
+      "owner": null
+    },
+    {
+      "id": "UX-003",
+      "priority": "P1",
+      "title": "Homelab com controles inteiros",
+      "source": "linux/ui_native/pages/homelab.py:111",
+      "finding": "Capturas 1280x800 e 800x600 mostram grupos comprimidos, botões parcialmente invisíveis e etapas sem espaço.",
+      "proposedWork": "Scroll vertical global, altura mínima de conteúdo, cards adaptativos; remover tabela técnica do modo simples.",
+      "acceptance": "Todas ações visíveis/alcançáveis por rolagem vertical; testar geometria dos filhos, e não apenas tamanho da janela.",
+      "status": "pending",
+      "owner": null
+    },
+    {
+      "id": "UX-004",
+      "priority": "P1",
+      "title": "Windows VM adapta colunas e ações",
+      "source": "linux/ui_native/pages/windows_vm.py:185",
+      "finding": "800x600 mantém duas colunas e linha larga de ações; Iniciar fica cortado e aparece scroll horizontal.",
+      "proposedWork": "Uma coluna em janela estreita, ações refluem; botão principal preservado.",
+      "acceptance": "800x600 e 1280x800, escala150/200%, foco/teclado/touch: nenhum CTA cortado e nenhum scroll horizontal necessário.",
+      "status": "pending",
+      "owner": null
+    },
+    {
+      "id": "UX-005",
+      "priority": "P1",
+      "title": "Instalação distinta de simulação de orçamento",
+      "source": "linux/ui_native/pages/homelab.py:488",
+      "finding": "Aviso ORÇAMENTO melhora honestidade, mas permanece texto em log+JSON numa etapa que fala aplicar perfil. Usuário não recebe appliance correspondente à escolha.",
+      "proposedWork": "No simples escolher apps instaláveis; perfis sem receita só na área Simular recursos avançada; quadro claro do que será instalado.",
+      "acceptance": "Escolha de assistente indisponível não instala outros apps com aparência de atender objetivo; aviso legível fora dos logs.",
+      "status": "pending",
+      "owner": null
+    },
+    {
+      "id": "UX-006",
+      "priority": "P2",
+      "title": "Início organizado por objetivo real",
+      "source": "linux/ui_native/pages/dashboard.py:32",
+      "finding": "Cinco objetivos coexistem com tutorial IA universal, ações rápidas e ferramentas. Card remoto lista JSON e card Jogos/Android/VM dispara perfil gaming.",
+      "proposedWork": "Objetivos abrem jornada/destino apropriados; primeiro uso específico; retomar tarefa recente; evitar ações genéricas com rótulo de produto completo.",
+      "acceptance": "Usuário escolhe Windows e chega à instalação Windows; escolhe servidor remoto e chega ao pareamento; IA não exigida para outros objetivos.",
+      "status": "pending",
+      "owner": null
+    },
+    {
+      "id": "UX-007",
+      "priority": "P1",
+      "title": "Modo simples com linguagem e estados de produto",
+      "source": "linux/ui_native/pages/homelab.py:297",
+      "finding": "argv, bind, mDNS, dry-run, Nunca --yes e Player PySide6 aparecem para leigo. run_cmd mostra stdout bruto; término vira Concluído/Falhou veja saída.",
+      "proposedWork": "Texto orientado à tarefa, progresso por etapa, motivo e ação de recuperação; JSON/log/portas/provedor em detalhes avançados.",
+      "acceptance": "Falha de download, autenticação, daemon e espaço explicam causa e oferecem retomar/reparar sem interpretar log.",
+      "status": "pending",
+      "owner": null
+    },
+    {
+      "id": "UX-008",
+      "priority": "P1",
+      "title": "Primeiro acesso remoto dentro da jornada",
+      "source": "linux/server/homelab-hosts.sh:526",
+      "finding": "R2 permanece pendente: primeiro SSH exige terminal externo.",
+      "proposedWork": "Pareamento guiado com confiança no host, credencial protegida, timeout/cancel, porta customizada; tecnologia PTY é escolha de implementação, não produto.",
+      "acceptance": "Máquina sem chave + host novo: completar sem terminal externo, sem senha em argv/log, rejeição/troca de identidade tratadas.",
+      "status": "pending",
+      "owner": null
+    },
+    {
+      "id": "UX-009",
+      "priority": "P1",
+      "title": "Concluir instalação abrindo solução pronta",
+      "source": "linux/ui_native/pages/homelab.py:691",
+      "finding": "Card contém Prévia/Ligar/Atualizar, não jornada completa de primeira conta/TLS/Abrir. Running não prova autenticação/configuração de uso.",
+      "proposedWork": "Estados não instalado→preparando→configurar acesso→pronto→abrir; apresentar maturidade e host; readiness funcional compartilhada.",
+      "acceptance": "Vaultwarden primeira conta/TLS e acesso a partir do admin; Paperless PDF pesquisável; não mostrar pronto por processo rodando.",
+      "status": "pending",
+      "owner": null
+    },
+    {
+      "id": "UX-010",
+      "priority": "P1",
+      "title": "Windows explica capacidade gráfica sem prometer 3D",
+      "source": "linux/ui_native/pages/windows_vm.py:198",
+      "finding": "R3 ainda pendente; rótulo Aceleração de vídeo depende de perfil/QEMU, não prova de driver/API no guest.",
+      "proposedWork": "Simples: display recomendado e motivo. Avançado: experimental opt-in, backend e diagnóstico. Monitor/fullscreen separados de aceleração.",
+      "acceptance": "Guest sem 3D não aparece acelerado; flags sessão/launcher coerentes; teste físico LCD/dock separado.",
+      "status": "pending",
+      "owner": null
+    },
+    {
+      "id": "UX-011",
+      "priority": "P2",
+      "title": "Gate de acessibilidade e usabilidade",
+      "source": "tests/test_homelab_player.py:1",
+      "finding": "Testes de handlers não garantem caminho acessível; novos bloqueios passaram com82 testes verdes. Escalas/leitor de tela/usuários reais ainda sem prova nesta revisão.",
+      "proposedWork": "Smoke de jornada por input público; nomes acessíveis/foco/contraste; sessão com leigos e métricas de conclusão/ajuda/retomada.",
+      "acceptance": "Completar local/remoto/VM com teclado e touch; escalas150/200%; registrar erros, assistência e retomada sem perda de estado.",
+      "status": "pending",
+      "owner": null
+    }
+  ]
+}

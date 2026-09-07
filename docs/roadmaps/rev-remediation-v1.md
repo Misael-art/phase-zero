@@ -112,3 +112,7 @@ permanece coberto pelo fail-closed de backup, não pelo rollback.
 REV-001..018 `verified` ou `deferred` com razão aceita; R5 com CI verde no
 SHA final e asset validado em host limpo; gates físicos registrados com o
 operador; handoff no formato obrigatório.
+
+## Revisão R01 e UX — 2026-09-07
+
+Base ba6adaa:82 pytest + Homelab verdes, aceite local das correções específicas.11 oportunidades UX, incluindo confirmação sem conexão a controle e hash do plano sensível à telemetria, em `reports/review-r01-ux-2026-09-07/README.md`. Sem aceite de release; nenhuma alteração de runtime.
