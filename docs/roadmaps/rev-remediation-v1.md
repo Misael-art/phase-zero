@@ -140,3 +140,7 @@ regressão desta frente; não usada como aceite.
 REV-001..018 `verified` ou `deferred` com razão aceita; R5 com CI verde no
 SHA final e asset validado em host limpo; gates físicos registrados com o
 operador; handoff no formato obrigatório.
+
+## Contrarrevisão UX-001..004 — 2026-09-07
+
+97fb085:115 pytest verdes, mas UX-001 permanece oculto por método duplicado; UX-003/004 com overflow no tema real em800x600. UX-002 validado localmente. Evidências/aceites em `reports/review-ux004-2026-09-07/README.md`. Revisão documental sem mutação do host.

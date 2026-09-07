@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "reviewedHead": "97fb085",
+  "items": [
+    {
+      "id": "UX-001",
+      "priority": "P1",
+      "status": "reopen",
+      "source": "linux/ui_native/pages/homelab.py:359",
+      "finding": "Segunda definição de _refresh_onboard_label sobrescreve primeira (340). Confirmar revisão permanece hidden=True, enabled=True, visibleRegion vazio; Avançar não sai de review.",
+      "fix": "Manter uma única definição com atualização de label e visibilidade. Verificar duplicatas de métodos nas classes alteradas.",
+      "acceptance": "Janela mostrada, etapa review atingida por interação; botão realmente visível e inteiro no viewport antes de clique. Usar isVisibleTo(window) E enabled, nunca visible OU enabled; confirmar desaparecimento e avanço.",
+      "testGap": "test_review_confirmation_reachable_by_clicks aceita isVisible() or isEnabled(); QTest envia evento ao widget oculto. Também injeta descoberta diretamente; não é jornada completa de descoberta real."
+    },
+    {
+      "id": "UX-003",
+      "priority": "P1",
+      "status": "partial",
+      "source": "linux/ui_native/pages/homelab.py:73",
+      "finding": "Scroll vertical melhora altura; porém header e linhas não refluem com tema real. Em800x600 há overflow horizontal70px e barra desativada: atualizar/avançar cortados.",
+      "fix": "Quebrar header/ações em linhas ou layout responsivo, labels com wrap/política adequada, remover mínimos excessivos; não esconder barra para simular ausência de overflow.",
+      "acceptance": "MainWindow+apply_theme real,800x600 e1280x800: scroll.horizontalScrollBar.maximum==0 e retângulo inteiro de cada botão dentro do viewport após rolagem. Incluir header/onboarding, não só _action_buttons.",
+      "testGap": "visibleRegion não vazio só prova algum fragmento visível; teste atual usa página isolada sem tema real."
+    },
+    {
+      "id": "UX-004",
+      "priority": "P1",
+      "status": "partial",
+      "source": "linux/ui_native/pages/windows_vm.py:105",
+      "finding": "Cards e botões refluem, mas hero mantém texto e grid de botões lado a lado. Tema real em800x600 tem overflow57px; botão Iniciar termina emx765 contra limite737 do viewport.",
+      "fix": "Refluir também layout externo do hero: texto em cima, grupo de ações abaixo; conferir widgets de manutenção e todas larguras mínimas com stylesheet real.",
+      "acceptance": "MainWindow+tema real: botão principal totalmente visível, nenhuma rolagem horizontal. Alternar largo→estreito→largo sem resíduo de layout.",
+      "testGap": "Largura mínima150px não assegura que botão esteja dentro da área visível."
+    }
+  ]
+}

@@ -451,6 +451,7 @@ Actualizar esta seção no início e fim de cada sessão.
 
 | Item | Estado atual | Verificado por | Data |
 |---|---|---|---|
+| Revisão97fb085 |115 pytest verdes; UX-001 oculto por método duplicado; UX-002 aceito local; UX-003/004 cortam no tema real | `reports/review-ux004-2026-09-07/README.md` | 2026-09-07 |
 | Base | `origin/main` `a85c7a4` (v1.17.4) | `git fetch` + `git log origin/main` | 2026-08-26 |
 | Player v2 | mergeado: PR #70 `1f86913`; `f7746de` ancestral | `git merge-base --is-ancestor f7746de origin/main` | 2026-08-26 |
 | CI da base | success run `32965735176` | GitHub Actions `ci.yml` push `main` | 2026-08-26 |
@@ -468,6 +469,7 @@ Adicionar uma linha por sessão material. Não apagar histórico.
 
 | Data | Agente | Branch/worktree | Fase | Commit/PR | Gates | Resultado/próximo passo |
 |---|---|---|---|---|---|---|
+| 2026-09-07 | Codex | codex/review-ux004, dedicada | revisão UX | base97fb085; docs via git log |115 pytest;6 capturas | aceite parcial; corrigir duplicação e reflow com tema; host inalterado |
 | 2026-09-06 | Codex | `codex/portfolio-clean-host-audit` / `pz-portfolio-clean-host-audit` | diagnóstico transversal | documentação; base `2180c94` | 364 pytest; 4 shell; 12 registros reproduzidos; 2 contratos PS; 13 Compose válidos sem healthchecks declarados | PZ-AUD-001..031 pending; [plano/handoff](../../reports/portfolio-clean-host-2026-09-06/PLANO.md); priorizar integridade do restore e estados honestos. Nenhum runtime alterado |
 | 2026-08-26 | opencode (checkout principal) | `feat/homelab-player-v2` (somente docs, sem commit) | rascunho | não commitado | — | rascunho untracked no checkout principal; não reutilizar |
 | 2026-08-26 | grok | `feat/homelab-umbrelos-v1` `/mnt/sdcard/Projects/pz-homelab-umbrelos-v1` | 0 | `0ebc7cc` | CI base `32965735176` success; suíte hermética + player 23 passed | Roadmap + dois papéis. |
