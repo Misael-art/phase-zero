@@ -502,6 +502,7 @@ sem evidência.
 
 | Item | Estado atual | Verificado por | Data |
 |---|---|---|---|
+| Revisão independente 2026-09-07 | Entrega local `9d6be9d` não aceita como concluída: 18 achados; P0 restore, onboarding e contrato GL; pacote 1.19.0 / runtime boot 1.16.6 pending | `reports/review-remediation-winvm-ux-2026-09-07/README.md`; 135 pytest, sessão/gráficos/proxies verdes; Homelab falha sem daemon | 2026-09-07 |
 | `main` | `31642be`, alinhada com `origin/main` | `git status`, `ls-remote` | 2026-08-07 |
 | `main` | `c11155b`, alinhada com `origin/main` | `git status`, `ls-remote` | 2026-08-08 |
 | PR #38 | mergeada via squash (`fc7ede8`); branch local/remota apagadas; worktree `pz-homelab-f9` preservado | `gh pr view 38`, `git ls-remote`, `git worktree list` | 2026-08-08 |
@@ -575,6 +576,7 @@ Adicionar uma linha por sessão material. Não apagar histórico.
 
 | Data | Agente | Branch/worktree | Fase | Commit/PR | Gates | Resultado/próximo passo |
 |---|---|---|---|---|---|---|
+| 2026-09-07 | Codex | `codex/review-remediation-winvm-ux`, worktree dedicada | revisão, sem correção de runtime | base `9d6be9d`; commit documental via git log | 135 pytest; 3 suites shell verdes; Homelab falha `refusal hides maturity`; 5 reproduções | 18 itens REV; P0 aberto; nenhum boot/workload/serviço alterado; próximo REV-001. Relatório/handoff em `reports/review-remediation-winvm-ux-2026-09-07/README.md` |
 | 2026-09-06 | Codex | `codex/portfolio-clean-host-audit` / `pz-portfolio-clean-host-audit` | diagnóstico transversal | docs sobre `2180c94` | 364 pytest; 4 shell; 12 registros reproduzidos; 2 contratos PS; 13 Compose; asset Arch verificado | PZ-AUD-001..031 pending; [plano/handoff](../../reports/portfolio-clean-host-2026-09-06/PLANO.md); P0 restore aberto. Sem mutação de runtime |
 | 2026-09-07 | opencode | `codex/aud-fase0` / `pz-aud-fase0` | Fase 0 (005,006,009,010,011,012) | `076b4ba`, `1a47c15`, `98b75a1`, `7fc3564` | linux-homelab/ai-proxies/9router/agent-workspaces exit 0; pytest Homelab 76; diff-check | 6 itens verified no backlog; P0 restore fechado em fixture. Sem workload/container/servidor tocado. Próximo: Fase 1 (001,002,003,004,026,027) em worktree novo |
 | 2026-09-07 | opencode | `codex/aud-fase1` / `pz-aud-fase1` | Fase 1 (001,002,003,004,026,027) | `b9523da`, `134a3a3`, `c13a304`, `7e7435c`, `209524d`, `ba3a12a`, `b23c0a9`, `1a48cda` | linux-homelab exit 0; pytest 153; diff-check | 6 itens verified no backlog. Daemon real intocado. Próximo: Fase 2 (007,008,015,025,030,031) em worktree novo |

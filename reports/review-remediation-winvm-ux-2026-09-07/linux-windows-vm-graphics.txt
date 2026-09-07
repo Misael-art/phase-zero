@@ -1,0 +1,41 @@
+=== static: parse + boot-safety invariants ===
+  boot-safety greps ok
+=== fixtures: fake sysfs, dri, kvm, qemu, virsh ===
+=== status: AMD Deck sem IOMMU -> VFIO blocked, compat recomendado ===
+  deck scenario ok
+=== status: dGPU com grupos isolados -> VFIO eligible plan-only ===
+  desktop scenario ok
+=== VFIO: grupo incompleto e endereco invalido permanecem bloqueados ===
+  strict VFIO validation ok
+=== status: Intel + render node -> virtio-gl eligible experimental ===
+  intel scenario ok
+=== status: sem /dev/kvm ou sem render node -> fallback compat ===
+  fallback compat scenario ok
+=== status: host multi-GPU escolhe render node acessivel ===
+  multi-GPU render selection ok
+=== plan: auto resolve compat; perfis experimentais bloqueados ===
+  plan scenarios ok
+=== libvirt: XML atual QXL/SPICE detectado; plan permanece read-only ===
+  libvirt inspection read-only ok
+=== runtime: status, dry-run, install, backup e rollback em root falso ===
+  runtime maintenance ok
+=== apply: dominio rodando bloqueia; gates --experimental/--yes ===
+  apply gates ok
+=== apply/remove: escreve somente PZ_WINDOWS_VM_GRAPHICS_PROFILE ===
+  config apply/remove ok
+=== guest-guide: read-only por padrao; save explicito ===
+  guest guide ok
+=== launch dry-run: compat preserva args; virtio-gl emite GL ===
+WARN:  legacy Windows VM config without share policy — defaulting to minimal shares (only exchange exposed; home/sdcard/mnt need explicit PZ_WINDOWS_VM_SHARE_POLICY=full)
+  launch dry-run profiles ok
+=== launch GRUB: controles diretos; touch rotacionado via GTK ===
+  GRUB input mapping gated to boot session
+=== launch: perfis bloqueados e gates ===
+  launch gates ok
+=== config profile: apply virtio-gl vale para launch sem flags ===
+  config-driven profile ok
+=== config profile: dominio libvirt faz fallback compat sem quebrar boot ===
+  configured libvirt fallback ok
+=== status JSON expose graphicsProfile ===
+  status field ok
+linux-windows-vm-graphics smoke ok

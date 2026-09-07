@@ -1,0 +1,12 @@
+{
+  "observedAt": "2026-09-07T14:11:41.725738+00:00",
+  "package": "1.19.0-1",
+  "qemu": "11.1.0-1",
+  "virglrenderer": "1.3.0-2",
+  "nestedHostParameter": "1",
+  "bootRuntimeProvenanceVersion": "1.16.6",
+  "bootRuntimePendingMarker": true,
+  "qemuProcessCountMatched": 0,
+  "guestStarted": false,
+  "storageIncidentResolved": "not evidenced; historical roadmap still deferred"
+}

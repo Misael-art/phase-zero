@@ -1,0 +1,5 @@
+=== proxy build is transactional with validated runtimes (PZ-AUD-016/017) ===
+  transactional build ok
+=== proxy manifest is the cross-OS contract (PZ-AUD-019) ===
+  manifest contract ok
+linux-ai-proxies smoke ok

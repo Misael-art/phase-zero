@@ -1,0 +1,5 @@
+{
+  "rc": 1,
+  "stdout": "",
+  "stderr": "ERROR: docker daemon not reachable; enable docker and add user to docker group\n"
+}

@@ -1,0 +1,78 @@
+=== syntax ===
+  syntax ok
+=== server profile argument integrity ===
+  profile args ok
+=== profile ordering + failure propagation (PZ-AUD-003) ===
+  profile ordering + propagation ok
+=== declared compose converges (PZ-AUD-004) ===
+  declared compose ok
+  arch repos declared ok
+=== compose has pinned tags and safe binds ===
+  compose pins/binds/hardening ok
+=== missing .env blocks sensitive services ===
+  missing secrets blockers ok
+=== repair generates secure .env without printing secrets ===
+  secure env ok
+=== apps catalog list/enable/disable/update ===
+  apps catalog ok
+=== apps JSON stays pure when compose writes to stdout ===
+ Container phasezero-n8n Stopping
+ Container phasezero-n8n Removed
+ Container phasezero-n8n Stopping
+ Container phasezero-n8n Removed
+ Container phasezero-n8n Stopping
+ Container phasezero-n8n Removed
+  compose stdout isolation ok
+=== apps never report success on partial failure (PZ-AUD-005) ===
+stub compose up failed
+stub compose rm failed
+  partial-failure honesty ok
+=== reconcile converges the curated registry (PZ-AUD-012) ===
+  reconcile convergence ok
+=== paperless ships its broker (PZ-AUD-007) ===
+  paperless broker ok
+=== executed pins, isolation, no secret expansion (PZ-AUD-030) ===
+  pins + isolation + redaction ok
+=== governor uses available memory, app and profile agree (PZ-AUD-031) ===
+  unified governor ok
+=== app recipes guide first use, probes prove serving (PZ-AUD-008) ===
+  app recipes ok
+=== web CLI bootstrap (no serve) ===
+  web CLI ok
+=== host-facts never invent sensors ===
+  host-facts ok
+=== hosts registry + ssh envelope ===
+=== hosts pair honors port, key and first contact (PZ-AUD-014) ===
+  hosts pair ok
+  hosts bridge ok
+=== compose config core/extras ===
+  docker compose unavailable; skipped
+=== tailscale logged-out blocker ===
+  tailscale blocker ok
+=== open/logical urls and backup/restore dry-runs ===
+  dry-runs ok
+=== CasaOS compatibility gate ===
+  casaos gate ok
+=== aggregate status schemaVersion + ready proofs ===
+  status schema ok
+  fresh verify ok
+  consistent verify ok
+  verify ok
+  status persisted ok
+=== readiness proofs are strict (PZ-AUD-006) ===
+  strict readiness ok
+=== prepare installs deps then converges honestly (PZ-AUD-002) ===
+  prepare delegation + honest verify ok
+=== operations: registry flow ===
+  operation registry ok
+=== operations: cross-process lock ===
+  lock ok
+=== operations: crash -> resume -> cancel ===
+  crash/resume/cancel ok
+=== operations: idempotent re-entry + corrupted state fail-closed ===
+  corrupted conflict reason ok
+  idempotency/corrupt ok
+=== profiles: registry + resource governor ===
+  registry 6 profiles ok
+  weights ok
+FAIL: refusal hides maturity

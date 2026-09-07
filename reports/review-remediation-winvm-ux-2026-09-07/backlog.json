@@ -1,0 +1,332 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-07",
+  "reviewedHead": "9d6be9d",
+  "mainHead": "2180c94",
+  "items": [
+    {
+      "id": "REV-001",
+      "priority": "P0",
+      "title": "Restore perde volume parcialmente copiado",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 1205
+      },
+      "finding": "O wipe precede cp; applied recebe o volume só após sucesso. Falha de cp deixa o destino vazio/parcial fora do rollback, que reporta rollbackApplied:true. Reproduzido com arquivo original eliminado e cp exit 42.",
+      "proposedWork": "Registrar volume antes da primeira mutação; rollback incluir volume falho; falha de rollback bloquear conclusão.",
+      "acceptance": "Injetar ENOSPC/erro de cp após wipe em cada posição; todos os bytes anteriores restaurados ou estado recovery-required verdadeiro.",
+      "related": "PZ-AUD-010",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-002",
+      "priority": "P1",
+      "title": "Backup SQLite não é snapshot vivo consistente",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 841
+      },
+      "finding": "cp -a copia base/WAL/SHM enquanto escritor pode alterá-los; .backup é executado na cópia já capturada, não no banco vivo. Consistência entre banco e anexos não é provada; Prometheus sem marcadores SQL pode receber consistent:true.",
+      "proposedWork": "Usar API SQLite na origem com contrato por app; dumps nativos ou parada/quiesce para servidores; snapshot coordenado dos anexos.",
+      "acceptance": "Escritor concorrente + checkpoints WAL + restore + integrity_check e invariantes de aplicação; classificar desconhecido como não certificado.",
+      "related": "PZ-AUD-009",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-003",
+      "priority": "P1",
+      "title": "Pré-restore captura dados antes de parar serviços",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 1143
+      },
+      "finding": "Snapshot tar para rollback ocorre antes de cmd_down (1163); rollback pode recolocar banco inconsistente mesmo quando cópia funciona.",
+      "proposedWork": "Parar/quiescer e confirmar ausência de escritores antes do snapshot; preservar estado anterior de execução.",
+      "acceptance": "Banco sob escrita, restauração falha, rollback íntegro e retorno ao estado anterior.",
+      "related": "PZ-AUD-010",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-004",
+      "priority": "P1",
+      "title": "Onboarding rejeita JSON válido da CLI",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/ui_native/pages/homelab.py",
+        "line": 374
+      },
+      "finding": "_first_json_line tenta json.loads por linha. prepare --dry-run real usa jq -n multilinha: exit 0 e objeto válido viram {} no Player. Reproduzido sem daemon.",
+      "proposedWork": "Parser único do documento/envelope completo; stderr separado; validar schema.",
+      "acceptance": "Alimentar QProcess com stdout real de prepare/discover/pair em chunks e pretty/compact; plano aparece.",
+      "related": "PZ-AUD-013",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-005",
+      "priority": "P1",
+      "title": "Pareamento falho permite avançar",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/ui_native/pages/homelab.py",
+        "line": 348
+      },
+      "finding": "Condição testa ausência da chave pair. Após pair=false, novo Avançar pula para profile. Reproduzido.",
+      "proposedWork": "Exigir pair is True para host atual, manter erro acionável e retry.",
+      "acceptance": "False/cancel/offline não avançam; só sucesso do mesmo host libera.",
+      "related": "PZ-AUD-013",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-006",
+      "priority": "P1",
+      "title": "Confirmação de plano sobrevive à troca de host",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/ui_native/pages/homelab.py",
+        "line": 441
+      },
+      "finding": "_on_host_changed não invalida review_plan/pair/confirmed; JSON de prepare não inclui identidade do host. Plano idêntico em B reaproveita aceite de A. Callback também lê seleção mutável. Reproduzido com payload compacto para isolar defeito do parser.",
+      "proposedWork": "Capturar hostId + perfil + apps + revisão + operação; invalidar ao trocar destino; backend conferir token.",
+      "acceptance": "Revisar A, selecionar B, receber callback atrasado de A: nenhuma mutação em B sem nova revisão.",
+      "related": "PZ-AUD-013",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-007",
+      "priority": "P1",
+      "title": "Perfil escolhido não dirige preparo",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/ui_native/pages/homelab.py",
+        "line": 408
+      },
+      "finding": "profile é guardado em _onboard_state, mas prepare recebe somente --dry-run/--json e execução só --json. Backend usa apps default; não consome seleção de onboarding.",
+      "proposedWork": "Transmitir perfil/apps/acesso no plano tipado, depois aplicar exatamente esse plano.",
+      "acceptance": "Duas seleções distintas geram conjuntos distintos; apps não escolhidos permanecem desligados.",
+      "related": "PZ-AUD-013",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-008",
+      "priority": "P1",
+      "title": "Primeiro SSH ainda exige terminal",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/server/homelab-hosts.sh",
+        "line": 526
+      },
+      "finding": "Porta/chave foram melhoradas, mas first-contact orienta ssh-copy-id manual; BatchMode=yes continua sem autenticação inicial interativa. Parear não completa jornada leiga em host novo.",
+      "proposedWork": "Fluxo de primeira confiança + autenticação protegido na UI/terminal embutido; timeout/cancel; chave sem senha apenas com decisão informada.",
+      "acceptance": "Admin sem chave + appliance novo + porta customizada: parear sem terminal externo, senha fora de argv/log.",
+      "related": "PZ-AUD-014",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-009",
+      "priority": "P1",
+      "title": "Boot automático e launcher discordam sobre experimental",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/windows-vm/windows-vm-session.sh",
+        "line": 415
+      },
+      "finding": "Probe elegível produz --graphics virtio-gl, sem --experimental; launcher guard (windows-vm.sh:2174) rejeita perfil explícito. Funções reais extraídas reproduzem rc 1 antes do launch. Domínio libvirt ainda impõe outro bloqueio.",
+      "proposedWork": "Unificar escolha/consentimento/backend em contrato; passar flags coerentes somente quando autorizado; compat funcional explícito.",
+      "acceptance": "Sessão real com launcher real e QEMU stub aceita plano elegível; sem consentimento seleciona compat diretamente; ramo libvirt coberto.",
+      "related": "WBR-005",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-010",
+      "priority": "P1",
+      "title": "Maturidade gráfica e indicador de aceleração contraditórios",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/windows-vm/graphics-profiles.json",
+        "line": 21
+      },
+      "finding": "JSON chama virtio-gl stable e label aceleração OpenGL; graphics.sh:656 marca experimental e não garante 3D Windows. UI windows_vm.py:435 habilita toggle pela presença de QEMU e marca ligado por perfil != compat.",
+      "proposedWork": "Uma fonte de maturidade; separar render host, driver guest e API 3D comprovada; experimental em opt-in avançado.",
+      "acceptance": "Host GL disponível/guest sem 3D nunca exibe aceleração validada; contrato UI/CLI/provision/session idêntico.",
+      "related": "WBR-005",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-011",
+      "priority": "P1",
+      "title": "Runtime instalado diverge do pacote",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "docs/roadmaps/winvm-boot-resilience-v1.md",
+        "line": 69
+      },
+      "finding": "Leitura de host: pacote 1.19.0-1; provenance do boot 1.16.6 de 20/08; marker pending existe. Não foi refeito runtime nem boot.",
+      "proposedWork": "Sincronização transacional a partir do pacote com preview/elevação; validar hash antes de próxima sessão e orientar atualização pendente.",
+      "acceptance": "Upgrade real em VM descartável, current após sync; LCD e monitor no runtime entregue; rollback do runtime testado.",
+      "related": "WBR-004",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-012",
+      "priority": "P1",
+      "title": "Resiliência física e recuperação continuam sem aceite",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "docs/roadmaps/winvm-boot-resilience-v1.md",
+        "line": 72
+      },
+      "finding": "WBR-007 não implementa contador repairFailed>=2; WBR-001/003/005/006 exigem provas físicas. Registro de csum/aio de agosto permanece sem evidência de encerramento; não implica erro ativo hoje. Retry compat não repete teste stable imediatamente após segundo launcher (session:611).",
+      "proposedWork": "Encerrar investigação de armazenamento com operador; implementar recuperação guiada e trava pós-guest-start/crash também no fallback.",
+      "acceptance": "Boot frio, desligamento QGA indisponível, crash tardio no fallback, reparo sem interrupção, 2 falhas escaladas, LCD/dock documentados.",
+      "related": "WBR-001..008",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-013",
+      "priority": "P1",
+      "title": "Ambiente de desenvolvimento Windows não certificado",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/windows-vm/windows-vm.sh",
+        "line": 1893
+      },
+      "finding": "CPU host/KVM e canais QGA/RDP/arquivos existem; não há matriz de instalação/build/debug/reboot nem gate nested/WSL2 no subsistema. Host mostra nested=1, insuficiente para provar exposição e funcionamento no guest.",
+      "proposedWork": "Perfil Windows Desenvolvimento separado: ferramentas comuns, disco/RAM, dependências, retomada, backup e smoke real; WSL2/Docker opção condicional.",
+      "acceptance": "Guest limpo instala toolchain, clona fixture pública, build/test/debug, reinicia e retoma; nested confirmado no guest antes de WSL2; GPU testada por API/carga.",
+      "related": "novo",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-014",
+      "priority": "P1",
+      "title": "Homelab corta controles no modo simples",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/ui_native/pages/homelab.py",
+        "line": 111
+      },
+      "finding": "Render offscreen 1280x800 mostra caixas Primeiros passos/Perfil/Ações comprimidas e botões parcialmente cortados. Página contém grupos empilhados e tabela expansível sem scroll global; não é somente falta de dados.",
+      "proposedWork": "Página rolável e responsiva; modo simples com estado, ação principal e etapas legíveis; tabela/log/política em avançado.",
+      "acceptance": "Screenshots + geometria asseguram controles completos em 1280x800, 800x600 e escala 150/200%; teclado/touch utilizáveis.",
+      "related": "PZ-AUD-029",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-015",
+      "priority": "P2",
+      "title": "Objetivos adicionados sem substituir jornadas técnicas",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "linux/ui_native/pages/dashboard.py",
+        "line": 33
+      },
+      "finding": "Início mantém onboarding IA universal, ações rápidas e ferramentas, além dos 5 objetivos; 20 categorias de sidebar. Cuidar de outro computador executa hosts list JSON; Jogos, Android e VM executa profile.gaming, sem instalar VM/Android.",
+      "proposedWork": "Objetivos abrem assistente específico, com plataforma/destino e opções relevantes; primeiros passos por objetivo; detalhes técnicos só no avançado.",
+      "acceptance": "Usuário sem terminal conclui cada objetivo; nenhum card promete solução não entregue; teste de usabilidade sem orientação.",
+      "related": "PZ-AUD-029",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-016",
+      "priority": "P1",
+      "title": "Paridade IA ainda documenta migrações pendentes",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "assets/ai/proxy-manifest.json",
+        "line": 40
+      },
+      "finding": "Manifesto admite MiMo Windows env-session/Go versus API oficial Linux e default DeepSeek divergente. Leitor de manifesto não conclui migração nem valida conversa real. Hermes continua bloqueado.",
+      "proposedWork": "Migrar adapters antes de anunciar paridade; matriz supported/experimental/blocked consumida por UI; fixtures e inferência supervisionada por plataforma.",
+      "acceptance": "Windows/Arch limpos: instalar, autenticar, chat/stream/tool, expirar credencial, reiniciar e recuperar sem segredo em log.",
+      "related": "PZ-AUD-019/020/021",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-017",
+      "priority": "P1",
+      "title": "Conclusão e certificação superestimadas",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "reports/portfolio-clean-host-2026-09-06/backlog.json",
+        "line": 24
+      },
+      "finding": "31/31 verified com ciProof textual pendente; gh não encontra PR nova nem run fase5; main segue 2180c94. arch-clean-host configura multilib/preinstala ferramentas e só testa instalação/status/dry-run, não preparo+app+reboot.",
+      "proposedWork": "Separar implementação, regressão local, CI, E2E/hardware, integração/release; reabrir aceites pendentes; publicar provas por SHA.",
+      "acceptance": "PR/CI do SHA final + asset instalado em Arch e Windows limpos, app funcional e reboot; estados refletem evidência real.",
+      "related": "PZ-AUD-028",
+      "implementation": null,
+      "behavioralProof": null,
+      "ciProof": null
+    },
+    {
+      "id": "REV-018",
+      "priority": "P1",
+      "title": "Gate Homelab depende de Docker acessível para testar maturidade",
+      "status": "pending",
+      "owner": null,
+      "source": {
+        "file": "tests/linux-homelab.sh",
+        "line": 961
+      },
+      "finding": "Suite local com daemon explicitamente indisponível para em FAIL: refusal hides maturity. cmd_up exige Docker antes de checar perfil não instalável; teste novo não injeta daemon nessa etapa. Não prova falha de CI porque branch não tem run; prova dependência ambiental da suite e mensagem incorreta para perfil bloqueado em host limpo.",
+      "proposedWork": "Checar maturidade antes de dependências/mutações; fixture explícita para cada cenário e teste sem Docker.",
+      "acceptance": "Suite toda verde em PATH controlado com daemon ausente, parado e fake ativo; nenhum acesso ao daemon real.",
+      "related": "PZ-AUD-022/028",
+      "implementation": null,
+      "behavioralProof": "profile-no-daemon.json e linux-homelab.txt",
+      "ciProof": null
+    }
+  ]
+}

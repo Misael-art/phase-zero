@@ -1,0 +1,35 @@
+{
+  "onboarding_multiline": {
+    "cli_rc": 0,
+    "valid_json": true,
+    "ui_parsed": {}
+  },
+  "pair_failed_advances": {
+    "next_step": "profile"
+  },
+  "confirmation_survives_host_change": {
+    "host": "fixture-b",
+    "dispatched": [
+      "prepare",
+      "--json"
+    ]
+  },
+  "boot_graphics_contract": {
+    "session_flag": "--graphics virtio-gl",
+    "launcher_guard": {
+      "rc": 1,
+      "stdout": "",
+      "stderr": "graphics virtio-gl e experimental; adicione --experimental\n"
+    }
+  },
+  "restore_partial_copy": {
+    "rc": 1,
+    "stdout": "{\n  \"action\": \"restore\",\n  \"source\": \"/run/user/1000/codex-desktop/tmp/pz-review-reproduce-b7uz0yb9/pz-restore-review-w8mwz73h/source\",\n  \"ok\": false,\n  \"failedVolume\": \"data\",\n  \"preRestore\": \"/run/user/1000/codex-desktop/tmp/pz-review-reproduce-b7uz0yb9/pz-restore-review-w8mwz73h/source.pre-restore\",\n  \"rollbackApplied\": true,\n  \"rollbackFailed\": \"\"\n}\n",
+    "original_preserved": false,
+    "remaining_files": []
+  },
+  "ui": {
+    "advanced_default": false,
+    "sidebar_categories": 20
+  }
+}
