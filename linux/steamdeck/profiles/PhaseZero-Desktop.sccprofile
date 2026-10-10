@@ -11,7 +11,13 @@
   },
   "X": {
    "action": "button(Keys.KEY_BACKSPACE)",
-   "name": "Apagar"
+   "name": "Apagar",
+   "modes": {
+    "C": {
+     "action": "shell('bash PZ_ROOT/linux/steamdeck/hotkey-actions.sh keyboard')",
+     "name": "Teclado virtual"
+    }
+   }
   },
   "Y": {
    "action": "button(Keys.KEY_SPACE)",

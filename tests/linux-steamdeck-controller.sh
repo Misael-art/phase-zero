@@ -33,6 +33,11 @@ jq -e . "$PROFILE" >/dev/null || { echo "FAIL: perfil não é JSON válido" >&2;
 jq -e '.buttons.A.action == "button(Keys.KEY_ENTER)"' "$PROFILE" >/dev/null || { echo "FAIL: A deve confirmar" >&2; exit 11; }
 jq -e '.buttons.B.action == "button(Keys.KEY_ESC)"' "$PROFILE" >/dev/null || { echo "FAIL: B deve cancelar" >&2; exit 12; }
 jq -e '.buttons.X.action == "button(Keys.KEY_BACKSPACE)"' "$PROFILE" >/dev/null || { echo "FAIL: X deve apagar" >&2; exit 13; }
+# Steam (botão C) + X abre o teclado. X sozinho continua Backspace.
+# C sem binding: Steam sozinho não vira tecla nem mata o processo da frente.
+jq -e '.buttons.X.modes.C.action | contains("hotkey-actions.sh keyboard")' "$PROFILE" >/dev/null || { echo "FAIL: Steam+X deve abrir o teclado" >&2; exit 63; }
+jq -e '.buttons.X.modes | keys == ["C"]' "$PROFILE" >/dev/null || { echo "FAIL: Steam+X deve ser o único acorde do X" >&2; exit 64; }
+jq -e '.buttons | has("C") | not' "$PROFILE" >/dev/null || { echo "FAIL: Steam sozinho deve permanecer sem binding" >&2; exit 65; }
 jq -e '.buttons.Y.action == "button(Keys.KEY_SPACE)"' "$PROFILE" >/dev/null || { echo "FAIL: Y deve ser espaço" >&2; exit 14; }
 jq -e '.buttons.LGRIP.action | contains("KEY_LEFTSHIFT") and contains("KEY_TAB")' "$PROFILE" >/dev/null || { echo "FAIL: L4 deve ser Shift+Tab" >&2; exit 15; }
 jq -e '.buttons.RGRIP.action == "button(Keys.KEY_TAB)"' "$PROFILE" >/dev/null || { echo "FAIL: R4 deve ser Tab" >&2; exit 16; }
@@ -90,6 +95,7 @@ chmod +x "$fake_bin"
 # os dois coincidem e o defeito fica invisível - que é como ele sobreviveu à
 # primeira versão desta suíte e só apareceu rodando à mão no terminal.
 env SHELLOPTS=monitor PZ_SCC_DAEMON_BIN="$fake_bin" PZ_CONTROLLER_REVERT_SECONDS=4 \
+    PZ_CONTROLLER_REVERT_SKIP_SYSTEMCTL=1 \
     bash "$SCRIPT" start >/dev/null 2>&1
 
 revert_pidfile="$PZ_SCC_CONFIG_DIR/phasezero-revert.pid"
@@ -121,6 +127,7 @@ echo "  reversão ok"
 
 echo "=== confirm cancela o timer de verdade ==="
 env SHELLOPTS=monitor PZ_SCC_DAEMON_BIN="$fake_bin" PZ_CONTROLLER_REVERT_SECONDS=30 \
+    PZ_CONTROLLER_REVERT_SKIP_SYSTEMCTL=1 \
     bash "$SCRIPT" start >/dev/null 2>&1
 timer_pid="$(cat "$revert_pidfile")"
 bash "$SCRIPT" confirm >/dev/null 2>&1
@@ -207,7 +214,7 @@ jq -e '.buttons.RB.action | contains("KEY_PAGEDOWN")' "$ashy" >/dev/null ||
     { echo "FAIL: R1 no Ashyterm deve ser Ctrl+PageDown" >&2; exit 57; }
 # O restante é o mapa desktop: só as abas mudam.
 jq -e --slurpfile d "$TMP_ROOT/desktop-rendered.sccprofile" \
-    '.buttons.A == $d[0].buttons.A and .buttons.DOTS == $d[0].buttons.DOTS and .pad_right == $d[0].pad_right' \
+    '.buttons.A == $d[0].buttons.A and .buttons.X == $d[0].buttons.X and .buttons.DOTS == $d[0].buttons.DOTS and .pad_right == $d[0].pad_right' \
     "$ashy" >/dev/null || { echo "FAIL: perfil do Ashyterm divergiu do desktop fora das abas" >&2; exit 58; }
 # Atalho do usuário no Ashyterm vence o padrão.
 mkdir -p "$XDG_CONFIG_HOME/ashyterm"
