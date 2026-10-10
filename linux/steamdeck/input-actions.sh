@@ -12,6 +12,20 @@ source "$DIR/common.sh"
 VKBD_IM_EXPAND_KEY='InputMethod[$e]'
 # shellcheck disable=SC2016
 VKBD_IM_DOLLAR_KEY='InputMethod$e'
+# Not IFS whitespace. Tab would collapse empty fields and shift the record.
+VKBD_REC=$'\x1f'
+
+steamdeck_record() {
+    local IFS="$VKBD_REC"
+    printf '%s\n' "$*"
+}
+
+steamdeck_read_record() {
+    local line IFS
+    IFS= read -r line || true
+    IFS="$VKBD_REC"
+    read -r "$@" <<<"$line"
+}
 
 steamdeck_has_graphical_session() {
     [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]
@@ -177,7 +191,7 @@ steamdeck_vkbd_legacy_maliit() {
     steamdeck_vkbd_plasma_desktop >/dev/null
 }
 
-# Prints: origin \t key \t path \t action
+# Prints: origin, key, path, action. Empty key/path stay empty.
 steamdeck_vkbd_resolve() {
     local plain qualified plasma maliit
     plain="$(steamdeck_kwinrc_wayland_key InputMethod || true)"
@@ -186,26 +200,26 @@ steamdeck_vkbd_resolve() {
     maliit="$(steamdeck_maliit_desktop_file || true)"
 
     if steamdeck_vkbd_is_wayland_im "$qualified"; then
-        printf 'explicit\t%s\t%s\tkeep\n' "$VKBD_IM_EXPAND_KEY" "$qualified"
+        steamdeck_record explicit "$VKBD_IM_EXPAND_KEY" "$qualified" keep
         return 0
     fi
     if steamdeck_vkbd_legacy_maliit && [ -n "$plasma" ]; then
-        printf 'phasezero-legacy\t%s\t%s\tmigrate\n' "$VKBD_IM_EXPAND_KEY" "$plasma"
+        steamdeck_record phasezero-legacy "$VKBD_IM_EXPAND_KEY" "$plasma" migrate
         return 0
     fi
     if steamdeck_vkbd_is_wayland_im "$plain"; then
-        printf 'explicit\tInputMethod\t%s\tkeep\n' "$plain"
+        steamdeck_record explicit InputMethod "$plain" keep
         return 0
     fi
     if [ -n "$plasma" ]; then
-        printf 'default\t%s\t%s\tselect\n' "$VKBD_IM_EXPAND_KEY" "$plasma"
+        steamdeck_record default "$VKBD_IM_EXPAND_KEY" "$plasma" select
         return 0
     fi
     if [ -n "$maliit" ]; then
-        printf 'default\tInputMethod\t%s\tselect\n' "$maliit"
+        steamdeck_record default InputMethod "$maliit" select
         return 0
     fi
-    printf 'unset\t\t\tkeep\n'
+    steamdeck_record unset "" "" keep
 }
 
 steamdeck_kwinrc_rewrite() {
@@ -403,14 +417,14 @@ steamdeck_fallback_snapshot() {
     for candidate in wvkbd-mobintl wvkbd onboard maliit-keyboard; do
         if steamdeck_keyboard_process_running "$candidate"; then
             if steamdeck_fallback_usable "$candidate" ""; then
-                printf '%s\tusable\n' "$candidate"
+                steamdeck_record "$candidate" usable
             else
-                printf '%s\talive-unusable-on-wayland\n' "$candidate"
+                steamdeck_record "$candidate" alive-unusable-on-wayland
             fi
             return 0
         fi
     done
-    printf '\tnot-used\n'
+    steamdeck_record "" not-used
 }
 
 steamdeck_vkbd_provider_name() {
@@ -478,37 +492,40 @@ steamdeck_dbus_method_bool_json() {
     fi
 }
 
-# Prints: effective \t reason. effective is true only when the keyboard is
+# Prints: effective, reason. effective is true only when the keyboard is
 # actually showing, or a fallback process offers a usable keyboard.
 steamdeck_vkbd_open_state() {
     local visible="$1" available="$2" supported="$3" method="$4" fb_state="$5"
     if [ "$visible" = true ]; then
-        printf 'true\tkwin-visible\n'
+        steamdeck_record true kwin-visible
         return 0
     fi
     if [ "$fb_state" = usable ]; then
-        printf 'true\tfallback-usable\n'
+        steamdeck_record true fallback-usable
         return 0
     fi
     if [ "$available" = true ]; then
-        printf 'false\tkwin-available-closed\n'
+        steamdeck_record false kwin-available-closed
         return 0
     fi
     if [ "$supported" != true ]; then
-        printf 'false\tdbus-unavailable\n'
+        steamdeck_record false dbus-unavailable
         return 0
     fi
     if [ -n "$method" ] && [ "$available" != true ]; then
-        printf 'false\tkwin-command-missing\n'
+        steamdeck_record false kwin-command-missing
         return 0
     fi
     if [ "$fb_state" = alive-unusable-on-wayland ]; then
-        printf 'false\tfallback-unusable\n'
+        steamdeck_record false fallback-unusable
         return 0
     fi
-    printf 'false\tnot-open\n'
+    steamdeck_record false not-open
 }
 
+# dbus.available means KWin has some input-method command. KWin 6.7 does not
+# expose which path it loaded, so this cannot prove the command matches
+# configured.inputMethod. configure reloads when it changes the file.
 steamdeck_virtual_keyboard_health_from_json() {
     local status
     status="$(cat)"
@@ -589,7 +606,7 @@ steamdeck_kwinrc_ensure_loaded() {
 
 steamdeck_configure_virtual_keyboard() {
     local origin key path action enabled file backup previous_plain
-    IFS=$'\t' read -r origin key path action < <(steamdeck_vkbd_resolve)
+    steamdeck_read_record origin key path action < <(steamdeck_vkbd_resolve)
     enabled="$(steamdeck_vkbd_enabled_state)"
     file="$(steamdeck_kwinrc_path)"
     previous_plain="$(steamdeck_kwinrc_wayland_key InputMethod || true)"
@@ -599,6 +616,16 @@ steamdeck_configure_virtual_keyboard() {
         action="cleanup-legacy"
     fi
     if [ "$action" = keep ]; then
+        # An explicit desktop with no enabled flag still looks unrepaired:
+        # health requires the flag, and a later repair would otherwise no-op.
+        if [ "$enabled" = unset ] && [ -n "$path" ] && [ "${PZ_DRY_RUN:-0}" != 1 ]; then
+            backup="$(pz_backup_file "$file" user | tail -1 || true)"
+            steamdeck_kwinrc_write_enabled true
+            steamdeck_vkbd_record_state keep-enable "$origin" "$key" "$path" "$backup" VirtualKeyboardEnabled unset
+            enabled=true
+        elif [ "$enabled" = unset ] && [ -n "$path" ]; then
+            pz_info "dry-run: would set VirtualKeyboardEnabled=true in $file"
+        fi
         steamdeck_kwinrc_ensure_loaded "$key" "$path"
         pz_info "KDE virtual keyboard unchanged: origin=$origin inputMethod=${path:-unset} enabled=$enabled"
         return 0
@@ -851,7 +878,7 @@ steamdeck_virtual_keyboard_status() {
     local kde_supported kde_available kde_enabled kde_visible kde_active
     local fb_candidate fb_state open_effective open_reason
     local legacy_present recorded_action recorded_backup state_file maliit plain qualified
-    IFS=$'\t' read -r origin key path action < <(steamdeck_vkbd_resolve)
+    steamdeck_read_record origin key path action < <(steamdeck_vkbd_resolve)
     # Resolve names the desktop configure would write. Status reports the
     # desktop that is in the file now; action says whether that is legacy.
     plain="$(steamdeck_kwinrc_wayland_key InputMethod || true)"
@@ -897,8 +924,8 @@ steamdeck_virtual_keyboard_status() {
     if [ "$dbus_visible" = true ]; then kde_visible=true; else kde_visible=false; fi
     if [ "$dbus_active" = true ]; then kde_active=true; else kde_active=false; fi
 
-    IFS=$'\t' read -r fb_candidate fb_state < <(steamdeck_fallback_snapshot)
-    IFS=$'\t' read -r open_effective open_reason < <(steamdeck_vkbd_open_state \
+    steamdeck_read_record fb_candidate fb_state < <(steamdeck_fallback_snapshot)
+    steamdeck_read_record open_effective open_reason < <(steamdeck_vkbd_open_state \
         "$dbus_visible" "$dbus_available" "$dbus_supported" "$path" "$fb_state")
 
     legacy_present=false

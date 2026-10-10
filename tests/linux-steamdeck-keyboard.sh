@@ -533,6 +533,27 @@ grep -q "$OTHER" "$PZ_KWINRC" || fail "explicit plain choice lost its desktop"
 grep -q -- "--delete" "$PZ_KWRITE_LOG" || fail "explicit plain choice skipped reload"
 export PZ_KWINRC_SKIP_NOTIFY=1
 
+reset_case
+export PZ_VKBD_DESKTOP_ROOT="$TMP/no-desktops"
+mkdir -p "$PZ_VKBD_DESKTOP_ROOT"
+: > "$PZ_KWINRC"
+empty_status="$(steamdeck_virtual_keyboard_status)"
+assert_eq "$(jq -r '.configured.origin' <<<"$empty_status")" "unset" "empty resolve shifted origin"
+assert_eq "$(jq -r '.configured.action' <<<"$empty_status")" "keep" "empty resolve shifted action"
+assert_eq "$(jq -r '.configured.inputMethod' <<<"$empty_status")" "" "empty resolve shifted path"
+assert_eq "$(jq -r '.fallback.candidate' <<<"$empty_status")" "" "empty fallback shifted candidate"
+assert_eq "$(jq -r '.fallback.state' <<<"$empty_status")" "not-used" "empty fallback shifted state"
+
+reset_case
+cat > "$PZ_KWINRC" <<EOF
+[Wayland]
+InputMethod[\$e]=$OTHER
+EOF
+steamdeck_configure_virtual_keyboard >/dev/null
+grep -q '^VirtualKeyboardEnabled=true$' "$PZ_KWINRC" || fail "keep left VirtualKeyboardEnabled unset"
+assert_eq "$(qualified_line "$PZ_KWINRC")" 1 "keep-enable dropped the explicit key"
+grep -q "$OTHER" "$PZ_KWINRC" || fail "keep-enable replaced the explicit desktop"
+
 if grep -q 'test("maliit")' "$REPO_ROOT/linux/audit/doctor.sh" "$REPO_ROOT/linux/audit/repair-plan.sh"; then
     fail "doctor or repair-plan still requires maliit"
 fi

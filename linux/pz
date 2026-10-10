@@ -372,7 +372,7 @@ cmd_steamdeck() {
             esac
             ;;
         cursor|pointer)
-            bash "$PZ_ROOT/linux/steamdeck/cursor-diagnose.sh" "${target:-snapshot}"
+            bash "$PZ_ROOT/linux/steamdeck/cursor-diagnose.sh" "${target:-snapshot}" "${3:-}"
             ;;
         console)      steamdeck_start_console_session "${target:-auto}" ;;
         dev|desktop)  steamdeck_start_dev_session "${target:-docked-monitor}" ;;

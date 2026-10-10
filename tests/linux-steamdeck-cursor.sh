@@ -137,4 +137,8 @@ awk '
     END { if (!seen) exit 1 }
 ' "$REPO_ROOT/linux/steamdeck/steamos-session.sh" || fail "handoff is not before session dispatch"
 
+# shellcheck disable=SC2016
+grep -F -q 'cursor-diagnose.sh" "${target:-snapshot}" "${3:-}"' "$REPO_ROOT/linux/pz" || fail "cursor sample duration is not forwarded"
+grep -F -q 'CURSOR_TARGET="/usr/local/lib/phasezero/cursor-diagnose.sh"' "$REPO_ROOT/linux/steamdeck/install-steamos-boot.sh" || fail "boot install does not place the cursor probe"
+
 printf 'linux-steamdeck-cursor ok\n'
