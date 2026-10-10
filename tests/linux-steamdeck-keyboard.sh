@@ -15,6 +15,11 @@ export XDG_RUNTIME_DIR="$TMP/run"
 mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_STATE_HOME" "$XDG_RUNTIME_DIR" "$TMP/bin" "$TMP/apps" "$TMP/kwin"
 
 export PATH="$TMP/bin:/usr/bin:/bin"
+# Open refuses to run without a display. GitHub runners have neither
+# WAYLAND_DISPLAY nor DISPLAY. The name is not a socket; nothing connects.
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ]; then
+    export WAYLAND_DISPLAY=wayland-test
+fi
 export PZ_KWINRC_FORCE_TEXT=1
 export PZ_KWINRC_SKIP_NOTIFY=1
 export PZ_VKBD_DESKTOP_ROOT="$TMP/apps"
