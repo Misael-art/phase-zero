@@ -20,6 +20,7 @@ Usage:
   pz steamdeck keyboard status Show config, D-Bus availability, and whether it is open
   pz steamdeck keyboard repair Select Plasma Keyboard, or keep a valid explicit choice
   pz steamdeck keyboard revert Restore kwinrc from the backup taken before repair
+  pz steamdeck cursor          Read-only pointer handoff diagnostic (does not restart anything)
   pz steamdeck console [mode]  Apply mode and launch Steam Gamepad UI
   pz steamdeck dev [mode]      Apply desktop/dev session mode
   pz steamdeck hotkeys install Install Meta+Shift+F1..F8 shortcuts
@@ -352,7 +353,7 @@ cmd_flatpak() {
 
 cmd_steamdeck() {
     local action="${1:-}" target="${2:-}"
-    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
+    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
     source "$PZ_ROOT/linux/steamdeck/common.sh"
     source "$PZ_ROOT/linux/steamdeck/input-actions.sh"
     case "$action" in
@@ -369,6 +370,9 @@ cmd_steamdeck() {
                 revert|restore) steamdeck_revert_virtual_keyboard ;;
                 *) pz_error "usage: pz steamdeck keyboard (toggle|status|configure|repair|revert)"; return 1 ;;
             esac
+            ;;
+        cursor|pointer)
+            bash "$PZ_ROOT/linux/steamdeck/cursor-diagnose.sh" "${target:-snapshot}"
             ;;
         console)      steamdeck_start_console_session "${target:-auto}" ;;
         dev|desktop)  steamdeck_start_dev_session "${target:-docked-monitor}" ;;
