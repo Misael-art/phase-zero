@@ -3,6 +3,18 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 As versões seguem a data de build em `version.json`.
 
+## [1.22.2] - 2026-10-10
+
+### Corrigido
+- **Teclado virtual do KDE no Steam Deck apontava para o Maliit e lia uma propriedade D-Bus que não existe.** A configuração legada gerida pelo PhaseZero (`InputMethod` simples no desktop do Maliit, sem `InputMethod[$e]`) passa a migrar para o Plasma Keyboard quando esse desktop está instalado. Uma escolha explícita válida fica como está. O status separa configuração, disponibilidade no D-Bus e abertura efetiva. Onboard ou wvkbd vivo no Wayland não conta como teclado aberto.
+- **Reescrever o `kwinrc` não recarregava o método de entrada do KWin 6.7.** O compositor só observa o sinal `org.kde.kconfig.notify` / `ConfigChanged` no caminho `/kwinrc`, e o KConfig só emite esse sinal quando a chave muda. `kwriteconfig6 --notify` com o mesmo valor é silencioso. O reparo apaga a chave e grava de novo, os dois com `--notify`, e devolve `InputMethod[$e]` em texto, sem novo sinal. Medido nesta sessão: o KWin (PID estável) passou a ter o `plasma-keyboard` como filho e `available=true`.
+
+### Adicionado
+- **Diagnóstico somente leitura do cursor na volta do Game Mode.** `pz steamdeck cursor` registra nós do SCController, o serviço do mapa e se o KWin enxerga o mouse virtual. Não captura o dispositivo, não reinicia o mapa e não reinicia o KWin. Sem amostra de movimento a conclusão fica `not-proven`.
+
+### Limitações
+- Digitar num campo real e a volta Game Mode → Switch Desktop não foram executados: o primeiro precisa de toque, o segundo encerra a sessão. Canal beta. O procedimento está em `docs/roadmaps/steamdeck-kde-input-v1.md`.
+
 ## [1.21.1] - 2026-09-23
 
 ### Adicionado

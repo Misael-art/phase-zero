@@ -197,11 +197,18 @@ class SteamDeckPage(BasePage):
 
         keyboard = _dict(parsed.get("virtualKeyboard"))
         kde = _dict(keyboard.get("kde"))
+        opened = _dict(keyboard.get("open"))
+        configured = _dict(keyboard.get("configured"))
+        dbus = _dict(keyboard.get("dbus"))
         provider = str(keyboard.get("provider") or "—")
-        if kde.get("enabled"):
-            self.keyboard_label.setText(f"Ligado ({provider})")
-        elif kde.get("available") or kde.get("supported"):
-            self.keyboard_label.setText(f"Disponível, desligado ({provider})")
+        # Configured and D-Bus-available are not the same as a keyboard the
+        # user can type on. "Ligado" used to fire from the config flag alone.
+        if opened.get("effective") or kde.get("visible"):
+            self.keyboard_label.setText(f"Aberto ({provider})")
+        elif dbus.get("available") or kde.get("available"):
+            self.keyboard_label.setText(f"Disponível, fechado ({provider})")
+        elif configured.get("inputMethod") or kde.get("enabled"):
+            self.keyboard_label.setText(f"Configurado, KWin sem teclado ativo ({provider})")
         else:
             self.keyboard_label.setText("Indisponível neste desktop")
 

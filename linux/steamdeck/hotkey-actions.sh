@@ -14,10 +14,9 @@ source "$DIR/osd.sh"
 PZ_BIN="$PZ_ROOT/linux/pz"
 
 keyboard_visible_now() {
+    # A leftover onboard/wvkbd process is not an open keyboard on Wayland.
     bash "$DIR/input-actions.sh" status 2>/dev/null |
-        jq -e '.kde.visible == true' >/dev/null 2>&1 && return 0
-    pgrep -x wvkbd-mobintl >/dev/null 2>&1 || pgrep -x wvkbd >/dev/null 2>&1 ||
-        pgrep -x onboard >/dev/null 2>&1
+        jq -e '.open.effective == true or .kde.visible == true' >/dev/null 2>&1
 }
 
 run_keyboard_toggle() {
