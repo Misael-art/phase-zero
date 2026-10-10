@@ -3,6 +3,11 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 As versões seguem a data de build em `version.json`.
 
+## [1.22.4] - 2026-10-10
+
+### Corrigido
+- **O pacote Linux da 1.22.3 não foi publicado.** O `appimagetool` vinha do canal `continuous`, cujo arquivo mudou e deixou de bater com o SHA256 fixo. O job morria depois de gerar deb, rpm e o pacote Arch, então o artefato não subia. O download agora aponta para a release numerada 1.9.1, com o digest conferido. A tag `v1.22.3` não é movida.
+
 ## [1.22.3] - 2026-10-10
 
 ### Corrigido
