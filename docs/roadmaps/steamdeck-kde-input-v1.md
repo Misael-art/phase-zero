@@ -117,3 +117,8 @@ Não marcar como verificado.
 
 1.22.2 sai no canal beta (pré-release). O canal estável exigiria os gates
 físicos acima. Não reutilizar as tags `v1.22.1` e `v1.21.1`.
+
+O repositório passou a se chamar `Misael-art/phase-zero`. O CI do Arch
+comparava `GITHUB_REPOSITORY` só com `Misael-art/PhaseZero` e falhava antes
+de exercitar o pacote. O guarda aceita os dois nomes. `dbus.available` não
+identifica qual comando o KWin carregou; o objeto não expõe o caminho.

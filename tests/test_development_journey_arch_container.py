@@ -22,7 +22,7 @@ def _assert_guarded_arch_container_ci() -> None:
         os.environ.get("PZ_ENABLE_ARCH_PUBLIC_JOURNEY_CONTAINER") != "1"
         or os.environ.get("GITHUB_ACTIONS") != "true"
         or os.environ.get("GITHUB_JOB") != "arch-clean-host"
-        or os.environ.get("GITHUB_REPOSITORY") != "Misael-art/PhaseZero"
+        or os.environ.get("GITHUB_REPOSITORY") not in {"Misael-art/PhaseZero", "Misael-art/phase-zero"}
         or os.geteuid() != 0
         or not Path("/etc/arch-release").is_file()
         or Path(shutil.which("pacman") or "/missing").resolve()
