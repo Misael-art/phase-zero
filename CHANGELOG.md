@@ -3,6 +3,11 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 As versões seguem a data de build em `version.json`.
 
+## [1.22.3] - 2026-10-10
+
+### Corrigido
+- **CI Python deixou de publicar release.** O `pip install PySide6` passou a puxar 6.12.0, que encerra o interpretador com sinal 11 depois de a suíte passar. Os jobs `python-test` e `homelab-python-test` ficam vermelhos e o `ci-gate` da release recusa o pacote. O workflow fixa `PySide6==6.11.1`, a última série que termina com código 0. A tag `v1.22.2` existe e não será movida; ela não gera artefatos enquanto esse gate recusar o commit.
+
 ## [1.22.2] - 2026-10-10
 
 ### Corrigido
