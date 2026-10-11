@@ -3,6 +3,17 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 As versões seguem a data de build em `version.json`.
 
+## [1.22.5] - 2026-10-11
+
+### Adicionado
+- **Steam+X abre o teclado do Plasma.** O mesmo caminho do botão de acesso rápido. Se o modo do teclado virtual estiver em Nunca ou Só sem mouse, o acorde passa um instante por Qualquer entrada, chama `forceActivate` e devolve o modo anterior. O painel continua visível depois dessa devolução.
+- **Toque no terminal abre o teclado.** Ashyterm, Konsole, kitty e Yakuake não pedem o painel de entrada. Um toque na tela, com um deles em foco e o teclado oculto, chama a abertura. Não fecha o teclado e não captura o dispositivo.
+- **Steam+Y, Steam+B e Steam+A.** Print (Spectacle neste host), copiar (Ctrl+C) e colar (Ctrl+V). Sozinhos, Y continua espaço, B Esc e A Enter. No Ashyterm, Ctrl+C interrompe o comando; a cópia de lá é Ctrl+Shift+C e a cola é Ctrl+Shift+V.
+- **Widget PhaseZero Deck no painel.** `org.phasezero.deckpanel` mostra CPU, RAM e disco, o mapa gerado do perfil versionado do controle e a opacidade oficial do painel que contém o applet (Adaptativo, Opaco, Translúcido). Não troca o tema global e não altera os outros painéis. A instalação pelo `kpackagetool6` não reinicia o Plasma nem o controle.
+
+### Limitações
+- Um caractere digitado no teclado virtual e a volta Game Mode → Switch Desktop continuam sem prova. A opacidade Translúcido fica no popup do widget; o instalador não grava esse modo sozinho.
+
 ## [1.22.4] - 2026-10-10
 
 ### Corrigido
