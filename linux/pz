@@ -353,7 +353,7 @@ cmd_flatpak() {
 
 cmd_steamdeck() {
     local action="${1:-}" target="${2:-}"
-    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|terminal-keyboard|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
+    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|terminal-keyboard|panel|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
     source "$PZ_ROOT/linux/steamdeck/common.sh"
     source "$PZ_ROOT/linux/steamdeck/input-actions.sh"
     case "$action" in
@@ -376,6 +376,9 @@ cmd_steamdeck() {
             ;;
         terminal-keyboard)
             bash "$PZ_ROOT/linux/steamdeck/terminal-keyboard.sh" "${target:-watch}"
+            ;;
+        panel)
+            bash "$PZ_ROOT/linux/steamdeck/install-deck-panel.sh" "${target:-status}"
             ;;
         console)      steamdeck_start_console_session "${target:-auto}" ;;
         dev|desktop)  steamdeck_start_dev_session "${target:-docked-monitor}" ;;

@@ -1,0 +1,21 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "PhaseZero"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Steam Deck desktop shortcuts, CPU, memory, disk, and panel opacity",
+        "Description[pt_BR]": "Mapa do controle do Steam Deck, CPU, RAM, disco e opacidade do painel",
+        "EnabledByDefault": true,
+        "Icon": "input-gamepad",
+        "Id": "org.phasezero.deckpanel",
+        "License": "LGPL-2.1-or-later",
+        "Name": "PhaseZero Deck",
+        "Name[pt_BR]": "PhaseZero Deck",
+        "Version": "1.0.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
