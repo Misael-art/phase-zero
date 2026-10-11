@@ -39,6 +39,12 @@ jq -e '.buttons.X.modes.C.action | contains("hotkey-actions.sh keyboard")' "$PRO
 jq -e '.buttons.X.modes | keys == ["C"]' "$PROFILE" >/dev/null || { echo "FAIL: Steam+X deve ser o único acorde do X" >&2; exit 64; }
 jq -e '.buttons | has("C") | not' "$PROFILE" >/dev/null || { echo "FAIL: Steam sozinho deve permanecer sem binding" >&2; exit 65; }
 jq -e '.buttons.Y.action == "button(Keys.KEY_SPACE)"' "$PROFILE" >/dev/null || { echo "FAIL: Y deve ser espaço" >&2; exit 14; }
+# Steam+A/B/Y. Sozinhos continuam Enter, Esc e Espaço.
+# Print deste host é a tecla que abre o Spectacle (KEY_SYSRQ).
+jq -e '.buttons.A.modes.C.action == "button(Keys.KEY_LEFTCTRL) and button(Keys.KEY_V)"' "$PROFILE" >/dev/null || { echo "FAIL: Steam+A deve colar" >&2; exit 66; }
+jq -e '.buttons.B.modes.C.action == "button(Keys.KEY_LEFTCTRL) and button(Keys.KEY_C)"' "$PROFILE" >/dev/null || { echo "FAIL: Steam+B deve copiar" >&2; exit 67; }
+jq -e '.buttons.Y.modes.C.action == "button(Keys.KEY_SYSRQ)"' "$PROFILE" >/dev/null || { echo "FAIL: Steam+Y deve ser print" >&2; exit 68; }
+jq -e '(.buttons.A.modes | keys == ["C"]) and (.buttons.B.modes | keys == ["C"]) and (.buttons.Y.modes | keys == ["C"])' "$PROFILE" >/dev/null || { echo "FAIL: cópia, cola e print devem ser só o acorde Steam" >&2; exit 69; }
 jq -e '.buttons.LGRIP.action | contains("KEY_LEFTSHIFT") and contains("KEY_TAB")' "$PROFILE" >/dev/null || { echo "FAIL: L4 deve ser Shift+Tab" >&2; exit 15; }
 jq -e '.buttons.RGRIP.action == "button(Keys.KEY_TAB)"' "$PROFILE" >/dev/null || { echo "FAIL: R4 deve ser Tab" >&2; exit 16; }
 jq -e '.buttons.LGRIP2.action == "button(Keys.KEY_LEFTMETA)"' "$PROFILE" >/dev/null || { echo "FAIL: L5 deve abrir o menu iniciar" >&2; exit 17; }
