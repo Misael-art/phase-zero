@@ -37,4 +37,4 @@ modules:
     sources:
       - type: git
         url: https://github.com/Misael-art/PhaseZero.git
-        tag: v1.22.4
+        tag: v1.22.5
