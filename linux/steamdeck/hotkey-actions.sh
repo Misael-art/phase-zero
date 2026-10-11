@@ -20,12 +20,15 @@ keyboard_visible_now() {
 }
 
 run_keyboard_toggle() {
+    local was_open=false
+    keyboard_visible_now && was_open=true
     bash "$DIR/input-actions.sh" keyboard || true
-    sleep 0.4
     if keyboard_visible_now; then
-        pz_osd_show "input-keyboard-virtual-on" "Meta+Shift+F4 — Teclado virtual ativado"
+        pz_osd_show "input-keyboard-virtual-on" "Teclado virtual aberto"
+    elif [ "$was_open" = true ]; then
+        pz_osd_show "input-keyboard-virtual-off" "Teclado virtual fechado"
     else
-        pz_osd_show "input-keyboard-virtual-off" "Meta+Shift+F4 — Teclado virtual desativado"
+        pz_osd_show "input-keyboard-virtual-off" "Teclado virtual não abriu"
     fi
 }
 

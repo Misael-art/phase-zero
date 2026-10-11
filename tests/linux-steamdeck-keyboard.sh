@@ -30,6 +30,7 @@ export PZ_VKBD_VISIBLE_DELAY=0
 export PZ_VKBD_WAYLAND=1
 export PZ_QDBUS6="$TMP/bin/qdbus6"
 export PZ_QDBUS_LOG="$TMP/qdbus.log"
+export PZ_DBUS_MODE_FILE="$TMP/dbus-mode"
 export PZ_VKBD_PROCESS_CMD="$TMP/bin/vkbd-proc"
 export PZ_VKBD_PROC_STATE="$TMP/proc-state"
 export PZ_VKBD_PROC_LOG="$TMP/proc.log"
@@ -83,6 +84,14 @@ if [[ "$joined" == *"willShowOnActive"* ]]; then
     exit 0
 fi
 if [[ "$joined" == *"Properties.Set"* ]]; then
+    prop="${@: -2:1}"
+    val="${*: -1}"
+    if [ "$prop" = "mode" ]; then
+        printf '%s\n' "$val" > "$PZ_DBUS_MODE_FILE"
+        if [ "$val" = 2 ]; then
+            : > "$PZ_DBUS_MODE_FILE.shown"
+        fi
+    fi
     printf 'set %s\n' "$joined" >> "$PZ_QDBUS_LOG"
     exit 0
 fi
@@ -90,10 +99,22 @@ if [[ "$joined" == *"Properties.Get"* ]]; then
     prop="${*: -1}"
     case "$prop" in
         available) printf '%s\n' "${PZ_DBUS_AVAILABLE:-false}" ;;
-        visible) printf '%s\n' "${PZ_DBUS_VISIBLE:-false}" ;;
+        visible)
+            if [ "${PZ_DBUS_SHOW_WHEN_MODE2:-0}" = 1 ] && [ -f "$PZ_DBUS_MODE_FILE.shown" ]; then
+                printf 'true\n'
+            else
+                printf '%s\n' "${PZ_DBUS_VISIBLE:-false}"
+            fi
+            ;;
         active) printf '%s\n' "${PZ_DBUS_ACTIVE:-false}" ;;
         activeClientSupportsTextInput) printf '%s\n' "${PZ_DBUS_TEXT:-true}" ;;
-        mode) printf '%s\n' "${PZ_DBUS_MODE:-1}" ;;
+        mode)
+            if [ -f "$PZ_DBUS_MODE_FILE" ]; then
+                cat "$PZ_DBUS_MODE_FILE"
+            else
+                printf '%s\n' "${PZ_DBUS_MODE:-1}"
+            fi
+            ;;
         *) exit 1 ;;
     esac
     exit 0
@@ -176,6 +197,8 @@ reset_case() {
     export PZ_VKBD_WAYLAND=1
     export PZ_KWINRC_SKIP_NOTIFY=1
     unset PZ_VKBD_USABLE_PROBE || true
+    unset PZ_DBUS_SHOW_WHEN_MODE2 || true
+    rm -f "$PZ_DBUS_MODE_FILE" "$PZ_DBUS_MODE_FILE.shown"
     : > "$PZ_VKBD_PROC_STATE"
     : > "$PZ_QDBUS_LOG"
     : > "$PZ_VKBD_PROC_LOG"
@@ -419,6 +442,33 @@ grep -q 'Properties.Set' "$PZ_QDBUS_LOG" || fail "hidden keyboard was not deacti
 if grep -q 'queried missing property enabled' "$PZ_QDBUS_LOG"; then
     fail "open queried enabled"
 fi
+grep -q 'VirtualKeyboard mode 1' "$PZ_QDBUS_LOG" || fail "hidden keyboard left VirtualKeyboardMode lifted"
+
+reset_case
+export PZ_DBUS_SUPPORTED=1
+export PZ_DBUS_AVAILABLE=true
+export PZ_DBUS_VISIBLE=false
+export PZ_DBUS_ACTIVE=false
+export PZ_DBUS_SHOW_WHEN_MODE2=1
+: > "$PZ_KWINRC"
+set +e
+steamdeck_kde_open_virtual_keyboard >/dev/null 2>"$TMP/kde-chord.err"
+kde_rc=$?
+set -e
+[ "$kde_rc" -eq 0 ] || fail "controller chord did not open the keyboard: $(cat "$TMP/kde-chord.err")"
+grep -q 'VirtualKeyboard mode 2' "$PZ_QDBUS_LOG" || fail "controller chord did not allow the panel"
+grep -q 'VirtualKeyboard mode 1' "$PZ_QDBUS_LOG" || fail "controller chord did not restore NonMouseInput"
+if grep -q 'org.kde.kwin.VirtualKeyboard active false' "$PZ_QDBUS_LOG"; then
+    fail "shown keyboard was deactivated"
+fi
+# The mode restore must be the last mode write.
+awk '
+    /VirtualKeyboard mode [0-2]/ {
+        n = split($0, f, " ")
+        last = f[n]
+    }
+    END { if (last != "1") exit 1 }
+' "$PZ_QDBUS_LOG" || fail "last VirtualKeyboardMode write was not the restore"
 
 reset_case
 export PZ_DBUS_SUPPORTED=1
