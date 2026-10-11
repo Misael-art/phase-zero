@@ -687,8 +687,41 @@ steamdeck_kde_deactivate_virtual_keyboard() {
     pz_info "KDE virtual keyboard deactivated"
 }
 
+# KWin 6.7 shows the input panel only when it is both requested and allowed.
+# NonMouseInput allows it solely after touch or a stylus. A controller chord
+# is a key, so forceActivate sets active, show() runs, and the panel stays
+# hidden. AnyInput makes the next show() allow the panel. Restoring the
+# previous mode does not hide a panel that is already on screen, and KWin
+# writes VirtualKeyboardMode itself. This function puts back the mode it read.
+steamdeck_kde_set_virtual_keyboard_mode() {
+    local mode="$1"
+    case "$mode" in
+        0|1|2) ;;
+        *) return 1 ;;
+    esac
+    steamdeck_qdbus org.kde.KWin /VirtualKeyboard \
+        org.freedesktop.DBus.Properties.Set \
+        org.kde.kwin.VirtualKeyboard mode "$mode" >/dev/null 2>&1
+}
+
+steamdeck_kde_keyboard_visible() {
+    [ "$(steamdeck_kde_virtual_keyboard_prop visible || echo false)" = "true" ]
+}
+
+steamdeck_kde_force_activate_keyboard() {
+    steamdeck_qdbus org.kde.KWin /VirtualKeyboard \
+        org.kde.kwin.VirtualKeyboard.forceActivate >/dev/null 2>&1 || return 1
+    local tries=0 max="${PZ_VKBD_VISIBLE_POLLS:-6}"
+    while [ "$tries" -lt "$max" ]; do
+        steamdeck_kde_keyboard_visible && return 0
+        tries=$((tries + 1))
+        sleep "${PZ_VKBD_VISIBLE_DELAY:-0.1}"
+    done
+    return 1
+}
+
 steamdeck_kde_open_virtual_keyboard() {
-    local available visible active tries max
+    local available tries max mode
     steamdeck_kde_virtual_keyboard_supported || return 1
     steamdeck_configure_virtual_keyboard || true
 
@@ -705,18 +738,29 @@ steamdeck_kde_open_virtual_keyboard() {
     done
     [ "$available" = "true" ] || return 1
 
-    steamdeck_qdbus org.kde.KWin /VirtualKeyboard \
-        org.kde.kwin.VirtualKeyboard.forceActivate >/dev/null 2>&1 || return 1
-
-    sleep "${PZ_VKBD_VISIBLE_DELAY:-0.2}"
-    visible="$(steamdeck_kde_virtual_keyboard_prop visible || echo false)"
-    active="$(steamdeck_kde_virtual_keyboard_prop active || echo false)"
-    if [ "$visible" = "true" ]; then
+    if steamdeck_kde_force_activate_keyboard; then
         pz_info "virtual keyboard requested via KDE/KWin"
         return 0
     fi
 
-    if [ "$active" = "true" ]; then
+    mode="$(steamdeck_kde_virtual_keyboard_prop mode || true)"
+    case "$mode" in
+        0|1) ;;
+        *) mode="" ;;
+    esac
+    if [ -n "$mode" ]; then
+        if steamdeck_kde_set_virtual_keyboard_mode 2; then
+            steamdeck_kde_force_activate_keyboard || true
+            steamdeck_kde_set_virtual_keyboard_mode "$mode" || \
+                pz_warn "could not restore VirtualKeyboardMode $mode"
+        fi
+    fi
+    if steamdeck_kde_keyboard_visible; then
+        pz_info "virtual keyboard requested via KDE/KWin"
+        return 0
+    fi
+
+    if [ "$(steamdeck_kde_virtual_keyboard_prop active || echo false)" = "true" ]; then
         # available means KWin has a command, not that a keyboard is showing.
         pz_warn "KDE virtual keyboard active but not visible"
         steamdeck_kde_deactivate_virtual_keyboard >/dev/null 2>&1 || true
