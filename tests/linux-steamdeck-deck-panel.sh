@@ -64,6 +64,45 @@ printf '%s' "$json" | jq -e '.note | contains("Ashyterm") and contains("Ctrl+Shi
 
 grep -q 'install-deck-panel.sh' "$REPO_ROOT/linux/pz" || fail "pz does not dispatch panel"
 
+# Ubuntu CI has no KDE package tool. The fake copies into the sandboxed
+# XDG_DATA_HOME the same way kpackagetool6 -i/-u/-r/-s does on a Deck.
+if ! command -v kpackagetool6 >/dev/null 2>&1; then
+    mkdir -p "$TMP/bin"
+    cat >"$TMP/bin/kpackagetool6" <<'EOF'
+#!/bin/bash
+type=""
+op=""
+target=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -t) type="${2:-}"; shift 2 ;;
+        -s|-i|-u|-r) op="${1#-}"; target="${2:-}"; shift 2 ;;
+        *) echo "fake kpackagetool6: unknown arg $1" >&2; exit 2 ;;
+    esac
+done
+[ "$type" = "Plasma/Applet" ] || { echo "fake kpackagetool6: bad type" >&2; exit 2; }
+root="${XDG_DATA_HOME:-$HOME/.local/share}/plasma/plasmoids"
+case "$op" in
+    s)
+        meta="$root/$target/metadata.json"
+        [ -f "$meta" ] || exit 1
+        grep -q "$target" "$meta" || exit 1
+        ;;
+    i|u)
+        id="$(basename "$target")"
+        mkdir -p "$root"
+        rm -rf "$root/$id"
+        cp -a "$target" "$root/$id"
+        printf '%s instalado com sucesso\n' "$root/$id/"
+        ;;
+    r) rm -rf "$root/$target" ;;
+    *) echo "fake kpackagetool6: missing op" >&2; exit 2 ;;
+esac
+EOF
+    chmod +x "$TMP/bin/kpackagetool6"
+    export PATH="$TMP/bin:$PATH"
+fi
+
 PRIVATE_APPLET="$XDG_DATA_HOME/plasma/plasmoids/org.phasezero.deckpanel"
 
 PZ_DRY_RUN=1 bash "$INSTALLER" install | grep -q 'dry-run' || fail "dry-run silent"
