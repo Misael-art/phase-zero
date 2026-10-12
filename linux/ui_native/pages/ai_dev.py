@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -67,6 +69,43 @@ _REPRESENTED_ELSEWHERE = {
 }
 
 
+# The ChatGPT Web bridge stays out of the public catalog while its gates are
+# pending. This card is private to hosts that already opted in through the
+# manager: its actions are built here and never registered in the catalog.
+_BRIDGE_STATUS_ID = "private.chatgpt-web.status"
+_BRIDGE_ARGS = ("ai", "chatgpt-web")
+_BRIDGE_STAGES = {
+    "opted-in": "aceito, ainda não instalado",
+    "package-verified": "instalado, ainda não configurado",
+    "launcher-configured": "configurado, mas desligado",
+    "web-model": "modelo Web ativo (sem ferramentas locais)",
+    "tools-experimental": "modelo Web com ferramentas (experimental)",
+}
+_BRIDGE_BUTTONS = (
+    # object name, label, command, mutable, what changes
+    ("chatgptWebOpen", "Abrir janela", ("desktop",), False, ""),
+    ("chatgptWebSetup", "Ligar ou reparar", ("setup", "--login-wait", "0"), True,
+     "Inicia o launcher isolado e o bridge local e religa a rota no perfil dedicado. "
+     "O ~/.codex do seu Codex normal não é alterado."),
+    ("chatgptWebTools", "Com ferramentas…", ("tools", "status"), False, ""),
+    ("chatgptWebSmoke", "Testar (1 mensagem)", ("smoke",), True,
+     "Envia um turno real pelo bridge. Gasta uma mensagem da sua conta ChatGPT."),
+    ("chatgptWebDisable", "Desligar", ("disable",), True,
+     "Restaura a rota do perfil dedicado e encerra o launcher. O ~/.codex do seu Codex "
+     "normal não é alterado; o login do ChatGPT no launcher é mantido."),
+)
+
+
+def _bridge_opted_in() -> bool:
+    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    root = Path(os.environ.get("PZ_CHATGPT_WEB_ROOT") or data / "phasezero/chatgpt-web")
+    try:
+        state = json.loads((root / "state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(state, dict) and bool(state.get("optIn"))
+
+
 def _cli_available(payload: dict, name: str) -> bool:
     clis = payload.get("clis") if isinstance(payload.get("clis"), dict) else {}
     node = clis.get(name)
@@ -83,6 +122,8 @@ class AiDevPage(BasePage):
         super().__init__(root, runner, actions, by_id, parent)
         self._payload: dict = {}
         self._technical_widgets: list[QWidget] = []
+        self._bridge_buttons: dict[str, QPushButton] = {}
+        self._bridge_ready = False
 
     def build(self) -> None:
         for action_id in _PRIMARY_IDS | _REPRESENTED_ELSEWHERE:
@@ -140,6 +181,7 @@ class AiDevPage(BasePage):
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
         layout.addLayout(cards)
+        layout.addWidget(self._build_bridge_card())
         layout.addWidget(self._build_advanced_connections())
         layout.addWidget(self._build_shortcuts())
         layout.addStretch()
@@ -245,6 +287,103 @@ class AiDevPage(BasePage):
         layout.addLayout(row)
         return card
 
+    def _build_bridge_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("chatgptWebCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        layout.addWidget(SectionHeader(
+            "ChatGPT Web no Codex (experimental)",
+            "Modelos ChatGPT Web numa janela separada do Codex, somente leitura. "
+            "Seu Codex normal não muda.",
+        ))
+        self.bridge_state = QLabel("Verificando…")
+        self.bridge_state.setObjectName("chatgptWebState")
+        self.bridge_state.setWordWrap(True)
+        self.bridge_state.setAccessibleName("Estado do ChatGPT Web no Codex")
+        layout.addWidget(self.bridge_state)
+        self.bridge_tools = QLabel("")
+        # Native styling is keyed on object names; the role is a separate property.
+        self.bridge_tools.setObjectName("cardDescription")
+        self.bridge_tools.setProperty("bridgeRole", "tools")
+        self.bridge_tools.setWordWrap(True)
+        layout.addWidget(self.bridge_tools)
+        row = QHBoxLayout()
+        for name, label, command, mutable, impact in _BRIDGE_BUTTONS:
+            action = ActionSpec(
+                id=f"private.chatgpt-web.{command[0]}", category="IA & Dev",
+                title=f"ChatGPT Web no Codex — {label}", description=impact or label,
+                args=(*_BRIDGE_ARGS, *command), icon="applications-development",
+                mutable=mutable, preview_args=(*_BRIDGE_ARGS, "status") if mutable else None,
+                preview_kind_override="state" if mutable else "", impact=impact,
+                visibility="advanced", timeout_s=600 if mutable else 0,
+            )
+            button = QPushButton(label)
+            button.setObjectName("primaryButton" if name == "chatgptWebOpen"
+                                 else "secondaryButton")
+            button.setProperty("bridgeRole", name)
+            button.setToolTip(impact or {
+                "chatgptWebOpen": "Abre o Codex Desktop no perfil dedicado, em janela separada.",
+                "chatgptWebTools": "Mostra o que falta para o modo com ferramentas.",
+            }[name])
+            button.clicked.connect(
+                lambda _checked=False, spec=action: self.action_requested.emit(spec))
+            self._bridge_buttons[name] = button
+            row.addWidget(button)
+        row.addStretch()
+        layout.addLayout(row)
+        card.setVisible(_bridge_opted_in())
+        self.bridge_card = card
+        return card
+
+    def _set_bridge_state(self, text: str, state: str) -> None:
+        self.bridge_state.setText(text)
+        self.bridge_state.setProperty("state", state)
+        self.bridge_state.style().unpolish(self.bridge_state)
+        self.bridge_state.style().polish(self.bridge_state)
+
+    def _apply_bridge_buttons(self, running: bool = False) -> None:
+        for name, button in self._bridge_buttons.items():
+            button.setEnabled(not running and (name != "chatgptWebOpen" or self._bridge_ready))
+
+    def _on_bridge_status(self, payload: dict) -> None:
+        def node(key: str) -> dict:
+            value = payload.get(key)
+            return value if isinstance(value, dict) else {}
+
+        stage = str(payload.get("stage") or "")
+        label = _BRIDGE_STAGES.get(stage, stage or "estado desconhecido")
+        running = bool(node("launcher").get("active") and node("route").get("active")
+                       and payload.get("daemonListening"))
+        self._bridge_ready = running
+        login = {"enabled": "inicia com o login", "off": "início no login desligado",
+                 "inconsistent": "início no login inconsistente"}.get(
+                     str(node("autostart").get("state")), "")
+        if payload.get("liveCodexRouteTouched"):
+            self._set_bridge_state(
+                "● Atenção: o ~/.codex do seu Codex normal aponta para um bridge local. "
+                "A ponte nunca faz isso; confira a configuração.", "error")
+        elif running:
+            self._set_bridge_state(f"● Pronto — {label}" + (f"; {login}" if login else ""),
+                                   "success")
+        elif payload.get("signedIn") is False:
+            self._set_bridge_state(
+                "● Falta o login no ChatGPT. Use Ligar ou reparar e entre na janela do "
+                "launcher.", "warning")
+        else:
+            self._set_bridge_state(f"● Parado — {label}. Use Ligar ou reparar.", "warning")
+        blockers = node("eligibility").get("blockers")
+        if payload.get("upstreamMode") == "full":
+            self.bridge_tools.setText("Com ferramentas: ligado (experimental). Cada ação "
+                                      "local pede sua aprovação.")
+        elif isinstance(blockers, list) and blockers:
+            self.bridge_tools.setText(f"Com ferramentas: bloqueado — {blockers[0]}.")
+        else:
+            self.bridge_tools.setText("Com ferramentas: ainda não configurado. Veja Com "
+                                      "ferramentas… para o próximo passo.")
+        self._apply_bridge_buttons()
+
     def _build_advanced_connections(self) -> QFrame:
         card = QFrame()
         card.setObjectName("aiAdvancedConnections")
@@ -296,6 +435,9 @@ class AiDevPage(BasePage):
         self.state_label.setText("● Verificando…")
         self._set_state("info")
         self.status_loader.fetch_action(action)
+        self.bridge_card.setVisible(_bridge_opted_in())
+        if not self.bridge_card.isHidden() and not self.status_loader.running(_BRIDGE_STATUS_ID):
+            self.status_loader.fetch(_BRIDGE_STATUS_ID, [*_BRIDGE_ARGS, "--json", "status"])
 
     def _set_state(self, state: str) -> None:
         self.state_label.setProperty("state", state)
@@ -303,6 +445,9 @@ class AiDevPage(BasePage):
         self.state_label.style().polish(self.state_label)
 
     def _on_status_ready(self, action_id: str, _stdout: str, parsed: object) -> None:
+        if action_id == _BRIDGE_STATUS_ID and isinstance(parsed, dict):
+            self._on_bridge_status(parsed)
+            return
         if action_id != "ai.status" or not isinstance(parsed, dict):
             return
         self.refresh_button.setEnabled(True)
@@ -357,6 +502,9 @@ class AiDevPage(BasePage):
             self._set_state("info")
 
     def _on_status_failed(self, action_id: str, message: str) -> None:
+        if action_id == _BRIDGE_STATUS_ID:
+            self._set_bridge_state("● Não foi possível ler o estado. Use Atualizar.", "warning")
+            return
         if action_id != "ai.status":
             return
         self.refresh_button.setEnabled(True)
@@ -379,5 +527,6 @@ class AiDevPage(BasePage):
     def block_while_running(self, running: bool) -> None:
         self.refresh_button.setEnabled(not running)
         self.repair_button.setEnabled(not running)
+        self._apply_bridge_buttons(running)
         if not running and self.isVisible():
             self.reload()

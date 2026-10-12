@@ -192,7 +192,11 @@ QScrollArea, QScrollArea > QWidget > QWidget {
 #serviceState[state="success"] { color: {{success}}; }
 #serviceState[state="warning"] { color: {{warning}}; }
 #serviceState[state="error"] { color: {{error}}; }
-#settingsCard, #healthGroup, #healthMetric {
+#chatgptWebState { color: {{text}}; font-weight: 650; }
+#chatgptWebState[state="success"] { color: {{success}}; }
+#chatgptWebState[state="warning"] { color: {{warning}}; }
+#chatgptWebState[state="error"] { color: {{error}}; }
+#settingsCard, #chatgptWebCard, #healthGroup, #healthMetric {
     background: {{surface}};
     border: 1px solid {{border_subtle}};
     border-radius: {{radius_lg}}px;

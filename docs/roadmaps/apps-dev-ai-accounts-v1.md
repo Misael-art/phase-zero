@@ -2828,3 +2828,30 @@ pelo teste de atalho foi fechada por esta sessão antes do ciclo. Testes:
 `tests/test_chatgpt_web_bridge.py` 53 passaram. Limite: o Desktop volta a
 regravar o arquivo no próximo uso, então o aviso do `doctor` reaparece; isso
 não afeta os turnos e o `disable` agora se resolve sozinho.
+
+## PXA-010 cartão privado na UI nativa — 2026-10-12
+
+Antes desta entrada a UI não tinha nenhuma superfície para a ponte: tudo era
+CLI, atalhos e notificações. A página **IA & Dev** ganhou um cartão "ChatGPT
+Web no Codex (experimental)" no mesmo estilo dos cartões vizinhos.
+
+Regra de descoberta mantida: o cartão só aparece em host que já aceitou a ponte
+pelo gerenciador (`optIn` em `state.json`). As ações são criadas na própria
+página e não entram em `build_catalog` nem no inventário, então
+`test_chatgpt_codex_bridge_stays_unlisted_until_browser_only_gate_passes`
+segue verde e um host novo não vê nada. O aceite continua acontecendo só no
+terminal (`setup`, com o texto `ACEITO`); a UI não aceita pelo operador.
+
+Conteúdo: estado em uma linha (pronto, parado, falta login, alerta se o
+`~/.codex` apontar para um bridge), motivo do bloqueio do modo com ferramentas
+e cinco botões — Abrir janela, Ligar ou reparar, Com ferramentas…, Testar
+(1 mensagem) e Desligar. Os três que alteram o host passam pela prévia padrão
+com o texto de impacto; Abrir janela só habilita com a ponte no ar.
+
+Prova: `tests/test_chatgpt_web_card.py` 4 passaram; suítes de UI que constroem
+a página (`test_ai_session_ui`, `test_linux_native_ui`, `test_native_navigation`
+e outras) 116 passaram. No host, a página renderizada fora da tela leu o estado
+real ("Pronto — modelo Web ativo…; inicia com o login", ferramentas bloqueadas
+pelo plano Plus) e o botão Com ferramentas… rodou pelo `CommandRunner` real
+(`/tmp/pz-evidence/pxa010/ui-page.png`). Não provado: clique real na janela
+do Control Center e a aparência do diálogo de resultado para saída em texto.
