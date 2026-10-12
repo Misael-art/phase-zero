@@ -2585,3 +2585,35 @@ No host atual, `pacman -Q` leu `phasezero-control-center 1.21.1-1`. `/dev/kvm`
 existe, mas não foi aberto nem usado; nenhuma VM foi iniciada. Memória, filesystem
 e carga foram apenas consultados. O arquivo untracked `hashlib` no worktree foi
 preservado.
+
+## PXA-010 prova (c): Exec do autostart sobrevive ao worktree e falha visível — 2026-10-12
+
+O `Exec` da entrada de autostart apontava direto para
+`sys.executable` + script dentro do worktree em `/mnt/sdcard`: se o worktree
+sumisse, o login não iniciava nada e o usuário nunca ficava sabendo. Corrigido em
+`linux/ai/chatgpt_web_bridge.py`: `autostart enable` agora escreve um wrapper POSIX
+em caminho estável (`~/.local/share/phasezero/chatgpt-web/bin/chatgpt-web-autostart.sh`,
+0o755) mais um arquivo-alvo de duas linhas (`python`, `script`, 0o600); o `Exec` do
+`.desktop` aponta só para o wrapper. Alvo ausente/quebrado dispara
+`notify-send --urgency=critical` em pt-BR com o comando de religamento e exit 1;
+`autostart status` só diz `enabled` se entrada, wrapper e alvo existem e conferem;
+`disable` remove os três.
+
+Provas: (1) comportamento coberto por testes —
+`tests/test_chatgpt_web_bridge.py::test_autostart_wrapper_survives_the_worktree_and_fails_visibly`
+(notifica e exit 1 com alvo inexistente, usando notify-send falso que grava argv) e
+`::test_autostart_wrapper_executes_the_manager_when_the_path_exists` (executa o
+gerenciador real quando o alvo existe); suíte tocada
+`pytest tests/test_chatgpt_web_bridge.py tests/test_product_inventory.py` fechou
+43 passaram, exit 0. (2) Host real misael-jupiter: autostart re-habilitado via
+`pz ai chatgpt-web autostart enable --acknowledge-autostart`, `Exec` lido no
+`.desktop` aponta para o wrapper estável; cópia do wrapper com alvo apontando para
+caminho inexistente executada no host produziu a notificação KDE crítica real com a
+mensagem pt-BR, capturada em `/tmp/pz-evidence/pxa010/notify-fail.png`
+(exit 1, sem tocar em gerenciador vivo). Persistência pós-reboot/logout (prova b)
+e o turno pela UI do Desktop (prova a) continuam pendentes: a automação por
+mouse/teclado mostrou mapeamento de ponteiro não confiável neste desktop
+(multi-tela com rotação) e um clique de calibração alterou o combo
+"Ordenação e facetas" do editor de temas do SteamZero do valor
+"Theme Engine — asset único" para "AURA" — incidente registrado para o operador,
+nenhuma outra janela do usuário recebeu input depois da descoberta.

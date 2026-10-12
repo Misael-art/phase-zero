@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -413,11 +416,15 @@ def test_login_autostart_is_opt_in_and_never_starts_the_upstream_launcher_direct
 
     assert bridge.autostart_enable(True)["state"] == "enabled"
     entry = bridge.paths.managed_autostart.read_text()
-    assert "chatgpt_web_bridge.py\" autostart run" in entry
+    assert 'Exec="' in entry and "chatgpt-web-autostart.sh\"" in entry
+    assert "autostart run" not in entry  # Exec is the stable wrapper, not the worktree
+    assert bridge.paths.autostart_wrapper.is_file()
+    assert bridge.paths.autostart_target.is_file()
     assert "codex-web-gpt-launcher" not in entry
     assert bridge.isolation()["upstreamAutostartEntry"] is None
 
-    bridge.paths.managed_autostart.write_text(entry.replace("autostart run", "launch"))
+    bridge.paths.managed_autostart.write_text(
+        entry.replace("chatgpt-web-autostart.sh", "dev.codexwebgpt.launcher.desktop"))
     assert bridge.autostart_status()["state"] == "inconsistent"
     with pytest.raises(BridgeError) as tampered:
         bridge.autostart_run()
@@ -425,6 +432,55 @@ def test_login_autostart_is_opt_in_and_never_starts_the_upstream_launcher_direct
 
     assert bridge.autostart_disable()["state"] == "off"
     assert not bridge.paths.managed_autostart.exists()
+    assert not bridge.paths.autostart_wrapper.exists()
+    assert not bridge.paths.autostart_target.exists()
+
+
+def _run_wrapper(wrapper: Path, home: Path) -> subprocess.CompletedProcess:
+    fake_bin = home / "fakebin"
+    fake_bin.mkdir(exist_ok=True)
+    recorder = home / "notify.log"
+    (fake_bin / "notify-send").write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" >> {recorder}\n")
+    (fake_bin / "notify-send").chmod(0o755)
+    env = dict(os.environ, PATH=f"{fake_bin}{os.pathsep}{os.environ['PATH']}")
+    return subprocess.run(["/bin/sh", str(wrapper)], capture_output=True, text=True,
+                          timeout=30, env=env, check=False)
+
+
+def test_autostart_wrapper_survives_the_worktree_and_fails_visibly(tmp_path, host):
+    # PXA-010(c): the login Exec is a stable path. When the recorded manager
+    # script disappears, the wrapper notifies in pt-BR instead of vanishing.
+    bridge, runner, home = host
+    bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
+                                    "unpacked": "verified"}
+    bridge.autostart_enable(True)
+    wrapper = bridge.paths.autostart_wrapper
+
+    bridge.paths.autostart_target.write_text(f"{sys.executable}\n{home / 'gone' / 'bridge.py'}\n")
+    gone = _run_wrapper(wrapper, home)
+    assert gone.returncode == 1
+    log = (home / "notify.log").read_text()
+    assert "não iniciou" in log and "não existe mais" in log
+    assert "--urgency=critical" in log
+
+    missing = home / "no-target"
+    bridge.paths.autostart_target.unlink()
+    orphan = _run_wrapper(wrapper, home)
+    assert orphan.returncode == 1
+    assert (home / "notify.log").read_text() != log
+
+
+def test_autostart_wrapper_executes_the_manager_when_the_path_exists(tmp_path, host):
+    bridge, runner, home = host
+    bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
+                                    "unpacked": "verified"}
+    bridge.autostart_enable(True)
+    manager = home / "manager.py"
+    manager.write_text("import sys\nprint('|'.join(sys.argv[1:]))\n")
+    bridge.paths.autostart_target.write_text(f"{sys.executable}\n{manager}\n")
+    done = _run_wrapper(bridge.paths.autostart_wrapper, home)
+    assert done.returncode == 0, done.stderr
+    assert "autostart|run" in done.stdout
 
 
 def test_autostart_run_notifies_when_the_session_cannot_start(host):

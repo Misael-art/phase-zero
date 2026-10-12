@@ -487,6 +487,12 @@ class Paths:
         self.autostart_dir = config / "autostart"
         self.autostart_entry = self.autostart_dir / UPSTREAM_AUTOSTART_ENTRY
         self.managed_autostart = self.autostart_dir / MANAGED_AUTOSTART_ENTRY
+        # Stable-path wrapper for the opt-in login entry. The manager itself can
+        # live in a worktree that disappears; the wrapper survives and fails
+        # visibly (desktop notification) instead of silently not launching.
+        self.autostart_bin = self.root / "bin"
+        self.autostart_wrapper = self.autostart_bin / "chatgpt-web-autostart.sh"
+        self.autostart_target = self.autostart_bin / "chatgpt-web-autostart.target"
         self.default_profile = home / UPSTREAM_DEFAULT_PROFILE
         self.default_core = home / UPSTREAM_DEFAULT_CORE
         self.descriptor = self.core_home / "runtime" / "launcher-browser.json"
@@ -1511,13 +1517,34 @@ class Bridge:
 
     # ---- opt-in start at login -------------------------------------------
 
+    def autostart_wrapper_text(self) -> str:
+        """POSIX wrapper at a stable path; fails visibly when the manager is gone."""
+        return ("#!/bin/sh\n"
+                "# PhaseZero ChatGPT Web — início no login (opt-in). Este caminho é estável;\n"
+                "# o gerenciador pode mudar. Alvo atual em chatgpt-web-autostart.target.\n"
+                "set -eu\n"
+                "DIR=$(dirname \"$0\")\n"
+                "TARGET=\"$DIR/chatgpt-web-autostart.target\"\n"
+                "PY=$(sed -n '1p' \"$TARGET\" 2>/dev/null || true)\n"
+                "SCRIPT=$(sed -n '2p' \"$TARGET\" 2>/dev/null || true)\n"
+                "if [ -z \"$SCRIPT\" ] || [ ! -f \"$SCRIPT\" ] || [ ! -f \"$PY\" ]; then\n"
+                "  notify-send --app-name=PhaseZero --urgency=critical --expire-time=30000 \\\n"
+                "    \"PhaseZero — ChatGPT Web não iniciou\" \\\n"
+                "    \"O início no login está ligado, mas o gerenciador em ${SCRIPT:-desconhecido} não existe mais. Religue a partir do repositório atual: pz ai chatgpt-web autostart enable --acknowledge-autostart\" \\\n"
+                "    || true\n"
+                "  exit 1\n"
+                "fi\n"
+                "exec \"$PY\" \"$SCRIPT\" autostart run\n")
+
+    def autostart_target_text(self) -> str:
+        return f"{sys.executable}\n{Path(__file__).resolve()}\n"
+
     def autostart_entry_text(self) -> str:
-        script = Path(__file__).resolve()
         return ("[Desktop Entry]\n"
                 "Type=Application\n"
                 "Name=PhaseZero — ChatGPT Web no Codex\n"
                 "Comment=Inicia o launcher isolado e o bridge (opt-in)\n"
-                f'Exec="{sys.executable}" "{script}" autostart run\n'
+                f'Exec="{self.paths.autostart_wrapper}"\n'
                 "Terminal=false\n"
                 "NoDisplay=true\n"
                 "X-GNOME-Autostart-enabled=true\n"
@@ -1532,6 +1559,8 @@ class Bridge:
             current = None
         state = ("off" if not record and current is None
                  else "enabled" if record and current == self.autostart_entry_text()
+                 and self.paths.autostart_wrapper.is_file()
+                 and self.paths.autostart_target.is_file()
                  else "inconsistent")
         return {"state": state, "entry": str(entry), "optedInAt": (record or {}).get("at"),
                 "startsUpstreamLauncherDirectly": False}
@@ -1546,6 +1575,8 @@ class Bridge:
             raise BridgeError("conclua `setup` antes de ligar o início no login",
                               "install-unverified")
         self.paths.autostart_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write(self.paths.autostart_wrapper, self.autostart_wrapper_text().encode(), 0o755)
+        atomic_write(self.paths.autostart_target, self.autostart_target_text().encode(), 0o600)
         atomic_write(self.paths.managed_autostart, self.autostart_entry_text().encode(), 0o600)
         state["autostart"] = {"at": iso(self.clock())}
         self.save_state(state)
@@ -1554,6 +1585,8 @@ class Bridge:
     def autostart_disable(self) -> dict[str, Any]:
         state = self.load_state()
         self.paths.managed_autostart.unlink(missing_ok=True)
+        self.paths.autostart_wrapper.unlink(missing_ok=True)
+        self.paths.autostart_target.unlink(missing_ok=True)
         state.pop("autostart", None)
         self.save_state(state)
         return self.autostart_status()
