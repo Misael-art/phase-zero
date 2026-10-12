@@ -1247,3 +1247,89 @@ def test_tools_steps_walk_to_ready_one_action_at_a_time(host, monkeypatch):
     done = bridge.tools_steps()
     assert done["ready"] is True and done["next"] is None
     assert "runtime-key-material" not in json.dumps(done)
+
+
+DESKTOP_REWRITTEN = (
+    'sandbox_mode = "read-only"\n'
+    f'{APPROVAL_LINE}\n'
+    f'openai_base_url = "http://127.0.0.1:{DEFAULT_PORT}/v1"\n'
+    'experimental_realtime_webrtc_call_base_url = "https://chatgpt.com/backend-api/codex"\n'
+    '\n[features]\nmulti_agent = true\n')
+
+
+REFUSAL = ("codex-chatgpt-web: Codex interrupt lifecycle hook changed after setup; "
+           "refusing to overwrite it.")
+
+
+def test_disable_resets_the_dedicated_profile_when_upstream_refuses_a_rewritten_config(host):
+    # Reproduced on the host with 6.1.8: after Codex Desktop re-serialises
+    # config.toml, upstream's `route disconnect` refuses and teardown was stuck.
+    bridge, runner, home = host
+    configure(bridge, runner, route_active=True)
+    runner.unit_active = True
+    rewritten = DESKTOP_REWRITTEN + '\n[desktop]\nsansFontSize = 14\n'
+    bridge.paths.codex_config.write_text(rewritten)
+    journal = bridge.paths.core_home / "codex/integration-journal.json"
+    journal.parent.mkdir(parents=True)
+    journal.write_text('{"version": 10, "active": true}')
+    runner.upstream["route disconnect"] = (0, REFUSAL, "")
+    runner.upstream["route status"] = (0, json.dumps({"installed": True, "active": True,
+                                                       "errors": [REFUSAL]}), "")
+
+    status = bridge.route_status()
+    assert status["desktopRewroteConfig"] is True and "disable" in status["hint"]
+    assert bridge.paths.codex_config.read_text() == rewritten  # observing never edits
+
+    result = bridge.disable()
+
+    assert result["disabled"] is True
+    route = result["steps"][0]
+    assert route["route"] == "restored-by-reset"
+    assert bridge.paths.codex_config.read_text() == OWNED_CONFIG
+    assert Path(route["configBackup"]).read_text() == rewritten
+    quarantine = Path(route["upstreamStateQuarantined"])
+    assert quarantine.parent == bridge.paths.journal
+    assert (quarantine / "integration-journal.json").is_file()
+    assert (quarantine / "config.json").is_file()
+    assert not journal.exists() and not (bridge.paths.core_home / "config.json").exists()
+    assert bridge.route_status() == {"installed": False, "active": False,
+                                     "source": "no-upstream-config"}
+    assert ["systemctl", "--user", "stop", UNIT_NAME] in runner.calls
+    assert "routeEnabled" not in bridge.load_state()
+    assert not (home / ".codex").exists()
+
+
+def test_setup_after_a_reset_restarts_the_launcher_before_configuring_again(host):
+    # With no upstream config left, the still-running daemon would hold the
+    # bridge port and upstream setup would collide with it.
+    bridge, runner, _ = host
+    configure(bridge, runner, route_active=False)
+    (bridge.paths.core_home / "config.json").unlink()
+    package = bridge.paths.package(bridge.asset())
+    bridge.package_state = lambda: {"state": "verified", "path": str(package),
+                                    "sha256": "x", "unpacked": "verified"}
+    runner.unit_active = True
+    runner.port_busy = True
+    runner.launchers = [{"pid": 99, "managed": True}]
+    bridge.paths.descriptor.parent.mkdir(parents=True)
+    bridge.paths.descriptor.write_text(json.dumps({"pid": 99}))
+    write_profile(bridge.paths.launcher_data, signed_in=True, auto_start=False)
+    order: list[str] = []
+    bridge.restart_launcher = lambda: (order.append("restart"),
+                                       setattr(runner, "port_busy", False))[0]
+
+    def upstream(verb: str) -> None:
+        if verb.startswith("setup"):
+            order.append("upstream-setup")
+            (bridge.paths.core_home / "config.json").write_text(json.dumps(
+                {"mode": "browser-only", "solAvailable": True}))
+            runner.upstream["route status"] = (0, json.dumps({"installed": True,
+                                                               "active": True}), "")
+            runner.port_busy = True
+
+    runner.on_upstream = upstream
+
+    result = bridge.setup()
+
+    assert order == ["restart", "upstream-setup"]
+    assert result["ready"] is True and result["stage"] == "web-model"

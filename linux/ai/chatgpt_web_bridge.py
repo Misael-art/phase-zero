@@ -151,6 +151,8 @@ MANAGED_ROUTE_KEYS = (
     "multi_agent_v2",
     "max_depth",
 )
+# How upstream words every refusal to edit a config it no longer recognises.
+UPSTREAM_REFUSAL = "refusing to overwrite"
 OWNED_CONFIG_HEADER = "# PhaseZero: perfil dedicado ChatGPT Web (experimental)."
 # Codex 0.162 rejects `untrusted` outright; `on-request` under a read-only
 # sandbox is the strictest policy it still accepts.
@@ -795,9 +797,15 @@ class Bridge:
         if code != 0 or not isinstance(parsed, dict):
             return {"installed": None, "active": None, "source": "upstream-error",
                     "detail": (err or out).strip()[:300]}
-        return {"installed": bool(parsed.get("installed")), "active": bool(parsed.get("active")),
-                "routeUrl": parsed.get("routeUrl"), "errors": parsed.get("errors") or [],
-                "source": "upstream"}
+        errors = parsed.get("errors") or []
+        result = {"installed": bool(parsed.get("installed")), "active": bool(parsed.get("active")),
+                  "routeUrl": parsed.get("routeUrl"), "errors": errors, "source": "upstream"}
+        if any(UPSTREAM_REFUSAL in str(error) for error in errors):
+            result["desktopRewroteConfig"] = True
+            result["hint"] = ("o Codex Desktop regravou a configuração do perfil dedicado e o "
+                              "launcher não a reconhece mais. A rota segue funcionando; no "
+                              "`disable` o gerenciador restaura o perfil por conta própria.")
+        return result
 
     def live_route_touched(self) -> bool | None:
         """True when the user's own Codex config points at a loopback bridge."""
@@ -1366,6 +1374,9 @@ class Bridge:
             return {"route": "not-installed"}
         code, out, err = self.upstream_cli(["route", "disconnect"])
         route = self.route_status()
+        refusal = " ".join([out, err, *map(str, route.get("errors") or [])])
+        if route.get("active") is not False and UPSTREAM_REFUSAL in refusal:
+            return self.reset_route(state)
         if code != 0 or route.get("active") is not False:
             raise BridgeError("rota não foi restaurada: " + (err or out).strip()[:300]
                               + ". Nada mais foi encerrado.", "route-restore-failed")
@@ -1382,6 +1393,37 @@ class Bridge:
         return {"route": "restored", "matchesBaseline": not external["diff"],
                 "externalEditsPreserved": external["diff"],
                 "next": "Reinicie o Codex do perfil dedicado antes de encerrar o launcher."}
+
+    def reset_route(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Manager-side restore for a dedicated profile upstream refuses to touch.
+
+        Codex Desktop re-serialises config.toml (comments and layout are lost) and
+        upstream then declines every route change. The dedicated profile belongs to
+        this manager: it goes back to its recorded baseline, the rewritten file is
+        kept as a backup, and upstream's own route state is moved aside so the next
+        `setup` configures from scratch. The ChatGPT session is not touched.
+        """
+        baseline = self._baseline_text(state)
+        current = self._config_text()
+        private_dir(self.paths.journal)
+        backup = self.paths.journal / f"config-pre-reset-{sha256_bytes(current.encode())[:16]}.toml"
+        atomic_write(backup, current.encode())
+        quarantine = private_dir(
+            self.paths.journal / f"upstream-route-{self.clock().strftime('%Y%m%dT%H%M%SZ')}")
+        moved = [*sorted((self.paths.core_home / "codex").glob("integration-journal*.json")),
+                 self.paths.core_home / "config.json"]
+        for item in moved:
+            if item.is_file():
+                os.replace(item, quarantine / item.name)
+        atomic_write(self.paths.codex_config, baseline.encode())
+        state.pop("routeEnabled", None)
+        self.save_state(state)
+        return {"route": "restored-by-reset", "matchesBaseline": True,
+                "configBackup": str(backup), "upstreamStateQuarantined": str(quarantine),
+                "reason": "o Codex Desktop regravou a configuração do perfil dedicado e o "
+                          "launcher se recusou a desfazer a própria rota",
+                "next": "Ajustes feitos pelo Codex Desktop neste perfil (plugins, fontes) "
+                        "voltam ao padrão; `setup` configura a rota de novo."}
 
     # ---- one-step setup --------------------------------------------------
 
@@ -1497,6 +1539,11 @@ class Bridge:
                        "login-required")
         done("login", "sessão ChatGPT presente no perfil do launcher")
         if (self.upstream_config() or {}).get("mode") != "browser-only":
+            if not self.upstream_config() and self.runner.port_in_use(DEFAULT_PORT):
+                # A daemon from a previous configuration still holds the port.
+                self.restart_launcher()
+                self._wait(self.descriptor_ready, DESCRIPTOR_WAIT_SECONDS,
+                           "launcher não ficou pronto a tempo", "launcher-timeout")
             self.configure_web_model()
             done("modelo web", "rota instalada no perfil dedicado; ~/.codex intocado")
         elif self.route_status().get("active"):
@@ -2181,7 +2228,9 @@ class Bridge:
             except ValueError:
                 doctor = {"ok": False, "detail": (err or out).strip()[:300]}
             if code != 0 or not doctor.get("ok"):
-                blockers.append("doctor upstream reportou falha")
+                blockers.append("doctor upstream reportou falha"
+                                + (": " + self.route_status()["hint"]
+                                   if self.route_status().get("desktopRewroteConfig") else ""))
         else:
             blockers.append("runtime upstream não configurado")
         return {"ready": not blockers, "blockers": blockers, "doctor": doctor,

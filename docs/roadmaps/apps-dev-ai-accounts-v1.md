@@ -2791,3 +2791,40 @@ ter sido atestada pelo operador); `tools status` aponta o plano como próximo
 passo (`/tmp/pz-evidence/pxa010/tools-status-plus.txt`) e o atalho sai com
 `tools-not-ready`. Testes: `tests/test_chatgpt_web_bridge.py` 51 passaram.
 Modo com ferramentas segue sem prova G3; PXA-010 permanece `in_progress`.
+
+## PXA-010 `disable` travava depois do uso do Codex Desktop — 2026-10-12
+
+Sintoma: `tools check` mostrava `doctor upstream reportou falha` ("Codex
+integration is inconsistent") em Browser-only, com a rota funcionando.
+
+Causa: o Codex Desktop regrava o `config.toml` do perfil dedicado e descarta
+comentários e layout. O launcher 6.1.8 valida as próprias linhas pelo texto
+exato (comentário marcador acima de `openai_base_url`, `multi_agent`,
+`[agents].max_depth`, bloco do hook de Interrupt) e passa a recusar qualquer
+mudança de rota ("... changed after setup; refusing to overwrite"). Recolocar
+só o marcador não basta: o erro seguinte, no host, foi
+`[features].multi_agent changed after setup`. Reproduzido numa cópia isolada do
+perfil (porta e diretórios próprios): `route disconnect` recusa. Consequência
+real: `disable` terminaria em `route-restore-failed` e o operador não
+conseguiria desligar a ponte depois de usar o Desktop.
+
+Correção: quando o upstream recusa com esse texto, `route_disable` restaura o
+perfil dedicado pelo próprio gerenciador (`restored-by-reset`): grava o baseline
+registrado, guarda o arquivo regravado em `journal/config-pre-reset-*.toml` e
+move o estado de rota do upstream (`integration-journal*.json`, `config.json`)
+para `journal/upstream-route-<data>/`. A sessão ChatGPT do launcher não é
+tocada. No `setup` seguinte, sem configuração upstream e com a porta ainda
+ocupada, o launcher é reiniciado antes do `setup --browser-only`. `route
+status` passa a sinalizar `desktopRewroteConfig` com explicação em pt-BR.
+Custo: ajustes do Codex Desktop naquele perfil (plugins, fontes, MCP
+`ai-memory`) voltam ao padrão; o backup fica no journal.
+
+Prova no host (`/tmp/pz-evidence/pxa010/disable-reset.txt`,
+`setup-after-reset.txt`): `disable` → `restored-by-reset`, launcher parado,
+porta livre; `setup` → seis etapas ok; `route status` sem erros; `route verify`
+ok; `doctor` upstream ok; `smoke` → `PONG` por `chatgpt-web/light`;
+`~/.codex/config.toml` com o mesmo SHA-256. A janela dedicada do Desktop aberta
+pelo teste de atalho foi fechada por esta sessão antes do ciclo. Testes:
+`tests/test_chatgpt_web_bridge.py` 53 passaram. Limite: o Desktop volta a
+regravar o arquivo no próximo uso, então o aviso do `doctor` reaparece; isso
+não afeta os turnos e o `disable` agora se resolve sozinho.
