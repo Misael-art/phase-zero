@@ -48,6 +48,7 @@ class FakeRunner:
         self.ldd_code = 0
         self.ldd_out = ""
         self.unpack_binary = True
+        self.codex_reply: str | None = None
 
     def run(self, args, *, env=None, timeout=30, input_text=None):
         self.calls.append(list(args))
@@ -66,6 +67,12 @@ class FakeRunner:
             return self.ldd_code, self.ldd_out, ""
         if args[0] == "journalctl":
             return 0, self.journal, ""
+        if args[0] == "git":  # read-only history snapshot runs against a real temp repo
+            done = subprocess.run(args, capture_output=True, text=True, check=False)
+            return done.returncode, done.stdout, done.stderr
+        if args[0].endswith("/codex") and self.codex_reply is not None:
+            Path(args[args.index("-o") + 1]).write_text(self.codex_reply)
+            return 0, "", ""
         if args[0] == "systemd-run" and "--wait" in args:
             verb = " ".join(upstream_args(args)[:2])
             self.on_upstream(verb)
@@ -367,7 +374,9 @@ def test_desktop_opens_separate_instance_on_dedicated_profile_and_guides_login(h
     assert env["CODEX_MULTI_LAUNCH"] == "1"
     title, body, critical = runner.notifications[0]
     assert "login necessário" in title and critical is True
-    assert "Faça login no Codex" in body and "chatgpt-web/medium" in body
+    assert "Faça login no Codex" in body and "(Web)" in body
+    assert "chatgpt-web/" not in body  # tier slugs are hidden in the Desktop selector
+    assert result["model"] == "chatgpt-web/medium"  # still the CLI default
     assert result["codexSignedIn"] is False
 
     (bridge.paths.codex_home / "auth.json").write_text("{}")
@@ -855,3 +864,333 @@ def test_runtime_key_never_lands_in_state_or_errors(host):
     with pytest.raises(BridgeError) as out_of_range:
         bridge.key_store("x", 0)
     assert out_of_range.value.code == "rotation-range"
+
+
+# ---- shortcuts, the two Desktop modes and consented history ----------------
+
+MODELS_CACHE = {"models": [
+    {"slug": "gpt-6-sol", "display_name": "GPT-6-Sol", "visibility": "list"},
+    {"slug": "chatgpt-web/gpt-6-sol", "display_name": "GPT-6 Sol (Web)", "visibility": "list"},
+    {"slug": "chatgpt-web/gpt-5.6-sol-instant", "display_name": "GPT-5.6 Sol Instant (Web)",
+     "visibility": "list"},
+    {"slug": "chatgpt-web/medium", "display_name": "ChatGPT Web — Medium", "visibility": "hide"},
+]}
+
+
+def ready_host(host, monkeypatch, mode: str = "browser-only"):
+    bridge, runner, home = host
+    configure(bridge, runner, route_active=True)
+    config = bridge.paths.core_home / "config.json"
+    config.write_text(json.dumps({**json.loads(config.read_text()), "mode": mode}))
+    runner.unit_active = True
+    runner.port_busy = True
+    (bridge.paths.codex_home / "auth.json").write_text("{}")
+    monkeypatch.setattr(bridge_module.shutil, "which",
+                        lambda name, path=None: f"/usr/bin/{name}")
+    return bridge, runner, home
+
+
+def tools_gate_met(bridge: Bridge) -> None:
+    bridge.record_eligibility("pro", "yes", "use", "yes")
+    bridge._secret_store = FakeVault()
+    bridge.key_store("runtime-key-material", 30)
+
+
+def test_desktop_guidance_uses_the_labels_the_selector_really_shows(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch)
+    (bridge.paths.codex_home / "models_cache.json").write_text(json.dumps(MODELS_CACHE))
+
+    result = bridge.desktop()
+
+    body = runner.notifications[-1][1]
+    assert "GPT-6 Sol (Web)" in body and "GPT-5.6 Sol Instant (Web)" in body
+    assert "ChatGPT Web — Medium" not in body and "chatgpt-web/medium" not in body
+    assert result["visibleModels"] == ["GPT-6 Sol (Web)", "GPT-5.6 Sol Instant (Web)"]
+
+
+def test_tools_window_stays_closed_until_the_gate_is_met(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch)  # launcher is browser-only
+
+    with pytest.raises(BridgeError) as error:
+        bridge.desktop("tools")
+
+    assert error.value.code == "tools-not-ready"
+    assert "elegibilidade não registrada" in str(error.value)
+    assert runner.spawned == []
+
+    bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
+                                    "unpacked": "verified"}
+    bridge.shortcuts_install(desktop_copy=False)
+    with pytest.raises(BridgeError):
+        bridge.shortcut_run("tools")
+    title, body, critical = runner.notifications[-1]
+    assert critical is True and "com ferramentas" in title
+    assert "modo com ferramentas indisponível" in body and "tunnel guide" in body
+    assert runner.spawned == []
+
+
+def test_tools_window_opens_on_the_dedicated_profile_once_the_gate_is_met(host, monkeypatch):
+    bridge, runner, home = ready_host(host, monkeypatch, mode="full")
+    tools_gate_met(bridge)
+
+    result = bridge.desktop("tools")
+
+    args, env = runner.spawned[0]
+    assert args == ["/usr/bin/codex-desktop", "--new-instance"]
+    assert env["CODEX_HOME"] == str(bridge.paths.codex_home) != str(home / ".codex")
+    assert result["mode"] == "tools" and result["sandbox"] == "read-only"
+    body = runner.notifications[-1][1]
+    assert "aprovação" in body and "somente leitura" in body
+
+    # The browser-only shortcut must not quietly become a tools window.
+    with pytest.raises(BridgeError) as error:
+        bridge.desktop("web")
+    assert error.value.code == "full-mode"
+    assert len(runner.spawned) == 1
+
+
+@pytest.mark.parametrize("line", ['approval_policy = "never"',
+                                  'sandbox_mode = "danger-full-access"',
+                                  'sandbox_mode = "workspace-write"'])
+def test_no_desktop_window_opens_on_a_profile_that_allows_writes_or_auto_approval(
+        host, monkeypatch, line):
+    bridge, runner, _ = ready_host(host, monkeypatch, mode="full")
+    tools_gate_met(bridge)
+    key = line.split(" = ")[0]
+    text = bridge.paths.codex_config.read_text()
+    bridge.paths.codex_config.write_text(
+        "\n".join(line if row.startswith(key) else row for row in text.splitlines()) + "\n")
+
+    with pytest.raises(BridgeError) as error:
+        bridge.desktop("tools")
+
+    assert error.value.code == "config-drift"
+    assert runner.spawned == []
+
+
+def installed_shortcuts(host, monkeypatch):
+    bridge, runner, home = ready_host(host, monkeypatch)
+    bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
+                                    "unpacked": "verified"}
+    (home / ".config").mkdir(exist_ok=True)
+    (home / ".config/user-dirs.dirs").write_text('XDG_DESKTOP_DIR="$HOME/Área de trabalho"\n')
+    (home / "Área de trabalho").mkdir()
+    return bridge, runner, home
+
+
+def test_shortcuts_land_in_menu_and_localised_desktop_on_a_stable_path(host, monkeypatch):
+    bridge, runner, home = installed_shortcuts(host, monkeypatch)
+    live = home / ".codex"
+    live.mkdir()
+    (live / "config.toml").write_text('model = "gpt-6-sol"\n')
+    native = home / ".local/share/applications/codex-desktop.desktop"
+    native.parent.mkdir(parents=True)
+    native.write_text("[Desktop Entry]\nExec=/usr/bin/codex-desktop %u\n")
+    assert bridge.shortcuts_status()["state"] == "off"
+
+    status = bridge.shortcuts_install()
+
+    assert status["state"] == "installed"
+    menu = home / ".local/share/applications"
+    desk = home / "Área de trabalho"
+    names = {"phasezero-chatgpt-web.desktop": "web", "phasezero-chatgpt-web-tools.desktop": "tools"}
+    for name, mode in names.items():
+        for folder in (menu, desk):
+            entry = (folder / name).read_text()
+            assert f'Exec="{bridge.paths.open_wrapper}" {mode}' in entry
+            assert str(Path(bridge_module.__file__).resolve()) not in entry
+            assert "NoDisplay" not in entry and "codex-web-gpt-launcher" not in entry
+        assert os.access(desk / name, os.X_OK)  # KDE only launches trusted desktop icons
+    assert "experimental" in (menu / "phasezero-chatgpt-web-tools.desktop").read_text()
+    assert str(bridge.paths.open_wrapper).startswith(str(bridge.paths.root / "bin"))
+    # The user's own Codex stays exactly as it was.
+    assert native.read_text() == "[Desktop Entry]\nExec=/usr/bin/codex-desktop %u\n"
+    assert sorted(item.name for item in live.iterdir()) == ["config.toml"]
+    assert (live / "config.toml").read_text() == 'model = "gpt-6-sol"\n'
+
+    (desk / "phasezero-chatgpt-web.desktop").write_text("[Desktop Entry]\nExec=/bin/true\n")
+    assert bridge.shortcuts_status()["state"] == "inconsistent"
+    with pytest.raises(BridgeError) as tampered:
+        bridge.shortcut_run("web")
+    assert tampered.value.code == "shortcuts-off" and runner.spawned == []
+
+    assert bridge.shortcuts_remove()["state"] == "off"
+    assert not any((folder / name).exists() for folder in (menu, desk) for name in names)
+    assert not bridge.paths.open_wrapper.exists() and native.exists()
+
+
+def test_shortcuts_can_skip_the_desktop_copy_and_leave_on_opt_out(host, monkeypatch):
+    bridge, runner, home = installed_shortcuts(host, monkeypatch)
+
+    status = bridge.shortcuts_install(desktop_copy=False)
+
+    assert status["state"] == "installed" and status["desktopCopy"] is False
+    assert list((home / "Área de trabalho").iterdir()) == []
+    runner.unit_active = False
+    runner.upstream["route status"] = (0, json.dumps({"installed": True, "active": False}), "")
+    bridge.opt_out()
+    assert bridge.shortcuts_status()["state"] == "off"
+    assert not (home / ".local/share/applications/phasezero-chatgpt-web.desktop").exists()
+
+
+def test_open_wrapper_fails_visibly_and_passes_the_mode_through(host, monkeypatch):
+    bridge, _, home = installed_shortcuts(host, monkeypatch)
+    bridge.shortcuts_install()
+    wrapper = bridge.paths.open_wrapper
+
+    bridge.paths.open_target.write_text(f"{sys.executable}\n{home / 'gone' / 'bridge.py'}\n")
+    gone = _run_wrapper(wrapper, home)
+    assert gone.returncode == 1
+    log = (home / "notify.log").read_text()
+    assert "não abriu" in log and "não existe mais" in log and "--urgency=critical" in log
+
+    manager = home / "manager.py"
+    manager.write_text("import sys\nprint('|'.join(sys.argv[1:]))\n")
+    bridge.paths.open_target.write_text(f"{sys.executable}\n{manager}\n")
+    done = subprocess.run(["/bin/sh", str(wrapper), "tools"], capture_output=True, text=True,
+                          timeout=30, check=False)
+    assert done.returncode == 0, done.stderr
+    assert "shortcuts|run|--mode|tools" in done.stdout
+
+
+def test_shortcut_starts_a_stopped_bridge_before_opening_the_window(host, monkeypatch):
+    bridge, runner, _ = installed_shortcuts(host, monkeypatch)
+    bridge.shortcuts_install()
+    runner.unit_active = False
+    waits: list[float] = []
+
+    def fake_setup(report=None, login_wait=300):
+        waits.append(login_wait)
+        runner.unit_active = True
+        return {"ready": True}
+
+    bridge.setup = fake_setup
+
+    result = bridge.shortcut_run("web")
+
+    assert waits == [0]  # never blocks a click waiting for a login
+    assert result["desktop"] == "started" and len(runner.spawned) == 1
+
+    def broken_setup(report=None, login_wait=300):
+        raise BridgeError("Login no ChatGPT ainda não concluído.", "login-required")
+
+    runner.unit_active = False
+    bridge.setup = broken_setup
+    with pytest.raises(BridgeError):
+        bridge.shortcut_run("web")
+    title, body, critical = runner.notifications[-1]
+    assert critical is True and "não abriu" in title and "Login no ChatGPT" in body
+    assert len(runner.spawned) == 1
+
+
+def make_repo(path: Path) -> Path:
+    path.mkdir(parents=True)
+    env = dict(os.environ, GIT_AUTHOR_NAME="Dev", GIT_AUTHOR_EMAIL="dev@example.invalid",
+               GIT_COMMITTER_NAME="Dev", GIT_COMMITTER_EMAIL="dev@example.invalid",
+               GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True, env=env)
+
+    git("init", "-q", "-b", "main")
+    (path / "app.py").write_text("print('a')\n")
+    git("add", "app.py")
+    git("commit", "-q", "-m", "feat: first screen")
+    (path / "app.py").write_text("print('b')\n")
+    git("commit", "-q", "-am", "fix: rotate key sk-abcdefghijklmnopqrstuvwx0123 leaked in CI")
+    (path / "notes.txt").write_text("draft\n")
+    return path
+
+
+def test_history_needs_recorded_consent_for_that_repository(host, tmp_path):
+    bridge, _, _ = host
+    repo = make_repo(tmp_path / "work/project")
+
+    with pytest.raises(BridgeError) as error:
+        bridge.history_snapshot(str(repo))
+    assert error.value.code == "history-consent-required"
+
+    with pytest.raises(BridgeError) as no_ack:
+        bridge.history_consent(str(repo), acknowledged=False)
+    assert no_ack.value.code == "ack-missing"
+
+    base = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    bridge.clock = lambda: base
+    granted = bridge.history_consent(str(repo), acknowledged=True)
+    assert granted["repos"][0]["path"] == str(repo) and granted["repos"][0]["state"] == "granted"
+    assert bridge.history_snapshot(str(repo))["commits"] == 2
+
+    bridge.clock = lambda: base + dt.timedelta(days=31)
+    with pytest.raises(BridgeError) as stale:
+        bridge.history_snapshot(str(repo))
+    assert stale.value.code == "history-consent-required" and "venceu" in str(stale.value)
+
+    bridge.clock = lambda: base
+    assert bridge.history_revoke(str(repo))["repos"] == []
+    with pytest.raises(BridgeError):
+        bridge.history_snapshot(str(repo))
+
+
+def test_history_scope_excludes_codex_profiles_and_non_repositories(host, tmp_path):
+    bridge, _, home = host
+    sessions = make_repo(home / ".codex")
+    (sessions / "sessions").mkdir()
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
+    for target in (sessions, sessions / "sessions", bridge.paths.root, home):
+        target.mkdir(parents=True, exist_ok=True)
+        with pytest.raises(BridgeError) as error:
+            bridge.history_consent(str(target), acknowledged=True)
+        assert error.value.code == "history-scope", target
+    with pytest.raises(BridgeError) as not_repo:
+        bridge.history_consent(str(plain), acknowledged=True)
+    assert not_repo.value.code == "history-not-a-repo"
+    assert "history" not in bridge.load_state()
+
+
+def test_history_snapshot_is_bounded_redacted_and_carries_no_identity(host, tmp_path):
+    bridge, _, _ = host
+    repo = make_repo(tmp_path / "work/project")
+    bridge.history_consent(str(repo), acknowledged=True)
+
+    snapshot = bridge.history_snapshot(str(repo), commits=1)
+
+    text = snapshot["text"]
+    assert snapshot["commits"] == 1 and "feat: first screen" not in text
+    assert "fix: rotate key" in text and "sk-abcdefghijklmnopqrstuvwx0123" not in text
+    assert "[REDIGIDO]" in text
+    assert "dev@example.invalid" not in text and "Dev <" not in text
+    assert "notes.txt" in text and "main" in text
+    assert "print('b')" not in text  # file contents never leave by default
+    assert snapshot["bytes"] == len(text.encode()) <= bridge_module.HISTORY_MAX_BYTES
+    with pytest.raises(BridgeError) as too_many:
+        bridge.history_snapshot(str(repo), commits=10_000)
+    assert too_many.value.code == "history-range"
+
+
+def test_ask_sends_the_snapshot_through_the_read_only_profile(host, monkeypatch, tmp_path):
+    bridge, runner, home = ready_host(host, monkeypatch)
+    repo = make_repo(tmp_path / "work/project")
+    before = sorted(item.name for item in repo.iterdir())
+    runner.codex_reply = "Dois commits: tela inicial e rotação de chave."
+
+    with pytest.raises(BridgeError) as error:
+        bridge.ask(str(repo), "O que mudou?")
+    assert error.value.code == "history-consent-required"
+    assert not any(call[0].endswith("/codex") for call in runner.calls)
+
+    bridge.history_consent(str(repo), acknowledged=True)
+    result = bridge.ask(str(repo), "O que mudou?")
+
+    call = next(call for call in runner.calls if call[0].endswith("/codex"))
+    assert call[1:5] == ["--sandbox", "read-only", "--ask-for-approval", "on-request"]
+    assert call[call.index("--model") + 1] == "chatgpt-web/medium"
+    assert str(repo) not in call[call.index("-C") + 1]  # Codex never runs inside the repo
+    prompt = call[-1]
+    assert "feat: first screen" in prompt and "O que mudou?" in prompt
+    assert "sk-abcdefghijklmnopqrstuvwx0123" not in prompt
+    assert result["ok"] is True and "Dois commits" in result["reply"]
+    assert result["sandbox"] == "read-only" and result["localTools"] is False
+    assert sorted(item.name for item in repo.iterdir()) == before
+    assert not (home / ".codex").exists()

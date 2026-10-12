@@ -39,6 +39,11 @@ Design rules enforced here, not only documented:
 * Starting at login is a separate opt-in (`autostart enable`). It installs a
   PhaseZero entry that goes through the same isolated unit and checks; it never
   re-enables the upstream launcher's own entry.
+* Menu and desktop shortcuts are local files pointing at a stable wrapper; they
+  open the dedicated profile only and never edit the user's own Codex entry.
+* Local history reaches a Web model only as a bounded, redacted summary of one
+  repository the user consented to. Codex profiles (live or dedicated) and the
+  whole home directory are out of scope, and file contents are never included.
 """
 
 from __future__ import annotations
@@ -190,6 +195,24 @@ LOGIN_WAIT_SECONDS = 300
 DESKTOP_COMMAND = "codex-desktop"
 NOTIFY_TITLE = "ChatGPT Web no Codex"
 SMOKE_TOKEN = "PONG"
+# Local shortcuts (menu + desktop). Never listed in the public catalog.
+SHORTCUT_ENTRIES = {"web": "phasezero-chatgpt-web.desktop",
+                    "tools": "phasezero-chatgpt-web-tools.desktop"}
+WEB_MODEL_PREFIX = "chatgpt-web/"
+# Consented, read-only summary of one repository's history. File contents never
+# leave by default: only branch, commit subjects, changed paths and line counts.
+HISTORY_CONSENT_MAX_AGE_DAYS = 30
+HISTORY_DEFAULT_COMMITS = 30
+HISTORY_MAX_COMMITS = 100
+HISTORY_MAX_SECTION_LINES = 80
+HISTORY_MAX_BYTES = 40_000
+HISTORY_QUESTION_MAX_CHARS = 4_000
+SECRET_LIKE = re.compile(
+    r"sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
+    r"|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}"
+    r"|eyJ[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{10,}[A-Za-z0-9._-]*"
+    r"|\b[A-Fa-f0-9]{40,}\b|[A-Za-z0-9+/_-]{48,}={0,2}")
+ASK_TIMEOUT_SECONDS = 420
 SMOKE_TIMEOUT_SECONDS = 420
 
 WARNINGS = (
@@ -493,6 +516,10 @@ class Paths:
         self.autostart_bin = self.root / "bin"
         self.autostart_wrapper = self.autostart_bin / "chatgpt-web-autostart.sh"
         self.autostart_target = self.autostart_bin / "chatgpt-web-autostart.target"
+        self.open_wrapper = self.autostart_bin / "chatgpt-web-open.sh"
+        self.open_target = self.autostart_bin / "chatgpt-web-open.target"
+        self.applications = data / "applications"
+        self.user_dirs = config / "user-dirs.dirs"
         self.default_profile = home / UPSTREAM_DEFAULT_PROFILE
         self.default_core = home / UPSTREAM_DEFAULT_CORE
         self.descriptor = self.core_home / "runtime" / "launcher-browser.json"
@@ -935,6 +962,7 @@ class Bridge:
         if self.launcher_active() or self.route_status().get("active"):
             raise BridgeError("rode `disable` antes de `opt-out`", "still-enabled")
         self.autostart_disable()
+        self.shortcuts_remove()
         state = self.load_state()
         state.pop("optIn", None)
         self.save_state(state)
@@ -1517,24 +1545,31 @@ class Bridge:
 
     # ---- opt-in start at login -------------------------------------------
 
-    def autostart_wrapper_text(self) -> str:
+    def wrapper_text(self, purpose: str, target: str, failure: str, fix: str,
+                     command: str) -> str:
         """POSIX wrapper at a stable path; fails visibly when the manager is gone."""
         return ("#!/bin/sh\n"
-                "# PhaseZero ChatGPT Web — início no login (opt-in). Este caminho é estável;\n"
-                "# o gerenciador pode mudar. Alvo atual em chatgpt-web-autostart.target.\n"
+                f"# PhaseZero ChatGPT Web — {purpose}. Este caminho é estável;\n"
+                f"# o gerenciador pode mudar. Alvo atual em {target}.\n"
                 "set -eu\n"
                 "DIR=$(dirname \"$0\")\n"
-                "TARGET=\"$DIR/chatgpt-web-autostart.target\"\n"
+                f"TARGET=\"$DIR/{target}\"\n"
                 "PY=$(sed -n '1p' \"$TARGET\" 2>/dev/null || true)\n"
                 "SCRIPT=$(sed -n '2p' \"$TARGET\" 2>/dev/null || true)\n"
                 "if [ -z \"$SCRIPT\" ] || [ ! -f \"$SCRIPT\" ] || [ ! -f \"$PY\" ]; then\n"
                 "  notify-send --app-name=PhaseZero --urgency=critical --expire-time=30000 \\\n"
-                "    \"PhaseZero — ChatGPT Web não iniciou\" \\\n"
-                "    \"O início no login está ligado, mas o gerenciador em ${SCRIPT:-desconhecido} não existe mais. Religue a partir do repositório atual: pz ai chatgpt-web autostart enable --acknowledge-autostart\" \\\n"
+                f"    \"PhaseZero — ChatGPT Web {failure}\" \\\n"
+                "    \"O gerenciador em ${SCRIPT:-desconhecido} não existe mais. "
+                f"Religue a partir do repositório atual: {fix}\" \\\n"
                 "    || true\n"
                 "  exit 1\n"
                 "fi\n"
-                "exec \"$PY\" \"$SCRIPT\" autostart run\n")
+                f"exec \"$PY\" \"$SCRIPT\" {command}\n")
+
+    def autostart_wrapper_text(self) -> str:
+        return self.wrapper_text(
+            "início no login (opt-in)", self.paths.autostart_target.name, "não iniciou",
+            "pz ai chatgpt-web autostart enable --acknowledge-autostart", "autostart run")
 
     def autostart_target_text(self) -> str:
         return f"{sys.executable}\n{Path(__file__).resolve()}\n"
@@ -1602,6 +1637,282 @@ class Bridge:
             self.runner.notify(NOTIFY_TITLE + " — não iniciou",
                                f"{error}\nRode: pz ai chatgpt-web setup", critical=True)
             raise
+
+    # ---- local shortcuts (menu + desktop) --------------------------------
+
+    def user_desktop_dir(self) -> Path:
+        """The session's desktop folder, localised names included."""
+        try:
+            text = self.paths.user_dirs.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        match = re.search(r'(?m)^XDG_DESKTOP_DIR="([^"]+)"', text)
+        if match:
+            value = match.group(1).replace("$HOME", str(self.paths.home))
+            if value.startswith("/"):
+                return Path(value)
+        return self.paths.home / "Desktop"
+
+    def shortcut_entry_text(self, mode: str) -> str:
+        name, comment = {
+            "web": ("ChatGPT Web no Codex",
+                    "Codex Desktop em janela separada com os modelos ChatGPT Web, somente "
+                    "leitura. O Codex normal não muda."),
+            "tools": ("ChatGPT Web no Codex — com ferramentas (experimental)",
+                      "Bloqueado até túnel, chave e elegibilidade estarem prontos. Sandbox "
+                      "somente leitura e aprovação por ação."),
+        }[mode]
+        return ("[Desktop Entry]\n"
+                "Type=Application\n"
+                f"Name={name}\n"
+                f"Comment={comment}\n"
+                f'Exec="{self.paths.open_wrapper}" {mode}\n'
+                "Icon=codex-desktop\n"
+                "Terminal=false\n"
+                "Categories=Development;\n"
+                "StartupNotify=false\n"
+                "X-PhaseZero-Managed=chatgpt-web\n")
+
+    def shortcut_files(self, desktop_copy: bool) -> list[tuple[Path, str]]:
+        folders = [self.paths.applications] + ([self.user_desktop_dir()] if desktop_copy else [])
+        return [(folder / name, mode) for folder in folders
+                for mode, name in SHORTCUT_ENTRIES.items()]
+
+    def shortcuts_status(self) -> dict[str, Any]:
+        record = self.load_state().get("shortcuts")
+        desktop_copy = bool((record or {}).get("desktopCopy", True))
+        expected = self.shortcut_files(desktop_copy)
+        present = [path for path, _ in self.shortcut_files(True) if path.exists()]
+
+        def intact(path: Path, mode: str) -> bool:
+            try:
+                return path.read_text(encoding="utf-8") == self.shortcut_entry_text(mode)
+            except OSError:
+                return False
+
+        state = ("off" if not record and not present
+                 else "installed" if record and all(intact(*item) for item in expected)
+                 and len(present) == len(expected) and self.paths.open_wrapper.is_file()
+                 and self.paths.open_target.is_file()
+                 else "inconsistent")
+        return {"state": state, "desktopCopy": desktop_copy if record else None,
+                "menu": str(self.paths.applications), "desktop": str(self.user_desktop_dir()),
+                "entries": [str(path) for path in present], "installedAt": (record or {}).get("at"),
+                "listedInPublicCatalog": False}
+
+    def shortcuts_install(self, desktop_copy: bool = True) -> dict[str, Any]:
+        state = self.load_state()
+        self.require_opt_in(state)
+        if self.package_state().get("unpacked") != "verified":
+            raise BridgeError("conclua `setup` antes de criar os atalhos", "install-unverified")
+        desktop = self.user_desktop_dir()
+        if desktop_copy and not desktop.is_dir():
+            raise BridgeError(f"pasta da área de trabalho não encontrada ({desktop}); use "
+                              "`--no-desktop-copy`", "desktop-dir-missing")
+        self.shortcuts_remove()
+        state = self.load_state()
+        private_dir(self.paths.autostart_bin)
+        atomic_write(self.paths.open_wrapper, self.wrapper_text(
+            "atalhos de menu e área de trabalho", self.paths.open_target.name, "não abriu",
+            "pz ai chatgpt-web shortcuts install",
+            'shortcuts run --mode "${1:-web}"').encode(), 0o755)
+        atomic_write(self.paths.open_target, self.autostart_target_text().encode(), 0o600)
+        self.paths.applications.mkdir(parents=True, exist_ok=True)
+        for path, mode in self.shortcut_files(desktop_copy):
+            # Executable: KDE refuses to launch a desktop icon it does not trust.
+            atomic_write(path, self.shortcut_entry_text(mode).encode(), 0o755)
+        state["shortcuts"] = {"at": iso(self.clock()), "desktopCopy": desktop_copy}
+        self.save_state(state)
+        return self.shortcuts_status()
+
+    def shortcuts_remove(self) -> dict[str, Any]:
+        state = self.load_state()
+        for path, mode in self.shortcut_files(True):
+            try:
+                ours = "X-PhaseZero-Managed=chatgpt-web" in path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if ours or state.get("shortcuts"):
+                path.unlink(missing_ok=True)
+        self.paths.open_wrapper.unlink(missing_ok=True)
+        self.paths.open_target.unlink(missing_ok=True)
+        state.pop("shortcuts", None)
+        self.save_state(state)
+        return self.shortcuts_status()
+
+    def shortcut_run(self, mode: str) -> dict[str, Any]:
+        """What a shortcut executes: no terminal, so every refusal becomes a notification."""
+        label = "com ferramentas" if mode == "tools" else "janela"
+        try:
+            if self.shortcuts_status()["state"] != "installed":
+                raise BridgeError("atalhos não estão instalados (ou foram alterados); rode "
+                                  "`pz ai chatgpt-web shortcuts install`", "shortcuts-off")
+            if mode == "tools":
+                self.require_tools_ready(self.load_state())
+            if not (self.launcher_active() and self.runner.port_in_use(DEFAULT_PORT)):
+                self.setup(login_wait=0)
+            return self.desktop(mode)
+        except BridgeError as error:
+            hint = {"tools-not-ready": "\nPassos: pz ai chatgpt-web tunnel guide",
+                    "shortcuts-off": ""}.get(error.code, "\nRode: pz ai chatgpt-web setup")
+            self.runner.notify(f"{NOTIFY_TITLE} — {label} não abriu", f"{error}{hint}",
+                               critical=True)
+            raise
+
+    # ---- consented local history -----------------------------------------
+
+    def history_root(self, repo: str) -> Path:
+        """Canonical top level of a real repository outside every Codex profile."""
+        path = Path(repo).expanduser()
+        try:
+            path = path.resolve(strict=True)
+        except OSError:
+            raise BridgeError(f"pasta não encontrada: {repo}", "history-not-a-repo") from None
+        fenced = (self.paths.live_codex_home.resolve(), self.paths.root.resolve(),
+                  self.paths.default_core.resolve(), self.paths.default_profile.resolve())
+        home = self.paths.home.resolve()
+
+        def refuse_scope(candidate: Path) -> None:
+            if candidate == home or any(candidate == item or item in candidate.parents
+                                        for item in fenced):
+                raise BridgeError(
+                    "fora do escopo: sessões, memórias e perfis do Codex (normal ou dedicado) e a "
+                    "pasta pessoal inteira nunca são compartilhados", "history-scope")
+
+        refuse_scope(path)
+        code, out, _ = self.runner.run(self.git_command(path, "rev-parse", "--show-toplevel"),
+                                       timeout=20)
+        if code != 0 or not out.strip():
+            raise BridgeError(f"{path} não é um repositório git", "history-not-a-repo")
+        top = Path(out.strip()).resolve()
+        refuse_scope(top)
+        return top
+
+    @staticmethod
+    def git_command(root: Path, *args: str) -> list[str]:
+        # Read-only invocations; repository-provided hooks and helpers stay off.
+        return ["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
+                "-c", "core.hooksPath=/dev/null", "-C", str(root), *args]
+
+    def history_status(self) -> dict[str, Any]:
+        record = self.load_state().get("history") or {}
+        limit = dt.timedelta(days=HISTORY_CONSENT_MAX_AGE_DAYS)
+        repos = []
+        for path, entry in sorted(record.items()):
+            granted = parse_iso(entry.get("at"))
+            fresh = bool(granted and self.clock() - granted <= limit)
+            repos.append({"path": path, "grantedAt": entry.get("at"),
+                          "state": "granted" if fresh else "expired"})
+        return {"repos": repos, "sends": "ramo, assuntos de commit, caminhos alterados e "
+                                         "contagem de linhas; nunca o conteúdo dos arquivos",
+                "destination": "sua conta ChatGPT, pelo bridge",
+                "neverShared": ["~/.codex (sessões, índice e memórias)", "perfil dedicado",
+                                "pasta pessoal inteira"],
+                "expiresAfterDays": HISTORY_CONSENT_MAX_AGE_DAYS}
+
+    def history_consent(self, repo: str, acknowledged: bool) -> dict[str, Any]:
+        state = self.load_state()
+        self.require_opt_in(state)
+        if not acknowledged:
+            raise BridgeError(
+                "compartilhar histórico exige `--acknowledge-upload`: ramo, assuntos de commit e "
+                "caminhos alterados deste repositório serão enviados à sua conta ChatGPT",
+                "ack-missing")
+        root = self.history_root(repo)
+        state.setdefault("history", {})[str(root)] = {"at": iso(self.clock())}
+        self.save_state(state)
+        return self.history_status()
+
+    def history_revoke(self, repo: str) -> dict[str, Any]:
+        state = self.load_state()
+        record = state.get("history") or {}
+        candidates = {repo, str(Path(repo).expanduser().resolve())}
+        for path in candidates & set(record):
+            del record[path]
+        if not record:
+            state.pop("history", None)
+        self.save_state(state)
+        return self.history_status()
+
+    def history_snapshot(self, repo: str, commits: int = HISTORY_DEFAULT_COMMITS) -> dict[str, Any]:
+        """Exactly the text a consented `ask` would send; nothing is sent here."""
+        state = self.load_state()
+        self.require_opt_in(state)
+        if not 1 <= commits <= HISTORY_MAX_COMMITS:
+            raise BridgeError(f"commits deve ficar entre 1 e {HISTORY_MAX_COMMITS}", "history-range")
+        root = self.history_root(repo)
+        entry = (state.get("history") or {}).get(str(root))
+        granted = parse_iso((entry or {}).get("at"))
+        if not granted:
+            raise BridgeError(
+                f"sem consentimento para {root}; rode `history consent --repo {root} "
+                "--acknowledge-upload`", "history-consent-required")
+        if self.clock() - granted > dt.timedelta(days=HISTORY_CONSENT_MAX_AGE_DAYS):
+            raise BridgeError(f"o consentimento para {root} venceu; registre de novo",
+                              "history-consent-required")
+
+        def git(*args: str) -> list[str]:
+            code, out, err = self.runner.run(self.git_command(root, *args), timeout=30)
+            if code != 0:
+                raise BridgeError("git falhou ao ler o histórico: " + (err or out).strip()[-200:],
+                                  "history-git-failed")
+            return [SECRET_LIKE.sub("[REDIGIDO]", line) for line in out.splitlines() if line.strip()]
+
+        def section(title: str, lines: list[str]) -> str:
+            shown = lines[:HISTORY_MAX_SECTION_LINES]
+            more = len(lines) - len(shown)
+            body = shown + ([f"… (+{more} linhas omitidas)"] if more > 0 else [])
+            return f"## {title}\n" + ("\n".join(body) if body else "(vazio)")
+
+        log = git("log", f"-n{commits}", "--date=short", "--pretty=format:%h %ad %s")
+        text = "\n\n".join([
+            f"# Histórico local (somente leitura) — {root.name}",
+            section("Ramo atual", git("rev-parse", "--abbrev-ref", "HEAD")),
+            section(f"Últimos {len(log)} commits (hash, data, assunto)", log),
+            section("Arquivos com mudanças não commitadas", git("status", "--short")),
+            section("Tamanho das mudanças não commitadas",
+                    git("diff", "--stat", "--no-ext-diff", "--no-textconv", "HEAD")),
+        ])
+        encoded = text.encode()[:HISTORY_MAX_BYTES]
+        text = encoded.decode("utf-8", errors="ignore")
+        return {"repo": str(root), "commits": len(log), "bytes": len(text.encode()), "text": text,
+                "fileContentsIncluded": False, "sent": False}
+
+    def ask(self, repo: str, question: str,
+            commits: int = HISTORY_DEFAULT_COMMITS) -> dict[str, Any]:
+        """One real Web-model turn about a consented repository. Spends one message."""
+        question = question.strip()
+        if not question:
+            raise BridgeError("escreva a pergunta", "usage")
+        if len(question) > HISTORY_QUESTION_MAX_CHARS:
+            raise BridgeError("pergunta longa demais", "history-range")
+        snapshot = self.history_snapshot(repo, commits)
+        prompt = ("Você recebeu um resumo somente leitura do histórico de um repositório local. "
+                  "Não há ferramentas locais neste turno: não finja executar comandos nem editar "
+                  "arquivos; quando sugerir mudanças, descreva-as ou escreva o patch para o "
+                  "operador aplicar.\n\n" + snapshot["text"] + "\n\n## Pedido do operador\n"
+                  + question)
+        scratch = private_dir(self.paths.root / "ask")
+        reply_file = scratch / "last-message.txt"
+        reply_file.unlink(missing_ok=True)
+        command, env = self.codex_command(
+            ["exec", "--skip-git-repo-check", "--ephemeral", "-C", str(scratch),
+             "-o", str(reply_file), prompt])
+        code, out, err = self.runner.run(command, env=env, timeout=ASK_TIMEOUT_SECONDS,
+                                         input_text="")
+        try:
+            reply = reply_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            reply = ""
+        ok = code == 0 and bool(reply)
+        result: dict[str, Any] = {
+            "ok": ok, "repo": snapshot["repo"], "commits": snapshot["commits"],
+            "bytesSent": len(prompt.encode()), "model": command[command.index("--model") + 1],
+            "reply": reply, "sandbox": "read-only", "localTools": False, "exitCode": code,
+            "liveCodexRouteTouched": self.live_route_touched()}
+        if not ok:
+            result["detail"] = (err or out).strip()[-600:]
+        return result
 
     # ---- ordered teardown ------------------------------------------------
 
@@ -1827,10 +2138,25 @@ class Bridge:
         """Codex's own login in the dedicated profile (needed for the model list)."""
         return (self.paths.codex_home / "auth.json").is_file()
 
-    def desktop(self) -> dict[str, Any]:
+    def visible_web_models(self) -> list[str]:
+        """Labels the Desktop selector really shows; tier slugs are hidden there."""
+        cache = self._read_json(self.paths.codex_home / "models_cache.json") or {}
+        models = cache.get("models")
+        return [str(item["display_name"]) for item in models if isinstance(item, dict)
+                and str(item.get("slug", "")).startswith(WEB_MODEL_PREFIX)
+                and item.get("visibility") == "list" and item.get("display_name")
+                ] if isinstance(models, list) else []
+
+    def desktop(self, mode: str = "web") -> dict[str, Any]:
         """Open Codex Desktop as a separate instance bound to the dedicated profile."""
         state = self.load_state()
         self.require_opt_in(state)
+        tools = mode == "tools"
+        if tools:
+            self.require_tools_ready(state)
+        elif (self.upstream_config() or {}).get("mode") == "full":
+            raise BridgeError("o launcher está no modo com ferramentas; use o atalho "
+                              "\"com ferramentas\" (`desktop --mode tools`)", "full-mode")
         self.require_ready(state)
         launcher = shutil.which(DESKTOP_COMMAND, path=self.env.get("PATH"))
         if not launcher:
@@ -1840,20 +2166,27 @@ class Bridge:
         env["CODEX_MULTI_LAUNCH"] = "1"
         pid = self.runner.spawn([launcher, "--new-instance"], env)
         signed_in = self.codex_signed_in()
-        model = self.default_model()
+        labels = self.visible_web_models()
+        pick = ("No seletor de modelo, escolha um que termine em \"(Web)\""
+                + (": " + ", ".join(labels[:4]) + "." if labels else
+                   ", por exemplo \"GPT-6 Sol (Web)\"."))
         guidance = (
             ([] if signed_in else
              ["1. Faça login no Codex NESTA janela nova (só na primeira vez)."])
-            + [f"{'1' if signed_in else '2'}. No seletor de modelo, escolha um \"ChatGPT Web\" "
-               f"(ex.: {model}).",
-               "Os modelos Web usam sua conta ChatGPT, não a cota do Codex.",
-               "Somente leitura: conversa e análise, sem editar arquivos.",
-               "A outra janela do Codex continua no perfil normal."])
+            + [f"{'1' if signed_in else '2'}. {pick}",
+               "Os modelos Web usam sua conta ChatGPT, não a cota do Codex."]
+            + (["Com ferramentas: cada ação local pede sua aprovação. Nunca escolha aprovar "
+                "tudo nem acesso total no seletor de permissões.",
+                "Sandbox somente leitura; escrita local segue bloqueada."] if tools else
+               ["Somente leitura: conversa e análise, sem editar arquivos."])
+            + ["A outra janela do Codex continua no perfil normal."])
         notified = self.runner.notify(
             NOTIFY_TITLE + (" — login necessário" if not signed_in else " — janela aberta"),
             "\n".join(guidance), critical=not signed_in)
-        return {"desktop": "started", "pid": pid, "codexHome": str(self.paths.codex_home),
-                "codexSignedIn": signed_in, "model": model, "guidance": guidance,
+        return {"desktop": "started", "mode": mode, "pid": pid,
+                "codexHome": str(self.paths.codex_home), "sandbox": "read-only",
+                "codexSignedIn": signed_in, "model": self.default_model(),
+                "visibleModels": labels, "guidance": guidance,
                 "notified": notified, "liveCodexRouteTouched": self.live_route_touched()}
 
     def codex_command(self, args: list[str]) -> tuple[list[str], dict[str, str]]:
@@ -1897,8 +2230,23 @@ def build_parser() -> argparse.ArgumentParser:
                         help="saída JSON em setup, status, smoke e repair")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("plan", "status", "fetch", "install", "launch", "stop", "disable", "opt-out",
-                 "repair", "adopt-session", "smoke", "desktop"):
+                 "repair", "adopt-session", "smoke"):
         sub.add_parser(name)
+    desktop = sub.add_parser("desktop", help="Codex Desktop no perfil dedicado")
+    desktop.add_argument("--mode", choices=("web", "tools"), default="web")
+    shortcuts = sub.add_parser("shortcuts", help="atalhos locais de menu e área de trabalho")
+    shortcuts.add_argument("action", choices=("status", "install", "remove", "run"))
+    shortcuts.add_argument("--mode", choices=("web", "tools"), default="web")
+    shortcuts.add_argument("--no-desktop-copy", action="store_true")
+    history = sub.add_parser("history", help="histórico local compartilhado com consentimento")
+    history.add_argument("action", choices=("status", "consent", "revoke", "snapshot"))
+    history.add_argument("--repo")
+    history.add_argument("--commits", type=int, default=HISTORY_DEFAULT_COMMITS)
+    history.add_argument("--acknowledge-upload", action="store_true")
+    ask = sub.add_parser("ask", help="pergunta ao modelo Web sobre um repositório consentido")
+    ask.add_argument("--repo", required=True)
+    ask.add_argument("--commits", type=int, default=HISTORY_DEFAULT_COMMITS)
+    ask.add_argument("question", nargs="+")
     setup = sub.add_parser("setup", help="faz tudo: pacote, launcher isolado, login, modelo Web")
     setup.add_argument("--login-wait", type=int, default=LOGIN_WAIT_SECONDS,
                        help="segundos aguardando o login na janela do launcher")
@@ -1954,7 +2302,26 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
     if command == "smoke":
         return bridge.smoke()
     if command == "desktop":
-        return bridge.desktop()
+        return bridge.desktop(args.mode)
+    if command == "shortcuts":
+        if args.action == "install":
+            return bridge.shortcuts_install(desktop_copy=not args.no_desktop_copy)
+        if args.action == "run":
+            return bridge.shortcut_run(args.mode)
+        return {"status": bridge.shortcuts_status,
+                "remove": bridge.shortcuts_remove}[args.action]()
+    if command == "history":
+        if args.action == "status":
+            return bridge.history_status()
+        if not args.repo:
+            raise BridgeError("informe `--repo CAMINHO`", "usage")
+        if args.action == "consent":
+            return bridge.history_consent(args.repo, args.acknowledge_upload)
+        if args.action == "revoke":
+            return bridge.history_revoke(args.repo)
+        return bridge.history_snapshot(args.repo, args.commits)
+    if command == "ask":
+        return bridge.ask(args.repo, " ".join(args.question), args.commits)
     if command == "repair":
         return bridge.repair()
     if command == "adopt-session":
@@ -1988,7 +2355,7 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
     raise BridgeError(f"comando desconhecido: {command}", "usage")
 
 
-FRIENDLY_COMMANDS = {"setup", "status", "smoke", "repair", "desktop"}
+FRIENDLY_COMMANDS = {"setup", "status", "smoke", "repair", "desktop", "shortcuts", "ask"}
 STAGE_LABELS = {
     "off": "desligado (rode `setup`)",
     "opted-in": "aceito, pacote ainda não instalado",
@@ -2043,6 +2410,21 @@ def render(command: str, result: dict[str, Any]) -> str:
     elif command == "desktop":
         lines += ["✓ Codex Desktop aberto no perfil dedicado (janela separada)"]
         lines += [f"  {item}" for item in result["guidance"]]
+    elif command == "shortcuts":
+        if "desktop" in result and "state" not in result:
+            return render("desktop", result)
+        lines.append({"off": "atalhos: não instalados (`shortcuts install`)",
+                      "installed": "✓ atalhos instalados (menu"
+                                   + (" + área de trabalho)" if result["desktopCopy"] else ")"),
+                      "inconsistent": "✗ atalhos INCONSISTENTES; rode `shortcuts install`"
+                      }[result["state"]])
+        lines += [f"  {item}" for item in result["entries"]]
+        lines.append("  Fora do catálogo público; o Codex Desktop normal não foi alterado.")
+    elif command == "ask":
+        lines.append(f"{mark(result['ok'])} {result['model']} — {result['commits']} commits de "
+                     f"{result['repo']} ({result['bytesSent']} bytes enviados, sem ferramentas "
+                     "locais)")
+        lines.append(result["reply"] or result.get("detail", "sem resposta"))
     elif command == "repair":
         lines += [f"✓ launchers fora do isolamento encerrados: {len(result['stoppedLaunchers'])}",
                   "✓ autostart upstream: "
