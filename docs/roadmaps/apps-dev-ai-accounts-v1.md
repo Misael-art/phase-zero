@@ -2522,6 +2522,35 @@ Retestes focais G1 PXA-006/009/014 — 2026-09-29, HEAD `31fc169`:
 - `rtk proxy env PYTHONPATH=. QT_QPA_PLATFORM=offscreen pytest -q tests/test_accessibility_gate.py` — 85 passaram em 51,26 s; processo encerrou com exit 0 após cerca de 34 s adicionais de teardown. `ps` não encontrou `linux/pz` nem pytest remanescente. A fixture isola HOME/XDG e suprime probes Homelab; prova contraste, nomes acessíveis e teclado, não leitor de tela audível, display físico ou G4.
 Sem mudança de código nesta rodada. PXA-006/G3 e PXA-009 seguem pendentes por observação real; PXA-014 segue pendente por G2, leitor de tela físico e G4.
 
+CI do push `295de3c` — causa e correção — 2026-10-12: o run de push
+`38276167695` falhou em três jobs; o run de pull_request do mesmo SHA
+`38276174510` passou inteiro. Causas, cada uma comprovada em log:
+(a) `arch-clean-host`: o guard `_assert_guarded_arch_container_ci` comparava
+`GITHUB_REPOSITORY` com a forma capitalizada `Misael-art/PhaseZero`; no evento
+push o GitHub entrega o nome canônico minúsculo `Misael-art/phase-zero` (o repo
+foi renomeado) e o guard falhou fechada, derrubando o teste — não é regressão do
+PR, é fragilidade de casing entre eventos push/pull_request. Corrigido em
+`tests/test_development_cancel.py` e
+`tests/test_development_journey_arch_container.py` para
+`casefold() == "misael-art/phase-zero"` (continua rejeitando fork). Prova
+unitária: monkeypatch de ambiente aceita a forma minúscula e rejeita
+`someone-else/Fork`. (b) `python-test` e `homelab-python-test`: todas as
+asserções passaram (1356 e 87 verdes) e o processo morreu com SIGSEGV no
+teardown do interpretador. Spy em `QProcess.start` provou 20 spawns reais de
+`linux/pz` no host, vindos de `HomelabPage.build()`
+(`QTimer.singleShot(0, refresh_hosts)`), do `singleShot(300, refresh_status)`
+pós-comando e do timer `StatusLoader.fetch` do hub Linux que o `PageRegistry`
+constrói cedo; em container o filho ainda vivo no shutdown produz
+`QProcess: Destroyed while process … is still running` e o crash — flaky por
+timing, não por código do PR. Corrigido em `tests/test_homelab_player.py` com
+fixture autouse que fixa `FakeQProcess` no módulo homelab e suprime
+`StatusLoader.fetch` em todo o arquivo, no mesmo padrão da fixture
+`no_homelab_startup_probe` do conftest. Verificação: suíte tocada fechou
+88 passaram/1 ignorado com 0 spawns reais no spy; suite completa `tests/` com
+spy fechou 1358 passaram/3 ignorados, exit 0, 0 spawns. Nenhuma linha de
+produção alterada; nenhum teste desativado. Pendente: re-run verde dos três
+jobs só é provável após push, ainda não autorizado pelo operador.
+
 ## Decisão de entrega beta com gates externos abertos — 2026-09-29
 
 O operador pediu uma versão instalável para testar as superfícies concluídas sem

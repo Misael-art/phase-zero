@@ -23,7 +23,8 @@ def _assert_guarded_arch_container_ci() -> None:
     if (
         os.environ.get("GITHUB_ACTIONS") != "true"
         or os.environ.get("GITHUB_JOB") != "arch-clean-host"
-        or os.environ.get("GITHUB_REPOSITORY") != "Misael-art/PhaseZero"
+        or os.environ.get("GITHUB_REPOSITORY", "").casefold()
+        != "misael-art/phase-zero"
         or os.geteuid() != 0
         or not Path("/etc/arch-release").is_file()
         or Path(shutil.which("pacman") or "/missing").resolve()
