@@ -76,10 +76,30 @@ def test_status_payload_drives_mode_radios_and_facts(page):
     assert page._mode_radios["handheld"].isChecked()
     assert not page._mode_radios["docked-tv"].isChecked()
     assert page.watcher_label.text() == "Ativo (aplica o modo sozinho)"
-    assert "Ligado" in page.keyboard_label.text()
+    assert "Disponível, fechado" in page.keyboard_label.text()
+    assert "Ligado" not in page.keyboard_label.text()
     assert page.decky_label.text() == "Instalado e serviço ativo"
     assert page.boot_label.text() == "Entrada GRUB presente e marcada"
     assert "OLED" in page.display_label.text()
+
+
+def test_keyboard_open_is_not_reported_from_the_config_flag(page):
+    payload = _payload()
+    payload["virtualKeyboard"] = {
+        "provider": "plasma-keyboard",
+        "kde": {"supported": True, "available": False, "enabled": True, "visible": False},
+        "configured": {"enabled": True, "inputMethod": "/usr/share/applications/org.kde.plasma.keyboard.desktop"},
+        "dbus": {"supported": True, "available": False, "visible": False},
+        "open": {"effective": False, "reason": "kwin-command-missing"},
+    }
+    page._on_status_ready("steamdeck.status", "", payload)
+    assert page.keyboard_label.text().startswith("Configurado, KWin sem teclado ativo")
+    assert "Ligado" not in page.keyboard_label.text()
+
+    payload["virtualKeyboard"]["open"] = {"effective": True, "reason": "kwin-visible"}
+    payload["virtualKeyboard"]["kde"]["visible"] = True
+    page._on_status_ready("steamdeck.status", "", payload)
+    assert page.keyboard_label.text().startswith("Aberto")
 
 
 def test_docked_payload_moves_the_radio(page):

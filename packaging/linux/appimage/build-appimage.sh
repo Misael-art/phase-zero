@@ -6,8 +6,11 @@ OUT="${1:-$ROOT/dist}"
 PYTHON="${PYTHON:-python3}"
 APPIMAGETOOL="${APPIMAGETOOL:-$(command -v appimagetool || true)}"
 PYTHON_BIN="$(command -v "$PYTHON" 2>/dev/null || true)"
-APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
-APPIMAGETOOL_SHA256="a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0"
+# continuous changes without a new hash and failed the v1.22.3 package job
+# (downloaded 14.39 MiB, checksum mismatch). 1.9.1 is the latest numbered
+# release and stays at this digest.
+APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
+APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
 
 # The AppDir must NOT live on a FUSE-backed filesystem (NTFS-3g, sshfs, ...):
 # appimagetool's parallel mksquashfs can silently drop files under I/O pressure

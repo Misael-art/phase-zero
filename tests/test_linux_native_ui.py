@@ -309,8 +309,12 @@ def test_manifest_serializes_catalog(catalog):
     json.dumps(manifest)
 
 
-def test_native_version_comes_from_project_manifest():
-    assert __version__ == json.loads((ROOT / "version.json").read_text())["version"]
+def test_native_version_comes_from_project_manifest_and_channel():
+    manifest = json.loads((ROOT / "version.json").read_text())
+    expected = manifest["version"]
+    if manifest.get("channel") in {"beta", "nightly"}:
+        expected = f"{expected} ({manifest['channel']})"
+    assert __version__ == expected
 
 
 def test_simplified_mode_is_default_and_env_can_enable_advanced(monkeypatch):

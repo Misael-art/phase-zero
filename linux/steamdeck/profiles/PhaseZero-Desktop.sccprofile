@@ -3,19 +3,43 @@
  "buttons": {
   "A": {
    "action": "button(Keys.KEY_ENTER)",
-   "name": "Confirmar"
+   "name": "Confirmar",
+   "modes": {
+    "C": {
+     "action": "button(Keys.KEY_LEFTCTRL) and button(Keys.KEY_V)",
+     "name": "Colar"
+    }
+   }
   },
   "B": {
    "action": "button(Keys.KEY_ESC)",
-   "name": "Cancelar"
+   "name": "Cancelar",
+   "modes": {
+    "C": {
+     "action": "button(Keys.KEY_LEFTCTRL) and button(Keys.KEY_C)",
+     "name": "Copiar"
+    }
+   }
   },
   "X": {
    "action": "button(Keys.KEY_BACKSPACE)",
-   "name": "Apagar"
+   "name": "Apagar",
+   "modes": {
+    "C": {
+     "action": "shell('bash PZ_ROOT/linux/steamdeck/hotkey-actions.sh keyboard')",
+     "name": "Teclado virtual"
+    }
+   }
   },
   "Y": {
    "action": "button(Keys.KEY_SPACE)",
-   "name": "Espaco"
+   "name": "Espaco",
+   "modes": {
+    "C": {
+     "action": "button(Keys.KEY_SYSRQ)",
+     "name": "Captura de tela"
+    }
+   }
   },
   "LB": {
    "action": "button(Keys.KEY_LEFTCTRL) and button(Keys.KEY_LEFTSHIFT) and button(Keys.KEY_TAB)",

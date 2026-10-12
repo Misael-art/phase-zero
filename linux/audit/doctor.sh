@@ -235,13 +235,14 @@ if command -v mangohud &>/dev/null; then check UX03 "MangoHud available" PASS "$
 if command -v gamemoderun &>/dev/null; then check UX04 "GameMode launcher available" PASS "$(command -v gamemoderun)"; else check UX04 "GameMode launcher available" WARN "install gamemode"; fi
 
 vk_status="$(run bash "$PZ_ROOT/linux/steamdeck/input-actions.sh" status 2>/dev/null || echo '{}')"
-if jq -e '.kde.supported == true and .kde.available == true and .kde.enabled == true and (.kde.inputMethod | test("maliit"))' <<< "$vk_status" >/dev/null 2>&1; then
-    check UX05 "Virtual keyboard available" PASS "KDE/KWin + Maliit"
-elif jq -e '.provider != "none"' <<< "$vk_status" >/dev/null 2>&1; then
-    check UX05 "Virtual keyboard available" WARN "provider present but not fully configured; run: linux/pz steamdeck keyboard repair"
-else
-    check UX05 "Virtual keyboard available" WARN "install maliit-keyboard or run: linux/pz steamdeck keyboard repair"
-fi
+vk_health="$(printf '%s\n' "$vk_status" | bash "$PZ_ROOT/linux/steamdeck/input-actions.sh" health-json 2>/dev/null || printf 'WARN\tvirtual keyboard status unreadable\n')"
+vk_level="${vk_health%%$'\t'*}"
+vk_detail="${vk_health#*$'\t'}"
+case "$vk_level" in
+    PASS|WARN) ;;
+    *) vk_level="WARN"; vk_detail="virtual keyboard status unreadable" ;;
+esac
+check UX05 "Virtual keyboard available" "$vk_level" "$vk_detail"
 
 if [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/sxhkd/sxhkdrc" ] || [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/swhkd/swhkdrc" ]; then
     check UX06 "Steam Deck hotkey config installed" PASS "found"

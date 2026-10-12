@@ -3,6 +3,39 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 As versões seguem a data de build em `version.json`.
 
+## [1.22.5] - 2026-10-11
+
+### Adicionado
+- **Steam+X abre o teclado do Plasma.** O mesmo caminho do botão de acesso rápido. Se o modo do teclado virtual estiver em Nunca ou Só sem mouse, o acorde passa um instante por Qualquer entrada, chama `forceActivate` e devolve o modo anterior. O painel continua visível depois dessa devolução.
+- **Toque no terminal abre o teclado.** Ashyterm, Konsole, kitty e Yakuake não pedem o painel de entrada. Um toque na tela, com um deles em foco e o teclado oculto, chama a abertura. Não fecha o teclado e não captura o dispositivo.
+- **Steam+Y, Steam+B e Steam+A.** Print (Spectacle neste host), copiar (Ctrl+C) e colar (Ctrl+V). Sozinhos, Y continua espaço, B Esc e A Enter. No Ashyterm, Ctrl+C interrompe o comando; a cópia de lá é Ctrl+Shift+C e a cola é Ctrl+Shift+V.
+- **Widget PhaseZero Deck no painel.** `org.phasezero.deckpanel` mostra CPU, RAM e disco, o mapa gerado do perfil versionado do controle e a opacidade oficial do painel que contém o applet (Adaptativo, Opaco, Translúcido). Não troca o tema global e não altera os outros painéis. A instalação pelo `kpackagetool6` não reinicia o Plasma nem o controle.
+
+### Limitações
+- Um caractere digitado no teclado virtual e a volta Game Mode → Switch Desktop continuam sem prova. A opacidade Translúcido fica no popup do widget; o instalador não grava esse modo sozinho.
+
+## [1.22.4] - 2026-10-10
+
+### Corrigido
+- **O pacote Linux da 1.22.3 não foi publicado.** O `appimagetool` vinha do canal `continuous`, cujo arquivo mudou e deixou de bater com o SHA256 fixo. O job morria depois de gerar deb, rpm e o pacote Arch, então o artefato não subia. O download agora aponta para a release numerada 1.9.1, com o digest conferido. A tag `v1.22.3` não é movida.
+
+## [1.22.3] - 2026-10-10
+
+### Corrigido
+- **CI Python deixou de publicar release.** O `pip install PySide6` passou a puxar 6.12.0, que encerra o interpretador com sinal 11 depois de a suíte passar. Os jobs `python-test` e `homelab-python-test` ficam vermelhos e o `ci-gate` da release recusa o pacote. O workflow fixa `PySide6==6.11.1`, a última série que termina com código 0. A tag `v1.22.2` existe e não será movida; ela não gera artefatos enquanto esse gate recusar o commit.
+
+## [1.22.2] - 2026-10-10
+
+### Corrigido
+- **Teclado virtual do KDE no Steam Deck apontava para o Maliit e lia uma propriedade D-Bus que não existe.** A configuração legada gerida pelo PhaseZero (`InputMethod` simples no desktop do Maliit, sem `InputMethod[$e]`) passa a migrar para o Plasma Keyboard quando esse desktop está instalado. Uma escolha explícita válida fica como está. O status separa configuração, disponibilidade no D-Bus e abertura efetiva. Onboard ou wvkbd vivo no Wayland não conta como teclado aberto.
+- **Reescrever o `kwinrc` não recarregava o método de entrada do KWin 6.7.** O compositor só observa o sinal `org.kde.kconfig.notify` / `ConfigChanged` no caminho `/kwinrc`, e o KConfig só emite esse sinal quando a chave muda. `kwriteconfig6 --notify` com o mesmo valor é silencioso. O reparo apaga a chave e grava de novo, os dois com `--notify`, e devolve `InputMethod[$e]` em texto, sem novo sinal. Medido nesta sessão: o KWin (PID estável) passou a ter o `plasma-keyboard` como filho e `available=true`.
+
+### Adicionado
+- **Diagnóstico somente leitura do cursor na volta do Game Mode.** `pz steamdeck cursor` registra nós do SCController, o serviço do mapa e se o KWin enxerga o mouse virtual. Não captura o dispositivo, não reinicia o mapa e não reinicia o KWin. Sem amostra de movimento a conclusão fica `not-proven`.
+
+### Limitações
+- Digitar num campo real e a volta Game Mode → Switch Desktop não foram executados: o primeiro precisa de toque, o segundo encerra a sessão. Canal beta. O procedimento está em `docs/roadmaps/steamdeck-kde-input-v1.md`.
+
 ## [1.21.1] - 2026-09-23
 
 ### Adicionado

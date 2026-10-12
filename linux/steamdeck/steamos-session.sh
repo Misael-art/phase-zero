@@ -61,6 +61,16 @@ target="$(cat "$TARGET_FILE" 2>/dev/null || true)"
 rm -f "$TARGET_FILE"
 log "gamescope exited rc=$rc target=${target:-desktop}"
 
+# Read-only record of the pointer handoff. It must not grab evdev, restart
+# the controller, restart KWin, or block the desktop if the probe fails.
+# A missing or empty file is not evidence that the cursor survived Game Mode.
+_script_dir="$(cd "$(dirname "$0")" && pwd)"
+if bash "$_script_dir/cursor-diagnose.sh" snapshot >"$STATE_DIR/cursor-handoff.json" 2>>"$LOG_FILE"; then
+    log "cursor handoff recorded (read-only; cause not claimed)"
+else
+    log "cursor handoff skipped"
+fi
+
 case "$target" in
     reboot)
         exec systemctl reboot

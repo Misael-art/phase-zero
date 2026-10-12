@@ -16,9 +16,11 @@ Usage:
   pz install <profile> --dry-run
   pz steamdeck <mode>          Apply Steam Deck mode (handheld|docked-tv|docked-monitor)
   pz steamdeck watch           Start mode-watcher daemon
-  pz steamdeck keyboard        Toggle Steam/desktop virtual keyboard
-  pz steamdeck keyboard status Show virtual keyboard provider/config
-  pz steamdeck keyboard repair Configure KDE/Maliit virtual keyboard
+  pz steamdeck keyboard        Toggle the KDE Wayland virtual keyboard
+  pz steamdeck keyboard status Show config, D-Bus availability, and whether it is open
+  pz steamdeck keyboard repair Select Plasma Keyboard, or keep a valid explicit choice
+  pz steamdeck keyboard revert Restore kwinrc from the backup taken before repair
+  pz steamdeck cursor          Read-only pointer handoff diagnostic (does not restart anything)
   pz steamdeck console [mode]  Apply mode and launch Steam Gamepad UI
   pz steamdeck dev [mode]      Apply desktop/dev session mode
   pz steamdeck hotkeys install Install Meta+Shift+F1..F8 shortcuts
@@ -351,7 +353,7 @@ cmd_flatpak() {
 
 cmd_steamdeck() {
     local action="${1:-}" target="${2:-}"
-    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
+    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|terminal-keyboard|panel|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
     source "$PZ_ROOT/linux/steamdeck/common.sh"
     source "$PZ_ROOT/linux/steamdeck/input-actions.sh"
     case "$action" in
@@ -365,8 +367,18 @@ cmd_steamdeck() {
                 toggle|"") steamdeck_toggle_virtual_keyboard ;;
                 status) steamdeck_virtual_keyboard_status ;;
                 configure|install|repair) steamdeck_configure_virtual_keyboard ;;
-                *) pz_error "usage: pz steamdeck keyboard (toggle|status|configure|repair)"; return 1 ;;
+                revert|restore) steamdeck_revert_virtual_keyboard ;;
+                *) pz_error "usage: pz steamdeck keyboard (toggle|status|configure|repair|revert)"; return 1 ;;
             esac
+            ;;
+        cursor|pointer)
+            bash "$PZ_ROOT/linux/steamdeck/cursor-diagnose.sh" "${target:-snapshot}" "${3:-}"
+            ;;
+        terminal-keyboard)
+            bash "$PZ_ROOT/linux/steamdeck/terminal-keyboard.sh" "${target:-watch}"
+            ;;
+        panel)
+            bash "$PZ_ROOT/linux/steamdeck/install-deck-panel.sh" "${target:-status}"
             ;;
         console)      steamdeck_start_console_session "${target:-auto}" ;;
         dev|desktop)  steamdeck_start_dev_session "${target:-docked-monitor}" ;;

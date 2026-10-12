@@ -14,19 +14,21 @@ source "$DIR/osd.sh"
 PZ_BIN="$PZ_ROOT/linux/pz"
 
 keyboard_visible_now() {
+    # A leftover onboard/wvkbd process is not an open keyboard on Wayland.
     bash "$DIR/input-actions.sh" status 2>/dev/null |
-        jq -e '.kde.visible == true' >/dev/null 2>&1 && return 0
-    pgrep -x wvkbd-mobintl >/dev/null 2>&1 || pgrep -x wvkbd >/dev/null 2>&1 ||
-        pgrep -x onboard >/dev/null 2>&1
+        jq -e '.open.effective == true or .kde.visible == true' >/dev/null 2>&1
 }
 
 run_keyboard_toggle() {
+    local was_open=false
+    keyboard_visible_now && was_open=true
     bash "$DIR/input-actions.sh" keyboard || true
-    sleep 0.4
     if keyboard_visible_now; then
-        pz_osd_show "input-keyboard-virtual-on" "Meta+Shift+F4 — Teclado virtual ativado"
+        pz_osd_show "input-keyboard-virtual-on" "Teclado virtual aberto"
+    elif [ "$was_open" = true ]; then
+        pz_osd_show "input-keyboard-virtual-off" "Teclado virtual fechado"
     else
-        pz_osd_show "input-keyboard-virtual-off" "Meta+Shift+F4 — Teclado virtual desativado"
+        pz_osd_show "input-keyboard-virtual-off" "Teclado virtual não abriu"
     fi
 }
 

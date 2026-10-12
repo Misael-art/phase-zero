@@ -202,6 +202,8 @@ install_app_profiles() {
 arm_revert() {
     [ "${PZ_DRY_RUN:-0}" = "1" ] && return 0
     [ "$REVERT_SECONDS" -gt 0 ] 2>/dev/null || return 0
+    local revert_skip_systemctl=0
+    [ "${PZ_CONTROLLER_REVERT_SKIP_SYSTEMCTL:-0}" = 1 ] && revert_skip_systemctl=1
     # setsid detaches the timer from this shell; a plain background subshell
     # dies with the terminal that ran `start`, taking the safety net with it.
     #
@@ -218,7 +220,12 @@ arm_revert() {
         # confirm removes the pidfile; its absence means the operator came
         # back and kept the profile.
         [ -f '$REVERT_PIDFILE' ] || exit 0
-        systemctl --user stop '$SERVICE_NAME' >/dev/null 2>&1 || true
+        # systemctl --user always talks to the real user manager. A sandboxed
+        # HOME does not redirect it, so the test suite sets this and only the
+        # recorded pid is stopped.
+        if [ $revert_skip_systemctl != 1 ]; then
+            systemctl --user stop '$SERVICE_NAME' >/dev/null 2>&1 || true
+        fi
         if [ -f '$DAEMON_PIDFILE' ]; then
             kill \"\$(cat '$DAEMON_PIDFILE' 2>/dev/null)\" >/dev/null 2>&1 || true
         fi
