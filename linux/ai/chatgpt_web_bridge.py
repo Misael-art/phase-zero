@@ -125,8 +125,9 @@ PENDING_GATES = (
     "rollback",
 )
 
-# Plan capability map from the OpenAI developer-mode article as read on the
-# audit date. An operator attestation is not proof; reconfirm before relying on it.
+# Plan capability map from the OpenAI developer-mode article, re-read on
+# 2026-10-12: full MCP for Business and Enterprise/Edu, read/fetch for Pro, no
+# developer mode for Free, Go or Plus. An operator attestation is not proof.
 PLAN_MCP_CAPABILITY = {
     "free": "none",
     "go": "none",
@@ -136,6 +137,9 @@ PLAN_MCP_CAPABILITY = {
     "enterprise": "write-beta",
     "edu": "write-beta",
 }
+PLAN_LABELS = {"free": "Free", "go": "Go", "plus": "Plus", "pro": "Pro", "business": "Business",
+               "enterprise": "Enterprise", "edu": "Edu"}
+PLAN_SOURCE = "https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt"
 ELIGIBILITY_MAX_AGE_DAYS = 30
 KEY_ROTATION_DEFAULT_DAYS = 30
 KEY_ROTATION_MAX_DAYS = 90
@@ -819,7 +823,10 @@ class Bridge:
         if stale:
             blockers.append("atestado de elegibilidade vencido; registre de novo")
         if plan_cap == "none":
-            blockers.append("plano informado não oferece MCP de desenvolvedor")
+            blockers.append(
+                f"o plano {PLAN_LABELS.get(str(record.get('plan')), 'informado')} não oferece MCP "
+                "de desenvolvedor (a OpenAI libera em Pro, só leitura, e em Business, Enterprise "
+                "e Edu)")
         if record.get("developerMode") != "yes":
             blockers.append("Developer Mode do workspace não confirmado")
         if record.get("tunnelPermission") not in {"use", "manage"}:
@@ -1753,10 +1760,16 @@ class Bridge:
                 self.setup(login_wait=0)
             return self.desktop(mode)
         except BridgeError as error:
-            hint = {"tools-not-ready": "\nPassos: pz ai chatgpt-web tunnel guide",
-                    "shortcuts-off": ""}.get(error.code, "\nRode: pz ai chatgpt-web setup")
-            self.runner.notify(f"{NOTIFY_TITLE} — {label} não abriu", f"{error}{hint}",
-                               critical=True)
+            body = f"{error}" + {"shortcuts-off": ""}.get(error.code,
+                                                         "\nRode: pz ai chatgpt-web setup")
+            if error.code == "tools-not-ready":
+                pending = self.tools_steps()["next"] or {}
+                body = ("O modo com ferramentas ainda não pode abrir.\n"
+                        f"Falta: {pending.get('detail', error)}.\n"
+                        f"Próximo passo: {pending.get('action', 'pz ai chatgpt-web tools status')}\n"
+                        "Enquanto isso, o atalho \"ChatGPT Web no Codex\" segue funcionando "
+                        "(sem ferramentas locais).")
+            self.runner.notify(f"{NOTIFY_TITLE} — {label} não abriu", body, critical=True)
             raise
 
     # ---- consented local history -----------------------------------------
@@ -2094,6 +2107,65 @@ class Bridge:
             raise BridgeError("modo com ferramentas indisponível: " + "; ".join(blockers),
                               "tools-not-ready")
 
+    def tools_steps(self) -> dict[str, Any]:
+        """Ordered checklist for the tools mode with the single next action."""
+        state = self.load_state()
+        self.require_opt_in(state)
+        record = state.get("eligibility") if isinstance(state.get("eligibility"), dict) else None
+        eligibility = self.eligibility(state)
+        key = self.key_status(state)
+        config = self.upstream_config() or {}
+        plan = str((record or {}).get("plan"))
+        label = PLAN_LABELS.get(plan, "não informado")
+        manager = "pz ai chatgpt-web"
+        steps = [
+            ("eligibility", bool(record) and eligibility["state"] == "recorded",
+             "plano e permissões registrados" if record and eligibility["state"] == "recorded"
+             else "atestado vencido" if record else "plano e permissões ainda não registrados",
+             f"{manager} eligibility --plan … --developer-mode … --tunnel-permission … "
+             "--single-user-trusted …"),
+            ("plan", bool(record) and eligibility["planMcpCapability"] != "none",
+             f"plano {label}: " + ("MCP de desenvolvedor disponível"
+                                   if record and eligibility["planMcpCapability"] != "none" else
+                                   "sem modo desenvolvedor. A OpenAI libera conectores MCP próprios "
+                                   "em Pro (só leitura) e em Business, Enterprise e Edu"),
+             f"Mude para um plano com modo desenvolvedor e registre de novo. Fonte: {PLAN_SOURCE}"),
+            ("developer-mode", (record or {}).get("developerMode") == "yes",
+             "modo desenvolvedor do ChatGPT " + ("confirmado" if (record or {}).get("developerMode")
+                                                 == "yes" else "não confirmado"),
+             "Ative em Configurações → Apps → Configurações avançadas e registre de novo."),
+            ("tunnel-permission", (record or {}).get("tunnelPermission") in {"use", "manage"},
+             "permissão de túnel na plataforma OpenAI",
+             f"{manager} tunnel guide"),
+            ("single-user", (record or {}).get("singleUserTrusted") == "yes"
+             and not self.runner.other_users(),
+             "conta local individual e confiável, sem outros usuários com sessão",
+             "Use somente em conta local individual e registre de novo."),
+            ("runtime-key", key["state"] == "stored",
+             {"absent": "chave de runtime ainda não está no cofre",
+              "rotation-overdue": "chave de runtime passou do prazo de rotação",
+              "stored": "chave de runtime no cofre do sistema"}[key["state"]],
+             f"Crie uma chave restrita a Tunnels Read + Use, com expiração, e rode "
+             f"`{manager} tunnel key store` (entrada oculta)."),
+            ("launcher-mode", config.get("mode") == "full",
+             "launcher no modo com ferramentas" if config.get("mode") == "full"
+             else "launcher ainda no modo somente Web",
+             f"`{manager} tunnel key stage`, conclua a página MCP do launcher com o tunnel_id e "
+             f"rode `{manager} tunnel key unstage`."),
+            ("auto-approve", not config.get("autoApproveToolCalls"),
+             "aprovação automática desligada no launcher" if not config.get("autoApproveToolCalls")
+             else "aprovação automática LIGADA no launcher",
+             "Desligue a aprovação automática na página MCP do launcher."),
+        ]
+        listed = [{"id": step, "ok": bool(ok), "detail": detail, "action": action}
+                  for step, ok, detail, action in steps]
+        pending = next((item for item in listed if not item["ok"]), None)
+        return {"ready": pending is None, "steps": listed, "next": pending,
+                "webModelStillWorks": config.get("mode") == "browser-only",
+                "planSource": PLAN_SOURCE, "lockedCapabilities": LOCKED_CAPABILITIES,
+                "note": "Pronto aqui não prova conta real nem escrita: gates externos seguem "
+                        "pendentes."}
+
     def tools_check(self) -> dict[str, Any]:
         state = self.load_state()
         blockers: list[str] = []
@@ -2272,7 +2344,7 @@ def build_parser() -> argparse.ArgumentParser:
     autostart.add_argument("action", choices=("status", "enable", "disable", "run"))
     autostart.add_argument("--acknowledge-autostart", action="store_true")
     tools = sub.add_parser("tools")
-    tools.add_argument("action", choices=("check",))
+    tools.add_argument("action", choices=("status", "check"))
     codex = sub.add_parser("codex")
     codex.add_argument("args", nargs=argparse.REMAINDER)
     return parser
@@ -2351,11 +2423,12 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
         return {"status": bridge.autostart_status, "disable": bridge.autostart_disable,
                 "run": bridge.autostart_run}[args.action]()
     if command == "tools":
-        return bridge.tools_check()
+        return bridge.tools_steps() if args.action == "status" else bridge.tools_check()
     raise BridgeError(f"comando desconhecido: {command}", "usage")
 
 
-FRIENDLY_COMMANDS = {"setup", "status", "smoke", "repair", "desktop", "shortcuts", "ask"}
+FRIENDLY_COMMANDS = {"setup", "status", "smoke", "repair", "desktop", "shortcuts", "ask",
+                     "tools"}
 STAGE_LABELS = {
     "off": "desligado (rode `setup`)",
     "opted-in": "aceito, pacote ainda não instalado",
@@ -2420,6 +2493,16 @@ def render(command: str, result: dict[str, Any]) -> str:
                       }[result["state"]])
         lines += [f"  {item}" for item in result["entries"]]
         lines.append("  Fora do catálogo público; o Codex Desktop normal não foi alterado.")
+    elif command == "tools":
+        if "steps" not in result:
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        lines.append("ChatGPT Web com ferramentas (experimental) — "
+                     + ("pronto para abrir" if result["ready"] else "ainda bloqueado"))
+        lines += [f"  {mark(item['ok'])} {item['detail']}" for item in result["steps"]]
+        if result["next"]:
+            lines += ["Próximo passo:", f"  {result['next']['action']}"]
+        if result["webModelStillWorks"]:
+            lines.append("O modo Web (sem ferramentas) continua funcionando normalmente.")
     elif command == "ask":
         lines.append(f"{mark(result['ok'])} {result['model']} — {result['commits']} commits de "
                      f"{result['repo']} ({result['bytesSent']} bytes enviados, sem ferramentas "

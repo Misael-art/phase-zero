@@ -2765,3 +2765,29 @@ gate da janela com ferramentas, recusa de perfil com `approval_policy = "never"`
 ou sandbox com escrita, atalhos em pasta localizada, wrapper, início sob
 demanda, consentimento, escopo, redação, `ask`); `tests/test_product_inventory.py`
 24 passaram. PXA-010 segue `in_progress` e fora do catálogo.
+
+## PXA-010 elegibilidade real do modo com ferramentas — 2026-10-12
+
+A pedido do operador, conferência somente leitura pelo navegador dele (nada
+criado ou alterado nas contas): plataforma OpenAI com um túnel já criado pelo
+operador (`CODEX_TUNEL`) e uma chave `API_CODEX` com permissão `All` e sem
+expiração, fora do que o guia pede (Tunnels Read + Use, com expiração; valor
+mascarado, não reaproveitável); ChatGPT sem conector próprio (só GitHub, Gmail
+e Google Drive) e plano `plus` em Configurações → Conta.
+
+O [artigo oficial de modo desenvolvedor](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt),
+relido nesta data, mantém: MCP completo em Business e Enterprise/Edu, leitura
+em Pro, nenhuma menção a Plus. O mapa `PLAN_MCP_CAPABILITY` está correto e o
+gate segue fechado para esta conta. Não foi criada chave nem conector: a chave
+é credencial da conta do operador e o conector não existiria sem o modo
+desenvolvedor.
+
+Mudança: `tools status` mostra a lista ordenada de requisitos com um único
+próximo passo, o bloqueio por plano cita o plano e os planos aceitos, e a
+notificação do atalho "com ferramentas" diz o que falta e lembra que o atalho
+Web segue funcionando. No host, elegibilidade registrada com o plano observado
+(`plus`, modo desenvolvedor `no`, túnel `manage`, conta individual `no` por não
+ter sido atestada pelo operador); `tools status` aponta o plano como próximo
+passo (`/tmp/pz-evidence/pxa010/tools-status-plus.txt`) e o atalho sai com
+`tools-not-ready`. Testes: `tests/test_chatgpt_web_bridge.py` 51 passaram.
+Modo com ferramentas segue sem prova G3; PXA-010 permanece `in_progress`.

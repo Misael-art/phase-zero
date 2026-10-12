@@ -925,7 +925,7 @@ def test_tools_window_stays_closed_until_the_gate_is_met(host, monkeypatch):
         bridge.shortcut_run("tools")
     title, body, critical = runner.notifications[-1]
     assert critical is True and "com ferramentas" in title
-    assert "modo com ferramentas indisponível" in body and "tunnel guide" in body
+    assert "ainda não pode abrir" in body and "eligibility --plan" in body
     assert runner.spawned == []
 
 
@@ -1194,3 +1194,56 @@ def test_ask_sends_the_snapshot_through_the_read_only_profile(host, monkeypatch,
     assert result["sandbox"] == "read-only" and result["localTools"] is False
     assert sorted(item.name for item in repo.iterdir()) == before
     assert not (home / ".codex").exists()
+
+
+def test_tools_steps_explain_an_ineligible_plan_and_the_single_next_step(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch)
+    first = bridge.tools_steps()
+    assert first["ready"] is False and first["next"]["id"] == "eligibility"
+    assert "eligibility --plan" in first["next"]["action"]
+
+    bridge.record_eligibility("plus", "no", "manage", "yes")
+    status = bridge.tools_steps()
+
+    assert status["ready"] is False and status["webModelStillWorks"] is True
+    step = status["next"]
+    assert step["id"] == "plan" and step["ok"] is False
+    assert "Plus" in step["detail"] and "Pro" in step["detail"] and "Business" in step["detail"]
+    assert "help.openai.com" in step["action"]
+    # Later steps are listed but never offered before the plan is resolved.
+    assert [item["id"] for item in status["steps"]][:3] == ["eligibility", "plan", "developer-mode"]
+
+    bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
+                                    "unpacked": "verified"}
+    bridge.shortcuts_install(desktop_copy=False)
+    with pytest.raises(BridgeError) as error:
+        bridge.shortcut_run("tools")
+    assert error.value.code == "tools-not-ready"
+    title, body, critical = runner.notifications[-1]
+    assert "com ferramentas" in title and critical is True
+    assert "Plus" in body and "Business" in body
+    assert "ChatGPT Web no Codex" in body  # the browser-only shortcut still works
+    assert runner.spawned == []
+
+
+def test_tools_steps_walk_to_ready_one_action_at_a_time(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch)
+    bridge.record_eligibility("pro", "yes", "use", "yes")
+    assert bridge.tools_steps()["next"]["id"] == "runtime-key"
+    assert "tunnel key store" in bridge.tools_steps()["next"]["action"]
+
+    bridge._secret_store = FakeVault()
+    bridge.key_store("runtime-key-material", 30)
+    step = bridge.tools_steps()["next"]
+    assert step["id"] == "launcher-mode" and "tunnel key stage" in step["action"]
+
+    config = bridge.paths.core_home / "config.json"
+    config.write_text(json.dumps({**json.loads(config.read_text()), "mode": "full",
+                                  "autoApproveToolCalls": True}))
+    assert bridge.tools_steps()["next"]["id"] == "auto-approve"
+
+    config.write_text(json.dumps({**json.loads(config.read_text()),
+                                  "autoApproveToolCalls": False}))
+    done = bridge.tools_steps()
+    assert done["ready"] is True and done["next"] is None
+    assert "runtime-key-material" not in json.dumps(done)
