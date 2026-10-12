@@ -2421,6 +2421,66 @@ confirma os requisitos documentados, não uma conta/workspace real. [Help Center
 OpenAI](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt),
 [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels).
 
+PXA-010 execução real no host, modo Browser-only — 2026-10-12 (`misael-jupiter`,
+Manjaro, Codex CLI 0.162.1, upstream `v6.1.8`): `linux/ai/chatgpt_web_bridge.py`
+exposto como `pz ai chatgpt-web` (fora da ajuda e do catálogo). Defeitos achados só
+no host e corrigidos:
+
+- O launcher upstream grava `~/.config/autostart/dev.codexwebgpt.launcher.desktop`
+  por padrão (`autoStart: true`). Após reboot ele subiu fora do unit, com perfil
+  padrão `~/.config/Codex Web GPT` e `~/.codex` gravável. Agora o diretório de
+  autostart é somente leitura no unit, a opção é forçada para desligada, e launcher
+  fora do isolamento ou entrada de autostart bloqueiam o preflight até `repair`.
+- Chromium move o processo principal para um `app-*.scope`; cgroup não indica
+  isolamento. A detecção lê ambiente e `mountinfo` do processo.
+- Codex 0.162.1 rejeita `approval_policy = "untrusted"` (config e CLI). Perfil
+  dedicado migra para `on-request` sob sandbox `read-only`; `codex exec` reporta
+  `approval: never` por ser não interativo.
+- `setup --browser-only` upstream instala também um hook `Interrupt`; aceito no
+  diff somente quando o comando aponta para o runtime gerenciado.
+- O launcher só inicia o daemon Responses na partida; `setup` reinicia o launcher
+  quando a porta 17841 não responde. Reexecutar o setup upstream com o daemon ativo
+  falha com `EADDRINUSE`; rota já configurada volta por `route connect`.
+- `disable` nunca concluía: a varredura de processos Codex casava o próprio
+  launcher (`codex-web-gpt-l`).
+- `/v1/models` exige o Bearer do Codex, ausente no perfil dedicado. O wrapper
+  injeta `--model chatgpt-web/medium` (ou `luna`) quando nenhum modelo é pedido.
+
+Evidência: ciclo `disable` → `setup` (19 s, sessão existente reaproveitada) →
+`smoke` devolveu `PONG` por `chatgpt-web/light`; turno com modelo padrão devolveu
+`42` por `chatgpt-web/medium`. SHA-256 de `~/.codex/config.toml` igual antes e
+depois; nenhuma entrada de autostart ao final. A sessão usada veio do perfil padrão
+do próprio launcher, realocada por `adopt-session` (nomes de cookie lidos, valores
+não). Não provado: host limpo Arch/Windows, modo Full/túnel, escrita local,
+sobrevivência a reboot após a correção. PXA-010 segue `in_progress` e fora do
+catálogo.
+
+PXA-010 Codex Desktop no perfil dedicado — 2026-10-12: o Desktop normal usa
+`~/.codex`, sem rota, e devolveu “limite de uso” da cota nativa. `pz ai chatgpt-web
+desktop` abre uma segunda instância (`CODEX_MULTI_LAUNCH=1 codex-desktop
+--new-instance`) com `CODEX_HOME` do perfil dedicado e envia notificação
+(`notify-send`) com os passos; `setup` também notifica login pendente e conclusão.
+O Desktop grava plugins, marketplaces e o MCP `node_repl` no `config.toml`, o que
+invalidava a comparação por linhas; `route verify` passou a avaliar o contrato
+(sandbox `read-only`, aprovação, rota loopback, hooks e MCP só do runtime
+gerenciado ou do próprio Desktop) e lista o restante como `otherChanges`. No host:
+instância aberta com o perfil dedicado, login Codex feito pelo operador,
+`models_cache.json` do perfil lista sete `chatgpt-web/*`, turno CLI no mesmo perfil
+devolveu `OK`. Não provado: turno enviado pela interface do Desktop; o seletor de
+permissões do Desktop pode sobrepor o padrão `read-only` por conversa.
+
+PXA-010 início no login como opt-in — 2026-10-12, a pedido do operador:
+`autostart enable --acknowledge-autostart` grava
+`~/.config/autostart/phasezero-chatgpt-web.desktop`, que executa `autostart run`
+(o mesmo `setup`, sem esperar login) e portanto sobe o launcher só pelo unit
+isolado. A entrada do launcher upstream continua bloqueada e em quarentena. Entrada
+alterada vira `inconsistent` e não inicia nada; falha no login gera notificação.
+No host: recusa sem o reconhecimento, entrada validada, linha `Exec` executada com
+`ready: true`, `~/.codex/config.toml` inalterado. A sessão real do Desktop
+acrescentou o MCP `ai-memory` (`http://127.0.0.1:49374/mcp`) ao perfil; a política
+passou a tolerar MCP HTTP em loopback e segue recusando comando ou URL externos.
+Não provado: partida a frio por um login real; `Exec` aponta para este worktree.
+
 Probe remoto `df6f5616c80668cfbc15d0bfabe882fa3ca10043` — PR run
 `36589276298`, job `109477799729`: instalação QEMU passou; etapa de probe
 falhou com `FAIL: hosted runner has no usable /dev/kvm`. Runner Ubuntu 24.04

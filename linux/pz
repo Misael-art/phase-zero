@@ -658,6 +658,11 @@ cmd_ai() {
             shift
             python3 "$PZ_ROOT/linux/ai/routing_manager.py" "$@"
             ;;
+        chatgpt-web)
+            # Experimental and opt-in (PXA-010): kept out of help and catalog on purpose.
+            shift
+            python3 "$PZ_ROOT/linux/ai/chatgpt_web_bridge.py" "${@:-status}"
+            ;;
         claude|claude-code|bonsai)
             shift
             bash "$PZ_ROOT/linux/ai/setup-claude-code.sh" "${@:-status}"
