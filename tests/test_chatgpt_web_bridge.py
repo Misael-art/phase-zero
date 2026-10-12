@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import sqlite3
@@ -722,3 +723,135 @@ def test_route_enable_refuses_unexpected_changes_and_restores_the_config(host):
     assert bridge.paths.codex_config.read_text() == before
     assert "route disconnect" in upstream_calls(runner)
     assert "routeEnabled" not in bridge.load_state()
+
+
+# ---- PXA-013: rejection and reversion proofs ------------------------------
+
+
+class FakeVault:
+    """System secret store seam: keeps material out of state files."""
+
+    def __init__(self) -> None:
+        self.items: dict[str, str] = {}
+
+    def store(self, reference: str, secret: str) -> None:
+        self.items[reference] = secret
+
+    def lookup(self, reference: str) -> str | None:
+        return self.items.get(reference)
+
+    def delete(self, reference: str) -> None:
+        self.items.pop(reference, None)
+
+
+def test_disable_during_a_running_task_restores_route_then_refuses(host):
+    bridge, runner, _ = host
+    configure(bridge, runner, route_active=True)
+    runner.unit_active = True
+    runner.codex_pids = [555]
+
+    def upstream(verb: str) -> None:
+        if verb == "route disconnect":
+            runner.upstream["route status"] = (0, json.dumps({"installed": True,
+                                                              "active": False}), "")
+
+    runner.on_upstream = upstream
+
+    with pytest.raises(BridgeError) as error:
+        bridge.disable()
+
+    assert error.value.code == "codex-running"
+    assert "555" in str(error.value)
+    assert "route disconnect" in upstream_calls(runner)  # route reverted first
+    assert ["systemctl", "--user", "stop", UNIT_NAME] not in runner.calls
+    assert runner.unit_active is True  # launcher and task untouched
+
+
+def test_disable_aborts_before_teardown_when_route_cannot_be_restored(host):
+    bridge, runner, _ = host
+    configure(bridge, runner, route_active=True)
+    runner.unit_active = True
+    runner.upstream["route disconnect"] = (1, "", "upstream recusou")
+
+    with pytest.raises(BridgeError) as error:
+        bridge.disable()
+
+    assert error.value.code == "route-restore-failed"
+    assert "Nada mais foi encerrado" in str(error.value)
+    assert ["systemctl", "--user", "stop", UNIT_NAME] not in runner.calls
+    assert runner.unit_active is True
+
+
+def test_route_disable_keeps_external_edits_and_reports_them(host):
+    bridge, runner, _ = host
+    configure(bridge, runner, route_active=True)
+    bridge.paths.codex_config.write_text(
+        bridge.paths.codex_config.read_text() + "js_repl = false\n")
+
+    def upstream(verb: str) -> None:
+        if verb == "route disconnect":
+            runner.upstream["route status"] = (0, json.dumps({"installed": True,
+                                                              "active": False}), "")
+
+    runner.on_upstream = upstream
+    result = bridge.route_disable()
+
+    assert result["route"] == "restored"
+    assert result["matchesBaseline"] is False
+    assert any("js_repl" in line for line in result["externalEditsPreserved"])
+    assert "js_repl = false" in bridge.paths.codex_config.read_text()
+
+
+def test_stale_eligibility_blocks_the_tools_gate(host):
+    bridge, _, _ = host
+    base = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    bridge.clock = lambda: base
+    assert bridge.record_eligibility("pro", "yes", "use", "yes")["blockers"] == []
+
+    bridge.clock = lambda: base + dt.timedelta(days=31)
+
+    blockers = bridge.eligibility(bridge.load_state())["blockers"]
+    assert any("vencido" in blocker for blocker in blockers)
+    with pytest.raises(BridgeError) as error:
+        bridge.require_tools_ready(bridge.load_state())
+    assert error.value.code == "tools-not-ready"
+    assert "vencido" in str(error.value)
+
+
+def test_tools_gate_refuses_while_launcher_stays_browser_only(host):
+    bridge, runner, _ = host
+    base = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    bridge.clock = lambda: base
+    bridge.record_eligibility("pro", "yes", "use", "yes")
+    bridge._secret_store = FakeVault()
+    bridge.key_store("runtime-key-material", 30)
+    configure(bridge, runner, route_active=False)  # upstream mode: browser-only
+
+    with pytest.raises(BridgeError) as error:
+        bridge.require_tools_ready(bridge.load_state())
+
+    assert error.value.code == "tools-not-ready"
+    assert "launcher não está no modo com ferramentas" in str(error.value)
+
+
+def test_runtime_key_never_lands_in_state_or_errors(host):
+    bridge, _, _ = host
+    vault = FakeVault()
+    bridge._secret_store = vault
+
+    status = bridge.key_store("super-segredo-42", 30)
+
+    assert status["state"] == "stored" and status["store"] == "os-secret-store"
+    reference = bridge.load_state()["runtimeKey"]["ref"]
+    assert reference.startswith("secret-service:")
+    assert vault.items[reference] == "super-segredo-42"
+    raw = bridge.paths.state.read_text()
+    assert "super-segredo-42" not in raw
+    assert "super-segredo-42" not in json.dumps(status)
+
+    with pytest.raises(BridgeError) as empty:
+        bridge.key_store("   ", 30)
+    assert empty.value.code == "empty-key" and "super-segredo" not in str(empty.value)
+    with pytest.raises(BridgeError) as out_of_range:
+        bridge.key_store("x", 0)
+    assert out_of_range.value.code == "rotation-range"
