@@ -419,10 +419,10 @@ com Qt offscreen. Status remoto continua rejeitado sem executor host-bound; esta
 melhora feedback e não fecha execução remota nem PXA-003.
 
 | PXA-009 | `in_progress` | `routing_manager.parse_quota` marca a origem como API de usage do 9Router e a hora local da consulta; dimensão e unidade aparecem na página de Roteamento IA, com unidade desconhecida explícita quando a resposta não a informa. Percentuais derivados de `used/total` ficam em campo separado de estimativa local, não viram cota observada nem entram no filtro de cota restante; recomendações não mostram o score neutro de 50% como medição quando estado é unknown/unavailable. Falha parcial de quota mantém conexão/conta na lista, marcando apenas cota indisponível. Página Roteamento IA consulta inventário a cada 60 s enquanto visível; timer para ao ocultar página, e tick chama somente `ai.routing-inventory` (GETs e gravação do cache local), sem recomendação/inferência. `test_routing_manager.py` + `test_ai_session_ui.py`: 78 passaram em 26,95 s (reteste 2026-09-26). Limites: sem prova de semântica/unidade na API real, sessão/quota de conta real ou operador. Enforcement por consumidor segue bloqueado em PXA-008; nenhuma rota de inferência habilitada por esta mudança. |
-| PXA-010 | `in_progress` | `608b28e`: pin histórico de auditoria `v6.0.0`/commit `212ceef2acac9d6ee0f3c9037abfaf4ad8ff9827`. Revisões documentais v6.1.0/v6.1.1 (2026-09-27) e v6.1.3 (2026-09-29) mantêm os gates: mesmo usuário alcança loopback e Full conserva gateway raw `exec`; README v6.1.3 ainda instrui `Allow all actions`, rejeitado pelo contrato PhaseZero. `v6.1.3` auditada: tag commit `fa2d2c6c24926078b46eedb2186f69f2e8d548d7`; manifesto e digests GitHub coincidem em 19/19 assets; scripts de instalação auditados como texto e 3/3 hashes conferem com o manifesto (notas abaixo); payloads binários de runtime não foram comparados localmente. Login continua em perfil próprio; nenhum cookie é importado. Identidade MCP padrão é configurável e distinta de `tunnel_id`/nome visível do túnel. Descoberta pública segue fechada por teste. Browser-only ainda requer sessão/conta real, G2 Arch/Windows e prova de instalação/reversão. Full acrescenta plano/workspace/permissões reais, broker, fronteira de mesmo usuário e falhas/rollback. Windows G2 segue não realizado; reavaliação e ISO intocada estão registradas ao fim do diário. Nenhuma integração, pacote ou rota ativados. |
-| PXA-011 | `planned` | Aguardando PXA-008 e gate seguro PXA-010. |
+| PXA-010 | `in_progress` | `608b28e`: pin histórico de auditoria `v6.0.0`/commit `212ceef2acac9d6ee0f3c9037abfaf4ad8ff9827`. Revisões documentais v6.1.0/v6.1.1 (2026-09-27) e v6.1.3 (2026-09-29) mantêm os gates: mesmo usuário alcança loopback e Full conserva gateway raw `exec`; README v6.1.3 ainda instrui `Allow all actions`, rejeitado pelo contrato PhaseZero. `v6.1.3` auditada: tag commit `fa2d2c6c24926078b46eedb2186f69f2e8d548d7`; manifesto e digests GitHub coincidem em 19/19 assets; scripts de instalação auditados como texto e 3/3 hashes conferem com o manifesto (notas abaixo); payloads binários de runtime não foram comparados localmente. Login continua em perfil próprio; nenhum cookie é importado. Identidade MCP padrão é configurável e distinta de `tunnel_id`/nome visível do túnel. Descoberta pública segue fechada por teste. Browser-only ainda requer sessão/conta real, G2 Arch/Windows e prova de instalação/reversão. Full acrescenta plano/workspace/permissões reais, broker, fronteira de mesmo usuário e falhas/rollback. Windows G2 segue não realizado; reavaliação e ISO intocada estão registradas ao fim do diário. Nenhuma integração, pacote ou rota ativados. 2026-10-12 (atalhos e histórico): atalhos locais de menu e área de trabalho (`shortcuts install`) com Exec em caminho estável, dois modos de janela (`desktop --mode web|tools`), rótulos reais do seletor nas orientações e histórico local por consentimento (`history`, `ask`) provados no host em Browser-only; modo com ferramentas segue fechado pelo gate (`tools-not-ready`) e sem prova G2/G3. Ver seção "PXA-010 atalhos, dois modos e histórico consentido". |
+| PXA-011 | `in_progress` | Manager da ponte implementado em `295de3c`/`a2b4760` (plan/fetch/install/launch/route/autostart/status/repair/disable/remove). Os sete casos hostis da matriz estão cobertos por fixtures com mensagem pt-BR e código de erro estável (`tests/test_chatgpt_web_bridge.py`, 29 passaram): host limpo simulado (fetch+install sem executar o pacote), dependência ausente (`tool-unsquashfs` no preflight e `missing-libraries` com lista do `ldd`), download truncado (`size-mismatch` com tamanho observado vs fixado), hash errado (`hash-mismatch`, pacote descartado antes de existir), porta 17841 ocupada (`preflight` bloqueia `port` e detalha "ocupada por outro processo"), crash do launcher (`launch-failed` com o final do journal) e edição externa da config (`route_verify` reporta violação; `route_enable` recusa, desconecta e restaura a config anterior, sem gravar `routeEnabled`). O `Exec` do autostart agora vive em caminho estável e falha com notificação crítica visível (prova no host em `a2b4760`). Limites: rollback de alterações parciais de `setup` e o fluxo completo em host Arch descartável (G2) não provados; sem integração com o gate de grants PXA-008; nada divulgado como pronto. |
 | PXA-012 | `planned` | Aguardando PXA-007/009/011; nenhuma rota ou wizard de integração disponível. |
-| PXA-013 | `planned` | Aguardando PXA-011/012; rejeição de replay/conta/escopo e rollback não provados. |
+| PXA-013 | `in_progress` | Provas de rejeição/reversão na ponte cobertas por testes comportamentais (`tests/test_chatgpt_web_bridge.py`, 35 passaram): `disable` durante tarefa restaura a rota primeiro, recusa com PIDs do Codex e não encerra o launcher (`codex-running`); falha de restauração da rota aborta todo o teardown sem efeito colateral (`route-restore-failed`, "Nada mais foi encerrado"); `route disable` preserva e reporta edição externa (`externalEditsPreserved`, `matchesBaseline` falso); atestado de elegibilidade com 31 dias vira bloqueio explícito no gate de tools (`tools-not-ready` cita "vencido"); launcher em browser-only recusa o modo com ferramentas; chave de runtime vive só no cofre do sistema — `state.json` e mensagens nunca contêm o segredo (referência `secret-service:` apenas). No roteamento, a recusa sem fallback silencioso já era coberta (`apply_plan` bloqueado `connection-grant-not-enforceable` em `test_routing_manager.py`, `test_auth_registry.py`, `test_opencode_9router_manager.py`; `route_enable` restaura config em recusa, provado em `f48ad6e`). Fora do escopo/consentimento no ledger: `test_account_grants.py`. Limites que impedem `verified`: replay por turno não tem mecanismo (broker do modo Full não implementado), "conta errada" em requisição individual não é verificável enquanto o 9Router não vincula requisição a grant (issue #2703), sessão expirada do login Codex/launcher além de `login-required` não é modelada, e logs do journal anexados em erros não têm prova de redação contra segredo impresso por upstream. |
 | PXA-014 | `in_progress` | `c7cdcf4` bloqueia subprocessos em gate de acessibilidade; `f4dafee` corrige `HomelabPage.build()` agendando `refresh_hosts` via QProcess. `36366981830` confirmou teardown sem aviso. CI limpo `36369508016` isolou falha `linux-audit-doctor` (caso Waydroid sem saída/resumo). Cherry-picks `ce667c3`/`8e64755` corrigem harness, propagam timeout/incompletude e isolam XDG em scratch único. CI push `36398640216` e PR `36398646298`, HEAD `7e16ec7`, verdes; Python 1312/2/15, Xvfb 2/2 em 100/150/200%, `shell-test` 9/9, Pester e demais 14 jobs passaram; log Python sem aviso QProcess nem trace temporário. Em `22101c4`, gate percorre Tab real e setas em grupos exclusivos; correção no Results evita QTableWidget reter Tab antes do disclosure técnico. `249acfc` adiciona reflow claro/escuro 800×600→1280×800→800×600. CI `36523435297` revelou hit-test XCB: `productHostSelector` tinha 52 px, mas página pai apenas 25 px. `5fbe281` corrige a causa com `QScrollArea`, restaura scroll ao topo ao trocar produto e verifica hit-test no widget realmente atingido. CI PR `36528790234` executou 1334 testes Python, 2 skipped e 15 subtests; só o teste novo de reset falhou porque não preparava faixa rolável; etapa Xvfb não executou. Teste agora força conteúdo 80 px maior que viewport antes de validar reset; módulo local: 38 passaram. CI PR `36530940616` no HEAD `2d9b6c7`: Python 1335/2/15 passou; Xvfb 2/2 em 100/150/200%. CI PR `36530940616` fechou com 15/15 jobs verdes; Pester 801/0/2. G2 Arch/Windows integral, leitor de tela real, display físico e G4 participantes seguem pendentes. |
 
 Provas: 49 testes focados passaram na base inicial `d9f144f`; depois 151 testes
@@ -2421,6 +2421,66 @@ confirma os requisitos documentados, não uma conta/workspace real. [Help Center
 OpenAI](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt),
 [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels).
 
+PXA-010 execução real no host, modo Browser-only — 2026-10-12 (`misael-jupiter`,
+Manjaro, Codex CLI 0.162.1, upstream `v6.1.8`): `linux/ai/chatgpt_web_bridge.py`
+exposto como `pz ai chatgpt-web` (fora da ajuda e do catálogo). Defeitos achados só
+no host e corrigidos:
+
+- O launcher upstream grava `~/.config/autostart/dev.codexwebgpt.launcher.desktop`
+  por padrão (`autoStart: true`). Após reboot ele subiu fora do unit, com perfil
+  padrão `~/.config/Codex Web GPT` e `~/.codex` gravável. Agora o diretório de
+  autostart é somente leitura no unit, a opção é forçada para desligada, e launcher
+  fora do isolamento ou entrada de autostart bloqueiam o preflight até `repair`.
+- Chromium move o processo principal para um `app-*.scope`; cgroup não indica
+  isolamento. A detecção lê ambiente e `mountinfo` do processo.
+- Codex 0.162.1 rejeita `approval_policy = "untrusted"` (config e CLI). Perfil
+  dedicado migra para `on-request` sob sandbox `read-only`; `codex exec` reporta
+  `approval: never` por ser não interativo.
+- `setup --browser-only` upstream instala também um hook `Interrupt`; aceito no
+  diff somente quando o comando aponta para o runtime gerenciado.
+- O launcher só inicia o daemon Responses na partida; `setup` reinicia o launcher
+  quando a porta 17841 não responde. Reexecutar o setup upstream com o daemon ativo
+  falha com `EADDRINUSE`; rota já configurada volta por `route connect`.
+- `disable` nunca concluía: a varredura de processos Codex casava o próprio
+  launcher (`codex-web-gpt-l`).
+- `/v1/models` exige o Bearer do Codex, ausente no perfil dedicado. O wrapper
+  injeta `--model chatgpt-web/medium` (ou `luna`) quando nenhum modelo é pedido.
+
+Evidência: ciclo `disable` → `setup` (19 s, sessão existente reaproveitada) →
+`smoke` devolveu `PONG` por `chatgpt-web/light`; turno com modelo padrão devolveu
+`42` por `chatgpt-web/medium`. SHA-256 de `~/.codex/config.toml` igual antes e
+depois; nenhuma entrada de autostart ao final. A sessão usada veio do perfil padrão
+do próprio launcher, realocada por `adopt-session` (nomes de cookie lidos, valores
+não). Não provado: host limpo Arch/Windows, modo Full/túnel, escrita local,
+sobrevivência a reboot após a correção. PXA-010 segue `in_progress` e fora do
+catálogo.
+
+PXA-010 Codex Desktop no perfil dedicado — 2026-10-12: o Desktop normal usa
+`~/.codex`, sem rota, e devolveu “limite de uso” da cota nativa. `pz ai chatgpt-web
+desktop` abre uma segunda instância (`CODEX_MULTI_LAUNCH=1 codex-desktop
+--new-instance`) com `CODEX_HOME` do perfil dedicado e envia notificação
+(`notify-send`) com os passos; `setup` também notifica login pendente e conclusão.
+O Desktop grava plugins, marketplaces e o MCP `node_repl` no `config.toml`, o que
+invalidava a comparação por linhas; `route verify` passou a avaliar o contrato
+(sandbox `read-only`, aprovação, rota loopback, hooks e MCP só do runtime
+gerenciado ou do próprio Desktop) e lista o restante como `otherChanges`. No host:
+instância aberta com o perfil dedicado, login Codex feito pelo operador,
+`models_cache.json` do perfil lista sete `chatgpt-web/*`, turno CLI no mesmo perfil
+devolveu `OK`. Não provado: turno enviado pela interface do Desktop; o seletor de
+permissões do Desktop pode sobrepor o padrão `read-only` por conversa.
+
+PXA-010 início no login como opt-in — 2026-10-12, a pedido do operador:
+`autostart enable --acknowledge-autostart` grava
+`~/.config/autostart/phasezero-chatgpt-web.desktop`, que executa `autostart run`
+(o mesmo `setup`, sem esperar login) e portanto sobe o launcher só pelo unit
+isolado. A entrada do launcher upstream continua bloqueada e em quarentena. Entrada
+alterada vira `inconsistent` e não inicia nada; falha no login gera notificação.
+No host: recusa sem o reconhecimento, entrada validada, linha `Exec` executada com
+`ready: true`, `~/.codex/config.toml` inalterado. A sessão real do Desktop
+acrescentou o MCP `ai-memory` (`http://127.0.0.1:49374/mcp`) ao perfil; a política
+passou a tolerar MCP HTTP em loopback e segue recusando comando ou URL externos.
+Não provado: partida a frio por um login real; `Exec` aponta para este worktree.
+
 Probe remoto `df6f5616c80668cfbc15d0bfabe882fa3ca10043` — PR run
 `36589276298`, job `109477799729`: instalação QEMU passou; etapa de probe
 falhou com `FAIL: hosted runner has no usable /dev/kvm`. Runner Ubuntu 24.04
@@ -2462,6 +2522,35 @@ Retestes focais G1 PXA-006/009/014 — 2026-09-29, HEAD `31fc169`:
 - `rtk proxy env PYTHONPATH=. QT_QPA_PLATFORM=offscreen pytest -q tests/test_accessibility_gate.py` — 85 passaram em 51,26 s; processo encerrou com exit 0 após cerca de 34 s adicionais de teardown. `ps` não encontrou `linux/pz` nem pytest remanescente. A fixture isola HOME/XDG e suprime probes Homelab; prova contraste, nomes acessíveis e teclado, não leitor de tela audível, display físico ou G4.
 Sem mudança de código nesta rodada. PXA-006/G3 e PXA-009 seguem pendentes por observação real; PXA-014 segue pendente por G2, leitor de tela físico e G4.
 
+CI do push `295de3c` — causa e correção — 2026-10-12: o run de push
+`38276167695` falhou em três jobs; o run de pull_request do mesmo SHA
+`38276174510` passou inteiro. Causas, cada uma comprovada em log:
+(a) `arch-clean-host`: o guard `_assert_guarded_arch_container_ci` comparava
+`GITHUB_REPOSITORY` com a forma capitalizada `Misael-art/PhaseZero`; no evento
+push o GitHub entrega o nome canônico minúsculo `Misael-art/phase-zero` (o repo
+foi renomeado) e o guard falhou fechada, derrubando o teste — não é regressão do
+PR, é fragilidade de casing entre eventos push/pull_request. Corrigido em
+`tests/test_development_cancel.py` e
+`tests/test_development_journey_arch_container.py` para
+`casefold() == "misael-art/phase-zero"` (continua rejeitando fork). Prova
+unitária: monkeypatch de ambiente aceita a forma minúscula e rejeita
+`someone-else/Fork`. (b) `python-test` e `homelab-python-test`: todas as
+asserções passaram (1356 e 87 verdes) e o processo morreu com SIGSEGV no
+teardown do interpretador. Spy em `QProcess.start` provou 20 spawns reais de
+`linux/pz` no host, vindos de `HomelabPage.build()`
+(`QTimer.singleShot(0, refresh_hosts)`), do `singleShot(300, refresh_status)`
+pós-comando e do timer `StatusLoader.fetch` do hub Linux que o `PageRegistry`
+constrói cedo; em container o filho ainda vivo no shutdown produz
+`QProcess: Destroyed while process … is still running` e o crash — flaky por
+timing, não por código do PR. Corrigido em `tests/test_homelab_player.py` com
+fixture autouse que fixa `FakeQProcess` no módulo homelab e suprime
+`StatusLoader.fetch` em todo o arquivo, no mesmo padrão da fixture
+`no_homelab_startup_probe` do conftest. Verificação: suíte tocada fechou
+88 passaram/1 ignorado com 0 spawns reais no spy; suite completa `tests/` com
+spy fechou 1358 passaram/3 ignorados, exit 0, 0 spawns. Nenhuma linha de
+produção alterada; nenhum teste desativado. Pendente: re-run verde dos três
+jobs só é provável após push, ainda não autorizado pelo operador.
+
 ## Decisão de entrega beta com gates externos abertos — 2026-09-29
 
 O operador pediu uma versão instalável para testar as superfícies concluídas sem
@@ -2496,3 +2585,246 @@ No host atual, `pacman -Q` leu `phasezero-control-center 1.21.1-1`. `/dev/kvm`
 existe, mas não foi aberto nem usado; nenhuma VM foi iniciada. Memória, filesystem
 e carga foram apenas consultados. O arquivo untracked `hashlib` no worktree foi
 preservado.
+
+## PXA-010 prova (c): Exec do autostart sobrevive ao worktree e falha visível — 2026-10-12
+
+O `Exec` da entrada de autostart apontava direto para
+`sys.executable` + script dentro do worktree em `/mnt/sdcard`: se o worktree
+sumisse, o login não iniciava nada e o usuário nunca ficava sabendo. Corrigido em
+`linux/ai/chatgpt_web_bridge.py`: `autostart enable` agora escreve um wrapper POSIX
+em caminho estável (`~/.local/share/phasezero/chatgpt-web/bin/chatgpt-web-autostart.sh`,
+0o755) mais um arquivo-alvo de duas linhas (`python`, `script`, 0o600); o `Exec` do
+`.desktop` aponta só para o wrapper. Alvo ausente/quebrado dispara
+`notify-send --urgency=critical` em pt-BR com o comando de religamento e exit 1;
+`autostart status` só diz `enabled` se entrada, wrapper e alvo existem e conferem;
+`disable` remove os três.
+
+Provas: (1) comportamento coberto por testes —
+`tests/test_chatgpt_web_bridge.py::test_autostart_wrapper_survives_the_worktree_and_fails_visibly`
+(notifica e exit 1 com alvo inexistente, usando notify-send falso que grava argv) e
+`::test_autostart_wrapper_executes_the_manager_when_the_path_exists` (executa o
+gerenciador real quando o alvo existe); suíte tocada
+`pytest tests/test_chatgpt_web_bridge.py tests/test_product_inventory.py` fechou
+43 passaram, exit 0. (2) Host real misael-jupiter: autostart re-habilitado via
+`pz ai chatgpt-web autostart enable --acknowledge-autostart`, `Exec` lido no
+`.desktop` aponta para o wrapper estável; cópia do wrapper com alvo apontando para
+caminho inexistente executada no host produziu a notificação KDE crítica real com a
+mensagem pt-BR, capturada em `/tmp/pz-evidence/pxa010/notify-fail.png`
+(exit 1, sem tocar em gerenciador vivo). Persistência pós-reboot/logout (prova b)
+e o turno pela UI do Desktop (prova a) continuam pendentes: a automação por
+mouse/teclado mostrou mapeamento de ponteiro não confiável neste desktop
+(multi-tela com rotação) e um clique de calibração alterou o combo
+"Ordenação e facetas" do editor de temas do SteamZero do valor
+"Theme Engine — asset único" para "AURA" — incidente registrado para o operador,
+nenhuma outra janela do usuário recebeu input depois da descoberta.
+
+## PXA-011 fixtures do manager — sete casos hostis cobertos — 2026-10-12
+
+A matriz exige que o manager da ponte encerre cada condição hostil com mensagem
+amigável em pt-BR. Coberto em `tests/test_chatgpt_web_bridge.py` com o `FakeRunner`
+estendido (junta real: grava bytes de download, responde `unsquashfs`/`ldd`/
+`journalctl`, hooks por verbo upstream): host limpo simulado (`fetch`+`install`
+verificam tamanho/SHA e desempacotam sem executar, modo 0o400 no pacote, sem
+entrada de desktop nem autostart), dependência ausente (`preflight` bloqueia
+`tool-unsquashfs` nomeando a ferramenta; `install` lista bibliotecas `not found`
+do `ldd` e não publica a árvore), download truncado (`size-mismatch` cita tamanho
+observado e fixado; nada é instalado), hash errado (`hash-mismatch` descarta o
+arquivo; o pacote não existe depois da recusa), porta 17841 ocupada (`launch`
+recusa via `preflight` e o check detalha "ocupada por outro processo"), crash do
+launcher (`launch-failed` anexa o final do journal do unit), edição manual da
+config (`route_verify` reporta a violação do contrato e a mudança externa;
+`route_enable` recusa, chama `route disconnect`, restaura o texto anterior e não
+grava `routeEnabled`). Verificação: `pytest tests/test_chatgpt_web_bridge.py`
+29 passaram; suíte relacionada `tests/test_product_inventory.py` junto: 53
+passaram, exit 0. Limites que permanecem: rollback de alterações parciais de
+`setup`, fluxo completo em host Arch/Windows descartável (G2) e integração com o
+gate de grants PXA-008 — nada aqui marca PXA-011 como `verified`.
+
+## PXA-013 provas de rejeição e reversão na ponte — 2026-10-12
+
+Seis testes comportamentais novos em `tests/test_chatgpt_web_bridge.py` (35
+passaram, exit 0) fecham a matriz de rejeição/reversão da ponte: (1) `disable`
+durante tarefa em andamento restaura a rota viva primeiro (chamada `route
+disconnect`), recusa com os PIDs do Codex listados (`codex-running`) e não
+encerra o launcher (`systemctl --user stop` ausente nas chamadas, unit segue
+ativo); (2) quando o upstream recusa a restauração da rota, o `disable` aborta
+antes de qualquer teardown (`route-restore-failed`, mensagem "...Nada mais foi
+encerrado") — sem fallback silencioso; (3) `route disable` preserva edição
+externa da config e a reporta (`externalEditsPreserved` com a linha,
+`matchesBaseline` falso); (4) atestado de elegibilidade com 31 dias vira
+bloqueio explícito no gate de tools (`tools-not-ready` cita "vencido", relógio
+injetável); (5) launcher em browser-only recusa o modo com ferramentas ("o
+launcher não está no modo com ferramentas"); (6) chave de runtime vive apenas no
+cofre do sistema — o `state.json` gravado e todas as mensagens de erro testadas
+contêm só a referência `secret-service:` de 48 hex, nunca o segredo; chave
+vazia e rotação fora do intervalo recusadas. O que já era coberto fora da
+ponte: recusa de apply sem grant por requisição (`test_routing_manager.py`,
+`test_auth_registry.py`, `test_opencode_9router_manager.py`), consentimento e
+escopo no ledger (`test_account_grants.py`), restauração da config em recusa de
+`route_enable` (`f48ad6e`). Limites registrados na matriz: replay por turno sem
+mecanismo (broker do modo Full não implementado), "conta errada" por requisição
+depende do 9Router vincular grant a requisição (issue upstream #2703), sessão
+expirada além de `login-required` não é modelada, e o tail de journal anexado
+em `launch-failed` não tem prova de redação contra segredo impresso por
+upstream. Por isso PXA-013 permanece `in_progress`.
+
+## PXA-010 atalhos, dois modos e histórico consentido — 2026-10-12
+
+Host `misael-jupiter` (Manjaro KDE Wayland), Codex CLI 0.162.1, launcher 6.1.8 em
+`browser-only`. Provas por artefato (processos, arquivos, saída do gerenciador);
+nenhuma automação de ponteiro ou teclado.
+
+**Mecanismo do modo com ferramentas no upstream 6.1.8** (lido em
+`core-home/versions/6.1.8-linux-x64/app/cli.js`, sem executar nada): o "Full
+harness" é `setup --full --tunnel-id tunnel_<32 hex> --runtime-key-file CAMINHO`.
+Ele baixa o `openai/tunnel-client` v0.0.12, exige túnel criado na plataforma
+OpenAI, chave de runtime Tunnels Read + Use e conector criado no ChatGPT; só
+então `config.json` passa a `mode: "full"` e o daemon abre o broker
+(`runtime/turn-broker.sock`, `localToolsEnabled`). As chamadas de ferramenta
+voltam ao turno do Codex, que as executa sob o próprio sandbox e política de
+aprovação. O upstream também oferece `--auto-approve-tool-calls` (cliques
+automáticos em "Allow once") e `--replace-codex-route`: a ponte não expõe nenhum
+dos dois, recusa `autoApproveToolCalls` ligado e nunca toca a rota de `~/.codex`.
+O que a ponte expõe: guia (`tunnel guide`), chave só no cofre (`tunnel key
+store|stage|unstage|revoke`), atestado de elegibilidade com vencimento de 30
+dias, `tools check` e a janela `desktop --mode tools`, todos atrás de
+`require_tools_ready()`. Túnel, chave e conector são atos administrativos do
+operador na conta dele; nada disso foi criado nesta sessão.
+
+**Atalhos** — `pz ai chatgpt-web shortcuts install|remove|status`
+(`--no-desktop-copy` opcional). Grava `phasezero-chatgpt-web.desktop` e
+`phasezero-chatgpt-web-tools.desktop` em `~/.local/share/applications` e na pasta
+de área de trabalho lida de `user-dirs.dirs` (`~/Área de trabalho` neste host).
+`Exec` aponta para `~/.local/share/phasezero/chatgpt-web/bin/chatgpt-web-open.sh
+<modo>`, mesmo mecanismo do autostart (`a2b4760`): alvo em arquivo `.target`,
+notificação crítica em pt-BR quando o gerenciador some. Sem terminal, toda
+recusa vira notificação; launcher parado é iniciado pelo mesmo `setup` com
+`login_wait=0`. Entrada adulterada vira `inconsistent` e nada abre. `opt-out`
+remove os atalhos. Nada entra no catálogo público nem no help do `pz`.
+
+Evidência (`/tmp/pz-evidence/pxa010/`):
+
+- `shortcuts-install.txt`: quatro entradas criadas; `desktop-file-validate` sem
+  erros; cópias da área de trabalho com bit de execução.
+- `gtk-launch phasezero-chatgpt-web` abriu uma instância nova do Codex Desktop:
+  `start.sh` (PID 1576387) e o `codex` app-server filho (PID 1578406) com
+  `CODEX_HOME=~/.local/share/phasezero/chatgpt-web/codex-home`; Electron com
+  `--user-data-dir=~/.local/state/codex-desktop/instances/port-5175/...`
+  (`shortcut-web-window.txt`).
+- `~/.codex/config.toml`, `~/.codex/auth.json` e
+  `/usr/share/applications/codex-desktop.desktop` com o mesmo SHA-256 antes e
+  depois (`live-before.txt` = `live-after.txt`); listagem de `~/.codex`
+  idêntica; unit segue com `ReadOnlyPaths=-~/.codex -~/.config/autostart`;
+  `route verify` ok.
+- Atalho "com ferramentas": `chatgpt-web-open.sh tools` saiu com código 1 e
+  `tools-not-ready` ("elegibilidade não registrada; chave de runtime não está no
+  cofre; launcher não está no modo com ferramentas"), sem abrir janela
+  (`shortcut-tools-blocked.json`).
+
+Não provado aqui: as duas janelas (normal e dedicada) abertas ao mesmo tempo —
+o Codex Desktop normal do operador estava fechado e não foi aberto por esta
+sessão; clique real no ícone da área de trabalho no Plasma (o lançamento foi
+pelo arquivo `.desktop` do menu via `gtk-launch`).
+
+**Rótulos do seletor** — as orientações de `desktop` e a notificação citavam
+`chatgpt-web/medium`, que tem `visibility: "hide"` em `models_cache.json`. Agora
+leem os rótulos visíveis do cache do perfil dedicado ("GPT-6 Sol (Web)",
+"GPT-6 Sol Instant (Web)", "GPT-5.6 Sol (Web)", "GPT-5.6 Sol Instant (Web)");
+sem cache, pedem um modelo terminado em "(Web)". O CLI segue com
+`--model chatgpt-web/<tier>`: o turno real abaixo usou `chatgpt-web/medium`.
+
+**Histórico de desenvolvimento local** — decisão de desenho desta entrega:
+resumo seletivo por repositório, com consentimento registrado e vencimento de
+30 dias. `history consent --repo R --acknowledge-upload`, `history snapshot`
+(mostra exatamente o texto, sem enviar), `history revoke`, e `ask --repo R
+PERGUNTA` (um turno real, gasta uma mensagem). Vai ramo, hash curto, data e
+assunto dos commits, caminhos alterados e contagem de linhas; conteúdo de
+arquivo, autor e e-mail não vão; padrões com cara de segredo viram `[REDIGIDO]`;
+teto de 100 commits e 40 kB. `~/.codex` (sessões, índice, memórias), o perfil
+dedicado e a pasta pessoal inteira são recusados (`history-scope`). O Codex roda
+em diretório próprio, sandbox read-only, nunca dentro do repositório.
+
+Evidência: consentimento registrado por esta sessão para o worktree, a pedido
+do operador, e revogado após a prova. `ask --commits 8` respondeu por
+`chatgpt-web/medium`, 1605 bytes enviados, citando o commit `295de3c` e as 736
+linhas pendentes (`ask-history.txt`, `history-snapshot.json`).
+
+Limite honesto: em Browser-only o modelo vê o histórico e propõe; não age.
+Atuar no repositório (ler arquivos sob demanda, editar) depende do modo com
+ferramentas, que segue fechado até túnel, chave, conector e elegibilidade do
+operador, mais G2 (Arch/Windows descartáveis) e G3 com conta real, e até o
+9Router vincular grant a requisição (PXA-006/008/009, issue upstream #2703).
+Escrita local continua bloqueada por desenho; o seletor de permissão por
+conversa do Desktop não pode ser travado de fora e a orientação da janela
+avisa para não escolher acesso total. Compartilhar sessões ou memórias do
+perfil normal com o dedicado não foi implementado nem desenhado: seria decisão
+nova, com aprovação humana.
+
+Testes: `tests/test_chatgpt_web_bridge.py` 49 passaram (12 testes novos, um com três casos: rótulos,
+gate da janela com ferramentas, recusa de perfil com `approval_policy = "never"`
+ou sandbox com escrita, atalhos em pasta localizada, wrapper, início sob
+demanda, consentimento, escopo, redação, `ask`); `tests/test_product_inventory.py`
+24 passaram. PXA-010 segue `in_progress` e fora do catálogo.
+
+## PXA-010 elegibilidade real do modo com ferramentas — 2026-10-12
+
+A pedido do operador, conferência somente leitura pelo navegador dele (nada
+criado ou alterado nas contas): plataforma OpenAI com um túnel já criado pelo
+operador (`CODEX_TUNEL`) e uma chave `API_CODEX` com permissão `All` e sem
+expiração, fora do que o guia pede (Tunnels Read + Use, com expiração; valor
+mascarado, não reaproveitável); ChatGPT sem conector próprio (só GitHub, Gmail
+e Google Drive) e plano `plus` em Configurações → Conta.
+
+O [artigo oficial de modo desenvolvedor](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt),
+relido nesta data, mantém: MCP completo em Business e Enterprise/Edu, leitura
+em Pro, nenhuma menção a Plus. O mapa `PLAN_MCP_CAPABILITY` está correto e o
+gate segue fechado para esta conta. Não foi criada chave nem conector: a chave
+é credencial da conta do operador e o conector não existiria sem o modo
+desenvolvedor.
+
+Mudança: `tools status` mostra a lista ordenada de requisitos com um único
+próximo passo, o bloqueio por plano cita o plano e os planos aceitos, e a
+notificação do atalho "com ferramentas" diz o que falta e lembra que o atalho
+Web segue funcionando. No host, elegibilidade registrada com o plano observado
+(`plus`, modo desenvolvedor `no`, túnel `manage`, conta individual `no` por não
+ter sido atestada pelo operador); `tools status` aponta o plano como próximo
+passo (`/tmp/pz-evidence/pxa010/tools-status-plus.txt`) e o atalho sai com
+`tools-not-ready`. Testes: `tests/test_chatgpt_web_bridge.py` 51 passaram.
+Modo com ferramentas segue sem prova G3; PXA-010 permanece `in_progress`.
+
+## PXA-010 `disable` travava depois do uso do Codex Desktop — 2026-10-12
+
+Sintoma: `tools check` mostrava `doctor upstream reportou falha` ("Codex
+integration is inconsistent") em Browser-only, com a rota funcionando.
+
+Causa: o Codex Desktop regrava o `config.toml` do perfil dedicado e descarta
+comentários e layout. O launcher 6.1.8 valida as próprias linhas pelo texto
+exato (comentário marcador acima de `openai_base_url`, `multi_agent`,
+`[agents].max_depth`, bloco do hook de Interrupt) e passa a recusar qualquer
+mudança de rota ("... changed after setup; refusing to overwrite"). Recolocar
+só o marcador não basta: o erro seguinte, no host, foi
+`[features].multi_agent changed after setup`. Reproduzido numa cópia isolada do
+perfil (porta e diretórios próprios): `route disconnect` recusa. Consequência
+real: `disable` terminaria em `route-restore-failed` e o operador não
+conseguiria desligar a ponte depois de usar o Desktop.
+
+Correção: quando o upstream recusa com esse texto, `route_disable` restaura o
+perfil dedicado pelo próprio gerenciador (`restored-by-reset`): grava o baseline
+registrado, guarda o arquivo regravado em `journal/config-pre-reset-*.toml` e
+move o estado de rota do upstream (`integration-journal*.json`, `config.json`)
+para `journal/upstream-route-<data>/`. A sessão ChatGPT do launcher não é
+tocada. No `setup` seguinte, sem configuração upstream e com a porta ainda
+ocupada, o launcher é reiniciado antes do `setup --browser-only`. `route
+status` passa a sinalizar `desktopRewroteConfig` com explicação em pt-BR.
+Custo: ajustes do Codex Desktop naquele perfil (plugins, fontes, MCP
+`ai-memory`) voltam ao padrão; o backup fica no journal.
+
+Prova no host (`/tmp/pz-evidence/pxa010/disable-reset.txt`,
+`setup-after-reset.txt`): `disable` → `restored-by-reset`, launcher parado,
+porta livre; `setup` → seis etapas ok; `route status` sem erros; `route verify`
+ok; `doctor` upstream ok; `smoke` → `PONG` por `chatgpt-web/light`;
+`~/.codex/config.toml` com o mesmo SHA-256. A janela dedicada do Desktop aberta
+pelo teste de atalho foi fechada por esta sessão antes do ciclo. Testes:
+`tests/test_chatgpt_web_bridge.py` 53 passaram. Limite: o Desktop volta a
+regravar o arquivo no próximo uso, então o aviso do `doctor` reaparece; isso
+não afeta os turnos e o `disable` agora se resolve sozinho.

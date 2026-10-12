@@ -106,6 +106,27 @@ class FakeQProcess:  # noqa: N801
         return b""
 
 
+@pytest.fixture(autouse=True)
+def _never_spawn_real_pz(app, monkeypatch):
+    """Force every HomelabPage spawn through FakeQProcess for the whole file.
+
+    build() queues ``refresh_hosts`` via ``QTimer.singleShot(0, …)`` and every
+    finished command queues ``refresh_status`` after 300 ms. Either can fire
+    inside a later test, before that test installs its own fake, leaving real
+    ``linux/pz`` children alive at interpreter shutdown (SIGSEGV after an all
+    green suite in CI). PageRegistry builds the Linux hub eagerly, so the
+    StatusLoader fetch timer is suppressed for the same reason.
+    """
+    import linux.ui_native.pages.homelab as mod
+
+    FakeQProcess._calls = []
+    monkeypatch.setattr(mod, "QProcess", FakeQProcess)
+    monkeypatch.setattr(
+        "linux.ui_native.status_loader.StatusLoader.fetch",
+        lambda _self, *_a, **_k: None,
+    )
+
+
 def test_homelab_page_registered(app):
     from linux.ui_native.pages.registry import PageRegistry
     from linux.ui_native.command_runner import CommandRunner
