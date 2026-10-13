@@ -2696,6 +2696,14 @@ status_json() {
     boot_grub="$(grub_cfg_entry_state)"
     grep -w 'phasezero.windowsvm=1' /proc/cmdline >/dev/null 2>&1 && current_marker="yes"
     discovery="$(discovery_json configured)"
+    # A completed install that never became the configured VM. Asked of
+    # provision.sh, which owns the operation records; anything but a JSON
+    # object or null is treated as "nothing pending".
+    local pending_finalize
+    pending_finalize="$(bash "$PZ_ROOT/linux/windows-vm/provision.sh" pending-finalize --json 2>/dev/null || true)"
+    if ! jq -e 'type == "object" or type == "null"' <<<"$pending_finalize" >/dev/null 2>&1; then
+        pending_finalize="null"
+    fi
     local session_state_file="$PZ_STATE/windows-vm/session-state.json"
     local session_graceful=true session_reason="" session_ended_at=""
     if [ -r "$session_state_file" ]; then
@@ -2777,6 +2785,7 @@ status_json() {
         --arg grubEntry "$boot_grub" \
         --arg currentMarker "$current_marker" \
         --argjson discovery "$discovery" \
+        --argjson pendingFinalize "$pending_finalize" \
         '{
             status: (
                 if $kvm != "yes" or $qemu == "" or $ovmfCodeExists != "yes" or $ovmfVarsExists != "yes" then "blocked"
@@ -2795,7 +2804,9 @@ status_json() {
                     and $bootArtifactsCurrent == "yes" and ($bootRuntimeStale | not)
                 ),
                 findings: [
-                    if $configInstalled != "yes" then
+                    if $pendingFinalize != null and ($configInstalled != "yes" or $diskExists != "yes" or $diskInstalledLike != "yes") then
+                        {id:"install-awaiting-activation", severity:"warning", message:"Uma instalação do Windows foi concluída, mas ainda não foi ativada nesta máquina virtual.", action:"windows.provision.finalize"}
+                    elif $configInstalled != "yes" then
                         {id:"vm-not-configured", severity:"warning", message:"A máquina virtual ainda não foi configurada.", action:"windows.provision.player"}
                     elif $diskExists != "yes" then
                         {id:"disk-missing", severity:"error", message:"O disco configurado não foi encontrado.", action:"windows.provision.player"}
@@ -2811,6 +2822,7 @@ status_json() {
                 ]
             },
             session: {lastEndedAt:$lastSessionEndedAt, lastGraceful:$lastSessionGraceful, lastReason:$lastSessionReason},
+            provision: {pendingFinalize: $pendingFinalize},
             config: {path: $configFile, installed: ($configInstalled == "yes")},
             vm: {dir: $vmDir, disk: $disk, diskExists: ($diskExists == "yes"), diskSource: $diskSource, installedLike: ($diskInstalledLike == "yes"), iso: $iso, isoExists: ($isoExists == "yes"), ramMb: ($ramMb|tonumber), cpus: ($cpus|tonumber), usbMode: $usbMode, graphicsProfile: $graphicsProfile, netModel: $netModel},
             libvirt: {domain: $libvirtDomain, uri: $libvirtUri, state: $libvirtState, disk: $libvirtDisk, preferred: ($libvirtDomain != ""), network:"default", networkState:$networkState, nicModel:$nicModel},

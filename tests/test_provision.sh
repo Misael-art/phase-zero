@@ -6,6 +6,15 @@ set -euo pipefail
 PZ_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$PZ_ROOT/linux/lib/common.sh"
 
+# common.sh derives PZ_STATE from XDG_STATE_HOME and ignores a PZ_STATE passed
+# in the environment. Cases below that only set PZ_STATE=... were therefore
+# running against the real ~/.local/state/phasezero: 956 plan files had piled
+# up there on one host, and a new case that called `finalize --latest`
+# activated a real 42 GB install. Everything in this suite gets a throwaway
+# state root unless a case sets its own.
+SUITE_STATE_ROOT="$(mktemp -d)"
+export XDG_STATE_HOME="$SUITE_STATE_ROOT"
+
 PASS=0 FAIL=0
 
 assert_eq() {
@@ -1459,6 +1468,61 @@ else
 fi
 
 echo ""
+echo "=== provision: a finished install that was never activated is found, not reinstalled ==="
+# Only the UI player called finalize. An install driven from the CLI ended as
+# 42 GB of working Windows in staging while status said "needsinstall".
+PEND_T="$(mktemp -d)"
+PEND_STATE="$PEND_T/xdg/phasezero"
+pend_op() {
+    # id state updatedAt [adoptedDisk]
+    local id="$1" dir="$PEND_STATE/operations/$1" vm="$PEND_STATE/windows-vm/vms/$1"
+    mkdir -p "$dir" "$vm"
+    printf 'snapshot\n' > "$vm/golden-clean.qcow2"
+    printf '%s\n' "$vm/golden-clean.qcow2" > "$dir/snapshot_path"
+    printf '%s\n' "$vm" > "$dir/vm_dir"
+    jq -n --arg id "$id" --arg state "$2" --arg ts "$3" --arg adopted "${4:-}" \
+        '{id:$id, state:$state, updatedAt:$ts} + (if $adopted == "" then {} else {adoptedDisk:$adopted} end)' \
+        > "$dir/operation.json"
+}
+pend_json() {
+    PZ_TEST_MODE=1 XDG_STATE_HOME="$PEND_T/xdg" bash "$PROVISION_SCRIPT" pending-finalize --json 2>/dev/null
+}
+
+assert_eq "no operations: nothing pending" "null" "$(pend_json | jq -c '.')"
+pend_op op-20260101-000000-1 failed 2026-01-01T00:00:00Z
+assert_eq "a failed install is not pending activation" "null" "$(pend_json | jq -c '.')"
+pend_op op-20260201-000000-2 completed 2026-02-01T00:00:00Z
+assert_eq "a completed, unadopted install is pending" "op-20260201-000000-2" "$(pend_json | jq -r '.operationId')"
+assert_eq "pending record carries when it completed" "2026-02-01T00:00:00Z" "$(pend_json | jq -r '.completedAt')"
+pend_op op-20260301-000000-3 completed 2026-03-01T00:00:00Z
+assert_eq "the newest completed install wins" "op-20260301-000000-3" "$(pend_json | jq -r '.operationId')"
+
+PEND_ADOPTED="$PEND_T/adopted.qcow2"
+printf 'disk\n' > "$PEND_ADOPTED"
+pend_op op-20260301-000000-3 completed 2026-03-01T00:00:00Z "$PEND_ADOPTED"
+assert_eq "an adopted install is no longer pending" "op-20260201-000000-2" "$(pend_json | jq -r '.operationId')"
+rm -f "$PEND_ADOPTED"
+assert_eq "adopted but the disk is gone: staging is the only copy, pending again" "op-20260301-000000-3" "$(pend_json | jq -r '.operationId')"
+
+rm -f "$PEND_STATE/windows-vm/vms/op-20260301-000000-3/golden-clean.qcow2" \
+      "$PEND_STATE/windows-vm/vms/op-20260201-000000-2/golden-clean.qcow2"
+assert_eq "without a verified snapshot there is nothing to activate" "null" "$(pend_json | jq -c '.')"
+pend_latest_rc=0
+PEND_LATEST_ERR="$(PZ_TEST_MODE=1 XDG_STATE_HOME="$PEND_T/xdg" bash "$PROVISION_SCRIPT" finalize --latest --json 2>&1)" || pend_latest_rc=$?
+assert_eq "finalize --latest with nothing pending fails" "1" "$pend_latest_rc"
+assert_contains "and says so" "$PEND_LATEST_ERR" "nenhuma instalação concluída"
+
+# status is what the page reads. With a pending install it must say so
+# instead of the generic "disk has no Windows".
+pend_op op-20260401-000000-4 completed 2026-04-01T00:00:00Z
+PEND_STATUS="$(XDG_STATE_HOME="$PEND_T/xdg" XDG_CONFIG_HOME="$PEND_T/config" HOME="$PEND_T/home" \
+    bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" status 2>/dev/null || echo '{}')"
+assert_eq "status exposes the pending install" "op-20260401-000000-4" "$(jq -r '.provision.pendingFinalize.operationId // ""' <<< "$PEND_STATUS")"
+assert_eq "status names it as awaiting activation" "1" "$(jq -r '[.health.findings[] | select(.id == "install-awaiting-activation" and .action == "windows.provision.finalize")] | length' <<< "$PEND_STATUS")"
+assert_eq "and drops the generic not-installed finding" "0" "$(jq -r '[.health.findings[] | select(.id == "guest-not-installed" or .id == "vm-not-configured")] | length' <<< "$PEND_STATUS")"
+rm -rf "$PEND_T"
+
+echo ""
 echo "=== memory: plan sizes from what is available and start refuses what cannot fit ==="
 # The plan used to size from MemTotal: 10374 MiB on a 14 GiB Deck with 2 GiB
 # available and the swap nearly full, with no warning. The launch path had
@@ -1472,7 +1536,7 @@ mem_host() {
         "$(( $1 * 1024 ))" "$(( $2 * 1024 ))" "$(( $3 * 1024 ))" > "$MEM_T/meminfo"
 }
 mem_plan() {
-    PZ_TEST_MODE=1 PZ_PREFLIGHT_JSON="$PREFLIGHT_PASS_FIXTURE" PZ_STATE="$MEM_T/state" \
+    PZ_TEST_MODE=1 PZ_PREFLIGHT_JSON="$PREFLIGHT_PASS_FIXTURE" XDG_STATE_HOME="$MEM_T/xdg" \
         PZ_WINDOWS_VM_PROFILE=desktop PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
         bash "$PROVISION_SCRIPT" plan --iso "$MEM_ISO" --json "$@" 2>/dev/null || echo "{}"
 }
@@ -1506,13 +1570,13 @@ MEM_START_ID="$(jq -r '.id' <<< "$MEM_START_PLAN")"
 MEM_START_TOKEN="$(jq -r '.confirmToken' <<< "$MEM_START_PLAN")"
 mem_host 14820 2100 1000
 mem_start_rc=0
-MEM_START_ERR="$(PZ_TEST_MODE=1 PZ_STATE="$MEM_T/state" PZ_WINDOWS_VM_PROFILE=desktop \
+MEM_START_ERR="$(PZ_TEST_MODE=1 XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE=desktop \
     PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
     bash "$PROVISION_SCRIPT" start --plan-id "$MEM_START_ID" --confirm "$MEM_START_TOKEN" --json 2>&1)" || mem_start_rc=$?
 assert_eq "start refuses a plan that no longer fits" "1" "$mem_start_rc"
 assert_contains "refusal says how much is missing" "$MEM_START_ERR" "memória insuficiente"
 assert_contains "refusal says what to do" "$MEM_START_ERR" "--ram"
-assert_eq "refused start creates no operation" "0" "$(find "$MEM_T/state/operations" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+assert_eq "refused start creates no operation" "0" "$(find "$MEM_T/xdg/phasezero/operations" -mindepth 1 -maxdepth 1 -name 'op-*' 2>/dev/null | wc -l)"
 
 # A dedicated GRUB boot has no desktop to protect: MemAvailable there is not
 # the constraint, and the sizing already kept its own reserve.
@@ -1527,6 +1591,8 @@ PZ_WINDOWS_VM_PROFILE=desktop PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
     windows_vm_memory_guard 12288' >/dev/null 2>&1 || mem_override_rc=$?
 assert_eq "explicit override lets an operator go ahead" "0" "$mem_override_rc"
 rm -rf "$MEM_T"
+
+rm -rf "$SUITE_STATE_ROOT"
 
 echo ""
 echo "=== results ==="

@@ -2946,19 +2946,96 @@ provision_remove() {
     fi
 }
 
+# The newest completed install that was never turned into the configured VM.
+#
+# finalize is what flattens the verified snapshot into
+# ~/VirtualMachines and points the config at it. Only the UI player called it,
+# after watching an install end. An install driven from the CLI, or one whose
+# player window was closed before the hour-long run finished, stayed in
+# staging: 42 GB of working Windows while status said "needsinstall" and the
+# page offered to install again.
+provision_pending_finalize_id() {
+    local base vm_dir op operation_file state removed adopted snapshot updated best="" best_updated=""
+    base="$(pz_staging_base)"
+    for vm_dir in "$base"/op-*; do
+        [ -d "$vm_dir" ] && [ ! -L "$vm_dir" ] || continue
+        op="$(basename -- "$vm_dir")"
+        case "$op" in */*|*..*|*[!A-Za-z0-9._-]*) continue ;; esac
+        operation_file="$OPERATIONS_DIR/$op/operation.json"
+        [ -f "$operation_file" ] && [ ! -L "$operation_file" ] || continue
+        state="$(jq -r '.state // ""' "$operation_file" 2>/dev/null || true)"
+        [ "$state" = "completed" ] || continue
+        removed="$(jq -r '.vmRemovedAt // ""' "$operation_file" 2>/dev/null || true)"
+        [ -z "$removed" ] || continue
+        adopted="$(jq -r '.adoptedDisk // ""' "$operation_file" 2>/dev/null || true)"
+        # Adopted and still there: done. Adopted but the disk is gone: the
+        # staging copy is the only Windows left, so it counts as pending.
+        if [ -n "$adopted" ] && [ -f "$adopted" ]; then
+            continue
+        fi
+        snapshot="$(cat "$OPERATIONS_DIR/$op/snapshot_path" 2>/dev/null || true)"
+        [ -n "$snapshot" ] && [ -f "$snapshot" ] || continue
+        updated="$(jq -r '.updatedAt // ""' "$operation_file" 2>/dev/null || true)"
+        if [ -z "$best" ] || [[ "$updated" > "$best_updated" ]]; then
+            best="$op"
+            best_updated="$updated"
+        fi
+    done
+    [ -n "$best" ] || return 1
+    printf '%s\n' "$best"
+}
+
+provision_pending_finalize() {
+    local json=0 op operation_file vm_dir
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json) json=1; shift ;;
+            *) pz_error "unknown pending-finalize option: $1"; return 1 ;;
+        esac
+    done
+    if ! op="$(provision_pending_finalize_id)"; then
+        if [ "$json" = "1" ]; then
+            printf 'null\n'
+        else
+            pz_info "nenhuma instalação concluída aguardando ativação"
+        fi
+        return 0
+    fi
+    operation_file="$OPERATIONS_DIR/$op/operation.json"
+    vm_dir="$(resolve_vm_staging_dir "$op" 2>/dev/null || true)"
+    if [ "$json" = "1" ]; then
+        jq -n \
+            --arg id "$op" \
+            --arg completedAt "$(jq -r '.updatedAt // ""' "$operation_file" 2>/dev/null || true)" \
+            --argjson running "$(if [ -n "$vm_dir" ] && operation_vm_running "$vm_dir"; then echo true; else echo false; fi)" \
+            --argjson allocatedBytes "$(if [ -n "$vm_dir" ]; then operation_allocated_bytes "$vm_dir"; else echo 0; fi)" \
+            '{operationId: $id, completedAt: $completedAt, running: $running, allocatedBytes: $allocatedBytes}'
+    else
+        pz_info "instalação concluída aguardando ativação: $op"
+        pz_info "ative com: pz windows-vm provision finalize --latest"
+    fi
+}
+
 provision_finalize() {
-    local operation_id="" target_dir="" json=0
+    local operation_id="" target_dir="" json=0 latest=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --operation-id) operation_id="${2:-}"; shift 2 ;;
             --operation-id=*) operation_id="${1#*=}"; shift ;;
             --target-dir) target_dir="${2:-}"; shift 2 ;;
             --target-dir=*) target_dir="${1#*=}"; shift ;;
+            --latest) latest=1; shift ;;
             --json) json=1; shift ;;
             *) pz_error "unknown finalize option: $1"; return 1 ;;
         esac
     done
-    [ -n "$operation_id" ] || { pz_error "--operation-id required"; return 1; }
+    if [ "$latest" = "1" ] && [ -z "$operation_id" ]; then
+        operation_id="$(provision_pending_finalize_id)" || {
+            pz_error "nenhuma instalação concluída aguardando ativação"
+            return 1
+        }
+    fi
+    [ -n "$operation_id" ] || { pz_error "--operation-id or --latest required"; return 1; }
 
     local op_dir="$OPERATIONS_DIR/$operation_id" operation_file="$OPERATIONS_DIR/$operation_id/operation.json"
     [ -f "$operation_file" ] || { pz_error "operation not found: $operation_id"; return 1; }
@@ -3040,6 +3117,14 @@ provision_finalize() {
     if [ -f "$vm_dir/OVMF_VARS.fd" ]; then
         cp --preserve=mode,timestamps "$vm_dir/OVMF_VARS.fd" "$target_dir/OVMF_VARS.fd"
         chmod 600 "$target_dir/OVMF_VARS.fd"
+    fi
+    # The guest was installed against this TPM. Without its state the adopted
+    # VM boots with a blank one: Windows sees a different machine, and
+    # anything sealed to the TPM during setup is lost. adopt points the config
+    # at $target_dir/tpm, so carry it across with the firmware variables.
+    if [ -d "$vm_dir/tpm" ] && [ ! -L "$vm_dir/tpm" ] && [ ! -e "$target_dir/tpm" ]; then
+        cp -a -- "$vm_dir/tpm" "$target_dir/tpm"
+        chmod 700 "$target_dir/tpm"
     fi
 
     local graphics ovmf_code net_model="virtio-net-pci"
@@ -3203,7 +3288,8 @@ Usage:
   provision plan --iso <windows.iso> [options] [--json]
   provision start --plan-id <id> --confirm <token> [--json]
   provision status --operation-id <id> [--json]
-  provision finalize --operation-id <id> [--target-dir PATH] [--json]
+  provision finalize (--operation-id <id>|--latest) [--target-dir PATH] [--json]
+  provision pending-finalize [--json]
   provision watch --operation-id <id>
   provision resume --operation-id <id>
   provision cancel --operation-id <id> [--remove-staging]
@@ -3245,6 +3331,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
         resume|recover) provision_resume "$@" ;;
         cancel|stop) provision_cancel "$@" ;;
         finalize|adopt) provision_finalize "$@" ;;
+        pending-finalize) provision_pending_finalize "$@" ;;
         shutdown) provision_shutdown "$@" ;;
         inventory|list) provision_inventory "$@" ;;
         remove|delete) provision_remove "$@" ;;
