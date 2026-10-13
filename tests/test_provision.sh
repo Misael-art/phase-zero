@@ -1459,6 +1459,76 @@ else
 fi
 
 echo ""
+echo "=== memory: plan sizes from what is available and start refuses what cannot fit ==="
+# The plan used to size from MemTotal: 10374 MiB on a 14 GiB Deck with 2 GiB
+# available and the swap nearly full, with no warning. The launch path had
+# already been fixed; this file kept a private copy of the old formula.
+MEM_T="$(mktemp -d)"
+MEM_ISO="$MEM_T/dummy.iso"
+dd if=/dev/urandom bs=1M count=2 of="$MEM_ISO" 2>/dev/null
+mem_host() {
+    # total available swap_free, in MiB
+    printf 'MemTotal: %s kB\nMemAvailable: %s kB\nSwapFree: %s kB\n' \
+        "$(( $1 * 1024 ))" "$(( $2 * 1024 ))" "$(( $3 * 1024 ))" > "$MEM_T/meminfo"
+}
+mem_plan() {
+    PZ_TEST_MODE=1 PZ_PREFLIGHT_JSON="$PREFLIGHT_PASS_FIXTURE" PZ_STATE="$MEM_T/state" \
+        PZ_WINDOWS_VM_PROFILE=desktop PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
+        bash "$PROVISION_SCRIPT" plan --iso "$MEM_ISO" --json "$@" 2>/dev/null || echo "{}"
+}
+
+mem_host 14820 12000 4000
+MEM_ROOMY="$(mem_plan)"
+assert_eq "roomy host: auto size leaves the desktop a reserve" "8192" "$(jq -r '.resources.ramMb' <<< "$MEM_ROOMY")"
+assert_eq "roomy host: plan says it fits" "fits" "$(jq -r '.resources.memory.fit' <<< "$MEM_ROOMY")"
+assert_eq "auto size is labelled auto" "auto" "$(jq -r '.resources.ramSource' <<< "$MEM_ROOMY")"
+assert_eq "roomy host: no memory warning" "0" "$(jq -r '[.warnings[] | select(test("MiB"))] | length' <<< "$MEM_ROOMY")"
+
+mem_host 14820 2100 1000
+MEM_BUSY="$(mem_plan)"
+assert_eq "busy host: auto size falls to the Windows 11 minimum, not 70% of total" "4096" "$(jq -r '.resources.ramMb' <<< "$MEM_BUSY")"
+assert_eq "busy host: minimum still exceeds what is free" "exceed" "$(jq -r '.resources.memory.fit' <<< "$MEM_BUSY")"
+assert_eq "busy host: plan records what was available" "2100" "$(jq -r '.resources.memory.availableMb' <<< "$MEM_BUSY")"
+assert_eq "busy host: the warning names the shortfall" "1" "$(jq -r '[.warnings[] | select(test("memória insuficiente"))] | length' <<< "$MEM_BUSY")"
+assert_eq "busy host: still a plan, not a blocker - the host may change before start" "0" "$(jq -r '.blockers | length' <<< "$MEM_BUSY")"
+
+mem_host 14820 3000 4000
+MEM_TIGHT="$(mem_plan --ram 6144)"
+assert_eq "explicit size is labelled explicit" "explicit" "$(jq -r '.resources.ramSource' <<< "$MEM_TIGHT")"
+assert_eq "covered by swap is tight, not refused" "tight" "$(jq -r '.resources.memory.fit' <<< "$MEM_TIGHT")"
+assert_eq "tight plan warns about swap" "1" "$(jq -r '[.warnings[] | select(test("swap"))] | length' <<< "$MEM_TIGHT")"
+
+# start re-reads the host: a plan written on a roomy host must not start on a
+# full one, and must not leave a lock or an operation behind when it refuses.
+mem_host 14820 12000 4000
+MEM_START_PLAN="$(mem_plan)"
+MEM_START_ID="$(jq -r '.id' <<< "$MEM_START_PLAN")"
+MEM_START_TOKEN="$(jq -r '.confirmToken' <<< "$MEM_START_PLAN")"
+mem_host 14820 2100 1000
+mem_start_rc=0
+MEM_START_ERR="$(PZ_TEST_MODE=1 PZ_STATE="$MEM_T/state" PZ_WINDOWS_VM_PROFILE=desktop \
+    PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
+    bash "$PROVISION_SCRIPT" start --plan-id "$MEM_START_ID" --confirm "$MEM_START_TOKEN" --json 2>&1)" || mem_start_rc=$?
+assert_eq "start refuses a plan that no longer fits" "1" "$mem_start_rc"
+assert_contains "refusal says how much is missing" "$MEM_START_ERR" "memória insuficiente"
+assert_contains "refusal says what to do" "$MEM_START_ERR" "--ram"
+assert_eq "refused start creates no operation" "0" "$(find "$MEM_T/state/operations" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+
+# A dedicated GRUB boot has no desktop to protect: MemAvailable there is not
+# the constraint, and the sizing already kept its own reserve.
+MEM_KIOSK_FIT="$(PZ_WINDOWS_VM_PROFILE=kiosk PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" bash -c '
+    . "'"$PZ_ROOT"'/linux/lib/common.sh"; . "'"$PZ_ROOT"'/linux/windows-vm/memory.sh"
+    windows_vm_memory_fit 12288')"
+assert_eq "kiosk boot is not gated on desktop headroom" "fits" "$MEM_KIOSK_FIT"
+mem_override_rc=0
+PZ_WINDOWS_VM_PROFILE=desktop PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
+    PZ_WINDOWS_VM_ALLOW_MEMORY_OVERCOMMIT=1 bash -c '
+    . "'"$PZ_ROOT"'/linux/lib/common.sh"; . "'"$PZ_ROOT"'/linux/windows-vm/memory.sh"
+    windows_vm_memory_guard 12288' >/dev/null 2>&1 || mem_override_rc=$?
+assert_eq "explicit override lets an operator go ahead" "0" "$mem_override_rc"
+rm -rf "$MEM_T"
+
+echo ""
 echo "=== results ==="
 echo "PASS: $PASS  FAIL: $FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

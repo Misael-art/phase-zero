@@ -410,65 +410,10 @@ target_user_can_rw() {
     [ -r "$path" ] && [ -w "$path" ]
 }
 
-# The VM is sized for one of two very different hosts, and a single figure
-# cannot serve both.
-#
-# Booted through the GRUB entry the host runs nothing but what carries the VM,
-# so anything not given to the guest is wasted. Launched over a live KDE session
-# the host is running the user's actual work, and sizing from MemTotal ignores
-# that: it asked for 10374 MB with 5 GB free and pushed the host into 8.6 GB of
-# swap during a Windows install.
-windows_vm_boot_mode() {
-    if [ "${PZ_WINDOWS_VM_PROFILE:-}" = "kiosk" ] || [ "${PZ_WINDOWS_VM_PROFILE:-}" = "desktop" ]; then
-        printf '%s' "$PZ_WINDOWS_VM_PROFILE"
-        return 0
-    fi
-    if grep -qw 'phasezero.windowsvm=1' /proc/cmdline 2>/dev/null; then
-        printf 'kiosk'
-    else
-        printf 'desktop'
-    fi
-}
-
-default_ram_mb() {
-    local total avail ram reserve mode floor
-    total="$(awk '/MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 8192)"
-    # MemAvailable is the kernel's own estimate of what can be handed out
-    # without swapping, reclaimable page cache included. MemFree alone would
-    # undercount badly on a warm desktop.
-    avail="$(awk '/MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 0)"
-    [ "$avail" -gt 0 ] 2>/dev/null || avail="$total"
-    # Windows 11 will not run below 4 GiB, so that is the floor whatever the
-    # host has left. Going under it produces a guest that boots into thrashing.
-    floor=4096
-    mode="$(windows_vm_boot_mode)"
-
-    if [ "$mode" = "kiosk" ]; then
-        # Kernel, systemd, SDDM, gamescope, virtiofsd and swtpm all live in this
-        # reserve. An OOM on the host side kills the VM outright, so it is not
-        # squeezed further.
-        reserve="${PZ_WINDOWS_VM_HOST_RESERVE_MB:-2048}"
-        ram=$(( total - reserve ))
-    else
-        # Leave the session responsive: take a share of what is actually free
-        # right now, never more than 70% of the machine.
-        reserve="${PZ_WINDOWS_VM_HOST_RESERVE_MB:-3072}"
-        ram=$(( avail - reserve ))
-        [ "$ram" -gt $(( total * 70 / 100 )) ] && ram=$(( total * 70 / 100 ))
-    fi
-
-    # Round down to a whole GiB: odd sizes gain nothing and make logs harder to
-    # compare between runs.
-    ram=$(( ram / 1024 * 1024 ))
-    if [ "$ram" -lt "$floor" ]; then
-        # Say it out loud rather than quietly handing the guest less than it
-        # needs: at this point the VM and the host cannot both be comfortable.
-        pz_warn "host has ${avail} MiB available; sizing the VM at the ${floor} MiB Windows 11 minimum anyway"
-        pz_warn "close applications or use --ram to choose deliberately"
-        ram="$floor"
-    fi
-    echo "$ram"
-}
+# RAM sizing and the "does it fit right now" check live in memory.sh so the
+# install plan and the launch cannot drift apart again.
+# shellcheck source=memory.sh
+source "$PZ_ROOT/linux/windows-vm/memory.sh"
 
 default_cpus() {
     local total cpus
@@ -2510,6 +2455,10 @@ launch_vm() {
         shell_join qemu-system-x86_64 "${QEMU_ARGS[@]}"
         return 0
     fi
+    # The configured figure is whatever was right when the VM was installed.
+    # Starting it into a host that cannot hold it ends with the OOM killer
+    # choosing between the VM and the desktop.
+    windows_vm_memory_guard "$RAM_MB" || return 1
     start_guest_touch_input_setup
     pz_info "Windows VM shares: \\\\10.0.2.4\\qemu (policy=$SHARE_POLICY)"
     if [ "$GRAPHICS_PROFILE" = "virtio-gl" ]; then

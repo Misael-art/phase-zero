@@ -4,16 +4,10 @@ set -euo pipefail
 PZ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$PZ_ROOT/linux/lib/common.sh"
 
-default_ram_mb() {
-    local total reserve ram
-    total="$(awk '/MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 8192)"
-    reserve=2048
-    ram=$(( total * 70 / 100 ))
-    [ "$ram" -gt $(( total - reserve )) ] && ram=$(( total - reserve ))
-    [ "$ram" -lt 4096 ] && ram=$(( total / 2 ))
-    [ "$ram" -lt 2048 ] && ram=2048
-    echo "$ram"
-}
+# default_ram_mb, windows_vm_memory_fit and windows_vm_memory_guard: shared with
+# the launch path. This file used to carry its own MemTotal-based copy.
+# shellcheck source=memory.sh
+source "$PZ_ROOT/linux/windows-vm/memory.sh"
 
 default_cpus() {
     local total cpus
@@ -237,9 +231,13 @@ provision_plan() {
         iso_sha="$(sha256sum "$iso" | cut -d' ' -f1)"
     fi
 
-    local json_ram json_cpus
+    local json_ram json_cpus ram_source="auto" memory_fit mem_available_mb swap_free_mb
+    [ -n "$ram" ] && ram_source="explicit"
     json_ram="${ram:-$(default_ram_mb)}"
     json_cpus="${cpus:-$(default_cpus)}"
+    memory_fit="$(windows_vm_memory_fit "$json_ram")"
+    mem_available_mb="$(windows_vm_meminfo_mb MemAvailable)"
+    swap_free_mb="$(windows_vm_meminfo_mb SwapFree)"
 
     local plan_id confirm_token timestamp
     plan_id="plan-$(date +%Y%m%d-%H%M%S)-${RANDOM}"
@@ -306,6 +304,17 @@ provision_plan() {
         [ "$virtio_outdated" = "true" ] && warnings="$(echo "$warnings" | jq '. + ["virtio-win outdated — latest may improve driver compatibility"]')"
     fi
 
+    # Independent of the preflight status: a host can pass every check and
+    # still have no room for the guest at this moment.
+    case "$memory_fit" in
+        tight)
+            warnings="$(echo "$warnings" | jq --arg m "a VM pede ${json_ram} MiB e o host tem ${mem_available_mb} MiB disponíveis agora; o resto sai da swap e a sessão vai ficar lenta" '. + [$m]')"
+            ;;
+        exceed)
+            warnings="$(echo "$warnings" | jq --arg m "memória insuficiente agora: a VM pede ${json_ram} MiB, o host tem ${mem_available_mb} MiB disponíveis e ${swap_free_mb} MiB de swap livre; a instalação será recusada se nada mudar — feche aplicativos ou reduza --ram" '. + [$m]')"
+            ;;
+    esac
+
     local destructive_ops="[]"
     if [ "$appx_deny" = "default" ]; then
         destructive_ops="[\"remove consumer AppX packages\"]"
@@ -325,6 +334,10 @@ provision_plan() {
         --argjson preflight "$preflight_json" \
         --argjson warnings "$warnings" \
         --arg ram "$json_ram" \
+        --arg ramSource "$ram_source" \
+        --arg memoryFit "$memory_fit" \
+        --argjson memAvailableMb "$mem_available_mb" \
+        --argjson swapFreeMb "$swap_free_mb" \
         --arg cpus "$json_cpus" \
         --arg diskSize "$disk_size" \
         --argjson imageIndex "$image_index" \
@@ -346,6 +359,8 @@ provision_plan() {
             iso: {path: $iso, sha256: $isoSha256, arch: $isoArch, uefi: $isoUefi, valid: $isoValid},
             resources: {
                 ramMb: ($ram|tonumber),
+                ramSource: $ramSource,
+                memory: {fit: $memoryFit, availableMb: $memAvailableMb, swapFreeMb: $swapFreeMb},
                 cpus: ($cpus|tonumber),
                 diskSize: $diskSize
             },
@@ -415,6 +430,12 @@ provision_start() {
     local blockers
     blockers="$(jq -r '.blockers | length' "$plan_file")"
     [ "$blockers" = "0" ] || { pz_error "plan has unresolved blockers"; return 1; }
+
+    # The plan recorded what the host had when it was written. What matters is
+    # what it has now: refuse before taking the lock or creating any state.
+    local plan_ram
+    plan_ram="$(jq -r '.resources.ramMb // 0' "$plan_file" 2>/dev/null || echo 0)"
+    windows_vm_memory_guard "$plan_ram" || return 1
 
     mkdir -p "$OPERATIONS_DIR"
     local operation_id="op-$(date +%Y%m%d-%H%M%S)-${RANDOM}"

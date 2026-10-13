@@ -226,16 +226,26 @@ echo 'unattended install contracts ok'
 # but the VM, so unused RAM is wasted; over a live KDE session the same figure
 # pushed this machine into 8.6 GiB of swap because it sized from MemTotal and
 # ignored what was actually in use.
-VM_SH="$ROOT/linux/windows-vm/windows-vm.sh"
+# The sizing has one home. windows-vm.sh and provision.sh both source it; a
+# private copy in either is how the install plan came to ask for 10 GiB on a
+# host with 2 GiB available.
+VM_SH="$ROOT/linux/windows-vm/memory.sh"
+for consumer in windows-vm.sh provision.sh; do
+    grep -Fq 'source "$PZ_ROOT/linux/windows-vm/memory.sh"' "$ROOT/linux/windows-vm/$consumer"
+    if grep -q '^default_ram_mb()' "$ROOT/linux/windows-vm/$consumer"; then
+        echo "$consumer still defines its own default_ram_mb" >&2
+        exit 1
+    fi
+done
 grep -Fq 'windows_vm_boot_mode()' "$VM_SH"
-grep -Fq 'MemAvailable:' "$VM_SH"
+grep -Fq 'windows_vm_meminfo_mb MemAvailable' "$VM_SH"
 # The GRUB marker is what distinguishes the two hosts.
 grep -Fq 'phasezero.windowsvm=1' "$VM_SH"
 
 ram_for() {
     PZ_WINDOWS_VM_PROFILE="$1" bash -c '
         . '"$ROOT"'/linux/lib/common.sh 2>/dev/null
-        eval "$(sed -n "/^windows_vm_boot_mode()/,/^}/p;/^default_ram_mb()/,/^}/p" '"$VM_SH"')"
+        . '"$VM_SH"'
         default_ram_mb' 2>/dev/null
 }
 kiosk_ram="$(ram_for kiosk)"
