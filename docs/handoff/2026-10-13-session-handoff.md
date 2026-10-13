@@ -25,6 +25,21 @@ na hora.
 
 Mergeados nesta sessão: #110, #111, #112. Fechado: #96 (superado pelo #100).
 
+## Pacote instalado no host (2026-10-13 06:53)
+
+`phasezero-control-center 1.22.5-1` foi instalado com `phasezero-admin pacman -U`
+a pedido do operador, para ele validar o trabalho desta sessão. **Não é a
+release publicada v1.22.5**: foi gerado da branch local
+`integration/validate-20261013` (`e02a9b4`) = `main` (`fa91c09`) + #113 + #114
+(até `6a99db8`) + #115. O pacote está em
+`~/.cache/pz-validate-20261013/`. Antes era `1.22.4-1`.
+
+- O hook pós-transação ressincronizou o runtime de boot do Windows VM; `pz windows-vm status` passou a `ok`, `readyToLaunch: true`.
+- Com o pacote instalado, o gravador de dock pode ser rearmado sem depender do merge do #113:
+  `systemd-run --user --unit=phasezero-dock-record pz steamdeck dock-record watch`
+- O #114 recebeu mais um commit (`6a99db8`, três guardas reescritas para o shellcheck 0.9). CI dessa rodada não conferido.
+- A branch `integration/validate-20261013` é só local e descartável; não abrir PR dela.
+
 ## Windows VM — o que foi validado e o que mudou no host
 
 ### Mudanças reais no host (não estão no git)
