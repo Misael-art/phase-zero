@@ -5,6 +5,8 @@ from .profiles import ProfilesPage
 from .homelab import HomelabPage
 from .emulation import EmulationPage
 from .ai_proxies import AiProxiesPage
+from .ai_dev import AiDevPage
+from .ai_routing import AiRoutingPage
 from .tuning import TuningPage
 from .overview import OverviewPage
 from .results import ResultsPage
@@ -14,5 +16,5 @@ __all__ = [
     "DashboardPage", "ProfilesPage",
     "HomelabPage",
     "EmulationPage",
-    "AiProxiesPage", "TuningPage", "OverviewPage", "ResultsPage",
+    "AiProxiesPage", "AiDevPage", "AiRoutingPage", "TuningPage", "OverviewPage", "ResultsPage",
 ]

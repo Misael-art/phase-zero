@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 from . import image_registry as reg
 from .models import ActionSpec
 from .provision_player import ProvisionPlayerWindow
-from .widgets import SectionHeader
+from .widgets import SectionHeader, fit_to_screen
 from .windows_install_dialog import completed_image_indices
 
 
@@ -189,7 +189,7 @@ class ImageManagerDialog(QDialog):
         self.setAutoFillBackground(True)
         self.setWindowTitle("Gerenciar imagens e VMs Windows")
         self.setWindowModality(Qt.WindowModal)
-        self.setMinimumSize(780, 540)
+        fit_to_screen(self, 780, 540)
 
         self._root = Path(root)
         self._runner = runner
@@ -419,7 +419,7 @@ class ImageManagerDialog(QDialog):
         )
 
     def _refresh_list(self) -> None:
-        self._install_indices = completed_image_indices(self._operations_dir)
+        self._install_indices = set()
         images = reg.list_images(self._state_arg())
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
@@ -459,6 +459,9 @@ class ImageManagerDialog(QDialog):
             self._set_actions_enabled(False)
             return
         self.details_stack.setCurrentIndex(1)
+        self._install_indices = completed_image_indices(
+            self._operations_dir, iso_sha256=str(entry.get("sha256") or "")
+        )
         label = str(entry.get("label") or Path(str(entry.get("path") or "ISO")).name or "ISO")
         self.title_label.setText(label)
         path_text = str(entry.get("path") or "")
@@ -626,14 +629,12 @@ class ImageManagerDialog(QDialog):
             self._vm_entries = [entry for entry in (entries or []) if isinstance(entry, dict)]
             count = len(self._vm_entries)
             total = sum(int(entry.get("allocatedBytes") or 0) for entry in self._vm_entries)
-            self.vms_button.setText(f"VMs instaladas · {count}")
+            self.vms_button.setText(f"Instalações Windows · {count}")
             self.vms_button.setEnabled(count > 0 and "windows.vm.remove" in self._by_id)
             if count:
-                self.vms_button.setToolTip(
-                    f"{count} instalação(ões), ocupando {_human_bytes(total)}"
-                )
+                self.vms_button.setToolTip(f"{count} instalação(ões), incluindo parciais, ocupando {_human_bytes(total)}")
             else:
-                self.vms_button.setToolTip("Nenhuma instalação concluída ocupa espaço")
+                self.vms_button.setToolTip("Nenhum arquivo de instalação Windows ocupa o staging do PhaseZero")
             self._update_play_enabled()
 
     def _on_read_failed(self, request_id: str, message: str) -> None:
@@ -642,7 +643,7 @@ class ImageManagerDialog(QDialog):
             return
         if request_id == "vm-inventory":
             self._vm_entries = []
-            self.vms_button.setText("VMs instaladas · indisponível")
+            self.vms_button.setText("Instalações Windows · indisponível")
             self.vms_button.setEnabled(False)
             self.vms_button.setToolTip(message)
             self._update_play_enabled()
@@ -805,21 +806,26 @@ class ImageManagerDialog(QDialog):
             return
         dialog = QDialog(self)
         dialog.setObjectName("windowsVmInventoryDialog")
-        dialog.setWindowTitle("VMs instaladas")
-        dialog.setMinimumSize(680, 430)
+        dialog.setWindowTitle("Instalações Windows")
+        fit_to_screen(dialog, 780, 540)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
         layout.addWidget(SectionHeader(
-            "VMs instaladas",
-            "Escolha uma instalação. O PhaseZero confirma caminho, uso e tamanho antes de remover.",
+            "Instalações Windows",
+            "Concluídas e interrompidas aparecem aqui. Escolha uma para conferir espaço e remover os arquivos.",
         ))
         vm_list = QListWidget()
         vm_list.setObjectName("windowsVmInventoryList")
         for entry in self._vm_entries:
             index = int(entry.get("imageIndex") or 0)
             edition = f"Edição {index}" if index else "Edição não identificada"
-            status = "Em execução" if entry.get("running") else "Desligada"
+            state = str(entry.get("state") or "completed")
+            status = "Em execução" if entry.get("running") else {
+                "interrupted": "Interrompida · pode retomar",
+                "failed": "Falhou · arquivos preservados",
+                "cancelled": "Cancelada · arquivos preservados",
+            }.get(state, "Concluída · desligada")
             item = QListWidgetItem(
                 f"Windows 11 · {edition}  —  {_human_bytes(entry.get('allocatedBytes'))}  ·  {status}"
             )
@@ -833,6 +839,9 @@ class ImageManagerDialog(QDialog):
         layout.addWidget(details)
 
         buttons = QHBoxLayout()
+        resume = QPushButton("Retomar instalação")
+        resume.setObjectName("primaryButton")
+        resume.setMinimumHeight(44)
         trash = QPushButton("Mover para a lixeira")
         trash.setObjectName("secondaryButton")
         trash.setMinimumHeight(44)
@@ -841,6 +850,7 @@ class ImageManagerDialog(QDialog):
         purge.setMinimumHeight(44)
         close = QPushButton("Cancelar")
         close.setMinimumHeight(44)
+        buttons.addWidget(resume)
         buttons.addWidget(trash)
         buttons.addWidget(purge)
         buttons.addStretch()
@@ -860,15 +870,21 @@ class ImageManagerDialog(QDialog):
                 purge.setEnabled(False)
                 return
             running = bool(entry.get("running"))
+            recoverable = entry.get("state") in {"interrupted", "failed", "cancelled"}
             path_text = str(entry.get("vmDir") or "")
             details.setText(
                 f"Espaço ocupado: {_human_bytes(entry.get('allocatedBytes'))}\n"
                 f"Criada em: {entry.get('createdAt') or '—'}\n"
                 f"Local: {path_text}\n\n"
-                "Lixeira permite recuperação, mas libera espaço somente após ser esvaziada. "
+                + ("Instalação parcial preservada. Retome pelo botão acima ou remova os arquivos desta operação.\n\n"
+                   if entry.get("state") in {"interrupted", "failed", "cancelled"} else "")
+                + "Lixeira permite recuperação, mas libera espaço somente após ser esvaziada. "
                 "Liberação imediata é permanente."
             )
+            resume.setVisible(recoverable)
+            resume.setEnabled(recoverable and not running and "windows.provision.resume" in self._by_id)
             trash.setEnabled(not running)
+            trash.setText("Remover instalação parcial" if recoverable else "Mover VM para a lixeira")
             purge.setEnabled(not running)
 
         def choose(mode: str) -> None:
@@ -891,6 +907,12 @@ class ImageManagerDialog(QDialog):
         vm_list.currentRowChanged.connect(lambda _row: update_details())
         trash.clicked.connect(lambda: choose("trash"))
         purge.clicked.connect(lambda: choose("purge"))
+        def resume_selected() -> None:
+            self._prepare_vm_resume(selected())
+            if self._pending_action is not None:
+                dialog.accept()
+
+        resume.clicked.connect(resume_selected)
         close.clicked.connect(dialog.reject)
         update_details()
         dialog.exec()
@@ -916,13 +938,29 @@ class ImageManagerDialog(QDialog):
         execute.extend(("--yes", "--json"))
         self._pending_action = replace(
             base,
-            title=("Liberar espaço da VM" if purge else "Mover VM para a lixeira"),
+            title=("Liberar espaço da instalação" if purge else
+                   "Remover instalação parcial" if entry.get("state") != "completed" else
+                   "Mover VM para a lixeira"),
             description=(
                 f"Remove a instalação selecionada e libera {_human_bytes(entry.get('allocatedBytes'))}."
             ),
             args=tuple(execute),
             preview_args=tuple(preview),
         )
+
+    def _prepare_vm_resume(self, entry: dict | None) -> None:
+        base = self._by_id.get("windows.provision.resume")
+        operation_id = str((entry or {}).get("id") or "")
+        if base is None or not operation_id:
+            return
+        self._pending_action = replace(
+            base,
+            title="Retomar instalação interrompida",
+            description="Continua do último checkpoint. Arquivos parciais serão preservados.",
+            args=("windows-vm", "provision", "resume", "--operation-id", operation_id),
+            preview_args=("windows-vm", "provision", "status", "--operation-id", operation_id, "--json"),
+        )
+        self.accept()
 
     def _play(self) -> None:
         entry = self._current

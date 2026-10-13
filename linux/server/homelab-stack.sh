@@ -12,9 +12,12 @@ source "$PZ_ROOT/linux/lib/common.sh"
 COMPOSE_DIR="${PZ_HOMELAB_COMPOSE_DIR:-$PZ_ROOT/assets/home-server}"
 CORE_FILE="$COMPOSE_DIR/docker-compose.homelab.yml"
 EXTRAS_FILE="$COMPOSE_DIR/docker-compose.extras.yml"
+APPS_CATALOG="${PZ_HOMELAB_APPS_CATALOG:-$COMPOSE_DIR/apps/catalog.json}"
 PROJECT="${PZ_HOMELAB_PROJECT:-phasezero-homelab}"
 HOMELAB_STATE="${PZ_HOMELAB_STATE:-$PZ_STATE/homelab}"
+PINS_ENV="${PZ_HOMELAB_IMAGE_PINS:-$HOMELAB_STATE/image-pins.env}"
 ENV_FILE="${PZ_HOMELAB_ENV_FILE:-$HOMELAB_STATE/.env}"
+ENABLED_FILE="${PZ_HOMELAB_APPS_ENABLED:-$HOMELAB_STATE/apps.enabled.json}"
 BACKUP_ROOT="${PZ_HOMELAB_BACKUP_ROOT:-$HOMELAB_STATE/backups}"
 PZ_HOMELAB_BACKUP_SCHEMA="2"
 
@@ -24,14 +27,17 @@ shift 2>/dev/null || true
 WITH_EXTRAS=0
 JSON_OUTPUT=0
 YES=0
+CONFIRM_FILE=""
 FOLLOW=0
 ACCESS_MODE="${PZ_HOMELAB_ACCESS_MODE:-local}"
 HOMELAB_PROFILE="${PZ_HOMELAB_PROFILE:-}"
+ALLOW_EMPTY=0
 APP=""
 DEST=""
 SOURCE=""
 VERIFY_MODE=0
 PLAN=0
+PREPARE_APPS=()
 
 usage() {
     cat <<EOF
@@ -39,13 +45,15 @@ Usage:
   homelab-stack.sh status [--json] [--extras] [--access local|tailscale|lan]
   homelab-stack.sh plan [--json] [--extras] [--access local|tailscale|lan]
   homelab-stack.sh up|down|restart [--extras] [--access local|tailscale|lan] [--profile <key>]
+  homelab-stack.sh reconcile [--access local|tailscale|lan]
   homelab-stack.sh open <app> [--access local|tailscale|lan]
   homelab-stack.sh logs <app> [--follow]
   homelab-stack.sh backup [--extras] [--dest PATH] [--dry-run]
   homelab-stack.sh backup verify --source PATH
-  homelab-stack.sh restore --source PATH [--plan] [--yes] [--dry-run]
+  homelab-stack.sh restore --source PATH [--plan] [--yes] [--confirm-file PATH] [--dry-run]
   homelab-stack.sh update [--extras] [--access local|tailscale|lan] [--dry-run]
   homelab-stack.sh repair [--extras] [--access local|tailscale|lan]
+  homelab-stack.sh prepare [--app KEY]... [--access local|tailscale|lan] [--dry-run]
   homelab-stack.sh tailscale
 
 Apps: portainer jellyfin syncthing vaultwarden uptime-kuma nextcloud grafana prometheus paperless n8n
@@ -57,6 +65,12 @@ while [ "$#" -gt 0 ]; do
         --extras) WITH_EXTRAS=1 ;;
         --json) JSON_OUTPUT=1 ;;
         --yes|-y) YES=1 ;;
+        --confirm-file)
+            [ "${2:-}" ] || { pz_error "--confirm-file requires value"; exit 2; }
+            CONFIRM_FILE="$2"
+            shift
+            ;;
+        --confirm-file=*) CONFIRM_FILE="${1#*=}" ;;
         --plan) PLAN=1 ;;
         --follow|-f) FOLLOW=1 ;;
         --dry-run|-n) PZ_DRY_RUN=1 ;;
@@ -73,10 +87,16 @@ while [ "$#" -gt 0 ]; do
             ;;
         --profile=*) HOMELAB_PROFILE="${1#--profile=}" ;;
         --dest)
-            [ "${2:-}" ] || { pz_error "--dest requires path"; exit 2; }
+            [ "${2:-}" ] || { pz_error "--dest requires value"; exit 2; }
             DEST="$2"
             shift
             ;;
+        --app)
+            [ "${2:-}" ] || { pz_error "--app requires value"; exit 2; }
+            PREPARE_APPS+=("$2")
+            shift
+            ;;
+        --app=*) PREPARE_APPS+=("${1#--app=}") ;;
         --source)
             [ "${2:-}" ] || { pz_error "--source requires path"; exit 2; }
             SOURCE="$2"
@@ -104,6 +124,8 @@ while [ "$#" -gt 0 ]; do
                 backup)
                     if [ "$1" = "verify" ]; then
                         VERIFY_MODE=1
+                    elif [ "$1" = "--allow-empty" ] || [ "$1" = "allow-empty" ]; then
+                        ALLOW_EMPTY=1
                     else
                         pz_error "unexpected argument: $1"
                         exit 2
@@ -133,6 +155,7 @@ docker_cli() {
 
 compose_args() {
     [ -f "$ENV_FILE" ] && printf '%s\0' --env-file "$ENV_FILE"
+    [ -f "$PINS_ENV" ] && printf '%s\0' --env-file "$PINS_ENV"
     printf '%s\0' -p "$PROJECT" -f "$CORE_FILE"
     [ "$WITH_EXTRAS" = "1" ] && [ -f "$EXTRAS_FILE" ] && printf '%s\0' -f "$EXTRAS_FILE"
 }
@@ -285,40 +308,134 @@ ensure_tailscale() {
     fi
 }
 
+HOMELAB_APPS_CATALOG="${PZ_HOMELAB_APPS_CATALOG:-$COMPOSE_DIR/apps/catalog.json}"
+
 app_rows() {
-    cat <<'EOF'
-jellyfin|Jellyfin|jellyfin|phasezero-jellyfin|core|8096|public|false|jellyfin_config jellyfin_cache
-syncthing|Syncthing|syncthing|phasezero-syncthing|core|8384|admin|true|syncthing_data
-vaultwarden|Vaultwarden|vaultwarden|phasezero-vaultwarden|core|8222|admin|true|vaultwarden_data
-uptime-kuma|Uptime Kuma|uptime-kuma|phasezero-uptime-kuma|core|3001|admin|true|uptimekuma_data
-portainer|Portainer|portainer|phasezero-portainer|extras|9000|admin|true|portainer_data
-nextcloud|Nextcloud|nextcloud|phasezero-nextcloud|extras|8080|admin|true|nextcloud_db nextcloud_data
-grafana|Grafana|grafana|phasezero-grafana|extras|3000|admin|true|grafana_data
-prometheus|Prometheus|prometheus|phasezero-prometheus|extras|9090|admin|true|prometheus_data
-node-exporter|Node Exporter|node-exporter|phasezero-node-exporter|extras|9100|admin|true|
-paperless|Paperless|paperless|phasezero-paperless|extras|8010|admin|true|paperless_data paperless_media
-n8n|n8n|n8n|phasezero-n8n|extras|5678|admin|true|n8n_data
-EOF
+    jq -r '
+        .apps[] | select(.listInStatus == true)
+        | [
+            .key, .title, .service, .container, .layer,
+            (.port | tostring), .bindKind,
+            (if .sensitive then "true" else "false" end),
+            ((.volumes // []) | join(" "))
+          ] | join("|")
+    ' "$HOMELAB_APPS_CATALOG"
 }
 
 secret_rows() {
-    cat <<'EOF'
-VW_ADMIN_TOKEN|vaultwarden|core
-NEXTCLOUD_DB_ROOT_PASSWORD|nextcloud-db|extras
-NEXTCLOUD_DB_PASSWORD|nextcloud|extras
-GRAFANA_ADMIN_PASSWORD|grafana|extras
-PAPERLESS_SECRET_KEY|paperless|extras
-N8N_ENCRYPTION_KEY|n8n|extras
-EOF
+    jq -r '
+        .apps[] | select((.secrets // []) | length > 0) as $a
+        | $a.secrets[] | "\(.)|\($a.service)|\($a.layer)"
+    ' "$HOMELAB_APPS_CATALOG"
 }
 
 all_volumes() {
+    # PZ-AUD-012: when the curated registry exists, back up exactly the
+    # volumes in use (enabled set); an explicit --extras keeps covering
+    # the extras layer as the operator requested.
+    if [ -f "$ENABLED_FILE" ] && [ -f "$APPS_CATALOG" ]; then
+        local keys
+        keys="$(enabled_keys)" || return 1
+        {
+            jq -r --argjson en "$keys" '
+                .apps[] | select(.key as $k | ($en | index($k) != null))
+                | (.volumes // [])[]
+            ' "$APPS_CATALOG" 2>/dev/null
+            if [ "$WITH_EXTRAS" = "1" ]; then
+                jq -r '.apps[] | select(.layer == "extras") | (.volumes // [])[]' \
+                    "$APPS_CATALOG" 2>/dev/null
+            fi
+        } | sort -u
+        return 0
+    fi
     app_rows | awk -F'|' -v extras="$WITH_EXTRAS" '
         $5 == "core" || extras == "1" {
             n = split($9, vols, " ")
             for (i = 1; i <= n; i++) if (vols[i] != "") print vols[i]
         }
     ' | sort -u
+}
+
+enabled_keys() {
+    # Desired set from the curated registry; errors when corrupt so the
+    # caller never converges a guessed set.
+    local raw
+    raw="$(cat "$ENABLED_FILE" 2>/dev/null || true)"
+    if ! jq -e '.schemaVersion == 1 and (.enabled | type == "array")' <<< "$raw" >/dev/null 2>&1; then
+        pz_error "enabled-apps registry corrupt: $ENABLED_FILE"
+        return 1
+    fi
+    jq -c '.enabled' <<< "$raw"
+}
+
+enabled_keys_with_deps() {
+    local keys
+    keys="$(enabled_keys)" || return 1
+    jq -n -c --argjson en "$keys" --slurpfile cat "$APPS_CATALOG" '
+        ($cat[0].apps) as $apps
+        | ([$apps[] | select(.key as $k | ($en | index($k) != null))
+            | ((.dependsOn // [])[]?), (.key)] | unique)
+        | map(select(. as $k | ($apps | map(.key) | index($k) != null)))
+    '
+}
+
+reconcile_files_for_keys() {
+    local keys="$1"
+    jq -r --argjson en "$keys" '
+        .apps[] | select(.key as $k | ($en | index($k) != null)) | .composeFile
+    ' "$APPS_CATALOG" 2>/dev/null | sort -u | while IFS= read -r f; do
+        [ -n "$f" ] && [ "$f" != "null" ] && printf '%s/%s\n' "$COMPOSE_DIR" "$f"
+    done
+}
+
+reconcile_services_for_keys() {
+    local keys="$1"
+    jq -r --argjson en "$keys" '
+        .apps[] | select(.key as $k | ($en | index($k) != null)) | (.services // [])[]
+    ' "$APPS_CATALOG" 2>/dev/null | sort -u
+}
+
+cmd_reconcile() {
+    # PZ-AUD-012: one reconciler for boot/restart/update/backup. Desired =
+    # curated registry; without a registry fall back to legacy layer up.
+    require_docker || return 1
+    if [ ! -f "$ENABLED_FILE" ]; then
+        pz_info "no curated registry; reconciling via legacy layer up"
+        cmd_up
+        return $?
+    fi
+    local keys files services
+    keys="$(enabled_keys_with_deps)" || return 1
+    if [ "$(jq -r 'length' <<< "$keys")" = "0" ]; then
+        jq -n --arg project "$PROJECT" \
+            '{action:"reconcile", ok:true, project:$project, desired:[], started:[], note:"registry empty; nothing to start (use down to stop running services)"}'
+        return 0
+    fi
+    if [ "$ACCESS_MODE" = "tailscale" ] && ! tailscale_authenticated; then
+        pz_error "tailscale access requested but Tailscale is logged out; run: pz server homelab tailscale"
+        return 1
+    fi
+    if [ "${PZ_DRY_RUN:-0}" = "1" ]; then
+        jq -n --argjson desired "$keys" \
+            '{action:"reconcile", dryRun:true, desired:$desired}'
+        return 0
+    fi
+    mapfile -t files < <(reconcile_files_for_keys "$keys")
+    mapfile -t services < <(reconcile_services_for_keys "$keys")
+    [ "${#files[@]}" -gt 0 ] || { pz_error "no compose modules for enabled set"; return 1; }
+    ensure_env_file "$ACCESS_MODE"
+    local -a args=()
+    [ -f "$ENV_FILE" ] && args+=(--env-file "$ENV_FILE")
+    [ -f "$PINS_ENV" ] && args+=(--env-file "$PINS_ENV")
+    args+=(-p "$PROJECT")
+    local f
+    for f in "${files[@]}"; do args+=(-f "$f"); done
+    docker_cli "${args[@]}" config --services >/dev/null || { pz_error "compose config failed for enabled set"; return 1; }
+    docker_cli "${args[@]}" up -d "${services[@]}" || { pz_error "reconcile up failed for enabled set"; return 1; }
+    local started_json
+    started_json="$(printf '%s\n' "${services[@]}" | jq -R . | jq -cs .)"
+    jq -n --arg project "$PROJECT" --argjson desired "$keys" --argjson started "$started_json" \
+        '{action:"reconcile", ok:true, project:$project, desired:$desired, started:$started}'
 }
 
 app_info() {
@@ -344,7 +461,9 @@ app_bind_kind() {
 
 running_containers_json() {
     if docker_reachable; then
-        docker ps --filter "name=phasezero-" --format '{{.Names}}' 2>/dev/null | jq -R . | jq -cs .
+        # PZ-AUD-011: scope discovery to this compose project; a second
+        # project on the same daemon must never leak into our status.
+        docker ps --filter "label=com.docker.compose.project=$PROJECT" --filter "name=phasezero-" --format '{{.Names}}' 2>/dev/null | jq -R . | jq -cs .
     else
         echo '[]'
     fi
@@ -356,6 +475,39 @@ services_json() {
     else
         echo '[]'
     fi
+}
+
+profile_definition_json() {
+    local registry="$COMPOSE_DIR/homelab-profiles.json"
+    [ -n "$HOMELAB_PROFILE" ] || { echo 'null'; return 0; }
+    [ -f "$registry" ] || { echo 'null'; return 0; }
+    jq -c --arg profile "$HOMELAB_PROFILE" '[.profiles[] | select(.key == $profile)] | .[0] // null' \
+        "$registry" 2>/dev/null || echo 'null'
+}
+
+profile_coverage_json() {
+    local profile services
+    profile="$(profile_definition_json)"
+    services="$(services_json)"
+    if [ "$profile" = null ]; then
+        jq -cn --arg requested "$HOMELAB_PROFILE" \
+            '{requested:$requested,known:($requested==""),complete:($requested==""),composeManaged:[],unmanaged:[]}'
+        return 0
+    fi
+    jq -cn --argjson profile "$profile" --argjson compose "$services" \
+        '{requested:$profile.key,known:true,
+          maturity:($profile.maturity // "preview"),
+          installable:($profile.installable // false),
+          installNote:($profile.installNote // "no install recipe yet"),
+          complete:(([$profile.services[] as $service | select(($compose|index($service)) == null) | $service]|length)==0),
+          composeManaged:[$profile.services[] as $service | select(($compose|index($service)) != null) | $service],
+          unmanaged:[$profile.services[] as $service | select(($compose|index($service)) == null) | $service],
+          reason:"profile registry is declarative; homelab-stack may start only services present in rendered Compose"}'
+}
+
+profile_budget_json() {
+    [ -n "$HOMELAB_PROFILE" ] || { echo 'null'; return 0; }
+    bash "$PZ_ROOT/linux/server/homelab-governor.sh" budget "$HOMELAB_PROFILE" 2>/dev/null || echo 'null'
 }
 
 secrets_json() {
@@ -373,7 +525,7 @@ secrets_json() {
 }
 
 apps_json() {
-    local effective admin_bind public_bind reason host admin_host public_host running names_json rows=()
+    local effective admin_bind public_bind reason host names_json rows=()
     IFS='|' read -r effective admin_bind public_bind reason < <(access_bind_plan "$ACCESS_MODE")
     IFS='|' read -r host _ _ < <(access_host_for_urls "$effective" "$admin_bind" "$public_bind")
     names_json="$(running_containers_json)"
@@ -394,7 +546,7 @@ apps_json() {
 }
 
 blockers_json() {
-    local blockers=()
+    local blockers=() coverage unmanaged
     [ -f "$CORE_FILE" ] || blockers+=("compose core missing: $CORE_FILE")
     [ "$WITH_EXTRAS" = "0" ] || [ -f "$EXTRAS_FILE" ] || blockers+=("compose extras missing: $EXTRAS_FILE")
     docker_installed || blockers+=("docker not installed")
@@ -409,24 +561,39 @@ blockers_json() {
     if [ "$ACCESS_MODE" = "tailscale" ] && ! tailscale_authenticated; then
         blockers+=("tailscale logged out; sensitive services stay local-only")
     fi
+    if [ -n "$HOMELAB_PROFILE" ]; then
+        coverage="$(profile_coverage_json)"
+        if [ "$(jq -r '.known' <<< "$coverage")" != true ]; then
+            blockers+=("unknown homelab profile: $HOMELAB_PROFILE")
+        elif [ "$(jq -r '.complete' <<< "$coverage")" != true ]; then
+            unmanaged="$(jq -r '.unmanaged | join(",")' <<< "$coverage")"
+            blockers+=("profile $HOMELAB_PROFILE is not orchestrated by this Compose stack: $unmanaged")
+        fi
+    fi
     [ "${#blockers[@]}" -gt 0 ] || { echo '[]'; return 0; }
     printf '%s\n' "${blockers[@]}" | jq -R . | jq -cs .
 }
 
 next_steps_json() {
-    local steps=()
+    local steps=() coverage
     docker_reachable || steps+=("ativar Docker e permitir acesso do usuário")
     [ -f "$ENV_FILE" ] || steps+=("gerar secrets com: pz server homelab repair")
     if [ "$ACCESS_MODE" = "tailscale" ] && ! tailscale_authenticated; then
         steps+=("autenticar Tailscale com: phasezero-admin tailscale up")
     fi
-    steps+=("subir core com: pz server homelab up --access local")
-    steps+=("subir extras só se precisar: pz server homelab up --extras --access tailscale")
+    coverage="$(profile_coverage_json)"
+    if [ -n "$HOMELAB_PROFILE" ] && [ "$(jq -r '.complete' <<< "$coverage")" != true ]; then
+        steps+=("executar diagnóstico: pz ai workspaces doctor")
+        steps+=("não aplicar perfil até adapters, proveniência e release gate estarem completos")
+    else
+        steps+=("subir core com: pz server homelab up --access local")
+        steps+=("subir extras só se precisar: pz server homelab up --extras --access tailscale")
+    fi
     printf '%s\n' "${steps[@]}" | jq -R . | jq -cs .
 }
 
 emit_status_json() {
-    local effective admin_bind public_bind reason host blockers secrets apps running services
+    local effective admin_bind public_bind reason host blockers secrets apps running services profile coverage budget
     IFS='|' read -r effective admin_bind public_bind reason < <(access_bind_plan "$ACCESS_MODE")
     host="$(access_host_for_urls "$effective" "$admin_bind" "$public_bind" | cut -d'|' -f1)"
     blockers="$(blockers_json)"
@@ -434,6 +601,9 @@ emit_status_json() {
     apps="$(apps_json)"
     running="$(running_containers_json)"
     services="$(services_json)"
+    profile="$(profile_definition_json)"
+    coverage="$(profile_coverage_json)"
+    budget="$(profile_budget_json)"
     jq -n \
         --arg project "$PROJECT" \
         --arg stateDir "$HOMELAB_STATE" \
@@ -460,6 +630,10 @@ emit_status_json() {
         --argjson apps "$apps" \
         --argjson running "$running" \
         --argjson services "$services" \
+        --arg profileId "$HOMELAB_PROFILE" \
+        --argjson profile "$profile" \
+        --argjson profileCoverage "$coverage" \
+        --argjson resourceBudget "$budget" \
         --argjson nextSteps "$(next_steps_json)" \
         '{
           tool:"homelab-stack",
@@ -471,6 +645,7 @@ emit_status_json() {
           tailscale:{installed:$tailscaleInstalled, authenticated:$tailscaleAuthenticated},
           access:{requested:$access, effective:$effective, reason:$reason, host:$host, adminBind:$adminBind, publicBind:$publicBind},
           compose:{coreExists:$coreExists, extrasExists:$extrasExists, services:$services},
+          profileId:$profileId,profile:$profile,profileCoverage:$profileCoverage,resourceBudget:$resourceBudget,
           env:{exists:$envExists, secrets:$secrets},
           apps:$apps,
           running:$running,
@@ -506,6 +681,25 @@ cmd_plan() {
 }
 
 cmd_up() {
+    # REV-018: profile maturity is a pure decision — it must refuse before
+    # any Docker requirement, so a clean host sees the honest refusal (rc 69)
+    # instead of a misleading daemon error.
+    if [ -n "$HOMELAB_PROFILE" ]; then
+        local coverage
+        coverage="$(profile_coverage_json)"
+        if [ "$(jq -r '.installable' <<< "$coverage")" != true ]; then
+            pz_error "profile $HOMELAB_PROFILE is $(jq -r '.maturity' <<< "$coverage") and not installable: $(jq -r '.installNote' <<< "$coverage")"
+            return 69
+        fi
+        if [ "$(jq -r '.known and .complete' <<< "$coverage")" != true ]; then
+            pz_error "profile $HOMELAB_PROFILE cannot be applied: services are not fully orchestrated ($(jq -r '.unmanaged|join(",")' <<< "$coverage"))"
+            return 69
+        fi
+        if ! bash "$PZ_ROOT/linux/server/homelab-governor.sh" check "$HOMELAB_PROFILE" >/dev/null 2>&1; then
+            pz_error "profile $HOMELAB_PROFILE rejected by resource governor; check budget: pz server homelab governor budget $HOMELAB_PROFILE"
+            return 1
+        fi
+    fi
     require_docker || return 1
     [ -f "$CORE_FILE" ] || { pz_error "compose file missing: $CORE_FILE"; return 1; }
     [ "$WITH_EXTRAS" = "0" ] || [ -f "$EXTRAS_FILE" ] || { pz_error "extras compose file missing: $EXTRAS_FILE"; return 1; }
@@ -514,10 +708,8 @@ cmd_up() {
         return 1
     fi
     if [ -n "$HOMELAB_PROFILE" ]; then
-        if ! bash "$PZ_ROOT/linux/server/homelab-governor.sh" check "$HOMELAB_PROFILE" >/dev/null 2>&1; then
-            pz_error "profile $HOMELAB_PROFILE rejected by resource governor; check budget: pz server homelab governor budget $HOMELAB_PROFILE"
-            return 1
-        fi
+        # Persist the profile only after every gate passed (never record
+        # intent for a refused up).
         mkdir -p "$HOMELAB_STATE"
         printf '%s\n' "$HOMELAB_PROFILE" > "$HOMELAB_STATE/profile.active"
     fi
@@ -537,12 +729,24 @@ cmd_up() {
 }
 
 cmd_down() {
+    # Fixture/override mode has no daemon to stop; treat as stopped.
+    if [ -n "${PZ_HOMELAB_VOLUME_MOUNT_OVERRIDE:-}" ]; then
+        pz_info "homelab stack stopped (volume-mount override; no daemon)"
+        return 0
+    fi
     require_docker || return 1
     if [ "${PZ_DRY_RUN:-0}" = "1" ]; then
         pz_info "dry-run: would run compose down (volumes preserved)"
         return 0
     fi
-    run_compose down
+    # R01-001: callers use `if ! cmd_down`, which suppresses errexit inside
+    # this function — a failed compose down must be propagated explicitly,
+    # otherwise restore snapshots/applies over live writers while reporting
+    # the stack as stopped.
+    if ! run_compose down; then
+        pz_error "compose down failed; the stack may still be running"
+        return 1
+    fi
     pz_info "homelab stack stopped (named volumes preserved)"
 }
 
@@ -585,10 +789,33 @@ cmd_logs() {
 }
 
 volume_actual_name() {
-    local logical="$1" found
+    # PZ-AUD-011: deterministic identity. Compose always creates
+    # <project>_<logical>; never fuzzy-match another project's suffix.
+    local logical="$1"
     [ -n "${PZ_HOMELAB_VOLUME_MOUNT_OVERRIDE:-}" ] && { printf '%s\n' "$logical"; return 0; }
-    found="$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E "^${PROJECT}_${logical}$|_${logical}$|^${logical}$" | head -1 || true)"
-    [ -n "$found" ] && printf '%s\n' "$found" || printf '%s_%s\n' "$PROJECT" "$logical"
+    printf '%s_%s\n' "$PROJECT" "$logical"
+}
+
+volume_project_label() {
+    # Owning compose project recorded on the volume, empty when unknown.
+    docker volume inspect -f '{{ index .Labels "com.docker.compose.project" }}' "$1" 2>/dev/null || true
+}
+
+volume_owned_by_project() {
+    # PZ-AUD-011: refuse volumes owned by another project. Unlabeled
+    # (legacy) volumes are allowed with a warning, never silently shared:
+    # a foreign label is a hard error before backup/restore/rm.
+    local vol="$1" owner
+    [ -n "${PZ_HOMELAB_VOLUME_MOUNT_OVERRIDE:-}" ] && return 0
+    owner="$(volume_project_label "$vol")"
+    if [ -n "$owner" ] && [ "$owner" != "$PROJECT" ]; then
+        pz_error "volume $vol belongs to project $owner, not $PROJECT; refusing"
+        return 1
+    fi
+    if [ -z "$owner" ] && docker volume inspect "$vol" >/dev/null 2>&1; then
+        pz_warn "volume $vol has no project label (legacy); assuming $PROJECT"
+    fi
+    return 0
 }
 
 volume_mount() {
@@ -598,6 +825,13 @@ volume_mount() {
         return 0
     fi
     docker volume inspect -f '{{ .Mountpoint }}' "$vol"
+}
+
+wipe_dir_contents() {
+    # Empty a directory without removing it (rm refuses trailing /.).
+    local dir="$1"
+    [ -n "$dir" ] && [ -d "$dir" ] || return 1
+    find "$dir" -mindepth 1 -delete 2>/dev/null
 }
 
 all_volumes_override() {
@@ -618,6 +852,82 @@ json_arr() {
     fi
 }
 
+stage_volume_consistent() {
+    # PZ-AUD-009 + REV-002 + R01-004: copy mount -> staging, then hot-backup
+    # SQLite files FROM THE LIVE MOUNT via the sqlite3 backup API, so a
+    # write in flight cannot ship a torn database and stale WAL/SHM copies
+    # are never shipped beside the hot backup. Server engines
+    # (MariaDB/Postgres data dirs) and Prometheus TSDB layouts cannot be
+    # made consistent from files alone: they are archived as-is and flagged
+    # consistent:false with the reason. Prints ONE tab-separated record
+    # "<method>\t<consistent>\t<reason>" — a reason carried in a side
+    # variable would be lost inside the $(...) command substitution.
+    # R01-005: the real TSDB layout is wal/ + chunks_head/ + block
+    # directories (01XXXX/index + chunks); any of those shapes must never
+    # be classified consistent from a plain file copy.
+    local mount="$1" stage="$2" db rel tmp blk tsdb=false
+    # SQLite can unlink/recreate -wal and -shm while writers checkpoint.
+    # They are never part of the staged snapshot: the live .backup below
+    # replaces each database, and copying a disappearing sidecar makes cp fail.
+    if ! tar -C "$mount" --exclude='*-wal' --exclude='*-shm' -cf - . | tar -C "$stage" -xf -; then
+        return 1
+    fi
+    if find "$stage" -maxdepth 4 \( -name 'PG_VERSION' -o -name 'ibdata1' -o -name 'mysql' \) -print -quit 2>/dev/null | grep -q .; then
+        printf 'staged-tar\t%s\t%s\n' false "server database directory copied as-is; needs native dump or stopped-stack snapshot"
+        return 0
+    fi
+    if [ -d "$stage/wal" ]; then
+        if [ -d "$stage/chunks_head" ] || [ -d "$stage/chunks" ] || [ -f "$stage/index" ]; then
+            tsdb=true
+        else
+            for blk in "$stage"/*/; do
+                [ -d "$blk" ] || continue
+                if [ -f "${blk}index" ] || [ -d "${blk}chunks" ]; then
+                    tsdb=true
+                    break
+                fi
+            done
+        fi
+    fi
+    if [ "$tsdb" = true ]; then
+        printf 'staged-tar\t%s\t%s\n' false "TSDB directory copied as-is; needs the service snapshot API or stopped-stack snapshot"
+        return 0
+    fi
+    local -a dbs=()
+    while IFS= read -r db; do
+        [ -n "$db" ] || continue
+        case "$db" in
+            *.db|*.sqlite|*.sqlite3) dbs+=("$db") ;;
+        esac
+    done < <(find "$stage" -maxdepth 4 -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) 2>/dev/null)
+    if [ "${#dbs[@]}" -eq 0 ]; then
+        printf 'staged-tar\t%s\t\n' true
+        return 0
+    fi
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        pz_warn "sqlite3 unavailable; shipping ${#dbs[@]} sqlite file(s) without hot-backup"
+        printf 'staged-tar\t%s\t%s\n' false "sqlite3 unavailable; plain file copy is not a consistent snapshot"
+        return 0
+    fi
+    for db in "${dbs[@]}"; do
+        rel="${db#"$stage"/}"
+        tmp="$db.pzhot"
+        # Stale sidecar copies from the cp would corrupt the hot backup on
+        # open; drop them before replacing the staged database.
+        rm -f "$db-wal" "$db-shm"
+        if sqlite3 "$mount/$rel" ".timeout 2000" ".backup '$tmp'" 2>/dev/null && [ -f "$tmp" ]; then
+            mv -f "$tmp" "$db"
+        else
+            pz_warn "sqlite hot-backup failed for $db; shipping file as-is"
+            rm -f "$tmp"
+            printf 'staged-tar\t%s\t%s\n' false "sqlite hot-backup failed for $rel; file shipped as-is"
+            return 0
+        fi
+    done
+    printf 'staged-tar+sqlite-live-hotbackup\t%s\t\n' true
+    return 0
+}
+
 cmd_backup() {
     local dest="${DEST:-$BACKUP_ROOT/$(date '+%Y%m%d-%H%M%S')}" vol actual mount started finished
     started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -627,51 +937,109 @@ cmd_backup() {
         return 0
     fi
     [ -n "${PZ_HOMELAB_VOLUME_MOUNT_OVERRIDE:-}" ] || require_docker || return 1
+    local -a expected=() _raw=()
+    mapfile -t _raw < <(all_volumes_override)
+    local _v
+    for _v in "${_raw[@]}"; do [ -n "$_v" ] && expected+=("$_v"); done
+    if [ "${#expected[@]}" -eq 0 ]; then
+        # PZ-AUD-009: an empty set is only a success when explicitly asked.
+        if [ "$ALLOW_EMPTY" = "1" ]; then
+            mkdir -p "$dest"
+            finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            jq -cn --arg schemaVersion "$PZ_HOMELAB_BACKUP_SCHEMA" --arg tool "homelab-backup" \
+                --arg id "$(basename "$dest")" --arg createdAt "$started" --arg finishedAt "$finished" \
+                --arg project "$PROJECT" \
+                '{schemaVersion:$schemaVersion, tool:$tool, id:$id, createdAt:$createdAt, finishedAt:$finishedAt,
+                  project:$project, volumes:[], verified:false, consistent:true, empty:true}' \
+                > "$dest/manifest.json"
+            jq -n --arg destination "$dest" --arg id "$(basename "$dest")" \
+                '{action:"backup", destination:$destination, id:$id, volumes:[], ok:true, consistent:true, empty:true}'
+            return 0
+        fi
+        pz_error "no volumes expected; refusing empty backup (pass backup --allow-empty to record one explicitly)"
+        return 1
+    fi
     mkdir -p "$dest"
-    local err=0
-    local -a vol_json=()
+    local stage_root="$dest/.staging"
+    rm -rf "$stage_root"
+    mkdir -p "$stage_root"
+    local -a vol_json=() missing=()
+    local err=0 consistent_all=true
     while IFS= read -r vol; do
         [ -n "$vol" ] || continue
         actual="$(volume_actual_name "$vol")"
-        mount="$(volume_mount "$actual")"
-        if [ ! -d "$mount" ]; then
-            pz_warn "volume mount missing, skipped: $actual"
+        if ! volume_owned_by_project "$actual"; then
+            err=1
             continue
         fi
-        if ! tar -C "$mount" -czf "$dest/$vol.tgz" . 2>/dev/null; then
+        mount="$(volume_mount "$actual")"
+        if [ ! -d "$mount" ]; then
+            # PZ-AUD-009: required data is never silently omitted.
+            pz_error "volume mount missing, cannot back up: $actual"
+            missing+=("$vol")
+            err=1
+            continue
+        fi
+        local stage="$stage_root/$vol"
+        mkdir -p "$stage"
+        local method consistent reason
+        if stage_line="$(stage_volume_consistent "$mount" "$stage")"; then
+            # R01-004: single tab-separated record; nothing rides on a side
+            # variable that a command substitution would discard.
+            IFS=$'\t' read -r method consistent reason <<< "$stage_line"
+        else
+            pz_error "staging failed for $actual"
+            err=1
+            continue
+        fi
+        if ! tar -C "$stage" -czf "$dest/$vol.tgz" . 2>/dev/null; then
             pz_error "tar failed for $actual"
             err=1
             continue
         fi
+        [ "$consistent" = true ] || consistent_all=false
         local sha size entries
         sha="$(sha256sum "$dest/$vol.tgz" | cut -d' ' -f1)"
         size="$(stat -c%s "$dest/$vol.tgz")"
         entries="$(tar -tzf "$dest/$vol.tgz" 2>/dev/null | wc -l)"
         vol_json+=("$(jq -cn --arg name "$vol" --arg archive "$vol.tgz" --arg sha256 "$sha" \
+            --arg method "$method" --argjson consistent "$consistent" --arg reason "$reason" \
             --argjson size "$size" --argjson entries "$entries" \
-            '{name:$name, archive:$archive, sha256:$sha256, sizeBytes:$size, entries:$entries}')")
-        pz_info "backed up $actual -> $dest/$vol.tgz"
-    done < <(all_volumes_override)
-    [ "$err" = "0" ] || { pz_error "backup incomplete; manifest not written"; return 1; }
+            '{name:$name, archive:$archive, sha256:$sha256, sizeBytes:$size, entries:$entries,
+              method:$method, consistent:$consistent,
+              reason:(if $consistent then null else $reason end)}')")
+        pz_info "backed up $actual -> $dest/$vol.tgz ($method)"
+    done < <(printf '%s\n' "${expected[@]}")
+    rm -rf "$stage_root"
+    if [ "$err" != "0" ]; then
+        local missing_json
+        missing_json="$(json_arr "${missing[@]}")"
+        jq -n --arg destination "$dest" --argjson missing "$missing_json" \
+            '{action:"backup", destination:$destination, ok:false, missingVolumes:$missing,
+              reason:"backup incomplete; manifest not written"}' || true
+        pz_error "backup incomplete; manifest not written"
+        return 1
+    fi
     finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     local volumes_json manifest
     volumes_json="$(printf '%s\n' "${vol_json[@]}" | jq -s .)"
     manifest="$(jq -cn --arg schemaVersion "$PZ_HOMELAB_BACKUP_SCHEMA" --arg tool "homelab-backup" \
         --arg id "$(basename "$dest")" --arg createdAt "$started" --arg finishedAt "$finished" \
-        --arg project "$PROJECT" --argjson volumes "$volumes_json" \
+        --arg project "$PROJECT" --argjson volumes "$volumes_json" --argjson consistent "$consistent_all" \
         '{schemaVersion:$schemaVersion, tool:$tool, id:$id, createdAt:$createdAt, finishedAt:$finishedAt,
-          project:$project, volumes:$volumes, verified:false}')"
+          project:$project, volumes:$volumes, verified:false, consistent:$consistent,
+          empty:false}')"
     printf '%s\n' "$manifest" > "$dest/manifest.json.tmp" && mv "$dest/manifest.json.tmp" "$dest/manifest.json"
     local msha
     msha="$(sha256sum "$dest/manifest.json" | cut -d' ' -f1)"
     mkdir -p "$BACKUP_ROOT"
     jq -n --arg latest "$dest" --arg id "$(basename "$dest")" --arg createdAt "$started" \
-        --arg manifestSha "$msha" --argjson verified false \
-        '{latest:$latest, id:$id, createdAt:$createdAt, manifestSha:$manifestSha, verified:false}' \
+        --arg manifestSha "$msha" --argjson verified false --argjson consistent "$consistent_all" \
+        '{latest:$latest, id:$id, createdAt:$createdAt, manifestSha:$manifestSha, verified:false, consistent:$consistent}' \
         > "$BACKUP_ROOT/last.json"
     jq -n --arg destination "$dest" --arg id "$(basename "$dest")" \
-        --argjson volumes "$volumes_json" \
-        '{action:"backup", destination:$destination, id:$id, volumes:$volumes, ok:true}'
+        --argjson volumes "$volumes_json" --argjson consistent "$consistent_all" \
+        '{action:"backup", destination:$destination, id:$id, volumes:$volumes, ok:true, consistent:$consistent}'
 }
 
 cmd_verify_backup() {
@@ -710,11 +1078,31 @@ cmd_verify_backup() {
         [ "$got" = "$sha" ] || { reasons+=("checksum mismatch: $archive"); fail=1; }
         tar -tzf "$f" >/dev/null 2>&1 || { reasons+=("tar corrupt: $archive"); fail=1; }
     done < <(printf '%s\n' "$manifest" | jq -r '.volumes[]? | [.archive, .sha256] | @tsv')
+    # PZ-AUD-009/010: size/entries recorded at backup time must still hold;
+    # extra archives outside the manifest are reported (restore ignores them).
+    while IFS=$'\t' read -r archive size entries; do
+        [ -n "$archive" ] || continue
+        local f="$src/$archive"
+        [ -f "$f" ] || continue
+        if [ -n "$size" ] && [ "$size" != "null" ]; then
+            [ "$(stat -c%s "$f")" = "$size" ] || { reasons+=("size changed: $archive"); fail=1; }
+        fi
+        if [ -n "$entries" ] && [ "$entries" != "null" ]; then
+            [ "$(tar -tzf "$f" 2>/dev/null | wc -l)" = "$entries" ] || { reasons+=("entries changed: $archive"); fail=1; }
+        fi
+    done < <(printf '%s\n' "$manifest" | jq -r '.volumes[]? | [.archive, (.sizeBytes|tostring), (.entries|tostring)] | @tsv')
+    local extra
+    extra="$(comm -23 <(find "$src" -maxdepth 1 -name '*.tgz' -printf '%f\n' 2>/dev/null | sort) \
+        <(printf '%s\n' "$manifest" | jq -r '.volumes[]?.archive' | sort) | tr '\n' ' ')"
+    [ -z "${extra// }" ] || reasons+=("extra archives outside manifest (ignored by restore):${extra}")
+    local consistent
+    consistent="$(printf '%s\n' "$manifest" | jq -r '.consistent // "unknown"')"
     local out
     out="$(jq -cn --arg source "$src" --arg schemaVersion "$PZ_HOMELAB_BACKUP_SCHEMA" \
         --argjson verified "$([ "$fail" -eq 0 ] && echo true || echo false)" \
         --argjson checks "$(json_arr "${reasons[@]}")" \
-        '{action:"verify-backup", source:$source, schemaVersion:$schemaVersion, verified:$verified, checks:$checks}')"
+        --arg consistent "$consistent" \
+        '{action:"verify-backup", source:$source, schemaVersion:$schemaVersion, verified:$verified, checks:$checks, consistent:$consistent}')"
     printf '%s\n' "$out"
     [ "$fail" -eq 0 ]
 }
@@ -760,16 +1148,55 @@ cmd_restore() {
         pz_error "backup verification failed; refusing restore"
         return 1
     fi
-    [ "$YES" = "1" ] || { pz_error "restore is destructive; pass --yes after verifying backup"; return 1; }
+    # PZ-AUD-010: a backup belongs to exactly one project; never apply a
+    # foreign project's data onto this one.
+    local manifest_project
+    manifest_project="$(jq -r '.project // empty' "$SOURCE/manifest.json")"
+    if [ -n "$manifest_project" ] && [ "$manifest_project" != "$PROJECT" ]; then
+        pz_error "backup project $manifest_project != $PROJECT; refusing restore"
+        return 1
+    fi
+    if [ "$YES" != "1" ]; then
+        # CCS-004: a Central nunca usa --yes; o operador confirma gerando um
+        # arquivo com a frase exata vinculada à origem do restore.
+        [ -n "$CONFIRM_FILE" ] || { pz_error "restore is destructive; pass --yes or --confirm-file after verifying backup"; return 1; }
+        [ -f "$CONFIRM_FILE" ] || { pz_error "confirmation file missing: $CONFIRM_FILE"; return 1; }
+        grep -qx "RESTAURAR $(basename "$SOURCE")" "$CONFIRM_FILE" \
+            || { pz_error "confirmation phrase mismatch in $CONFIRM_FILE (esperado: RESTAURAR $(basename "$SOURCE"))"; return 1; }
+    fi
     [ -n "${PZ_HOMELAB_VOLUME_MOUNT_OVERRIDE:-}" ] || require_docker || return 1
     [ -d "$SOURCE" ] || { pz_error "restore source missing: $SOURCE"; return 1; }
+    # Manifest-driven volume list: extra *.tgz files in the directory are
+    # NEVER applied (PZ-AUD-010).
+    local -a manifest_vols=()
+    mapfile -t manifest_vols < <(jq -r '.volumes[]? | "\(.name)\t\(.archive)\t\(.sha256)"' "$SOURCE/manifest.json")
+    [ "${#manifest_vols[@]}" -gt 0 ] || { pz_error "manifest lists no volumes; refusing empty restore"; return 1; }
+    # REV-003: stop the stack BEFORE capturing the pre-restore snapshot —
+    # a rollback copy taken while writers are live can ship a torn database.
+    # The previous execution state is remembered so a successful restore can
+    # bring the stack back up.
+    local stack_was_running=false
+    if [ -z "${PZ_HOMELAB_VOLUME_MOUNT_OVERRIDE:-}" ] && docker_reachable; then
+        if [ -n "$(docker ps --filter "label=com.docker.compose.project=$PROJECT" -q 2>/dev/null)" ]; then
+            stack_was_running=true
+        fi
+    fi
+    # PZ-AUD-010: a failed stop must block mutation, never be ignored.
+    if ! cmd_down; then
+        pz_error "could not stop stack; refusing to mutate volumes"
+        return 1
+    fi
     local pre_dir="$SOURCE.pre-restore"
     mkdir -p "$pre_dir"
     local -a pre_vol=()
-    local vol actual mount
-    while IFS= read -r vol; do
+    local vol actual mount archive sha
+    while IFS=$'\t' read -r vol archive sha; do
         [ -n "$vol" ] || continue
         actual="$(volume_actual_name "$vol")"
+        if ! volume_owned_by_project "$actual"; then
+            pz_error "pre-restore snapshot refused for foreign volume $actual; aborting restore"
+            return 1
+        fi
         mount="$(volume_mount "$actual")"
         if [ ! -d "$mount" ]; then
             pz_warn "no pre-restore snapshot for $actual (mount missing)"
@@ -779,14 +1206,14 @@ cmd_restore() {
             pz_error "pre-restore snapshot failed for $actual; aborting restore"
             return 1
         fi
-        local sha size entries
-        sha="$(sha256sum "$pre_dir/$vol.tgz" | cut -d' ' -f1)"
+        local sha2 size entries
+        sha2="$(sha256sum "$pre_dir/$vol.tgz" | cut -d' ' -f1)"
         size="$(stat -c%s "$pre_dir/$vol.tgz")"
         entries="$(tar -tzf "$pre_dir/$vol.tgz" 2>/dev/null | wc -l)"
-        pre_vol+=("$(jq -cn --arg name "$vol" --arg archive "$vol.tgz" --arg sha256 "$sha" \
+        pre_vol+=("$(jq -cn --arg name "$vol" --arg archive "$vol.tgz" --arg sha256 "$sha2" \
             --argjson size "$size" --argjson entries "$entries" \
             '{name:$name, archive:$archive, sha256:$sha256, sizeBytes:$size, entries:$entries}')")
-    done < <(all_volumes_override)
+    done < <(printf '%s\n' "${manifest_vols[@]}")
     if [ "${#pre_vol[@]}" -gt 0 ]; then
         jq -cn --arg schemaVersion "$PZ_HOMELAB_BACKUP_SCHEMA" --arg tool "homelab-restore-pre" \
             --arg id "$(basename "$SOURCE").pre-restore" --arg createdAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -794,45 +1221,115 @@ cmd_restore() {
             '{schemaVersion:$schemaVersion, tool:$tool, id:$id, createdAt:$createdAt, project:$project, volumes:$volumes, verified:false}' \
             > "$pre_dir/manifest.json"
     fi
-    cmd_down || true
-    local -a started=()
-    local failed=""
-    for archive in "$SOURCE"/*.tgz; do
-        [ -e "$archive" ] || continue
-        vol="$(basename "$archive" .tgz)"
+    local work
+    work="$(mktemp -d "${TMPDIR:-/tmp}/pz-restore.XXXXXX")" || { pz_error "no temp dir for restore staging"; return 1; }
+    local -a applied=()
+    local failed="" mutating=""
+    while IFS=$'\t' read -r vol archive sha; do
+        [ -n "$vol" ] || continue
         actual="$(volume_actual_name "$vol")"
-        mount="$(volume_mount "$actual")"
-        if ! mkdir -p "$mount"; then
-            pz_error "mount dir unavailable for $vol"
+        if ! volume_owned_by_project "$actual"; then
+            pz_error "refusing foreign volume $actual"
             failed="$vol"
             break
         fi
-        if ! tar -C "$mount" -xzf "$archive"; then
+        if [ ! -f "$SOURCE/$archive" ]; then
+            pz_error "manifest archive missing: $archive"
+            failed="$vol"
+            break
+        fi
+        # TOCTOU: re-checksum right before applying.
+        if [ "$(sha256sum "$SOURCE/$archive" | cut -d' ' -f1)" != "$sha" ]; then
+            pz_error "checksum changed since verify: $archive; aborting"
+            failed="$vol"
+            break
+        fi
+        # Path safety: no absolute paths, no parent escapes.
+        if tar -tzf "$SOURCE/$archive" 2>/dev/null | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+            pz_error "unsafe paths in $archive; aborting"
+            failed="$vol"
+            break
+        fi
+        mount="$(volume_mount "$actual")"
+        rm -rf "$work/stage"
+        mkdir -p "$work/stage" "$mount" || { pz_error "mount dir unavailable for $vol"; failed="$vol"; break; }
+        if ! tar -C "$work/stage" -xzf "$SOURCE/$archive"; then
             pz_error "restore failed for $vol"
             failed="$vol"
             break
         fi
-        started+=("$vol")
+        # REV-001: the volume is mutated from here on. Register it BEFORE
+        # the first destructive write so a failed swap is part of the
+        # rollback set instead of being silently dropped with its
+        # destination wiped.
+        mutating="$vol"
+        # Exact state: wipe current contents, then populate from staging.
+        if ! wipe_dir_contents "$mount" || ! cp -a "$work/stage/." "$mount/"; then
+            pz_error "swap failed for $vol"
+            failed="$vol"
+            break
+        fi
+        mutating=""
+        applied+=("$vol")
         pz_info "restored $archive -> $actual"
-    done
+    done < <(printf '%s\n' "${manifest_vols[@]}")
+    rm -rf "$work"
     if [ -n "$failed" ]; then
-        local rb_ok=true rb_fail=""
-        for v in "${started[@]}"; do
+        # REV-001: roll back every mutated volume — including the one whose
+        # swap failed mid-copy — to its pre-restore snapshot. A rollback
+        # that cannot complete is reported as recovery-required, never as
+        # an applied rollback.
+        local -a rb_targets=("${applied[@]}")
+        [ -n "$mutating" ] && rb_targets+=("$mutating")
+        local rb_ok=true rb_fail="" rb_work
+        rb_work="$(mktemp -d "${TMPDIR:-/tmp}/pz-restore-rb.XXXXXX")" || { pz_error "no temp dir for rollback"; return 1; }
+        for v in "${rb_targets[@]}"; do
             if [ -f "$pre_dir/$v.tgz" ]; then
-                if ! tar -C "$(volume_mount "$(volume_actual_name "$v")")" -xzf "$pre_dir/$v.tgz" 2>/dev/null; then
+                local rbm
+                rbm="$(volume_mount "$(volume_actual_name "$v")")"
+                rm -rf "$rb_work/swap"
+                mkdir -p "$rb_work/swap"
+                if [ -n "$rbm" ] && [ -d "$rbm" ] \
+                    && tar -C "$rb_work/swap" -xzf "$pre_dir/$v.tgz" 2>/dev/null \
+                    && wipe_dir_contents "$rbm" && cp -a "$rb_work/swap/." "$rbm/"; then
+                    :
+                else
                     rb_ok=false
                     rb_fail="$rb_fail $v"
                 fi
+            else
+                rb_ok=false
+                rb_fail="$rb_fail $v"
             fi
         done
+        rm -rf "$rb_work"
         jq -n --arg source "$SOURCE" --arg pre "$pre_dir" --arg volume "$failed" \
             --argjson rollbackApplied "$([ "$rb_ok" = "true" ] && echo true || echo false)" \
-            --arg rolledBack "$(printf '%s' "${started[@]}")" --arg rollbackFailed "${rb_fail# }" \
-            '{action:"restore", source:$source, ok:false, failedVolume:$volume, preRestore:$pre, rollbackApplied:$rollbackApplied, rollbackFailed:$rollbackFailed}'
+            --argjson recoveryRequired "$([ "$rb_ok" = "true" ] && echo false || echo true)" \
+            --arg rolledBack "$(printf '%s' "${rb_targets[@]}")" --arg rollbackFailed "${rb_fail# }" \
+            --argjson stackWasRunning "$stack_was_running" \
+            --arg nextAction "inspect $pre_dir and restore it manually before any retry" \
+            '{action:"restore", source:$source, ok:false, failedVolume:$volume, preRestore:$pre,
+              rollbackApplied:$rollbackApplied, recoveryRequired:$recoveryRequired,
+              rolledBack:$rolledBack, rollbackFailed:$rollbackFailed,
+              stackWasRunning:$stackWasRunning,
+              nextAction:(if $recoveryRequired then $nextAction else null end)}'
         return 1
     fi
+    # REV-003: a successful restore returns the stack to its previous
+    # execution state (best effort, honestly reported).
+    local stack_restarted=false
+    if [ "$stack_was_running" = "true" ]; then
+        if run_compose up -d >/dev/null 2>&1; then
+            stack_restarted=true
+        else
+            pz_warn "stack was running before restore; bring it back with: pz server homelab up"
+        fi
+    fi
     jq -n --arg source "$SOURCE" --arg pre "$pre_dir" \
-        '{action:"restore", source:$source, ok:true, preRestore:$pre}'
+        --argjson stackWasRunning "$stack_was_running" --argjson stackRestarted "$stack_restarted" \
+        '{action:"restore", source:$source, ok:true, preRestore:$pre,
+          stackWasRunning:$stackWasRunning, stackRestarted:$stackRestarted}'
 }
 
 cmd_update() {
@@ -847,6 +1344,253 @@ cmd_update() {
     run_compose pull
     run_compose up -d
     pz_info "homelab updated using pinned compose tags"
+}
+
+capabilities_cli() {
+    # Test seam: PZ_HOMELAB_CAPABILITIES_CLI overrides the real engine.
+    if [ -n "${PZ_HOMELAB_CAPABILITIES_CLI:-}" ]; then
+        # Intentional word-splitting: the override is a command line.
+        # shellcheck disable=SC2086
+        printf '%s\n' $PZ_HOMELAB_CAPABILITIES_CLI
+        return 0
+    fi
+    printf '%s\n' "$PZ_ROOT/linux/pz" capabilities
+}
+
+prepare_missing_deps() {
+    local -a missing=()
+    command -v docker >/dev/null 2>&1 || missing+=("docker")
+    docker compose version >/dev/null 2>&1 || missing+=("compose")
+    [ "${#missing[@]}" -gt 0 ] && printf '%s\n' "${missing[@]}"
+    return 0
+}
+
+prepare_install_deps() {
+    # PZ-AUD-002: one approval (this invocation) covers the whole plan:
+    # create the capabilities plan, then apply it with its own token.
+    local plan_json plan_id token apply_out
+    mapfile -t cap_args < <(capabilities_cli)
+    plan_json="$("${cap_args[@]}" plan --capability development.docker --capability development.docker-compose 2>/dev/null)" || {
+        pz_error "capabilities plan for docker/compose failed"
+        return 1
+    }
+    plan_id="$(jq -r '.planId // .plan_id // .id // empty' <<< "$plan_json")"
+    token="$(jq -r '.confirmToken // .confirm_token // .token // empty' <<< "$plan_json")"
+    # shellcheck disable=SC2015 # guarda: sem plano/token, aborta com erro
+    [ -n "$plan_id" ] && [ -n "$token" ] || {
+        pz_error "capabilities plan returned no plan-id/token"
+        return 1
+    }
+    apply_out="$("${cap_args[@]}" apply --plan-id "$plan_id" --confirm "$token" 2>/dev/null)" || {
+        pz_error "capabilities apply for docker/compose failed"
+        return 1
+    }
+    [ "$(jq -r '.ok // false' <<< "$apply_out")" = "true" ] || {
+        pz_error "capabilities apply did not report ok"
+        return 1
+    }
+    return 0
+}
+
+prepare_ensure_daemon() {
+    docker info >/dev/null 2>&1 && return 0
+    # Installed but inactive: enable + start once via the admin bridge.
+    pz_admin_run systemctl enable --now docker >/dev/null 2>&1 || return 1
+    local i
+    for i in $(seq 1 15); do
+        docker info >/dev/null 2>&1 && return 0
+        sleep 1
+    done
+    return 1
+}
+
+prepare_ensure_access() {
+    # Returns 0 when this session can drive the daemon, 2 when group
+    # membership was configured but the session needs a re-login, 1 on
+    # failure. Installing the package, starting the daemon and granting
+    # access are distinct steps; group access grants elevated privileges
+    # and always needs a fresh session (Docker post-install).
+    docker info >/dev/null 2>&1 && return 0
+    local user="${USER:-$(id -un 2>/dev/null)}"
+    if id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+        pz_error "user $user is in docker group but this session cannot reach the daemon; log out and back in, then re-run prepare"
+        return 2
+    fi
+    pz_admin_run usermod -aG docker "$user" >/dev/null 2>&1 || return 1
+    pz_error "user $user added to docker group; log out and back in, then re-run prepare (group access needs a fresh session)"
+    return 2
+}
+
+default_prepare_apps() {
+    if [ -f "$APPS_CATALOG" ]; then
+        jq -r '[.apps[] | select(.userFacing == true and .defaultEnabled == true) | .key] | .[]' "$APPS_CATALOG" 2>/dev/null
+    fi
+}
+
+cmd_prepare() {
+    # PZ-AUD-002: the install path. Dependencies -> daemon -> access ->
+    # configure -> apps -> verify, idempotent, one approval, honest states.
+    local -a steps=() apps=()
+    local step_status="failed" next_action="" detail=""
+    # REV-006/007: the plan is typed. It carries the host it targets and the
+    # profile the operator reviewed; the Player binds its confirmation to
+    # exactly this identity, and an unknown profile fails closed first.
+    local host_alias="${PZ_HOMELAB_HOST_ALIAS:-local}"
+    # R01-003: the plan states the profile truth. Today every appliance
+    # profile is budget-only (installable:false with no service recipe), so
+    # the plan carries installable/note/services/budget explicitly instead
+    # of silently implying that profile.active delivers the profile's
+    # services. Apps enabled by prepare come from the catalog defaults.
+    local prep_installable="null" prep_note="" prep_services="null" prep_budget="null"
+    if [ -n "$HOMELAB_PROFILE" ]; then
+        local prep_cov prep_def
+        prep_cov="$(profile_coverage_json)"
+        if [ "$(jq -r '.known' <<< "$prep_cov")" != true ]; then
+            pz_error "prepare: unknown profile $HOMELAB_PROFILE"
+            return 2
+        fi
+        prep_installable="$(jq -r '.installable' <<< "$prep_cov")"
+        if [ "$prep_installable" != "true" ]; then
+            prep_note="$(jq -r '.installNote // "no install recipe yet"' <<< "$prep_cov")"
+        fi
+        prep_def="$(profile_definition_json)"
+        prep_services="$(jq -c '.services // []' <<< "$prep_def" 2>/dev/null || echo '[]')"
+        prep_budget="$(profile_budget_json)"
+    fi
+    step() { steps+=("$(jq -cn --arg name "$1" --arg status "$2" --arg detail "${3:-}" '{name:$name, status:$status, detail:$detail}')"); }
+    finish() {
+        local ok="$1" state="$2"
+        jq -n --argjson ok "$ok" --arg state "$state" \
+            --argjson steps "$(printf '%s\n' "${steps[@]}" | jq -cs '.')" \
+            --arg nextAction "$next_action" \
+            --arg host "$host_alias" --arg profile "$HOMELAB_PROFILE" \
+            --argjson installable "$prep_installable" --arg note "$prep_note" \
+            --argjson services "$prep_services" --argjson budget "$prep_budget" \
+            '{action:"prepare", tool:"homelab-stack", ok:$ok, state:$state, steps:$steps,
+              host:$host, profile:(if $profile == "" then null else $profile end),
+              profileInstallable:$installable,
+              profileNote:(if $installable == false then $note else null end),
+              profileServices:$services, budget:$budget,
+              appsSource:"catalog-defaults",
+              nextAction:(if $nextAction == "" then null else $nextAction end)}'
+        [ "$ok" = true ]
+    }
+    if [ "${PZ_DRY_RUN:-0}" = "1" ]; then
+        apps=("${PREPARE_APPS[@]}")
+        [ "${#apps[@]}" -gt 0 ] || mapfile -t apps < <(default_prepare_apps)
+        jq -n --argjson apps "$(printf '%s\n' "${apps[@]}" | jq -R . | jq -cs .)" \
+            --arg access "$ACCESS_MODE" \
+            --arg host "$host_alias" --arg profile "$HOMELAB_PROFILE" \
+            --argjson installable "$prep_installable" --arg note "$prep_note" \
+            --argjson services "$prep_services" --argjson budget "$prep_budget" \
+            '{action:"prepare", dryRun:true, host:$host,
+              profile:(if $profile == "" then null else $profile end),
+              profileInstallable:$installable,
+              profileNote:(if $installable == false then $note else null end),
+              profileServices:$services, budget:$budget,
+              appsSource:"catalog-defaults",
+              access:$access, apps:$apps,
+              steps:["dependencies","daemon","access","configure","apps","verify"]}'
+        return 0
+    fi
+    apps=("${PREPARE_APPS[@]}")
+    [ "${#apps[@]}" -gt 0 ] || mapfile -t apps < <(default_prepare_apps)
+    # 1. dependencies
+    local -a missing=()
+    mapfile -t missing < <(prepare_missing_deps)
+    if [ "${#missing[@]}" -gt 0 ]; then
+        if prepare_install_deps; then
+            mapfile -t missing < <(prepare_missing_deps)
+            if [ "${#missing[@]}" -gt 0 ]; then
+                step dependencies failed "still missing after install: ${missing[*]}"
+                next_action="inspect capabilities apply output; then re-run: pz server homelab prepare"
+                finish false failed
+                return 1
+            fi
+            step dependencies installed "installed via capabilities: development.docker + development.docker-compose"
+        else
+            step dependencies failed "could not install: ${missing[*]}"
+            next_action="install docker + compose for your distro, then re-run: pz server homelab prepare"
+            finish false failed
+            return 1
+        fi
+    else
+        step dependencies ready "docker + compose present"
+    fi
+    # 2. daemon
+    if prepare_ensure_daemon; then
+        step daemon ready "engine reachable"
+    else
+        step daemon failed "engine not reachable and could not be started (admin bridge needed)"
+        next_action="start the docker daemon (systemctl enable --now docker), then re-run: pz server homelab prepare"
+        finish false failed
+        return 1
+    fi
+    # 3. access
+    local access_rc=0
+    prepare_ensure_access || access_rc=$?
+    if [ "$access_rc" = "0" ]; then
+        step access ready "session drives the daemon"
+    elif [ "$access_rc" = "2" ]; then
+        step access needs-reauth "group configured; fresh session required"
+        next_action="log out and back in, then re-run: pz server homelab prepare"
+        finish false needs-reauth
+        return 1
+    else
+        step access failed "no daemon access and could not configure group (admin bridge needed)"
+        next_action="grant daemon access, then re-run: pz server homelab prepare"
+        finish false failed
+        return 1
+    fi
+    # 4. configure
+    ensure_env_file "$ACCESS_MODE" || {
+        step configure failed "could not write homelab .env"
+        finish false failed
+        return 1
+    }
+    if [ -n "$HOMELAB_PROFILE" ]; then
+        # REV-007/R01-003: the reviewed profile selection drives the
+        # RESOURCE BUDGET (governor reads profile.active). It does not
+        # claim the profile's services are installed — the plan states
+        # installable/note and apps stay catalog-driven.
+        mkdir -p "$HOMELAB_STATE"
+        printf '%s\n' "$HOMELAB_PROFILE" > "$HOMELAB_STATE/profile.active"
+    fi
+    step configure ready ".env ensured (access=$ACCESS_MODE)"
+    # 5. apps
+    local app enable_out
+    for app in "${apps[@]}"; do
+        enable_out="$(bash "$PZ_ROOT/linux/server/homelab-apps.sh" enable "$app" --json 2>/dev/null)" || {
+            step apps failed "enable $app failed: $(jq -r '.reason // "unknown"' <<< "$enable_out" 2>/dev/null || echo unknown)"
+            next_action="fix the reported cause, then re-run: pz server homelab prepare"
+            finish false failed
+            return 1
+        }
+    done
+    if ! bash "$PZ_ROOT/linux/server/homelab-stack.sh" reconcile --access "$ACCESS_MODE" >/dev/null 2>&1; then
+        step apps failed "reconcile failed after enable"
+        next_action="check compose output, then re-run: pz server homelab prepare"
+        finish false failed
+        return 1
+    fi
+    step apps ready "enabled + reconciled: ${apps[*]}"
+    # 6. verify
+    local status_json ready
+    status_json="$(bash "$PZ_ROOT/linux/server/homelab-status.sh" status --json 2>/dev/null)" || {
+        step verify failed "status collection failed"
+        finish false failed
+        return 1
+    }
+    ready="$(jq -r '.ready' <<< "$status_json")"
+    if [ "$ready" = "true" ]; then
+        step verify ready "homelab ready"
+        finish true ready
+        return 0
+    fi
+    step verify failed "not ready: $(jq -r '.reasons[:3] | join("; ")' <<< "$status_json")"
+    next_action="review status reasons, then re-run: pz server homelab prepare"
+    finish false failed
+    return 1
 }
 
 cmd_repair() {
@@ -869,6 +1613,8 @@ case "$ACTION" in
     up|install|start) cmd_up ;;
     down|stop) cmd_down ;;
     restart) cmd_down; cmd_up ;;
+    reconcile) cmd_reconcile ;;
+    prepare) cmd_prepare ;;
     tailscale) ensure_tailscale ;;
     status) cmd_status ;;
     plan|dry-run) PZ_DRY_RUN="${PZ_DRY_RUN:-0}" cmd_plan ;;

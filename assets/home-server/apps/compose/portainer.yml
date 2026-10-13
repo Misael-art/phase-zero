@@ -1,0 +1,55 @@
+# Per-app compose module. Portainer never mounts docker.sock; socket-proxy does, read-only.
+services:
+  socket-proxy:
+    image: ${PZ_IMAGE_SOCKET_PROXY:-tecnativa/docker-socket-proxy:0.2.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-socket-proxy
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    cpus: 0.25
+    networks:
+      - pz-internal
+    environment:
+      CONTAINERS: "1"
+      TASKS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  portainer:
+    image: ${PZ_IMAGE_PORTAINER:-portainer/portainer-ce:2.33.2}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-portainer
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    cpus: 0.5
+    networks:
+      - pz-internal
+    ports:
+      - "${HOMELAB_ADMIN_BIND_ADDR:-127.0.0.1}:9000:9000"
+    environment:
+      DOCKER_HOST: "tcp://socket-proxy:2375"
+    volumes:
+      - portainer_data:/data
+    depends_on:
+      - socket-proxy
+
+networks:
+  pz-internal:
+    internal: true
+
+volumes:
+  portainer_data:

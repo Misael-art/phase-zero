@@ -54,7 +54,10 @@ link_managed_bin() {
 # into the user prefix and link it into ~/.local/bin, which precedes /usr/bin on
 # PATH, so it shadows any system (pacman) opencode without root.
 
-version_of() { grep -oE '[0-9]+\.[0-9]+\.[0-9]+' <<< "${1:-}" | head -1; }
+# Never fails: a broken CLI prints nothing parseable, and under `set -e` a
+# non-zero grep here would abort the caller mid-repair instead of letting it
+# diagnose and roll back.
+version_of() { grep -oE '[0-9]+\.[0-9]+\.[0-9]+' <<< "${1:-}" | head -1 || true; }
 
 opencode_cli_version() {
     command -v opencode >/dev/null 2>&1 || return 0
@@ -93,8 +96,40 @@ backup_opencode_db() {
     fi
 }
 
+# opencode-ai ships a postinstall that fetches the platform-specific binary, so
+# the package is useless without it. npm >= 12 blocks lifecycle scripts unless
+# the package is named explicitly -- and it still exits 0, leaving a stub that
+# dies with "postinstall script was not run". Allow scripts for this one package
+# only; never --dangerously-allow-all-scripts, which would also unblock the
+# whole transitive tree.
+npm_allow_scripts_args() {
+    npm install --help 2>/dev/null | grep -q -- '--allow-scripts' || return 0
+    printf '%s\n' "--allow-scripts=opencode-ai"
+}
+
+managed_cli_package_version() {
+    local manifest="$NPM_PREFIX/lib/node_modules/opencode-ai/package.json"
+    [ -f "$manifest" ] || return 0
+    version_of "$(jq -r '.version // empty' "$manifest" 2>/dev/null || true)"
+}
+
+# The only trustworthy signal that an install worked: run the binary. npm's exit
+# code does not cover a blocked postinstall, and a stub still passes -x.
+managed_cli_runs_as() {
+    local target="$1" probe
+    [ -x "$NPM_PREFIX/bin/opencode" ] || return 1
+    probe="$("$NPM_PREFIX/bin/opencode" --version 2>/dev/null || true)"
+    [ "$(version_of "$probe")" = "$target" ]
+}
+
+npm_install_cli() {
+    local version="$1" allow_scripts
+    mapfile -t allow_scripts < <(npm_allow_scripts_args)
+    npm install -g --prefix "$NPM_PREFIX" "${allow_scripts[@]}" "opencode-ai@$version"
+}
+
 align_cli_to() {
-    local target="$1" current
+    local target="$1" current previous
     current="$(opencode_cli_version)"
 
     if [ "$current" = "$target" ] && cli_is_managed; then
@@ -110,11 +145,24 @@ align_cli_to() {
     pz_check_deps npm
     backup_opencode_db
     mkdir -p "$NPM_PREFIX"
+    # Remember what worked so a failed upgrade can be undone instead of leaving
+    # the host with no usable CLI.
+    previous="$(managed_cli_package_version)"
     pz_info "pinning opencode CLI to $target (npm user prefix, shadows system opencode)"
-    if ! npm install -g --prefix "$NPM_PREFIX" "opencode-ai@$target"; then
+    if ! npm_install_cli "$target"; then
         pz_error "npm install opencode-ai@$target failed"
+        restore_previous_cli "$previous"
         return 1
     fi
+
+    # Probe before linking: a broken binary must never be published into
+    # $LOCAL_BIN, where it shadows the system opencode on PATH.
+    if ! managed_cli_runs_as "$target"; then
+        pz_error "opencode CLI $target installed but does not execute (blocked postinstall or bad platform build)"
+        restore_previous_cli "$previous"
+        return 1
+    fi
+
     link_managed_bin opencode "$NPM_PREFIX/bin/opencode"
     hash -r 2>/dev/null || true
 
@@ -127,6 +175,27 @@ align_cli_to() {
         pz_warn "opencode CLI resolves to ${resolved:-none}, not $target: $LOCAL_BIN may sit behind /usr/bin on PATH."
         pz_warn "managed binary is $NPM_PREFIX/bin/opencode; ensure $LOCAL_BIN precedes /usr/bin, or remove the system opencode package."
     fi
+}
+
+# Undo a failed pin. Reinstalling the previous version is preferred; if that is
+# gone or also broken, unlink the managed binary so PATH falls back to whatever
+# the host already had rather than resolving to a stub.
+restore_previous_cli() {
+    local previous="${1:-}"
+    if [ -n "$previous" ] && npm_install_cli "$previous" >/dev/null 2>&1 &&
+        managed_cli_runs_as "$previous"; then
+        link_managed_bin opencode "$NPM_PREFIX/bin/opencode"
+        hash -r 2>/dev/null || true
+        pz_warn "rolled opencode CLI back to $previous"
+        return 0
+    fi
+    if [ -L "$LOCAL_BIN/opencode" ] &&
+        [ "$(readlink -f "$LOCAL_BIN/opencode" 2>/dev/null)" = "$(readlink -f "$NPM_PREFIX/bin/opencode" 2>/dev/null)" ]; then
+        rm -f "$LOCAL_BIN/opencode"
+        hash -r 2>/dev/null || true
+        pz_warn "unlinked broken managed opencode from $LOCAL_BIN; host CLI (if any) is back on PATH"
+    fi
+    return 0
 }
 
 opencode_sync() {

@@ -83,6 +83,7 @@ class ThemesPage(BasePage):
         self._catalog_loaded = False
         self._history_loaded = False
         self.status_loader.status_ready.connect(self._on_status_ready)
+        self.status_loader.status_failed.connect(self._on_status_failed)
 
     # ------------------------------------------------------------------ build
 
@@ -106,7 +107,6 @@ class ThemesPage(BasePage):
 
         scroll.setWidget(inner)
         self._layout.addWidget(scroll)
-        self.reload()
 
     def _hero_label(self, key: str, text: str) -> QLabel:
         label = QLabel(text)
@@ -341,6 +341,23 @@ class ThemesPage(BasePage):
         elif action_id == "themes.history":
             self._apply_history(parsed)
 
+    def _on_status_failed(self, action_id: str, message: str) -> None:
+        # Sem handler, a página ficava presa em "Verificando…"/"Carregando…"
+        # para sempre na primeira falha de leitura.
+        if action_id == "themes.status":
+            self._set_hero("profile", "Indisponível agora")
+            for _fid, toggle, detail in self._controls:
+                detail.setText("Não foi possível verificar. Clique em Atualizar.")
+                with QtSignalBlockerGuard(toggle):
+                    toggle.set_pending(False)
+                    toggle.setEnabled(False)
+            if self.gamemode_label is not None:
+                self.gamemode_label.setText("Leitura falhou; nenhuma configuração foi alterada. Tente Atualizar.")
+        elif action_id == "themes.catalog":
+            self.catalog_hint.setText("Catálogo indisponível agora — clique em Atualizar para tentar de novo.")
+        elif action_id == "themes.history":
+            self.history_hint.setText("Histórico indisponível agora — clique em Atualizar para tentar de novo.")
+
     def _apply_status(self, parsed: object) -> None:
         if not isinstance(parsed, dict):
             return
@@ -350,11 +367,18 @@ class ThemesPage(BasePage):
         profile = parsed.get("profile", {}) if isinstance(parsed.get("profile"), dict) else {}
 
         self._set_hero("profile", profile.get("title", "Personalizado"))
-        self._set_hero("plasma", f"{plasma.get('major', '—')} · {'compatível' if plasma.get('compatible') else plasma.get('reason', 'incompatível')}")
+        major = plasma.get("major")
+        self._set_hero("plasma", f"{major if major is not None else '—'} · {'compatível' if plasma.get('compatible') else plasma.get('reason', 'incompatível')}")
         self._set_hero("session", f"{plasma.get('session', '—')} · KWin {'sim' if plasma.get('kwin') else 'não'}")
         self._set_hero("steamos", "sim" if plasma.get("steamOs") else "não")
         wallpaper = hero.get("wallpaper") if isinstance(hero.get("wallpaper"), dict) else {}
-        self._set_hero("wallpaper", str(wallpaper.get("file", "") or wallpaper.get("color", "") or "—"))
+        # O motor emite {state, screens:[{screen, plugin, mode}]}; as chaves
+        # file/color que a UI lia nunca existem e o herói ficava em "—".
+        label = str(wallpaper.get("file", "") or wallpaper.get("color", "") or "")
+        screens = wallpaper.get("screens") if isinstance(wallpaper.get("screens"), list) else []
+        if not label and screens:
+            label = f"{len(screens)} tela(s) · {screens[0].get('plugin', '—')}"
+        self._set_hero("wallpaper", label or "—")
         battery = hero.get("battery") if isinstance(hero.get("battery"), dict) else {}
         percent = battery.get("percent")
         self._set_hero(
@@ -413,7 +437,17 @@ class ThemesPage(BasePage):
             self.extensions_table.resizeColumnsToContents()
         wallpapers = parsed.get("wallpapers", [])
         if isinstance(wallpapers, list):
-            available = sum(1 for item in wallpapers if isinstance(item, dict) and item.get("available"))
+            # O motor serializa a tupla (bool, reason) como array JSON;
+            # truthiness de lista contava wallpaper ausente como disponível.
+            def _is_available(item: object) -> bool:
+                if not isinstance(item, dict):
+                    return False
+                flag = item.get("available")
+                if isinstance(flag, list):
+                    return bool(flag) and flag[0] is True
+                return flag is True
+
+            available = sum(1 for item in wallpapers if _is_available(item))
             self.catalog_hint.setText(
                 f"{len(wallpapers)} wallpapers curados · {available} disponíveis · "
                 f"{len(extensions) if isinstance(extensions, list) else 0} extensões KDE avaliadas"
@@ -481,7 +515,9 @@ class ThemesPage(BasePage):
         toggle.setEnabled(False)
         detail.setText("Aguardando confirmação…")
         self._pending_toggles[action.id] = (toggle, applied, detail, previous_detail)
-        self.run_action(action)
+        # run_action espera action_id (str); passar o ActionSpec devolvia
+        # None do by_id.get() e nenhum toggle disparava operação.
+        self.request_action(action)
 
     def cancel_pending_action(self, action_id: str) -> None:
         pending = self._pending_toggles.pop(action_id, None)

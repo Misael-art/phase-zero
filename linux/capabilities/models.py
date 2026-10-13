@@ -48,6 +48,9 @@ class CapabilitySpec:
     risk: str = "normal"
     license: str = "upstream"
     keywords: tuple[str, ...] = ()
+    # Vazio significa "derive de risco/reboot/perfis" (ver catalog.mode_for).
+    # Preencher só quando a curadoria discordar da derivação.
+    mode: str = ""  # recommended | opt-in | advanced
 
     def validate(self) -> None:
         if not self.id or self.id != self.id.casefold() or " " in self.id:
@@ -60,6 +63,8 @@ class CapabilitySpec:
             raise ValueError(f"reboot inválido: {self.id}")
         if self.compatibility.immutable not in {"supported", "layered", "blocked"}:
             raise ValueError(f"política immutable inválida: {self.id}")
+        if self.mode not in {"", "recommended", "opt-in", "advanced"}:
+            raise ValueError(f"modo inválido: {self.id}")
         for source in self.sources:
             source.validate()
 

@@ -49,10 +49,14 @@ class ProxyState:
         return self.service == "active"
 
     @property
+    def crash_looping(self) -> bool:
+        return self.service == "crash-loop"
+
+    @property
     def service_label(self) -> str:
         if not self.installed:
             return "não instalado"
-        return {"active": "rodando", "inactive": "parado", "failed": "falhou"}.get(
+        return {"active": "rodando", "inactive": "parado", "failed": "falhou", "crash-loop": "reiniciando sem parar"}.get(
             self.service, self.service or "desconhecido"
         )
 
@@ -72,6 +76,8 @@ class GatewayState:
     healthy: bool = False
     service: str = "unknown"
     detail: str = ""
+    usage_blocked: bool = False
+    blocked_reason: str = ""
 
     @property
     def label(self) -> str:
@@ -150,7 +156,7 @@ def parse_detailed_status(parsed: object) -> tuple[dict[str, ProxyState], IdeInt
 
 
 def parse_gateway_status(gateway_id: str, parsed: object) -> GatewayState:
-    """Parse `pz ai 9router status` / `pz ai odysseus status` JSON envelopes."""
+    """Parse Hermes, 9Router and Odysseus status JSON envelopes."""
     if not isinstance(parsed, dict):
         return GatewayState(id=gateway_id)
     detail = ""
@@ -159,13 +165,31 @@ def parse_gateway_status(gateway_id: str, parsed: object) -> GatewayState:
         combos = parsed.get("combos")
         active = providers.get("active", 0) if isinstance(providers, dict) else 0
         total = combos.get("total", 0) if isinstance(combos, dict) else 0
-        detail = f"{active} providers · {total} combos"
+        detail = f"{active} contas conectadas · {total} rotas prontas"
     elif gateway_id == "odysseus":
-        detail = str(parsed.get("endpoint", ""))
+        if not bool(parsed.get("installed")) and parsed.get("podmanRootless") is False:
+            detail = "Precisa de Podman rootless neste host"
+        else:
+            detail = str(parsed.get("endpoint", ""))
+    elif gateway_id == "hermes":
+        version = str(parsed.get("version", "")).strip()
+        auth = parsed.get("auth") if isinstance(parsed.get("auth"), dict) else {}
+        if not bool(auth.get("configured")):
+            detail = "Autenticação pendente"
+        else:
+            detail = version or "Configuração validada"
+    usage_blocked = parsed.get("usageBlocked") is True
+    blocked_reason = parsed.get("blockedReason")
+    if not isinstance(blocked_reason, str):
+        blocked_reason = ""
+    if gateway_id == "hermes" and usage_blocked:
+        detail = "Uso bloqueado: grant por conexão não é aplicado a cada requisição."
     return GatewayState(
         id=gateway_id,
-        installed=bool(parsed.get("installed")),
-        healthy=bool(parsed.get("healthy")),
+        installed=bool(parsed.get("installed", parsed.get("available"))),
+        healthy=bool(parsed.get("healthy", parsed.get("ready"))),
         service=str(parsed.get("service", "unknown")),
         detail=detail,
+        usage_blocked=usage_blocked,
+        blocked_reason=blocked_reason,
     )

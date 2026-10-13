@@ -1,7 +1,0 @@
-{
-  "type": "http",
-  "url": "https://mcp.bonsai-rx.org/mcp",
-  "auto": false,
-  "auth": "manual",
-  "description": "Bonsai remote MCP. Manual install only; endpoint/auth must be validated before autostart."
-}

@@ -112,18 +112,58 @@ echo "bonsai:$*"
         rendered = json.dumps(state)
         self.assertNotIn("super-secret-must-not-leak", rendered)
         self.assertTrue(state["claude"]["auth"]["loggedIn"])
+        self.assertEqual("ok", state["claude"]["auth"]["probeStatus"])
         self.assertEqual("subscription", state["selectedAuth"])
         self.assertIn("installations", state)
         self.assertIn("authentications", state)
         self.assertIn("ports", state)
         self.assertIn("hooks", state)
         self.assertIn("recommendedActions", state)
+        self.assertFalse(state["managedSessionLaunch"]["enabled"])
+        self.assertEqual(
+            "account-bound-consumer-grant-unavailable",
+            state["managedSessionLaunch"]["blockedReason"],
+        )
         self.assertTrue(state["routeCapabilities"]["subscription"]["claudeAiConnectors"])
         self.assertFalse(state["routeCapabilities"]["bonsai"]["claudeAiConnectors"])
         self.assertFalse(state["routeCapabilities"]["bonsai"]["connectorsWarningExpected"])
         self.assertTrue(state["routeCapabilities"]["bonsai"]["upstreamDirectCommandMayWarn"])
         self.assertTrue(state["routeCapabilities"]["bonsai"]["phaseZeroLauncherSuppressesWarning"])
         self.assertEqual(1, sum(item["state"] == "orphan" for item in state["configuration"]["hooks"]))
+
+    def test_live_verify_reports_grant_block_without_sending_prompt(self) -> None:
+        self._settings()
+        manager = CC.Manager()
+        manager.install("subscription", None, dry_run=False, yes=True, verbose=False)
+        with mock.patch.object(subprocess, "run", wraps=subprocess.run) as run_spy:
+            result = manager.verify("subscription", None, live=True)
+        self.assertTrue(result["ok"], "configuration verification remains separate from launch authorization")
+        self.assertFalse(result["managedLaunchEnabled"])
+        self.assertEqual(
+            "account-bound-consumer-grant-unavailable",
+            result["live"]["subscription"]["blockedReason"],
+        )
+        self.assertIsNone(result["live"]["subscription"]["passed"])
+        client_launches = [
+            call for call in run_spy.call_args_list
+            if call.args and isinstance(call.args[0], list)
+            and Path(call.args[0][0]).name == "claude-subscription"
+        ]
+        self.assertEqual([], client_launches, "live verify must not run a provider-backed client")
+
+    def test_missing_claude_backend_is_not_reported_as_logged_out(self) -> None:
+        os.environ["PZ_CLAUDE_COMMAND"] = str(self.bin / "missing-claude")
+        auth = CC.Manager().claude_info()["auth"]
+        self.assertIsNone(auth["loggedIn"])
+        self.assertEqual("backend-unavailable", auth["probeStatus"])
+
+    def test_timed_out_claude_auth_probe_stays_unknown(self) -> None:
+        with mock.patch.object(CC, "run_capture", side_effect=[
+            (0, "2.1.220 (Claude Code)", ""), (124, "", "timed out"),
+        ]):
+            auth = CC.Manager().claude_info()["auth"]
+        self.assertIsNone(auth["loggedIn"])
+        self.assertEqual("timeout", auth["probeStatus"])
 
     def test_dry_run_leaves_no_trace(self) -> None:
         self._settings()
@@ -173,31 +213,38 @@ echo "bonsai:$*"
                 "ANTHROPIC_MODEL": "bad",
             }
         )
-        probe = subprocess.run([str(launchers[0]), "--probe"], text=True, stdout=subprocess.PIPE, env=env, check=True)
-        self.assertEqual(
-            {"ANTHROPIC_API_KEY": None, "ANTHROPIC_AUTH_TOKEN": None, "ANTHROPIC_BASE_URL": None, "ANTHROPIC_MODEL": None},
-            json.loads(probe.stdout),
-        )
+        for launcher in launchers[:3]:
+            with self.subTest(launcher=launcher.name):
+                probe = subprocess.run(
+                    [str(launcher), "--probe"], text=True, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, env=env, check=False,
+                )
+                self.assertNotEqual(0, probe.returncode)
+                self.assertIn("account-bound consumer grant", probe.stderr)
+                self.assertEqual("", probe.stdout)
 
         second = manager.install("subscription", None, dry_run=False, yes=True, verbose=False)
         self.assertEqual("complete", second["status"])
         after = {str(path): (path.read_bytes(), path.stat().st_mtime_ns) for path in launchers}
         self.assertEqual(before, after)
 
-    def test_bonsai_guard_blocks_home(self) -> None:
+    def test_bonsai_launcher_delegates_to_fail_closed_manager(self) -> None:
         self._settings()
         manager = CC.Manager()
         manager.install("subscription", None, dry_run=False, yes=True, verbose=False)
+        project = self.root / "safe-project"
+        project.mkdir()
         proc = subprocess.run(
-            [str(self.home / ".local/bin/claude-bonsai")],
-            cwd=self.home,
+            [str(self.home / ".local/bin/claude-bonsai"), "--probe"],
+            cwd=project,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
         )
-        self.assertEqual(2, proc.returncode)
-        self.assertIn("sensitive directory", proc.stderr)
+        self.assertNotEqual(0, proc.returncode)
+        self.assertIn("account-bound consumer grant", proc.stderr)
+        self.assertEqual("", proc.stdout)
 
     def test_bonsai_route_uses_explicit_reviewed_working_directory(self) -> None:
         self._settings()
@@ -208,10 +255,11 @@ echo "bonsai:$*"
         receipt = self.root / "bonsai-route.txt"
         os.environ["PZ_TEST_BONSAI_ROUTE"] = str(receipt)
         try:
-            self.assertEqual(0, manager.run_route("bonsai", [], str(project)))
+            with self.assertRaisesRegex(RuntimeError, "account-bound consumer grant"):
+                manager.run_route("bonsai", [], str(project))
         finally:
             os.environ.pop("PZ_TEST_BONSAI_ROUTE", None)
-        self.assertEqual(f"{project.resolve()}|false", receipt.read_text(encoding="utf-8").strip())
+        self.assertFalse(receipt.exists(), "no Bonsai client process may start without a grant")
         parsed = CC.build_parser().parse_args(["run", "bonsai", "--cwd", str(project)])
         self.assertEqual(str(project), parsed.cwd)
         self.assertTrue(manager.preflight("bonsai", str(project))["ok"])
@@ -220,9 +268,18 @@ echo "bonsai:$*"
         blocked = manager.preflight("bonsai", str(project))
         self.assertFalse(blocked["ok"])
         self.assertEqual(["dotenv"], blocked["workspace"]["blockers"])
-        self.assertEqual(69, manager.run_route("bonsai", [], str(project)))
+        with self.assertRaisesRegex(RuntimeError, "account-bound consumer grant"):
+            manager.run_route("bonsai", [], str(project))
 
-    def test_bonsai_shim_intercepts_only_start_and_supports_safe_selector(self) -> None:
+    def test_all_managed_claude_routes_fail_closed_before_process_creation(self) -> None:
+        manager = CC.Manager()
+        with mock.patch.object(subprocess, "run", side_effect=AssertionError("process must not start")):
+            for route in ("subscription", "bonsai", "proxy"):
+                with self.subTest(route=route):
+                    with self.assertRaisesRegex(RuntimeError, "no client process was started"):
+                        manager.run_route(route, ["--version"], str(self.home))
+
+    def test_bonsai_shim_blocks_managed_launch_without_connection_grant(self) -> None:
         self._settings()
         manager = CC.Manager()
         manager.install("subscription", None, dry_run=False, yes=True, verbose=False)
@@ -243,10 +300,11 @@ echo "bonsai:$*"
             env=env,
             check=False,
         )
-        self.assertEqual(0, direct.returncode, direct.stderr)
-        self.assertEqual(f"{project.resolve()}|false", receipt.read_text(encoding="utf-8").strip())
+        self.assertNotEqual(0, direct.returncode)
+        self.assertIn("account-bound consumer grant", direct.stderr)
+        self.assertFalse(receipt.exists(), "the shim must not start Bonsai without a grant")
 
-        receipt.unlink()
+        receipt.unlink(missing_ok=True)
         env["BONSAI_ROUTE"] = "9router"
         fallback = subprocess.run(
             [str(shim), "start", "--cwd", str(project)],
@@ -257,7 +315,7 @@ echo "bonsai:$*"
             check=False,
         )
         self.assertNotEqual(0, fallback.returncode)
-        self.assertIn("no Bonsai snapshot/upload", fallback.stderr)
+        self.assertIn("account-bound consumer grant", fallback.stderr)
         self.assertFalse(receipt.exists())
 
     def test_network_error_classification_covers_enotimp_and_gateway(self) -> None:
@@ -274,6 +332,34 @@ echo "bonsai:$*"
         self.assertFalse(info["installed"])
         self.assertIsNone(info["authenticated"])
         self.assertTrue(CC.Manager().claude_info()["auth"]["loggedIn"])
+
+    def test_bonsai_unpublished_from_npm_gives_actionable_error(self) -> None:
+        # @bonsai-ai/cli returns 404 on the npm registry since 2026-09.
+        self.bonsai.unlink()
+        manager = CC.Manager()
+        tx = mock.MagicMock()
+        with mock.patch.object(manager, "_bonsai_upstream", return_value=None), mock.patch.object(
+            manager, "node_info", return_value={"npm": "/usr/bin/npm", "node": "/usr/bin/node", "major": 24}
+        ), mock.patch.object(CC, "run_capture", return_value=(1, "", "npm error code E404\nnpm error 404 Not Found")):
+            with self.assertRaisesRegex(RuntimeError, "indisponível no npm"):
+                manager._ensure_bonsai(tx)
+
+    def test_bonsai_status_flags_runner_that_fakes_latest(self) -> None:
+        # AISR-006: a runner that answers npm "latest" with the installed version
+        # keeps Bonsai pinned forever; status must say so.
+        runner = self.home / "runner/bonsai-managed"
+        runner.parent.mkdir(parents=True)
+        runner.write_text(
+            "#!/usr/bin/env bash\nexport PZ_BONSAI_INSTALLED_VERSION=0.4.19\n"
+            "exec node --require latest-fail-open.cjs cli.js \"$@\"\n",
+            encoding="utf-8",
+        )
+        self.assertEqual("upstream", CC.Manager._bonsai_update_check(str(self.bonsai)))
+        shim = self.home / "shim/bonsai"
+        shim.parent.mkdir(parents=True)
+        shim.write_text(f"#!/usr/bin/env bash\nupstream={runner}\nexec \"$upstream\" \"$@\"\n", encoding="utf-8")
+        self.assertEqual("forged", CC.Manager._bonsai_update_check(str(shim)))
+        self.assertEqual("not-installed", CC.Manager._bonsai_update_check(None))
 
     def test_repair_removes_empty_hook_envelopes(self) -> None:
         settings = self.home / ".claude/settings.json"

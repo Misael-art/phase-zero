@@ -48,7 +48,14 @@ grep -Fq 'transport:"qmp"' "$SH"
 grep -Fq 'Set-ExchangeMappingTask' "$PS"
 grep -Fq "PhaseZero-MapExchange" "$PS"
 grep -Fq '\\10.0.2.4\qemu' "$PS"
-grep -Fq 'install -d -m 0700 "$RUNTIME_DIR" "$STATE_DIR"' "$ROOT/linux/windows-vm/windows-vm.sh"
+# Sockets QGA/QMP dão execução e poder de desligar o guest: os diretórios que
+# os hospedam nascem 0700. A asserção é a invariante, não a linha literal — o
+# runtime dir passou a ser criado por ensure_runtime_dir, que também devolve o
+# dono ao usuário alvo quando a execução é elevada.
+WVM_SH="$ROOT/linux/windows-vm/windows-vm.sh"
+grep -Fq 'install -d -m 0700 "$STATE_DIR"' "$WVM_SH"
+awk '/^ensure_runtime_dir\(\)/,/^}/' "$WVM_SH" | grep -Fq 'install -d -m 0700'
+grep -Fq 'ensure_runtime_dir "$RUNTIME_DIR"' "$WVM_SH"
 grep -Fq 'transport-verify --json' "$RECOVER"
 grep -Fq '"$GUEST_LOGIN" apply' "$RECOVER"
 grep -Fq -- '--leave-running' "$RECOVER"

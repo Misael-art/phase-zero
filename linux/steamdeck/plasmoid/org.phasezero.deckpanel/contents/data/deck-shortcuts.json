@@ -1,0 +1,191 @@
+{
+  "note": "No Ashyterm, Ctrl+C vai para o shell e interrompe o comando. A cópia de lá é Ctrl+Shift+C e a cola é Ctrl+Shift+V.",
+  "groups": [
+    {
+      "id": "face",
+      "title": "Face",
+      "items": [
+        {
+          "id": "A",
+          "label": "A",
+          "name": "Confirmar",
+          "keys": "Enter"
+        },
+        {
+          "id": "B",
+          "label": "B",
+          "name": "Cancelar",
+          "keys": "Esc"
+        },
+        {
+          "id": "X",
+          "label": "X",
+          "name": "Apagar",
+          "keys": "Backspace"
+        },
+        {
+          "id": "Y",
+          "label": "Y",
+          "name": "Espaco",
+          "keys": "Espaço"
+        }
+      ]
+    },
+    {
+      "id": "shoulders",
+      "title": "Ombros",
+      "items": [
+        {
+          "id": "LB",
+          "label": "L1",
+          "name": "Aba anterior",
+          "keys": "Ctrl+Shift+Tab"
+        },
+        {
+          "id": "RB",
+          "label": "R1",
+          "name": "Proxima aba",
+          "keys": "Ctrl+Tab"
+        }
+      ]
+    },
+    {
+      "id": "back",
+      "title": "Traseiros",
+      "items": [
+        {
+          "id": "LGRIP",
+          "label": "L4",
+          "name": "Campo anterior",
+          "keys": "Shift+Tab"
+        },
+        {
+          "id": "RGRIP",
+          "label": "R4",
+          "name": "Proximo campo",
+          "keys": "Tab"
+        },
+        {
+          "id": "LGRIP2",
+          "label": "L5",
+          "name": "Menu Iniciar",
+          "keys": "Meta"
+        },
+        {
+          "id": "RGRIP2",
+          "label": "R5",
+          "name": "Visao geral das atividades",
+          "keys": "Meta+W"
+        }
+      ]
+    },
+    {
+      "id": "system",
+      "title": "Sistema",
+      "items": [
+        {
+          "id": "BACK",
+          "label": "View",
+          "name": "Alternar janelas",
+          "keys": "Alt+Tab"
+        },
+        {
+          "id": "START",
+          "label": "Menu",
+          "name": "Visao geral das atividades",
+          "keys": "Meta+W"
+        },
+        {
+          "id": "DOTS",
+          "label": "…",
+          "name": "Teclado virtual",
+          "keys": "abre ou fecha"
+        }
+      ]
+    },
+    {
+      "id": "pointing",
+      "title": "Cursores",
+      "items": [
+        {
+          "id": "dpad",
+          "label": "Direcional",
+          "name": "Setas",
+          "keys": "Setas"
+        },
+        {
+          "id": "lstick",
+          "label": "Analógico esquerdo",
+          "name": "Setas",
+          "keys": "Setas"
+        },
+        {
+          "id": "rstick",
+          "label": "Analógico direito",
+          "name": "Cursor",
+          "keys": "Cursor"
+        },
+        {
+          "id": "pad_left",
+          "label": "Trackpad esquerdo",
+          "name": "Rolagem",
+          "keys": "Rolagem"
+        },
+        {
+          "id": "pad_right",
+          "label": "Trackpad direito",
+          "name": "Cursor",
+          "keys": "Cursor"
+        },
+        {
+          "id": "RPAD",
+          "label": "Trackpad direito",
+          "name": "Clique esquerdo",
+          "keys": "Clique esquerdo"
+        },
+        {
+          "id": "trigger_left",
+          "label": "L2",
+          "name": "Clique direito",
+          "keys": "Clique direito"
+        },
+        {
+          "id": "trigger_right",
+          "label": "R2",
+          "name": "Clique esquerdo",
+          "keys": "Clique esquerdo"
+        }
+      ]
+    },
+    {
+      "id": "chords",
+      "title": "Steam",
+      "items": [
+        {
+          "id": "X",
+          "label": "Steam + X",
+          "name": "Teclado virtual",
+          "keys": "abre ou fecha"
+        },
+        {
+          "id": "Y",
+          "label": "Steam + Y",
+          "name": "Captura de tela",
+          "keys": "Print"
+        },
+        {
+          "id": "B",
+          "label": "Steam + B",
+          "name": "Copiar",
+          "keys": "Ctrl+C"
+        },
+        {
+          "id": "A",
+          "label": "Steam + A",
+          "name": "Colar",
+          "keys": "Ctrl+V"
+        }
+      ]
+    }
+  ]
+}

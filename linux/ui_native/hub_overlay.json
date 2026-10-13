@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "_comment": "Overlay da página Linux. Só acrescenta o que o backend não sabe: ordem das seções, ícone e quais ações entram na vitrine. Todo id aqui precisa existir no catálogo real — ver tests/test_linux_hub.py.",
+  "sections": [
+    "Ajustes do sistema",
+    "Gaming e streaming",
+    "Hardware e drivers",
+    "Saúde e desempenho",
+    "Segurança e privacidade",
+    "Backup e nuvem",
+    "Desenvolvimento",
+    "Criação e produtividade",
+    "Administração",
+    "Educação",
+    "Ferramentas"
+  ],
+  "tuning": [
+    {
+      "area": "gaming",
+      "title": "Otimizações de jogo",
+      "description": "GameMode, MangoHud, prioridades de processo e CoreCtrl com preset do PhaseZero.",
+      "section": "Gaming e streaming",
+      "icon": "applications-games",
+      "mode": "recommended"
+    },
+    {
+      "area": "browser",
+      "title": "Hardening de navegador",
+      "description": "Telemetria desligada, proteção contra rastreamento e políticas de privacidade no Firefox e Chromium.",
+      "section": "Segurança e privacidade",
+      "icon": "preferences-system-privacy",
+      "mode": "recommended"
+    },
+    {
+      "area": "dev",
+      "title": "Ajustes de desenvolvimento",
+      "description": "Limites de inotify, rede e memória para watchers, além de preferências de git e npm.",
+      "section": "Desenvolvimento",
+      "icon": "applications-development",
+      "mode": "opt-in"
+    }
+  ],
+  "capabilities": {},
+  "actions": [
+    {
+      "id": "hub.flatpak",
+      "title": "Aplicativos Flatpak",
+      "description": "Fontes confiáveis, auditoria de permissões e reparo do runtime Flatpak.",
+      "section": "Ferramentas",
+      "icon": "system-software-install",
+      "mode": "recommended",
+      "rollback": ["manual"],
+      "actionIds": ["flatpak.status", "flatpak.audit", "flatpak.remotes", "flatpak.repair", "flatpak.rollback"]
+    },
+    {
+      "id": "hub.emulation",
+      "title": "Emulação e biblioteca de jogos",
+      "description": "Layout de mídia, emuladores, frontends e integrações com o Steam.",
+      "section": "Ferramentas",
+      "icon": "applications-games",
+      "mode": "opt-in",
+      "rollback": ["manual"],
+      "actionIds": ["emulation.status", "emulation.setup", "emulation.layout", "emulation.doctor"]
+    },
+    {
+      "id": "hub.ai",
+      "title": "Agentes e ferramentas de IA",
+      "description": "Conectores MCP, OpenCode, modelos locais e diagnóstico dos agentes.",
+      "section": "Ferramentas",
+      "icon": "applications-development",
+      "mode": "opt-in",
+      "rollback": ["manual"],
+      "actionIds": ["ai.status", "ai.doctor", "ai.repair", "ai.compat"]
+    },
+    {
+      "id": "hub.host-health",
+      "title": "Saúde do host",
+      "description": "Diagnóstico completo, dependências opcionais e bundle de suporte.",
+      "section": "Ferramentas",
+      "icon": "dialog-information",
+      "mode": "recommended",
+      "rollback": ["none"],
+      "actionIds": ["system.doctor", "system.deps.status", "system.support-bundle"]
+    }
+  ]
+}

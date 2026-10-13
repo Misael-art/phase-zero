@@ -269,11 +269,27 @@ pz_flatpak_setup_from_profile() {
     local profile_file="$1"
     local dry_run="${PZ_DRY_RUN:-0}"
 
-    pz_flatpak_require 2>/dev/null || return 0
-
     local flatpak_raw
     flatpak_raw=$(jq -r '.packages.linux.flatpak // empty' "$profile_file" 2>/dev/null || true)
     [ -z "$flatpak_raw" ] && return 0
+
+    # PZ-AUD-027: a declared flatpak selection bootstraps its own runtime
+    # instead of silently skipping when flatpak is absent.
+    if ! command -v flatpak &>/dev/null; then
+        if [ "$dry_run" = "1" ]; then
+            pz_info "would bootstrap flatpak runtime for declared selection"
+        elif command -v pacman &>/dev/null; then
+            pz_info "bootstrapping flatpak runtime..."
+            pz_admin_run pacman -S --needed --noconfirm flatpak || {
+                pz_error "profile needs flatpak but it could not be installed; install flatpak and re-run"
+                return 1
+            }
+        else
+            pz_error "profile needs flatpak but no supported installer exists on this host"
+            return 1
+        fi
+    fi
+    pz_flatpak_require 2>/dev/null || return 0
 
     local is_object=false
     echo "$flatpak_raw" | jq -e '. | type == "object"' >/dev/null 2>&1 && is_object=true
@@ -286,16 +302,20 @@ pz_flatpak_setup_from_profile() {
 
         if [ -n "$remotes" ]; then
             if [ "$dry_run" = "1" ]; then pz_info "planning flatpak remotes..."; else pz_info "configuring flatpak remotes..."; fi
-            echo "$remotes" | while IFS=$'\t' read -r name url required; do
+            while IFS=$'\t' read -r name url required; do
                 [ -z "$name" ] || [ -z "$url" ] && continue
                 if [ "$dry_run" = "1" ]; then
                     pz_info "  would add remote: $name -> $url"
                     continue
                 fi
                 pz_flatpak_ensure_remote "$name" "$url" || {
-                    [ "$required" = "true" ] && pz_warn "required remote '$name' failed"
+                    if [ "$required" = "true" ]; then
+                        pz_error "required remote '$name' failed"
+                        return 1
+                    fi
+                    pz_warn "optional remote '$name' failed"
                 }
-            done
+            done < <(printf '%s\n' "$remotes")
         fi
 
         if [ -n "$packages" ] && [ "$dry_run" = "1" ]; then

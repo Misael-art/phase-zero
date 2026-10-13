@@ -61,6 +61,11 @@ done
 "$REPO_ROOT/linux/pz" emulation shared status >/dev/null
 # verify status output contains expected info (no crash)
 
+# drift vira dica de convergência no texto (rc0), alinhado ao --json
+grep -q "pz emulation shared apply" "$REPO_ROOT/linux/emulation/shared-content.sh"
+grep -q "pz emulation media apply --plan" "$REPO_ROOT/linux/emulation/media.sh"
+echo "  drift hints ok"
+
 # shared plan after apply shows no changes
 "$REPO_ROOT/linux/pz" emulation shared plan >/dev/null
 # should not error

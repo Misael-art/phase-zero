@@ -20,6 +20,7 @@ from linux.ui_native import __version__
 
 
 ROOT = Path(__file__).resolve().parents[1]
+pytestmark = pytest.mark.usefixtures("no_homelab_startup_probe")
 
 # Module paths under linux/ui_native/ to audit for import-time AttributeError
 UI_MODULES: list[str] = [
@@ -42,6 +43,8 @@ UI_MODULES: list[str] = [
     "linux.ui_native.pages.results",
     "linux.ui_native.pages.workspace",
     "linux.ui_native.pages.ai_proxies",
+    "linux.ui_native.pages.ai_dev",
+    "linux.ui_native.pages.ai_routing",
     "linux.ui_native.pages.windows_vm",
     "linux.ui_native.pages.service_control",
     "linux.ui_native.health_models",
@@ -106,11 +109,13 @@ def test_windows_vm_page_translates_status_json_into_visual_controls(ws_page):
 
 def test_windows_vm_primary_actions_are_ordered_and_launch_requires_disk(ws_page):
     page, _actions = ws_page
-    hero = page.refresh_button.parentWidget()
+    grid = page._hero_grid
     labels = [
-        hero.layout().itemAt(index).widget().text()
-        for index in range(hero.layout().count())
-        if isinstance(hero.layout().itemAt(index).widget(), QPushButton)
+        grid.itemAtPosition(row, col).widget().text()
+        for row in range(grid.rowCount())
+        for col in range(grid.columnCount())
+        if grid.itemAtPosition(row, col) is not None
+        and isinstance(grid.itemAtPosition(row, col).widget(), QPushButton)
     ]
     assert labels == ["Atualizar", "Instalar automaticamente", "Iniciar VM"]
     page._on_status_ready("windows.status", "", {
@@ -469,3 +474,48 @@ def test_ui_modules_import():
     for mod_name in UI_MODULES:
         mod = __import__(mod_name, fromlist=["_trash"])
         assert isinstance(mod, ModuleType), f"{mod_name} did not import as module"
+
+
+# ── UX-004: reflow keeps every CTA intact at small and large windows ──
+
+def test_windows_vm_page_reflows_without_cut_cta(qapp, ws_page):
+    from PySide6.QtTest import QTest
+
+    page, _actions = ws_page
+
+    def settle():
+        for _ in range(3):
+            qapp.processEvents()
+
+    try:
+        page.resize(1280, 800)
+        page.show()
+        QTest.qWaitForWindowExposed(page)
+        settle()
+        scroll = page._page_scroll
+        assert scroll.widgetResizable()
+        assert scroll.horizontalScrollBar().maximum() == 0
+        # wide: cards side by side, hero buttons share one row (same center
+        # line within rounding; heights differ so tops can differ)
+        assert page._narrow_layout is False
+        assert page._perf_card.geometry().top() == page._integration_card.geometry().top()
+        assert abs(page.refresh_button.geometry().center().y()
+                   - page.power_button.geometry().center().y()) <= 2
+        scroll.ensureWidgetVisible(page.power_button, 8, 8)
+        settle()
+        assert not page.power_button.visibleRegion().isEmpty()
+        assert page.power_button.width() >= 150
+
+        # narrow (800x600): one column, hero actions stacked, CTA intact
+        page.resize(800, 600)
+        settle()
+        assert page._narrow_layout is True
+        assert page._perf_card.geometry().top() < page._integration_card.geometry().top()
+        assert page.power_button.geometry().y() > page.install_button.geometry().y()
+        assert scroll.horizontalScrollBar().maximum() == 0
+        scroll.ensureWidgetVisible(page.power_button, 8, 8)
+        settle()
+        assert not page.power_button.visibleRegion().isEmpty()
+        assert page.power_button.width() >= 150
+    finally:
+        page.hide()

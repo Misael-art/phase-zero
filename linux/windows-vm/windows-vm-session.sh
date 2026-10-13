@@ -153,7 +153,6 @@ resolve_display_target() {
 build_gamescope_args() {
     GAMESCOPE_ARGS=(
         --backend drm
-        --expose-wayland
         -O "$DISPLAY_CONNECTOR"
         -r "$DISPLAY_REFRESH_RATE"
     )
@@ -269,7 +268,7 @@ compositor_command() {
             pz_display_shell_join \
                 dbus-run-session -- env PZ_WINDOWS_VM_INSIDE_COMPOSITOR=1 gamescope \
                 "${GAMESCOPE_ARGS[@]}" \
-                -- "$0"
+                -- env GDK_BACKEND=x11 "$0"
             ;;
         cage)
             pz_display_shell_join dbus-run-session -- env PZ_WINDOWS_VM_INSIDE_COMPOSITOR=1 cage -- "$0"
@@ -322,9 +321,12 @@ printf '%s display_profile=%s external_connectors=%s compositor=%s reason=%s com
     "$(compositor_reason "$kind")" "$(compositor_command "$kind")"
 case "$kind" in
     gamescope)
+        # QEMU GTK must be an Xwayland client: Gamescope's XWM owns scaling
+        # and forced fullscreen. Native xdg-shell leaves a decorated, small
+        # window despite -full-screen (observed on both Deck and dock).
         exec dbus-run-session -- env PZ_WINDOWS_VM_INSIDE_COMPOSITOR=1 gamescope \
             "${GAMESCOPE_ARGS[@]}" \
-            -- "$0"
+            -- env GDK_BACKEND=x11 "$0"
         ;;
     cage)
         exec dbus-run-session -- env PZ_WINDOWS_VM_INSIDE_COMPOSITOR=1 cage -- "$0"
@@ -412,7 +414,14 @@ direct_boot_graphics_flag() {
     local plan
     plan="$(launcher_graphics_probe virtio-gl 2>/dev/null || true)"
     [ "$(jq -r '.eligible // false' <<<"$plan" 2>/dev/null)" = "true" ] || return 0
-    printf '%s\n' "--graphics virtio-gl"
+    # --experimental is required for an explicitly requested virtio-gl. Without
+    # it the launcher refuses the very profile this probe just proved eligible
+    # ("graphics virtio-gl e experimental; adicione --experimental"), the quick
+    # retry drops to compat, and the guest lands at 1024x768 letterboxed on a
+    # 1280x800 panel - which is what direct boot did on every single run.
+    # The gate exists to stop a human enabling an unproven profile by accident;
+    # here eligibility was just verified against this host by graphics plan.
+    printf '%s\n' "--graphics virtio-gl --experimental"
 }
 
 write_session_state() {

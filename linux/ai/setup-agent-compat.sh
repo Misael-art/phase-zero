@@ -9,7 +9,7 @@ LOCAL_BIN="${PZ_LOCAL_BIN:-$HOME/.local/bin}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/phasezero/ai"
 STATE_FILE="$STATE_DIR/agent-compat.json"
 PROJECTS_FILE="$STATE_DIR/projects.json"
-WORKSPACE_ROOT="${PZ_WORKSPACE_ROOT:-$PZ_ROOT}"
+WORKSPACE_ROOT="${PZ_WORKSPACE_ROOT:-}"
 RTK_REPO_API="${PZ_RTK_REPO_API:-https://api.github.com/repos/rtk-ai/rtk/releases/latest}"
 RTK_DOCS_URL="https://www.rtk-ai.app/docs/"
 RTK_REPO_URL="https://github.com/rtk-ai/rtk"
@@ -30,6 +30,43 @@ tool_path() {
 
 bool_json() {
     [ "$1" = "true" ] && printf 'true' || printf 'false'
+}
+
+registered_workspace_root() {
+    [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT" ] && { printf '%s\n' "$WORKSPACE_ROOT"; return 0; }
+    [ -f "$PROJECTS_FILE" ] || return 1
+    jq -r '.projects | reverse[]? | .path // empty' "$PROJECTS_FILE" 2>/dev/null | while IFS= read -r path; do
+        [ -d "$path" ] || continue
+        [ -f "$path/AGENTS.md" ] || continue
+        grep -q 'BEGIN BOOTSTRAP CAVEMAN' "$path/AGENTS.md" 2>/dev/null || continue
+        grep -q 'BEGIN PHASEZERO TOOLS' "$path/AGENTS.md" 2>/dev/null || continue
+        printf '%s\n' "$path"
+        break
+    done
+}
+
+detected_client_bindings() {
+    local memory_state="$STATE_DIR/memory-integrations.json" memory_clients='[]'
+    if [ -f "$memory_state" ] && jq empty "$memory_state" >/dev/null 2>&1; then
+        memory_clients="$(jq '.clients // []' "$memory_state")"
+    fi
+    jq -cn --argjson memoryClients "$memory_clients" \
+        --argjson grok "$({ command -v grok >/dev/null 2>&1 || [ -d "$HOME/.grok" ]; } && echo true || echo false)" \
+        --argjson kimi "$({ command -v kimi >/dev/null 2>&1 || command -v kimi-code >/dev/null 2>&1 || [ -d "$HOME/.kimi-code" ] || [ -d "$HOME/.kimi" ]; } && echo true || echo false)" \
+        --argjson zcode "$({ command -v zcode >/dev/null 2>&1 || [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/ai.z.zcode/store.json" ]; } && echo true || echo false)" '
+      def mem($id): ($memoryClients | map(select(.client == $id)) | first // {});
+      {
+        clients:[
+          {id:"grok-build",label:"Grok Build CLI",detected:$grok,kind:"agent",rules:"AGENTS.md",rtk:"host-shell",memory:(mem("grok")),directRuleInjection:false},
+          {id:"kimi-code",label:"Kimi Code CLI",detected:$kimi,kind:"agent",rules:"AGENTS.md",rtk:"host-shell",memory:(mem("kimi-code")),directRuleInjection:false},
+          {id:"zcode",label:"ZCode",detected:$zcode,kind:"agent",rules:"AGENTS.md (OpenCode-compatible)",rtk:"host-shell",memory:(mem("zcode")),directRuleInjection:false}
+        ],
+        providers:[
+          {id:"grok-provider",label:"Grok/xAI provider",kind:"provider",directRuleInjection:false,receivesRulesThrough:"selected agent client"},
+          {id:"kimi-provider",label:"Kimi/Moonshot provider",kind:"provider",directRuleInjection:false,receivesRulesThrough:"selected agent client"}
+        ],
+        safety:"Rules stay project-scoped; providers never receive host instructions or secrets directly."
+      }'
 }
 
 ensure_local_bin() {
@@ -338,6 +375,11 @@ is_ponytail_workspace() {
 }
 
 apply_rules() {
+    # Every target is "$WORKSPACE_ROOT/<file>": an empty root would write
+    # /AGENTS.md, /CLAUDE.md, ... (and succeed under sudo).
+    case "$WORKSPACE_ROOT" in
+        ""|/|"$HOME") pz_error "refusing to write agent rules without a project (workspace: '${WORKSPACE_ROOT}')"; return 2 ;;
+    esac
     local caveman_body="$PZ_ROOT/assets/agent-skills/caveman-always-on.md"
     local tools_body="$PZ_ROOT/assets/agent-skills/phasezero-tools-always-on.md"
     local ponytail_body="$PZ_ROOT/assets/agent-skills/ponytail-architecture-runtime.md"
@@ -461,21 +503,38 @@ frugality_configured() {
 
 status_json() {
     local rtk_path="" memory_path="" headroom_path="" rtk_ver="" memory_ver="" headroom_ver=""
-    local ponytail=false frugality=false rule_json rules_ok=false mode="degraded"
+    local ponytail=false frugality=false rule_json='[]' rules_ok=false mode="degraded" workspace_source="none" bindings
+    if [ -n "${PZ_WORKSPACE_ROOT:-}" ]; then
+        WORKSPACE_ROOT="${PZ_WORKSPACE_ROOT}"
+        workspace_source="explicit"
+    elif WORKSPACE_ROOT="$(registered_workspace_root || true)" && [ -n "$WORKSPACE_ROOT" ]; then
+        workspace_source="registered"
+    else
+        WORKSPACE_ROOT=""
+        mode="needs-project"
+    fi
     rtk_path="$(tool_path rtk || true)"
     memory_path="$(tool_path ai-memory || true)"
     headroom_path="$(tool_path headroom || true)"
     [ -n "$rtk_path" ] && rtk_ver="$(first_line "$rtk_path" --version)"
     [ -n "$memory_path" ] && memory_ver="$(first_line "$memory_path" --version)"
     [ -n "$headroom_path" ] && headroom_ver="$(first_line "$headroom_path" --version)"
-    is_ponytail_workspace "$WORKSPACE_ROOT" && ponytail=true
-    frugality_configured && frugality=true
-    rule_json="$(rule_records | jq -s .)"
-    jq -e 'all(.[]; .caveman == true and .phasezeroTools == true)' <<< "$rule_json" >/dev/null && rules_ok=true
-    [ -n "$rtk_path" ] && [ -n "$memory_path" ] && [ "$rules_ok" = "true" ] && mode="ready"
+    if [ -n "$WORKSPACE_ROOT" ]; then
+        is_ponytail_workspace "$WORKSPACE_ROOT" && ponytail=true
+        frugality_configured && frugality=true
+        rule_json="$(rule_records | jq -s .)"
+        jq -e 'length > 0 and all(.[]; .caveman == true and .phasezeroTools == true)' <<< "$rule_json" >/dev/null && rules_ok=true
+    fi
+    bindings="$(detected_client_bindings)"
+    if [ -n "$rtk_path" ] && [ -n "$memory_path" ] && [ "$rules_ok" = "true" ]; then
+        mode="ready"
+    elif [ -z "$WORKSPACE_ROOT" ]; then
+        mode="needs-project"
+    fi
     jq -cn \
         --arg mode "$mode" \
         --arg workspaceRoot "$WORKSPACE_ROOT" \
+        --arg workspaceSource "$workspace_source" \
         --arg docs "$RTK_DOCS_URL" \
         --arg rtkPath "$rtk_path" \
         --arg rtkVersion "$rtk_ver" \
@@ -488,10 +547,12 @@ status_json() {
         --argjson rulesOk "$(bool_json "$rules_ok")" \
         --argjson ponytailDetected "$(bool_json "$ponytail")" \
         --argjson frugalityConfigured "$(bool_json "$frugality")" \
+        --argjson bindings "$bindings" \
         '{
           schemaVersion:1,
           mode:$mode,
           workspaceRoot:$workspaceRoot,
+          workspaceSource:$workspaceSource,
           stateFile:$stateFile,
           tools:{
             caveman:{id:"caveman",status:(if $rulesOk then "available" else "missing-rules" end),role:"style",configured:$rulesOk},
@@ -503,6 +564,7 @@ status_json() {
             graphify:{id:"graphify",status:"notConfigured",role:"placeholder",configured:false,placeholder:true,repairKind:"none"}
           },
           rules:{ok:$rulesOk,files:$rules},
+          integrations:$bindings,
           conflictRules:["style=caveman","shell=rtk-when-present","memory=ai-memory-when-present","architecture=ponytail-workspace-only","no-duplicate-wrappers","no-secrets-in-rules"]
         }'
 }
@@ -515,6 +577,9 @@ write_state() {
 
 dry_run() {
     local asset=""
+    if [ -z "$WORKSPACE_ROOT" ]; then
+        WORKSPACE_ROOT="$(registered_workspace_root || true)"
+    fi
     asset="$(rtk_asset_name || true)"
     jq -cn \
         --arg workspaceRoot "$WORKSPACE_ROOT" \
@@ -579,10 +644,10 @@ register_project() {
             path: $path,
             injectedAt: $at,
             agents: (if $rulesApplied
-                then (["agents","claude","gemini","github-copilot","cursor","windsurf","cline"]
-                    + (if $zcode then ["zcode"] else [] end))
+                then ["agents","claude","gemini","github-copilot","cursor","windsurf","cline","grok-build","kimi-code","zcode"]
                 else [] end),
             ponytail: $ponytail,
+            zcodeDedicatedRules: $zcode,
             rulesHash: $hash,
             lastStatus: "ready"
         }]' "$PROJECTS_FILE" > "$tmp" && mv "$tmp" "$PROJECTS_FILE"
@@ -700,6 +765,7 @@ init_usage() {
     cat >&2 <<'EOF'
 usage: setup-agent-compat.sh init [--dry-run] [--force] [--zcode] [--only-rules|--only-frugality] [<project-dir>]
        setup-agent-compat.sh init --status [<project-dir>]
+       setup-agent-compat.sh init --register-existing [<project-dir>]
        setup-agent-compat.sh init --list
        setup-agent-compat.sh init --undo [<project-dir>]
 EOF
@@ -716,6 +782,7 @@ cmd_init() {
             --only-rules) only_rules=true ;;
             --only-frugality) only_frugality=true ;;
             --status) mode="status" ;;
+            --register-existing) mode="register-existing" ;;
             --list) mode="list" ;;
             --undo) mode="undo" ;;
             --help|-h) init_usage; return 0 ;;
@@ -733,6 +800,21 @@ cmd_init() {
     case "$mode" in
         status) init_status "$target"; return $? ;;
         undo) init_undo "$target"; return $? ;;
+        register-existing)
+            WORKSPACE_ROOT="$target"
+            local existing_rules ponytail_existing=false existing_hash
+            existing_rules="$(rule_records | jq -s .)"
+            if ! jq -e 'length > 0 and all(.[]; .caveman == true and .phasezeroTools == true)' <<< "$existing_rules" >/dev/null; then
+                pz_error "managed Caveman/PhaseZero rules are incomplete in $target"
+                return 1
+            fi
+            is_ponytail_workspace "$target" && ponytail_existing=true
+            existing_hash="$(rules_source_hash "$ponytail_existing")"
+            register_project "$target" "$ponytail_existing" false "$existing_hash" true
+            jq -cn --arg path "$target" --arg hash "$existing_hash" \
+                '{schemaVersion:1,action:"register-existing",path:$path,status:"ready",rulesHash:$hash,modifiedProjectFiles:false}'
+            return 0
+            ;;
     esac
     if [ "$only_rules" = "true" ] && [ "$only_frugality" = "true" ]; then
         pz_error "--only-rules and --only-frugality are mutually exclusive"
@@ -801,8 +883,15 @@ setup_all() {
     configure_rtk
     install_headroom || true
     bash "$PZ_ROOT/linux/ai/setup-memory.sh" setup >/dev/null || pz_warn "ai-memory setup skipped/failed"
-    apply_rules
-    apply_frugality_pack
+    if [ -z "$WORKSPACE_ROOT" ]; then
+        WORKSPACE_ROOT="$(registered_workspace_root || true)"
+    fi
+    if [ -n "$WORKSPACE_ROOT" ]; then
+        apply_rules
+        apply_frugality_pack
+    else
+        pz_warn "no registered project; global tools configured, project rules unchanged"
+    fi
     write_state
     status_json
 }
@@ -821,6 +910,11 @@ case "${1:-setup}" in
         status_json | jq '.tools.headroom'
         ;;
     rules|caveman)
+        [ -n "$WORKSPACE_ROOT" ] || WORKSPACE_ROOT="$(registered_workspace_root || true)"
+        if [ -z "$WORKSPACE_ROOT" ]; then
+            jq -cn '{mode:"needs-project",rules:[],summary:"Nenhum projeto registrado para receber as regras.",next:"linux/pz ai init <pasta-do-projeto>"}'
+            exit 2
+        fi
         apply_rules
         write_state
         status_json | jq '{mode,rules,tools:{caveman:.tools.caveman,ponytail:.tools.ponytail}}'

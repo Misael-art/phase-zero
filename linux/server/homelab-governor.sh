@@ -48,12 +48,8 @@ pz_governor_registry() {
 }
 
 pz_governor_available_mb() {
-    if [ -n "${PZ_HOMELAB_RAM_TOTAL_OVERRIDE:-}" ]; then
-        printf '%s\n' "$PZ_HOMELAB_RAM_TOTAL_OVERRIDE"
-        return 0
-    fi
-    awk '/^MemTotal:/ {printf "%d", $2/1024; exit}' /proc/meminfo 2>/dev/null \
-        || { pz_error "cannot read total RAM"; return 1; }
+    # PZ-AUD-031: MemAvailable via the shared helper (override = test seam).
+    pz_mem_available_mb
 }
 
 # pz_governor_winvm_status -> 'active' | 'idle' | 'unknown'
@@ -86,7 +82,15 @@ pz_governor_winvm_mb() {
 pz_governor_winvm_status_json() {
     local st mb
     st="$(pz_governor_winvm_status)"
-    mb="$(pz_governor_winvm_mb)" || return $?
+    if ! mb="$(pz_governor_winvm_mb)"; then
+        # Unconfigured budget is a reportable state, not a tool failure.
+        jq -cn --argjson schemaVersion "$SCHEMA_VERSION" --arg status "$st" \
+            '{schemaVersion:$schemaVersion, tool:"homelab-governor", action:"winvm-status",
+              status:$status, active:false, weightMB:null, state:"needs-config",
+              summary:"Nenhum orcamento WinVM configurado no governador.",
+              nextAction:"linux/pz server homelab profile set <perfil>"}'
+        return 0
+    fi
 jq -cn --argjson schemaVersion "$SCHEMA_VERSION" \
         --arg status "$st" \
         --argjson active "$([ "$st" = "active" ] && echo true || echo false)" \
@@ -172,8 +176,10 @@ pz_governor_budget() {
         reasons="$(jq -cn --arg m "$over_message" --arg w "$winvm_reason" \
             'if $w == "" then [$m] else [$m, $w] end')"
     fi
-    local title
+    local title total_mb disk_mb
     title="$(jq -r --arg k "$profile" '[.profiles[] | select(.key == $k) | .title] | .[0]' <<< "$reg")"
+    total_mb="$(pz_mem_total_mb 2>/dev/null || printf 'null')"
+    disk_mb="$(pz_disk_available_mb "${PZ_HOMELAB_STATE:-$PZ_STATE/homelab}" 2>/dev/null || printf 'null')"
     jq -cn --argjson schemaVersion "$SCHEMA_VERSION" \
         --arg tool "homelab-governor" \
         --arg profile "$profile" \
@@ -182,6 +188,8 @@ pz_governor_budget() {
         --argjson serviceMB "$used" \
         --argjson budgetMB "$total" \
         --argjson availableMB "$available" \
+        --argjson totalMB "${total_mb:-null}" \
+        --argjson diskAvailableMB "${disk_mb:-null}" \
         --argjson headroomPct "$headroom" \
         --argjson winvmActive "$winvm_active" \
         --argjson winvmWeightMB "$winvm_mb" \
@@ -189,7 +197,8 @@ pz_governor_budget() {
         --argjson reasons "$reasons" \
         '{schemaVersion:$schemaVersion, tool:$tool, profile:$profile, profileTitle:$profileTitle,
           coreBaseMB:$coreBaseMB, serviceMB:$serviceMB, budgetMB:$budgetMB,
-          availableMB:$availableMB, headroomPct:$headroomPct,
+          availableMB:$availableMB, totalMB:$totalMB, diskAvailableMB:$diskAvailableMB,
+          headroomPct:$headroomPct,
           winvmActive:$winvmActive, winvmWeightMB:$winvmWeightMB, verdict:$verdict, reasons:$reasons}'
 }
 
@@ -200,7 +209,7 @@ pz_governor_list_json() {
     def="$(jq -r '.default' <<< "$reg")"
     jq -cn --argjson schemaVersion "$SCHEMA_VERSION" \
         --arg default "$def" \
-        --argjson profiles "$(jq -c '[.profiles[] | {key, title, description, class, maturity, extras, services}]' <<< "$reg")" \
+        --argjson profiles "$(jq -c '[.profiles[] | {key, title, description, class, maturity, installable, installNote, extras, services}]' <<< "$reg")" \
         '{schemaVersion:$schemaVersion, tool:"homelab-governor", default:$default, profiles:$profiles}'
 }
 

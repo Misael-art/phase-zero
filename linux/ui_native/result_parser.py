@@ -41,8 +41,85 @@ def _has_output(value: Any) -> bool:
     return value is not None
 
 
+# Statuses that mean "valid report, action pending on the user/environment"
+# rather than "the tool failed".
+_RESUMABLE_STATUSES = {
+    "warn", "warning", "degraded", "needsinstall", "needsrepair",
+    "needs-login", "needslogin", "needs-credentials", "needscredentials",
+    "gui-required", "guirequired",
+}
+
+# LUX-003: envelopes cujo estado diz que a operação falhou. Um nextAction ou
+# resumable junto não transforma falha em "pendente".
+_FAILURE_STATES = {
+    "error", "failed", "failure", "fail", "blocked", "timeout", "timed-out",
+    "unhealthy", "crashed", "aborted", "manualaction",
+}
+
+
+def is_failure_report(value: Any) -> bool:
+    """Whether a structured result's top-level status is a failure."""
+    if not isinstance(value, dict):
+        return False
+    return str(value.get("status", "")).strip().casefold() in _FAILURE_STATES
+
+
+def restart_required(value: Any) -> bool:
+    """True when the payload asks for a reboot to finish (not a failure)."""
+    if not isinstance(value, dict):
+        return False
+    return str(value.get("status", "")).casefold().replace("-", "") == "requiresrestart"
+
+
+def is_pending_report(value: Any) -> bool:
+    """True when the payload is a valid diagnostic saying work is pending.
+
+    Readiness/state lives in these payloads (homelab ``state``, AI proxies
+    ``resumable``, legacy ``status`` warnings); a run that produced one did its
+    job even with a non-zero exit code.
+    """
+    if not isinstance(value, dict) or not value:
+        return False
+    for key in ("state", "status"):
+        if str(value.get(key, "")).strip().casefold() in _FAILURE_STATES:
+            return False
+    if value.get("resumable") is True:
+        return True
+    state = value.get("state")
+    if isinstance(state, str) and state.strip():
+        return True
+    if str(value.get("status", "")).casefold() in _RESUMABLE_STATUSES:
+        return True
+    next_action = value.get("nextAction")
+    return isinstance(next_action, str) and bool(next_action.strip())
+
+
+def guidance(value: Any) -> dict[str, Any]:
+    """Unified orientation fields across backend envelope dialects.
+
+    Backends emit either ``next`` (legacy AI proxies) or ``nextAction``
+    (homelab/ledger), plus optional ``summary`` and ``reasons``. Consumers
+    render whatever this returns without caring which dialect produced it.
+    """
+    out: dict[str, Any] = {"summary": None, "next_action": None, "reasons": []}
+    if not isinstance(value, dict):
+        return out
+    summary = value.get("summary") or value.get("message")
+    if isinstance(summary, str) and summary.strip():
+        out["summary"] = summary.strip()
+    nxt = value.get("nextAction") or value.get("next")
+    if isinstance(nxt, str) and nxt.strip():
+        out["next_action"] = nxt.strip()
+    reasons = value.get("reasons")
+    if isinstance(reasons, list):
+        out["reasons"] = [str(item) for item in reasons[:6]]
+    return out
+
+
 def severity_for(value: Any, exit_code: int, *, mutable: bool = True, has_output: bool | None = None) -> str:
     if exit_code != 0:
+        if is_pending_report(value):
+            return "warning"
         if mutable:
             return "error"
         if has_output is None:
@@ -50,11 +127,22 @@ def severity_for(value: Any, exit_code: int, *, mutable: bool = True, has_output
         return "warning" if has_output else "error"
     if not isinstance(value, dict):
         return "success"
-    status = str(value.get("status", "")).casefold()
-    if status in {"failed", "error", "blocked", "requiresrestart", "manualaction"}:
-        return "error"
-    if status in {"warn", "warning", "degraded", "needsinstall", "needsrepair"}:
+    if restart_required(value):
         return "warning"
+    if is_failure_report(value):
+        return "error"
+    status = str(value.get("status", "")).casefold()
+    if status in {
+        "warn", "warning", "degraded", "needsinstall", "needsrepair",
+        "needs-login", "needslogin", "needs-credentials", "needscredentials",
+        "gui-required", "guirequired",
+    }:
+        return "warning"
+    # Payloads cujo veredito é só "ok" (verify, rescue-wallpaper) saem do
+    # motor com exit 0; ok:false aqui é falha, não sucesso. Planos bloqueados
+    # carregam "blockers" e são resultado, não erro (mesmo contrato do _emit).
+    if value.get("ok") is False and "blockers" not in value:
+        return "error" if mutable else "warning"
     return "success"
 
 

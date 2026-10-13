@@ -164,6 +164,20 @@ def test_phasezero_mode_dark_roundtrip(fake_plasma, fake_state, fake_config):
     assert result["status"] == "failed"
 
 
+def test_phasezero_dark_matches_stock_lookandfeel_scheme(fake_plasma, fake_state, fake_config):
+    """Um lookandfeel stock limpa a chave ColorScheme; chave ausente com o
+    pacote esperado ativo É o esquema do modo, não degradação."""
+    (fake_config / "kdeglobals").write_text(
+        "[KDE]\nLookAndFeelPackage=org.kde.breezedark.desktop\n\n[General]\n", encoding="utf-8"
+    )
+    (fake_config / "phasezero").mkdir(exist_ok=True)
+    (fake_config / "phasezero/theme.conf").write_text("[interface]\ntheme=dark\n", encoding="utf-8")
+    status = json.loads(run_cli("status", "--json").stdout)
+    feature = status["features"]["theme.phasezero"]
+    assert feature["state"] == "ligado", feature
+    assert feature["params"]["mode"] == "dark"
+
+
 def test_reduce_motion_on_off_roundtrip(fake_plasma, fake_state, fake_config):
     operation = _plan_and_apply("--feature", "access.reduce-motion", "--state", "on")
     assert operation["status"] == "complete"
@@ -443,3 +457,39 @@ def test_wallpaper_read_script_names_keys_and_selects_group():
     assert "configKeys()" not in code, "configKeys() lança TypeError e vira {} silencioso"
     for key in ("WallpaperSource", "WallpaperWorkShopId", "SteamLibraryPath"):
         assert key in WALLPAPER_CONFIG_KEYS
+
+
+# --- regressões de host real (set/2026) ---------------------------------------
+
+
+def test_reduce_motion_off_restores_previous_value(fake_plasma, fake_state, fake_config):
+    """O off não pode gravar o valor-padrão fixo por cima do tuning do usuário."""
+    (fake_config / "kdeglobals").write_text(
+        "[KDE]\nAnimationDurationFactor=0.5\n", encoding="utf-8"
+    )
+    result, _ = _apply_feature("access.reduce-motion", fake_config, state="ligado")
+    assert result["status"] == "ligado", result
+    assert _read_config(fake_config, "kdeglobals", "KDE", "AnimationDurationFactor") == "0"
+
+    result, _ = _apply_feature("access.reduce-motion", fake_config, state="desligado")
+    assert result["status"] == "desligado", result
+    assert _read_config(fake_config, "kdeglobals", "KDE", "AnimationDurationFactor") == "0.5"
+
+
+def test_write_key_prefers_kwriteconfig(fake_plasma, fake_state, fake_config, tmp_path):
+    """Escrita direta em KConfig vivo disputa cache com o daemon; kwriteconfig
+    via KConfig mantém a sessão sincronizada."""
+    from themes.platform import HostFacts
+
+    log = tmp_path / "kwc.log"
+    stub = tmp_path / "kwriteconfig6"
+    stub.write_text(f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "{log}"\n', encoding="utf-8")
+    stub.chmod(0o755)
+
+    facts = HostFacts(plasma_major=6, kwin=True, binaries={"kwriteconfig6": str(stub)})
+    KdeSession(facts).write_key("kdeglobals", "KDE", "AnimationDurationFactor", "0.5")
+
+    args = log.read_text().splitlines()
+    assert len(args) == 1
+    for expected in ("--file", "kdeglobals", "--group", "KDE", "--key", "AnimationDurationFactor", "0.5"):
+        assert expected in args[0]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transactional OpenCode integration for the PhaseZero-managed 9Router."""
+"""Read-only OpenCode diagnostics; managed 9Router use fails closed without grant binding."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import re
 import stat
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +21,12 @@ except ModuleNotFoundError:
 
 
 SCHEMA_VERSION = 1
+CONNECTION_GRANT_BLOCKED_REASON = "connection-grant-not-enforceable"
+CONNECTION_GRANT_BLOCKER = (
+    "connection-grant-not-enforceable: OpenCode 9Router use is blocked; "
+    "the consumer grant cannot bind each request "
+    "to the selected account; no route configuration or client process was started."
+)
 ROUTE_ENV_KEYS = {
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -259,6 +264,8 @@ class OpenCodeManager:
                 "loopbackOnly": bool(listener.get("loopbackOnly", router.get("loopbackOnly"))),
                 "endpoint": "http://127.0.0.1:20128/v1",
             },
+            "executionSupported": False,
+            "executionBlockedReason": CONNECTION_GRANT_BLOCKED_REASON,
             "bonsaiDirectSupported": False,
             "secretsRedacted": True,
         }
@@ -271,143 +278,34 @@ class OpenCodeManager:
             raise RuntimeError("OpenCode CLI/Desktop version alignment failed")
 
     def install(self, dry_run: bool = False, yes: bool = False) -> dict[str, Any]:
-        before = self.status()
-        if dry_run:
-            return {
-                "schemaVersion": SCHEMA_VERSION,
-                "dryRun": True,
-                "state": before,
-                "plannedActions": [
-                    "align-cli-to-desktop",
-                    "merge-opencode-jsonc-into-json",
-                    "write-9router-file-credential",
-                    "configure-loopback-provider",
-                    "archive-conflicting-jsonc",
-                    "verify",
-                ],
-                "secretsRedacted": True,
-            }
-        if not yes and sys.stdin.isatty():
-            answer = input("Configure OpenCode for PhaseZero 9Router with rollback? [y/N] ").strip().lower()
-            if answer not in {"y", "yes", "s", "sim"}:
-                raise RuntimeError("cancelled")
-        self._sync_cli()
-        cli = self._cli_info()
-        desktop = self._desktop_version()
-        if not cli["installed"]:
-            raise RuntimeError("OpenCode CLI missing after version alignment")
-        if desktop and cli["version"] != desktop:
-            raise RuntimeError(f"OpenCode version skew: CLI {cli['version'] or 'unknown'}, desktop {desktop}")
-        token = self._router_token()
-        tx = cc.Transaction(self.data_root, "install")
-        archive = self.legacy_config.with_name(f"{self.legacy_config.name}.phasezero-migrated-{cc.stamp()}.bak")
-        try:
-            canonical = self._read_config(self.config)
-            legacy = self._read_config(self.legacy_config)
-            merged = deep_merge(legacy, canonical)
-            models = self._models(merged)
-            merged.setdefault("$schema", "https://opencode.ai/config.json")
-            provider_map = merged.setdefault("provider", {})
-            if not isinstance(provider_map, dict):
-                raise RuntimeError("OpenCode provider configuration must be an object")
-            provider_map["9router"] = {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "PhaseZero 9Router",
-                "options": {
-                    "baseURL": "http://127.0.0.1:20128/v1",
-                    "apiKey": f"{{file:{self.router_key}}}",
-                },
-                "models": {name: {"name": name} for name in models},
-            }
-            merged["model"] = "9router/Default"
-            self.config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-            desired_key = (token + "\n").encode()
-            if (
-                not self.router_key.is_file()
-                or self.router_key.read_bytes() != desired_key
-                or stat.S_IMODE(self.router_key.stat().st_mode) != 0o600
-            ):
-                tx.backup(self.router_key)
-                cc.atomic_text(self.router_key, token + "\n", 0o600)
-            desired_config = (json.dumps(merged, indent=2, sort_keys=True) + "\n").encode()
-            if (
-                not self.config.is_file()
-                or self.config.read_bytes() != desired_config
-                or stat.S_IMODE(self.config.stat().st_mode) != 0o600
-            ):
-                tx.backup(self.config)
-                cc.atomic_json(self.config, merged, 0o600)
-            if self.legacy_config.is_file():
-                tx.backup(self.legacy_config)
-                tx.backup(archive)
-                os.replace(self.legacy_config, archive)
-                os.chmod(archive, 0o600)
-            verification = self.verify(live=False)
-            if not verification["ok"]:
-                raise RuntimeError("OpenCode 9Router post-install verification failed")
-            tx.manifest["packages"].append(
-                {"name": "opencode-ai", "version": cli["version"], "method": "user-local-version-lock"}
-            )
-            tx.complete(
-                verification,
-                "\n".join(
-                    [
-                        "# OpenCode + 9Router report",
-                        "",
-                        f"- Completed: {cc.now_iso()}",
-                        f"- CLI/Desktop: `{cli['version']}`",
-                        "- Route: `9router`",
-                        f"- Config: `{self.config}`",
-                        f"- Rollback: `linux/pz ai opencode rollback {tx.manifest_path}`",
-                        "- Secrets: file reference, redacted",
-                        "",
-                    ]
-                ),
-            )
-            return {
-                "schemaVersion": SCHEMA_VERSION,
-                "status": "complete",
-                "manifest": str(tx.manifest_path),
-                "report": str(tx.report_path),
-                "verification": verification,
-                "secretsRedacted": True,
-            }
-        except Exception:
-            tx.finalize_paths()
-            tx.manifest["status"] = "failed-rolling-back"
-            tx.save()
-            cc.restore_manifest(tx.manifest_path, force=True)
-            raise
-
-    def sync_catalog(self, dry_run: bool = False) -> dict[str, Any]:
-        """Refresh provider.9router.models so every 9Router combo is selectable.
-
-        Read-only when dry_run. Writes opencode.json in place (atomic, 0600) and
-        returns the before/after model list. Safe to call repeatedly (idempotent).
-        """
-        before = self._read_config(self.config) if self.config.is_file() else {}
-        models = self._models(before)
-        result: dict[str, Any] = {
+        blocked = {
             "schemaVersion": SCHEMA_VERSION,
+            "status": "blocked",
+            "ok": False,
             "dryRun": dry_run,
-            "path": str(self.config),
-            "models": models,
+            "blockedReason": CONNECTION_GRANT_BLOCKED_REASON,
+            "blockers": [CONNECTION_GRANT_BLOCKER],
+            "plannedActions": [],
             "secretsRedacted": True,
         }
         if dry_run:
-            return result
-        desired = before
-        provider_map = desired.setdefault("provider", {})
-        if not isinstance(provider_map, dict):
-            raise RuntimeError("OpenCode provider configuration must be an object")
-        provider_map["9router"] = provider_map.get("9router", {}) if isinstance(provider_map.get("9router"), dict) else {}
-        provider_map["9router"]["models"] = {name: {"name": name} for name in models}
-        if not self.config.is_file() or self.config.read_bytes() != (json.dumps(desired, indent=2, sort_keys=True) + "\n").encode():
-            cc.atomic_json(self.config, desired, 0o600)
-            result["updated"] = True
-        else:
-            result["updated"] = False
-        return result
+            return blocked
+        raise RuntimeError(CONNECTION_GRANT_BLOCKER)
+
+    def sync_catalog(self, dry_run: bool = False) -> dict[str, Any]:
+        blocked = {
+            "schemaVersion": SCHEMA_VERSION,
+            "status": "blocked",
+            "ok": False,
+            "dryRun": dry_run,
+            "blockedReason": CONNECTION_GRANT_BLOCKED_REASON,
+            "blockers": [CONNECTION_GRANT_BLOCKER],
+            "updated": False,
+            "secretsRedacted": True,
+        }
+        if dry_run:
+            return blocked
+        raise RuntimeError(CONNECTION_GRANT_BLOCKER)
 
     def verify(self, live: bool = False) -> dict[str, Any]:
         state = self.status()
@@ -421,100 +319,41 @@ class OpenCodeManager:
             and state["router"]["loopbackOnly"]
         )
         live_result: dict[str, Any] = {"requested": live, "passed": None}
-        if live and ok:
-            live_model = self._active_route_model(state)
-            with tempfile.TemporaryDirectory(prefix="pz-opencode-smoke-") as raw:
-                fixture = Path(raw) / "README.md"
-                fixture.write_text("Synthetic PhaseZero OpenCode smoke fixture.\n", encoding="utf-8")
-                env = os.environ.copy()
-                for key in ROUTE_ENV_KEYS:
-                    env.pop(key, None)
-                try:
-                    proc = subprocess.run(
-                        [
-                            state["cli"]["path"],
-                            "run",
-                            "--pure",
-                            "--title",
-                            "PhaseZero 9Router smoke",
-                            "--format",
-                            "json",
-                            "--print-logs",
-                            "--log-level",
-                            "ERROR",
-                            "--model",
-                            live_model,
-                            "Use a ferramenta read para ler README.md e responda apenas: OPENCODE_TOOL_OK",
-                        ],
-                        cwd=raw,
-                        text=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        timeout=120,
-                        check=False,
-                        env=env,
-                        start_new_session=True,
-                    )
-                except subprocess.TimeoutExpired:
-                    live_result = {
-                        "requested": True,
-                        "passed": False,
-                        "exitCode": 124,
-                        "failureClass": "timeout",
-                        "model": live_model,
-                    }
-                    return {
-                        "schemaVersion": SCHEMA_VERSION,
-                        "ok": False,
-                        "state": state,
-                        "live": live_result,
-                        "secretsRedacted": True,
-                    }
-            combined = f"{proc.stdout}\n{proc.stderr}"
-            lowered = combined.lower()
-            quota_blocked = any(marker in lowered for marker in ("429", "rate_limit", "rate limit", "usage credits"))
-            tool_call = '"type":"tool_use"' in combined and '"tool":"read"' in combined
-            passed = proc.returncode == 0 and "OPENCODE_TOOL_OK" in combined and tool_call and "401" not in combined
-            if quota_blocked:
-                live_result = {
+        if live:
+            return {
+                "schemaVersion": SCHEMA_VERSION,
+                "ok": False,
+                "configurationOk": ok,
+                "blockedReason": CONNECTION_GRANT_BLOCKED_REASON,
+                "state": state,
+                "live": {
                     "requested": True,
                     "passed": None,
-                    "exitCode": proc.returncode,
-                    "blockedReason": "provider-rate-limit",
-                    "model": live_model,
-                }
-            else:
-                live_result = {
-                    "requested": True,
-                    "passed": passed,
-                    "exitCode": proc.returncode,
-                    "model": live_model,
-                    "toolCall": tool_call,
-                }
-                ok = ok and passed
-        return {"schemaVersion": SCHEMA_VERSION, "ok": ok, "state": state, "live": live_result, "secretsRedacted": True}
+                    "blockedReason": CONNECTION_GRANT_BLOCKED_REASON,
+                },
+                "secretsRedacted": True,
+            }
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "ok": ok,
+            "configurationOk": ok,
+            "blockedReason": CONNECTION_GRANT_BLOCKED_REASON,
+            "executionSupported": False,
+            "state": state,
+            "live": live_result,
+            "secretsRedacted": True,
+        }
 
     def run(self, route: str | None, args: list[str]) -> int:
         selected = route or os.environ.get("BONSAI_ROUTE") or "9router"
         if selected in {"direct", "bonsai"}:
-            raise RuntimeError("BONSAI_ROUTE=direct is unsupported in OpenCode; use 9router or run Bonsai through Claude Code")
+            raise RuntimeError(
+                "BONSAI_ROUTE=direct is unsupported in OpenCode; use the local route "
+                "or run Bonsai through Claude Code"
+            )
         if selected not in {"9router", "proxy"}:
             raise RuntimeError("OpenCode route must be 9router")
-        state = self.status()
-        if not state["configuration"]["configured"] or not state["router"]["healthy"]:
-            raise RuntimeError("OpenCode 9Router route is not ready; run: linux/pz ai opencode install --yes")
-        env = os.environ.copy()
-        for key in ROUTE_ENV_KEYS:
-            env.pop(key, None)
-        env.pop("BONSAI_API_KEY", None)
-        routed_args = list(args)
-        has_model = any(
-            arg in {"-m", "--model"} or arg.startswith("--model=")
-            for arg in routed_args
-        )
-        if routed_args and routed_args[0] == "run" and not has_model:
-            routed_args[1:1] = ["--model", self._active_route_model(state)]
-        return subprocess.run([state["cli"]["path"], *routed_args], check=False, env=env).returncode
+        raise RuntimeError(CONNECTION_GRANT_BLOCKER)
 
 
 def build_parser() -> argparse.ArgumentParser:

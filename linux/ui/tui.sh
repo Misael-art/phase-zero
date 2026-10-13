@@ -58,18 +58,23 @@ pz_tui_run() {
 }
 
 pz_tui_show_output() {
-    local title="$1" tmp
+    local title="$1" tmp rc=0
     # shellcheck disable=SC2119 # pz_tempfile forwards args to mktemp; no args is intentional
     tmp="$(pz_tempfile)"
     shift 1
-    "$@" > "$tmp" 2>&1 || true
+    "$@" > "$tmp" 2>&1 || rc=$?
+    # LUX-017: the result line is never hidden behind `|| true`.
+    if [ "$rc" -eq 0 ]; then
+        printf '\n✔ concluído\n' >> "$tmp"
+    else
+        printf '\n✖ falhou (código %s)\n' "$rc" >> "$tmp"
+    fi
     whiptail --backtitle "$PZ_TUI_BACKTITLE" \
         --title "$title" \
         --textbox "$tmp" \
         "$(( $(pz_tui_height) - 4 ))" "$((80))"
     rm -f "$tmp"
 }
-
 main_menu() {
     while true; do
         choice=$(pz_tui_menu "Painel Principal" "Selecione um módulo:" \
@@ -79,7 +84,7 @@ main_menu() {
             "ai"           "IA - Codex, Claude, Ollama, MCP" \
             "profiles"     "Perfis de instalação" \
             "doctor"       "Diagnóstico e reparos" \
-            "exit"         "Sair" 3>&2 2>&1 1>&3)
+            "exit"         "Sair" 3>&2 2>&1 1>&3) || true
         [ -z "$choice" ] && break
         case "$choice" in
             overview)     overview_menu ;;
@@ -98,125 +103,76 @@ overview_menu() {
 }
 
 steamdeck_menu() {
+    # LUX-017: a TUI é somente leitura. Mudanças passam pela Central
+    # (prévia, confirmação e registro): `pz ui`.
     while true; do
-        choice=$(pz_tui_menu "Steam Deck" "Gerenciar modo e serviços:" \
+        choice=$(pz_tui_menu "Steam Deck" "Consultar estado (somente leitura):" \
             "status"       "Ver status atual" \
-            "handheld"     "Modo portátil" \
-            "docked-tv"    "Modo dock TV" \
-            "docked-monitor" "Modo dock monitor" \
-            "kb"           "Alternar teclado virtual" \
-            "kb-repair"    "Configurar teclado virtual KDE/Maliit" \
+            "kb-status"    "Status do teclado virtual" \
             "decky-status" "Status Decky/plugins" \
-            "decky-install" "Instalar Decky + plugins + temas" \
-            "decky-priv" "Instalar Decky privilegiado" \
-            "decky-plugins" "Instalar plugins Decky" \
-            "decky-repair" "Reparar Decky/plugins" \
-            "decky-repair-priv" "Reparar plugins privilegiado" \
-            "decky-powertools" "Reparar PowerTools" \
-            "decky-themes" "Instalar temas CSS Loader" \
-            "decky-prepare" "Preparar Steam UI para Decky" \
             "boot-status"  "Status boot GRUB SteamOS" \
-            "boot-reboot"  "Reiniciar direto no SteamOS Plus" \
-            "back"         "Voltar" 3>&2 2>&1 1>&3)
+            "apply"        "Aplicar mudanças…" \
+            "back"         "Voltar" 3>&2 2>&1 1>&3) || true
         [ -z "$choice" ] && break
         case "$choice" in
             status)  pz_tui_show_output "Status Steam Deck" bash "$PZ_ROOT/linux/steamdeck/status.sh" ;;
-            handheld) pz_tui_show_output "Modo Portátil" bash "$PZ_ROOT/linux/steamdeck/apply-handheld.sh" ;;
-            docked-tv) pz_tui_show_output "Modo Dock TV" bash "$PZ_ROOT/linux/steamdeck/apply-docked-tv.sh" ;;
-            docked-monitor) pz_tui_show_output "Modo Dock Monitor" bash "$PZ_ROOT/linux/steamdeck/apply-docked-monitor.sh" ;;
-            kb)      bash "$PZ_ROOT/linux/steamdeck/input-actions.sh" toggle-keyboard ;;
-            kb-repair) pz_tui_show_output "Teclado Virtual" bash "$PZ_ROOT/linux/steamdeck/input-actions.sh" configure ;;
+            kb-status) pz_tui_show_output "Teclado Virtual" "$PZ_ROOT/linux/pz" steamdeck keyboard status ;;
             decky-status) pz_tui_show_output "Decky/plugins" bash "$PZ_ROOT/linux/steamdeck/plugins.sh" status ;;
-            decky-install) pz_tui_show_output "Instalar Decky" bash "$PZ_ROOT/linux/steamdeck/plugins.sh" install ;;
-            decky-priv) pz_tui_show_output "Decky privilegiado" bash "$PZ_ROOT/linux/steamdeck/plugins.sh" install-decky-privileged ;;
-            decky-plugins) pz_tui_show_output "Plugins Decky" bash "$PZ_ROOT/linux/steamdeck/plugins.sh" install-plugins ;;
-            decky-repair) pz_tui_show_output "Reparar Decky/plugins" bash "$PZ_ROOT/linux/steamdeck/plugins.sh" repair ;;
-            decky-repair-priv) pz_tui_show_output "Reparar plugins privilegiado" bash "$PZ_ROOT/linux/steamdeck/plugins.sh" install-plugins-privileged ;;
-            decky-powertools) pz_tui_show_output "Reparar PowerTools" bash "$PZ_ROOT/linux/steamdeck/plugins.sh" install-plugin-privileged PowerTools ;;
-            decky-themes) pz_tui_show_output "Temas Decky" bash "$PZ_ROOT/linux/steamdeck/plugins.sh" install-themes ;;
-            decky-prepare) pz_tui_show_output "Preparar Steam UI" bash "$PZ_ROOT/linux/steamdeck/plugins.sh" prepare-ui ;;
             boot-status) pz_tui_show_output "Boot SteamOS" bash "$PZ_ROOT/linux/steamdeck/install-steamos-boot.sh" status ;;
-            boot-reboot)
-                if pz_tui_yesno "Reiniciar" "Definir próximo boot para SteamOS Plus e reiniciar agora?"; then
-                    bash "$PZ_ROOT/linux/steamdeck/install-steamos-boot.sh" next-reboot
-                fi
-                ;;
+            apply)   pz_tui_apply_hint ;;
             back)    break ;;
         esac
     done
 }
-
 emulation_menu() {
     while true; do
-        choice=$(pz_tui_menu "Emulação" "Gerenciar emuladores e conteúdo:" \
+        choice=$(pz_tui_menu "Emulação" "Consultar estado e planos (somente leitura):" \
             "retrodeck-status" "Status ecossistema RetroDECK" \
-            "retrodeck-integrate" "Integrar RetroDECK ao ecossistema" \
-            "retrodeck-repair" "Reparar integração RetroDECK" \
             "shared-status" "Status conteúdo compartilhado" \
             "shared-plan"   "Plano conteúdo compartilhado" \
             "media-status"  "Status mídia" \
-            "media-index"   "Indexar mídia" \
             "pc-status"     "Status jogos PC" \
             "pc-plan"       "Plano jogos PC" \
-            "pc-repair"     "Reparar jogos PC nos frontends" \
             "perf-status"   "Status performance Switch/PS3/PS4" \
-            "perf-apply"    "Aplicar perfis adaptativos" \
-            "lsfg-prepare"  "Preparar LSFG 2x" \
             "emudeck"       "Status EmuDeck" \
             "srm"           "Status Steam ROM Manager" \
-            "fixes"         "Reparos amigáveis" \
+            "fixes"         "Reparos amigáveis disponíveis" \
             "layout"        "Ver layout de diretórios" \
-            "back"          "Voltar" 3>&2 2>&1 1>&3)
+            "apply"         "Aplicar mudanças…" \
+            "back"          "Voltar" 3>&2 2>&1 1>&3) || true
         [ -z "$choice" ] && break
         case "$choice" in
             retrodeck-status) pz_tui_show_output "RetroDECK" bash "$PZ_ROOT/linux/emulation/retrodeck.sh" status ;;
-            retrodeck-integrate)
-                if pz_tui_yesno "RetroDECK" "Migrar conteúdo faltante, criar backups e compartilhar biblioteca?"; then
-                    pz_tui_show_output "Integrando RetroDECK" bash "$PZ_ROOT/linux/emulation/retrodeck.sh" integrate
-                fi
-                ;;
-            retrodeck-repair)
-                if pz_tui_yesno "RetroDECK" "Reparar links compartilhados e mídia?"; then
-                    pz_tui_show_output "Reparando RetroDECK" bash "$PZ_ROOT/linux/emulation/retrodeck.sh" repair
-                fi
-                ;;
             shared-status) pz_tui_show_output "Conteúdo Compartilhado" bash "$PZ_ROOT/linux/emulation/shared-content.sh" status ;;
             shared-plan)   pz_tui_show_output "Plano de Compartilhamento" bash "$PZ_ROOT/linux/emulation/shared-content.sh" plan ;;
             media-status)  pz_tui_show_output "Status Mídia" bash "$PZ_ROOT/linux/emulation/media.sh" status ;;
-            media-index)   pz_tui_show_output "Indexando Mídia" bash "$PZ_ROOT/linux/emulation/media.sh" index ;;
             pc-status)     pz_tui_show_output "Jogos PC" bash "$PZ_ROOT/linux/emulation/pc-games.sh" status ;;
             pc-plan)       pz_tui_show_output "Plano Jogos PC" bash "$PZ_ROOT/linux/emulation/pc-games.sh" plan ;;
-            pc-repair)
-                if pz_tui_yesno "Jogos PC" "Configurar ES-DE, Heroic, Hydra e SRM para /roms/steam?"; then
-                    pz_tui_show_output "Reparando Jogos PC" bash "$PZ_ROOT/linux/emulation/pc-games.sh" repair
-                fi
-                ;;
             perf-status)   pz_tui_show_output "Performance Emuladores" bash "$PZ_ROOT/linux/emulation/performance.sh" status ;;
-            perf-apply)
-                if pz_tui_yesno "Performance" "Aplicar perfis adaptativos?"; then
-                    pz_tui_show_output "Performance Emuladores" bash "$PZ_ROOT/linux/emulation/performance.sh" apply
-                fi
-                ;;
-            lsfg-prepare)
-                if pz_tui_yesno "LSFG" "Instalar camada LSFG verificada?"; then
-                    pz_tui_show_output "LSFG" bash "$PZ_ROOT/linux/emulation/performance.sh" prepare-lsfg
-                fi
-                ;;
             emudeck)       pz_tui_show_output "Status EmuDeck" bash "$PZ_ROOT/linux/emulation/emudeck.sh" status ;;
             srm)           pz_tui_show_output "Status SRM" bash "$PZ_ROOT/linux/emulation/srm.sh" status ;;
             fixes)         pz_tui_show_output "Reparos Amigáveis" bash "$PZ_ROOT/linux/emulation/fixes.sh" list ;;
             layout)        pz_tui_show_output "Layout de Diretórios" bash "$PZ_ROOT/linux/emulation/bios.sh" layout ;;
+            apply)         pz_tui_apply_hint ;;
             back) break ;;
         esac
     done
 }
 
+pz_tui_apply_hint() {
+    pz_tui_msgbox "Aplicar mudanças" "O terminal só consulta estado.
+
+Para instalar, reparar ou mudar o sistema use a Central:
+  pz ui
+
+Lá cada ação mostra o que vai mudar, pede confirmação e fica registrada em Resultados."
+}
 ai_menu() {
     while true; do
         choice=$(pz_tui_menu "Inteligência Artificial" "Ferramentas de IA:" \
             "status"       "Status IA" \
             "mcp-status"   "Status MCP" \
-            "back"         "Voltar" 3>&2 2>&1 1>&3)
+            "back"         "Voltar" 3>&2 2>&1 1>&3) || true
         [ -z "$choice" ] && break
         case "$choice" in
             status)    pz_tui_show_output "Status IA" bash "$PZ_ROOT/linux/ai/status.sh" ;;
@@ -249,7 +205,7 @@ doctor_menu() {
             "doctor"        "Diagnóstico completo" \
             "repair-plan"   "Plano de reparo" \
             "support"       "Gerar bundle de suporte" \
-            "back"          "Voltar" 3>&2 2>&1 1>&3)
+            "back"          "Voltar" 3>&2 2>&1 1>&3) || true
         [ -z "$choice" ] && break
         case "$choice" in
             doctor)      pz_tui_show_output "Diagnóstico" bash "$PZ_ROOT/linux/audit/doctor.sh" ;;
@@ -263,7 +219,7 @@ doctor_menu() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     # Verify whiptail available
     if ! command -v whiptail &>/dev/null; then
-        pz_error "whiptail not found. Install with: sudo pacman -S whiptail"
+        pz_error "whiptail not found. Install with: sudo pacman -S libnewt"
         exit 1
     fi
     main_menu

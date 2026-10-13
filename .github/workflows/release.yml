@@ -28,7 +28,7 @@ jobs:
   ci-gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
           fetch-depth: 0
@@ -86,7 +86,7 @@ jobs:
             base-devel git jq python python-pip python-pytest pyside6 \
             dpkg rpm-tools squashfs-tools curl sudo
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
           fetch-depth: 0
@@ -135,7 +135,7 @@ jobs:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-48
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
@@ -161,12 +161,37 @@ jobs:
     needs: [ci-gate, linux-packages, flatpak]
     if: always() && needs.ci-gate.result == 'success' && needs.linux-packages.result == 'success'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
-      - name: Read version
-        run: echo "VERSION=$(jq -r '.version' version.json)" >> "$GITHUB_ENV"
+      - name: Read version and release channel
+        run: |
+          set -euo pipefail
+          version="$(jq -r '.version' version.json)"
+          channel="$(jq -r '.channel // "stable"' version.json)"
+          case "$channel" in
+            stable|beta|nightly) ;;
+            *) echo "unsupported release channel: $channel" >&2; exit 1 ;;
+          esac
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "CHANNEL=$channel" >> "$GITHUB_ENV"
+
+      - name: Describe preview limits
+        run: |
+          set -euo pipefail
+          if [ "$CHANNEL" = "stable" ]; then
+            : > release-channel-notes.md
+          else
+            cat > release-channel-notes.md <<'EOF'
+          > **Preview channel.** This build does not close the PXA acceptance gates.
+          > Real account/session/quota evidence (G3), request-bound consumer grants and
+          > no-paid-fallback enforcement (PXA-008/009), complete Windows clean-host
+          > validation (G2), and five-person usability validation (G4) remain open.
+          > Managed inference stays fail-closed. The PXA-010 Codex Web bridge remains
+          > outside the product catalog; PXA-011–013 remain unavailable.
+          EOF
+          fi
 
       - uses: actions/download-artifact@v8
         with:
@@ -186,7 +211,10 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ env.VERSION }}
-          name: PhaseZero v${{ env.VERSION }}
+          name: PhaseZero v${{ env.VERSION }} (${{ env.CHANNEL }})
+          prerelease: ${{ env.CHANNEL != 'stable' }}
+          make_latest: ${{ env.CHANNEL == 'stable' }}
+          body_path: release-channel-notes.md
           generate_release_notes: true
           fail_on_unmatched_files: false
           files: |

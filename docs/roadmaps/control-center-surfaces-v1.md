@@ -113,6 +113,15 @@ CHANGELOG 1.16.x; decisão explícita sobre `linux/ui/server.py`.
 | CCS-037 | Testes UI Waydroid | Espelhar `test_windows_vm_ui.py` para power/toggles | pytest | verified `a2a11ad` — espelho vive em test_service_control_ui.py |
 | CCS-038 | Fallback user `misael` | Tirar hardcoded dos scripts waydroid/steamdeck | grep | hermético | verified `f053adb` (windows-vm/homelab anotados p/ seus roadmaps) |
 
+### Extensão v1.17.x — jornadas fluidas (CCS-040+)
+
+| ID | Requisito | Estado |
+|---|---|---|
+| CCS-040 | Homelab Player v2: padrões da casa (tema/runner/acessibilidade), rótulos PT e restore assistido com `--confirm-file` (CLI ganha a alternativa ao `--yes`) | verified `f7746de` |
+| CCS-041 | Início que orienta: primeiro uso detectado via ledger, faixa "Comece por aqui" com 3 passos reais do catálogo | verified `aa5a5bd` |
+| CCS-042 | Confiança global: timeout classificado com Tentar novamente, toast central de operação em andamento, pendings liberados em falha de leitura, nota-padrão de segredos, glossário único (Prévia/Aplicar/dry-run) e a11y fina (default button, foco CONFIRMAR, buddies, tooltips=description) | verified (branch jornadas) |
+
+
 Fora deste plano (apontar, não executar aqui):
 
 - WBR-001/003/005/006 físicos, WBR-007 wizard → roadmap WinVM.

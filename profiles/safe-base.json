@@ -12,7 +12,7 @@
         "ufw",
         "rsync",
         "unzip",
-        "p7zip",
+        "7zip",
         "git",
         "git-lfs",
         "github-cli",
@@ -29,7 +29,6 @@
         "gst-plugins-bad",
         "gst-plugins-ugly",
         "gst-libav",
-        "codecs",
         "noto-fonts",
         "noto-fonts-emoji",
         "noto-fonts-cjk"

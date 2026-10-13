@@ -97,15 +97,22 @@ provision_tpm_args() {
     PROVISION_TPM_PID_FILE="$vm_dir/swtpm.pid"
     install -d -m 0700 "$state_dir"
     rm -f "$sock" "$PROVISION_TPM_PID_FILE"
-    swtpm socket --tpm2 \
-        --tpmstate "dir=$state_dir" \
-        --ctrl "type=unixio,path=$sock,terminate" \
-        --pid "file=$PROVISION_TPM_PID_FILE" \
-        --log "file=$vm_dir/swtpm.log,level=20" \
-        --daemon || {
+    local -a swtpm_args=(socket --tpm2
+        --tpmstate "dir=$state_dir"
+        --ctrl "type=unixio,path=$sock,terminate"
+        --pid "file=$PROVISION_TPM_PID_FILE"
+        --log "file=$vm_dir/swtpm.log,level=20"
+        --daemon)
+    local swtpm_rc=0
+    if [ "$LOCK_FD" -ge 0 ] 2>/dev/null; then
+        swtpm "${swtpm_args[@]}" {LOCK_FD}>&- || swtpm_rc=$?
+    else
+        swtpm "${swtpm_args[@]}" || swtpm_rc=$?
+    fi
+    if [ "$swtpm_rc" -ne 0 ]; then
         log_operation "$op" "swtpm failed to start"
         return 1
-    }
+    fi
     for ((i = 0; i < 100; i++)); do
         [ -S "$sock" ] && break
         sleep 0.05
@@ -442,6 +449,13 @@ provision_start() {
         }' > "$op_dir/operation.json"
     chmod 0600 "$op_dir/operation.json"
 
+    # Persist a short handoff grace before releasing the lock. A reader that
+    # observes the tiny gap before the detached worker takes flock must not
+    # misclassify a newly started install as dead.
+    jq --argjson epoch "$(date +%s)" \
+        '.workerSpawnedEpoch = $epoch' "$op_dir/operation.json" > "$op_dir/operation.tmp" &&
+        mv "$op_dir/operation.tmp" "$op_dir/operation.json"
+
     if [ "$json" = "1" ]; then
         jq -n \
             --arg id "$operation_id" \
@@ -459,8 +473,8 @@ provision_start() {
     # file description keeps the lock alive and makes the worker deadlock on
     # its own re-acquire loop. ACTIVE_LOCK keeps the operation-id handoff.
     provision_lock_release
-    nohup bash "$PZ_ROOT/linux/windows-vm/provision.sh" run --operation-id "$operation_id" \
-        > "$op_dir/worker.log" 2>&1 &
+    setsid nohup bash "$PZ_ROOT/linux/windows-vm/provision.sh" run --operation-id "$operation_id" \
+        </dev/null > "$op_dir/worker.log" 2>&1 &
     disown
 }
 
@@ -478,6 +492,8 @@ provision_run() {
     local op_dir="$OPERATIONS_DIR/$operation_id"
     local plan_file="$op_dir/plan.json"
     [ -f "$plan_file" ] || { pz_error "plan not found for operation $operation_id"; return 1; }
+
+    provision_worker_identity_write "$operation_id"
 
     # The parent (start/resume) holds the lock only until spawn; the worker
     # re-acquires it for the whole run so a second start/resume is blocked
@@ -546,6 +562,7 @@ provision_run() {
     local done_ts; done_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     jq --arg ts "$done_ts" '.state = "completed" | .progress = 100 | .updatedAt = $ts' \
         "$op_dir/operation.json" > "${op_dir}/operation.tmp" && mv "${op_dir}/operation.tmp" "$op_dir/operation.json"
+    rm -f -- "$op_dir/worker.identity.json" "$op_dir/worker.pid"
     provision_lock_clear "$operation_id"
     pz_info "provision completed: $operation_id"
 }
@@ -570,13 +587,123 @@ fail_operation() {
     update_checkpoint "$op" "$cp" "failed"
     local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     jq --arg ts "$ts" '.state = "failed" | .updatedAt = $ts' "$op_dir/operation.json" > "${op_dir}/operation.tmp" && mv "${op_dir}/operation.tmp" "$op_dir/operation.json"
+    rm -f -- "$op_dir/worker.identity.json" "$op_dir/worker.pid"
+}
+
+# Worker identity binds PID to this boot and kernel process start tick, so PID
+# reuse cannot turn an unrelated process into proof that an install is alive.
+provision_worker_identity_write() {
+    local op="$1" pid="$$" stat rest ticks boot_id op_dir tmp
+    op_dir="$OPERATIONS_DIR/$op"
+    [ -r "/proc/$pid/stat" ] || return 1
+    stat="$(cat "/proc/$pid/stat" 2>/dev/null || true)"
+    rest="${stat##*) }"
+    local -a fields=()
+    read -r -a fields <<< "$rest"
+    ticks="${fields[19]:-}"
+    boot_id="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+    [[ "$ticks" =~ ^[0-9]+$ && "$boot_id" =~ ^[0-9a-f-]+$ ]] || return 1
+    tmp="$(mktemp "$op_dir/.worker.XXXXXX")" || return 1
+    jq -n --argjson pid "$pid" --arg bootId "$boot_id" --arg startTicks "$ticks" \
+        '{pid:$pid,bootId:$bootId,startTicks:$startTicks}' > "$tmp" || { rm -f "$tmp"; return 1; }
+    chmod 0600 "$tmp"
+    mv -f -- "$tmp" "$op_dir/worker.identity.json"
+    printf '%s\n' "$pid" > "$op_dir/worker.pid"
+}
+
+provision_worker_alive() {
+    local op="$1" op_dir="$OPERATIONS_DIR/$1" pid boot_id ticks stat rest cmdline
+    [ -f "$op_dir/worker.identity.json" ] || return 1
+    pid="$(jq -r '.pid // 0' "$op_dir/worker.identity.json" 2>/dev/null || echo 0)"
+    boot_id="$(jq -r '.bootId // ""' "$op_dir/worker.identity.json" 2>/dev/null || true)"
+    ticks="$(jq -r '.startTicks // ""' "$op_dir/worker.identity.json" 2>/dev/null || true)"
+    [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || return 1
+    [ -r "/proc/$pid/stat" ] && [ -r "/proc/$pid/cmdline" ] || return 1
+    [ "$boot_id" = "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)" ] || return 1
+    stat="$(cat "/proc/$pid/stat" 2>/dev/null || true)"
+    rest="${stat##*) }"
+    local -a fields=()
+    read -r -a fields <<< "$rest"
+    [ "${fields[19]:-}" = "$ticks" ] || return 1
+    cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+    [[ "$cmdline" == *"$PZ_ROOT/linux/windows-vm/provision.sh run --operation-id $op"* ]]
+}
+
+provision_active_lock_held() {
+    if [ -d "$ACTIVE_LOCK.d" ]; then
+        local holder_pid=""
+        [ -f "$ACTIVE_LOCK.d/pid" ] && holder_pid="$(cat "$ACTIVE_LOCK.d/pid" 2>/dev/null || true)"
+        [[ "$holder_pid" =~ ^[0-9]+$ ]] && kill -0 "$holder_pid" 2>/dev/null
+        return
+    fi
+    [ -f "$ACTIVE_LOCK" ] || return 1
+    if command -v flock >/dev/null 2>&1 && [ "${PZ_LOCK_FORCE_MKDIR:-0}" != "1" ]; then
+        flock -n "$ACTIVE_LOCK" -c true >/dev/null 2>&1 && return 1
+        return 0
+    fi
+    return 1
+}
+
+provision_spawn_grace_active() {
+    local op="$1" spawned now
+    spawned="$(jq -r '.workerSpawnedEpoch // 0' "$OPERATIONS_DIR/$op/operation.json" 2>/dev/null || echo 0)"
+    [[ "$spawned" =~ ^[0-9]+$ ]] || return 1
+    [ "$spawned" -gt 0 ] || return 1
+    now="$(date +%s)"
+    [ "$((now - spawned))" -lt 15 ]
+}
+
+provision_worker_effectively_alive() {
+    local op="$1"
+    provision_worker_alive "$op" || provision_active_lock_held || provision_spawn_grace_active "$op"
+}
+
+provision_supervisor_alive() {
+    local op="$1"
+    provision_worker_alive "$op" || provision_spawn_grace_active "$op"
+}
+
+provision_effective_state() {
+    local op="$1" state
+    state="$(jq -r '.state // "unknown"' "$OPERATIONS_DIR/$op/operation.json" 2>/dev/null || echo unknown)"
+    if [ "$state" = "running" ] && ! provision_worker_effectively_alive "$op"; then
+        printf 'interrupted\n'
+    else
+        printf '%s\n' "$state"
+    fi
+}
+
+# Caller must own the provision lock. Never resume or replace a supervisor
+# while its QEMU child still has the staging disk open.
+provision_mark_interrupted_locked() {
+    local op="$1" op_dir="$OPERATIONS_DIR/$1" vm_dir="" reason ts
+    if provision_supervisor_alive "$op"; then
+        pz_error "operation $op still has a live worker or is starting"
+        return 1
+    fi
+    vm_dir="$(resolve_vm_staging_dir "$op" 2>/dev/null || true)"
+    if [ -n "$vm_dir" ] && [ -d "$vm_dir" ] && operation_vm_running "$vm_dir"; then
+        reason="worker ended; QEMU remains active for this installation"
+    else
+        reason="worker ended without recording a terminal state"
+    fi
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    jq --arg ts "$ts" --arg reason "$reason" \
+        '.state="interrupted" | .updatedAt=$ts | .interruptionReason=$reason | .recoveryAction="resume-or-remove"' \
+        "$op_dir/operation.json" > "$op_dir/operation.tmp" && mv "$op_dir/operation.tmp" "$op_dir/operation.json"
+    rm -f -- "$op_dir/worker.identity.json" "$op_dir/worker.pid"
+    [ "$reason" = "worker ended without recording a terminal state" ] || {
+        pz_error "operation $op still has a QEMU process; shut it down before resuming or removing"
+        return 2
+    }
+    pz_warn "operation $op was interrupted; its staging files are preserved"
 }
 
 # ── Provision lock ──
 # Single-writer lock across start/resume/cancel. Uses flock(1) when available
 # (atomic, auto-released on process death); falls back to mkdir+pidfile with
 # staleness check. The lock file content is the authoritative operation id;
-# a lock whose recorded operation is completed/failed/cancelled is recoverable,
+    # a lock whose recorded operation is terminal/interrupted is recoverable,
 # a running operation blocks a new one, and inconsistent state (lock references
 # a missing/corrupt operation) produces a diagnostic instead of silent overwrite.
 LOCK_FD=-1
@@ -633,9 +760,21 @@ provision_lock_acquire() {
             prev_state="$(jq -r '.state // ""' "$prev_op/operation.json" 2>/dev/null || true)"
             case "$prev_state" in
                 running)
-                    pz_error "active operation exists: $prev (state: running) — cancel or wait for it"
-                    provision_lock_release
-                    return 1
+                    if provision_mark_interrupted_locked "$prev"; then
+                        prev_state="interrupted"
+                    else
+                        provision_lock_release
+                        return 1
+                    fi
+                    ;;
+                interrupted)
+                    local prev_vm_dir
+                    prev_vm_dir="$(resolve_vm_staging_dir "$prev" 2>/dev/null || true)"
+                    if [ -n "$prev_vm_dir" ] && [ -d "$prev_vm_dir" ] && operation_vm_running "$prev_vm_dir"; then
+                        pz_error "interrupted operation $prev still has a QEMU process; shut it down before starting another install"
+                        provision_lock_release
+                        return 1
+                    fi
                     ;;
                 completed|failed|cancelled)
                     pz_warn "recovering provision lock from operation $prev (state: $prev_state)"
@@ -1197,6 +1336,29 @@ PSEOF
     return 0
 }
 
+# windows-vm.sh marks the VM directory nodatacow before it creates an image,
+# because QEMU opens the disk with cache=none and a copy-on-write, checksummed
+# btrfs file fails its own checksum on readback under O_DIRECT and returns EIO
+# to the guest mid-write. This path creates images too and never did it, so a
+# VM provisioned here got none of that protection - the guard existed and
+# simply was not on this road. The log line matters: the previous version
+# warned into a void, so a failed chattr looked identical to a successful one.
+provision_mark_nodatacow() {
+    local op="$1" vm_dir="$2" fstype
+    [ -d "$vm_dir" ] || return 0
+    command -v chattr >/dev/null 2>&1 || {
+        log_operation "$op" "nodatacow skipped: chattr unavailable"
+        return 0
+    }
+    fstype="$(stat -f -c %T "$vm_dir" 2>/dev/null || true)"
+    [ "$fstype" = "btrfs" ] || return 0
+    if chattr +C "$vm_dir" 2>/dev/null; then
+        log_operation "$op" "btrfs: $vm_dir marked nodatacow before disk creation"
+    else
+        log_operation "$op" "WARNING: could not set nodatacow on $vm_dir; image stays copy-on-write and may hit EIO under O_DIRECT"
+    fi
+}
+
 run_disk() {
     local op="$1"
     local plan_file="$OPERATIONS_DIR/$op/plan.json"
@@ -1210,6 +1372,7 @@ run_disk() {
     local disk_size
     disk_size="$(jq -r '.resources.diskSize // "256G"' "$plan_file")"
     log_operation "$op" "creating disk: $disk_path ($disk_size)"
+    provision_mark_nodatacow "$op" "$vm_dir"
     qemu-img create -f qcow2 "$disk_path" "$disk_size"
     log_operation "$op" "disk created"
     return 0
@@ -1292,7 +1455,11 @@ run_setup() {
     log_operation "$op" "launching QEMU for Windows setup (TPM 2.0 + Secure Boot firmware)"
     mkdir -p "$vm_dir"
     rm -f "$vm_dir/qga.sock" "$vm_dir/setup-qmp.sock"
-    qemu-system-x86_64 "${qemu_args[@]}" &
+    if [ "$LOCK_FD" -ge 0 ] 2>/dev/null; then
+        qemu-system-x86_64 "${qemu_args[@]}" {LOCK_FD}>&- &
+    else
+        qemu-system-x86_64 "${qemu_args[@]}" &
+    fi
     local qemu_pid=$!
     echo "$qemu_pid" > "$vm_dir/qemu-pid"
 
@@ -1395,7 +1562,11 @@ run_drivers() {
     )
 
     log_operation "$op" "launching QEMU for driver installation"
-    qemu-system-x86_64 "${qemu_args[@]}" &
+    if [ "$LOCK_FD" -ge 0 ] 2>/dev/null; then
+        qemu-system-x86_64 "${qemu_args[@]}" {LOCK_FD}>&- &
+    else
+        qemu-system-x86_64 "${qemu_args[@]}" &
+    fi
     local qemu_pid=$!
     echo "$qemu_pid" > "$vm_dir/drivers-qemu-pid"
 
@@ -1597,7 +1768,11 @@ run_tweaks() {
     )
 
     log_operation "$op" "launching QEMU for tweaks"
-    qemu-system-x86_64 "${qemu_args[@]}" &
+    if [ "$LOCK_FD" -ge 0 ] 2>/dev/null; then
+        qemu-system-x86_64 "${qemu_args[@]}" {LOCK_FD}>&- &
+    else
+        qemu-system-x86_64 "${qemu_args[@]}" &
+    fi
     local qemu_pid=$!
     echo "$qemu_pid" > "$vm_dir/tweaks-qemu-pid"
 
@@ -1914,7 +2089,11 @@ run_relaunch() {
     rm -f "$vm_dir/qga.sock" "$vm_dir/relaunch-qmp.sock"
     # The player/worker exits after validation. Keep the desktop VM independent
     # from its terminal so shell teardown cannot SIGHUP a healthy guest.
-    nohup setsid qemu-system-x86_64 "${qemu_args[@]}" </dev/null >>"$vm_dir/relaunch-qemu.log" 2>&1 &
+    if [ "$LOCK_FD" -ge 0 ] 2>/dev/null; then
+        nohup setsid qemu-system-x86_64 "${qemu_args[@]}" {LOCK_FD}>&- </dev/null >>"$vm_dir/relaunch-qemu.log" 2>&1 &
+    else
+        nohup setsid qemu-system-x86_64 "${qemu_args[@]}" </dev/null >>"$vm_dir/relaunch-qemu.log" 2>&1 &
+    fi
     local qemu_pid=$!
     echo "$qemu_pid" > "$vm_dir/qemu-pid"
 
@@ -2035,6 +2214,13 @@ provision_status() {
     [ -f "$op_dir/operation.json" ] || { pz_error "operation metadata missing"; return 1; }
 
     local vm_dir="" snapshot_path="" qemu_pid_raw="" qemu_pid_num=0 staging_qemu_pid=0 adopted_disk="" adopted_qemu_pid=0
+    local effective_state worker_alive=false interruption_reason=""
+    effective_state="$(provision_effective_state "$operation_id")"
+    provision_worker_effectively_alive "$operation_id" && worker_alive=true
+    interruption_reason="$(jq -r '.interruptionReason // ""' "$op_dir/operation.json" 2>/dev/null || true)"
+    if [ "$effective_state" = "interrupted" ] && [ -z "$interruption_reason" ]; then
+        interruption_reason="worker process is gone; staging files are preserved"
+    fi
     local vm_dir_file="$OPERATIONS_DIR/$operation_id/vm_dir"
     [ -f "$vm_dir_file" ] && vm_dir="$(cat "$vm_dir_file")"
     local snap_path_file="$OPERATIONS_DIR/$operation_id/snapshot_path"
@@ -2085,6 +2271,9 @@ provision_status() {
     if [ "$json" = "1" ]; then
         jq -n \
             --argjson op "$(cat "$op_dir/operation.json")" \
+            --arg state "$effective_state" \
+            --arg interruptionReason "$interruption_reason" \
+            --argjson workerAlive "$worker_alive" \
             --arg vmDir "$vm_dir" \
             --arg snapshotPath "$snapshot_path" \
             --argjson snapshotExists "$snapshot_exists" \
@@ -2095,16 +2284,20 @@ provision_status() {
             --argjson adoptedDiskExists "$([ -n "$adopted_disk" ] && [ -f "$adopted_disk" ] && echo true || echo false)" \
             --argjson adoptedQemuPid "$adopted_qemu_pid" \
             --argjson libvirtRunning "$libvirt_running" \
-            '$op + {vmDir: $vmDir, snapshotPath: $snapshotPath, snapshotExists: $snapshotExists, qemuPid: $qemuPid, stagingQemuPid: $stagingQemuPid, qemuRunning: $qemuRunning, adoptedDisk: $adoptedDisk, adoptedDiskExists: $adoptedDiskExists, adoptedQemuPid: $adoptedQemuPid, libvirtRunning: $libvirtRunning}'
+            '$op + {state:$state, persistedState:$op.state, workerAlive:$workerAlive, interruptionReason:$interruptionReason, recoveryAction:(if $state == "interrupted" then "resume-or-remove" else "" end), vmDir: $vmDir, snapshotPath: $snapshotPath, snapshotExists: $snapshotExists, qemuPid: $qemuPid, stagingQemuPid: $stagingQemuPid, qemuRunning: $qemuRunning, adoptedDisk: $adoptedDisk, adoptedDiskExists: $adoptedDiskExists, adoptedQemuPid: $adoptedQemuPid, libvirtRunning: $libvirtRunning}'
     else
         local state checkpoint progress
-        state="$(jq -r '.state' "$op_dir/operation.json")"
+        state="$effective_state"
         checkpoint="$(jq -r '.checkpoint' "$op_dir/operation.json")"
         progress="$(jq -r '.progress' "$op_dir/operation.json")"
         echo "Operation: $operation_id"
         echo "State: $state"
         echo "Checkpoint: $checkpoint"
         echo "Progress: ${progress}%"
+        if [ "$state" = "interrupted" ]; then
+            echo "Recovery: retome a operação ou remova os arquivos temporários"
+            [ -z "$interruption_reason" ] || echo "Reason: $interruption_reason"
+        fi
         jq -r '.log[]' "$op_dir/operation.json" 2>/dev/null || true
     fi
 }
@@ -2127,7 +2320,7 @@ provision_watch() {
     while true; do
         [ -f "$op_dir/operation.json" ] || break
         local state
-        state="$(jq -r '.state // "unknown"' "$op_dir/operation.json")"
+        state="$(provision_effective_state "$operation_id")"
         local checkpoint progress
         checkpoint="$(jq -r '.checkpoint // ""' "$op_dir/operation.json")"
         progress="$(jq -r '.progress // 0' "$op_dir/operation.json")"
@@ -2137,6 +2330,9 @@ provision_watch() {
             "$progress" "$checkpoint"
         if [ "$state" != "running" ]; then
             printf " [%s]\n" "$state"
+            if [ "$state" = "interrupted" ]; then
+                echo "A instalação foi interrompida; os arquivos foram preservados. Retome ou remova pelo inventário."
+            fi
             if [ -f "$op_dir/worker.log" ]; then
                 echo "--- worker log ---"
                 tail -20 "$op_dir/worker.log" 2>/dev/null || true
@@ -2165,23 +2361,39 @@ provision_resume() {
     state="$(jq -r '.state' "$op_dir/operation.json")"
     checkpoint="$(jq -r '.checkpoint' "$op_dir/operation.json")"
 
-    if [ "$state" = "running" ]; then
-        pz_error "operation is already running"
-        return 1
-    fi
-
     if ! provision_lock_acquire "$operation_id"; then
         return 1
     fi
 
+    state="$(jq -r '.state // "unknown"' "$op_dir/operation.json")"
+    if [ "$state" = "running" ]; then
+        provision_mark_interrupted_locked "$operation_id" || {
+            provision_lock_release
+            return 1
+        }
+    elif [ "$state" != "interrupted" ] && [ "$state" != "failed" ] && [ "$state" != "cancelled" ]; then
+        pz_error "operation cannot be resumed from state: $state"
+        provision_lock_release
+        return 1
+    fi
+    local vm_dir
+    vm_dir="$(resolve_vm_staging_dir "$operation_id" 2>/dev/null || true)"
+    if [ -n "$vm_dir" ] && [ -d "$vm_dir" ] && operation_vm_running "$vm_dir"; then
+        pz_error "QEMU still has this install's disk open; shut it down before resuming"
+        provision_lock_release
+        return 1
+    fi
+
     local resume_ts; resume_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    jq --arg ts "$resume_ts" '.state = "running" | .updatedAt = $ts' "$op_dir/operation.json" > "${op_dir}/operation.tmp" && mv "${op_dir}/operation.tmp" "$op_dir/operation.json"
+    jq --arg ts "$resume_ts" --argjson epoch "$(date +%s)" \
+        '.state = "running" | .updatedAt = $ts | .workerSpawnedEpoch=$epoch | del(.interruptionReason,.recoveryAction)' \
+        "$op_dir/operation.json" > "${op_dir}/operation.tmp" && mv "${op_dir}/operation.tmp" "$op_dir/operation.json"
 
     # Close the parent lock FD before spawning; otherwise nohup inherits it
     # and the worker blocks on its own lock for the full handoff retry window.
     provision_lock_release
-    nohup bash "$PZ_ROOT/linux/windows-vm/provision.sh" run --operation-id "$operation_id" \
-        > "$op_dir/worker.log" 2>&1 &
+    setsid nohup bash "$PZ_ROOT/linux/windows-vm/provision.sh" run --operation-id "$operation_id" \
+        </dev/null > "$op_dir/worker.log" 2>&1 &
     disown
 
     pz_info "operation resumed: $operation_id (from checkpoint: $checkpoint)"
@@ -2443,11 +2655,10 @@ provision_cancel() {
     [ "$success" = "1" ]
 }
 
-# ── Completed VM inventory and removal ──
-# Completed provision operations own their staging directory. Older releases
-# left those directories behind indefinitely, so one successful install could
-# consume tens of gigabytes even after another VM became the configured one.
-# Inventory and removal are keyed by operation id: callers never supply a path.
+# ── Provisioned and interrupted VM inventory and removal ──
+# Inventory includes completed guests and recoverable partial staging so disk
+# use never disappears merely because a worker failed before completion.
+# Operations are keyed by ID; callers never supply a removal path.
 
 operation_allocated_bytes() {
     local path="$1" blocks=""
@@ -2476,7 +2687,7 @@ provision_inventory() {
         esac
     done
 
-    local instances='[]' total=0 operation_file op op_dir state removed_at
+    local instances='[]' total=0 operation_file op op_dir state removed_at persisted_state worker_alive
     local vm_dir allocated image_index created_at updated_at adopted_disk kind running
     shopt -s nullglob
     for operation_file in "$OPERATIONS_DIR"/op-*/operation.json; do
@@ -2486,8 +2697,9 @@ provision_inventory() {
         op_dir="$(dirname -- "$operation_file")"
         op="$(basename -- "$op_dir")"
         case "$op" in */*|*..*|*[!A-Za-z0-9._-]*) continue ;; esac
-        state="$(jq -r '.state // ""' "$operation_file" 2>/dev/null || true)"
-        [ "$state" = "completed" ] || continue
+        persisted_state="$(jq -r '.state // ""' "$operation_file" 2>/dev/null || true)"
+        state="$(provision_effective_state "$op")"
+        case "$state" in completed|interrupted|failed|cancelled) ;; *) continue ;; esac
         removed_at="$(jq -r '.vmRemovedAt // ""' "$operation_file" 2>/dev/null || true)"
         [ -z "$removed_at" ] || continue
         vm_dir="$(resolve_vm_staging_dir "$op" 2>/dev/null || true)"
@@ -2503,26 +2715,34 @@ provision_inventory() {
         updated_at="$(jq -r '.updatedAt // ""' "$operation_file" 2>/dev/null || true)"
         adopted_disk="$(jq -r '.adoptedDisk // ""' "$operation_file" 2>/dev/null || true)"
         kind="installed"
-        [ -n "$adopted_disk" ] && kind="installation-files"
+        if [ "$state" != "completed" ]; then
+            kind="partial-installation"
+        elif [ -n "$adopted_disk" ]; then
+            kind="installation-files"
+        fi
         running=false
         if operation_vm_running "$vm_dir"; then
             running=true
         fi
+        worker_alive=false
+        [ "$state" != "running" ] || { provision_worker_effectively_alive "$op" && worker_alive=true; }
 
         instances="$(jq -c \
             --arg id "$op" \
             --arg vmDir "$vm_dir" \
             --arg createdAt "$created_at" \
             --arg updatedAt "$updated_at" \
+            --arg state "$state" \
             --arg adoptedDisk "$adopted_disk" \
             --arg kind "$kind" \
             --argjson imageIndex "$image_index" \
             --argjson allocatedBytes "$allocated" \
             --argjson running "$running" \
-            '. + [{id:$id, state:"completed", kind:$kind, vmDir:$vmDir,
+            --argjson workerAlive "$worker_alive" \
+            '. + [{id:$id, state:$state, kind:$kind, vmDir:$vmDir,
                     imageIndex:$imageIndex, allocatedBytes:$allocatedBytes,
                     createdAt:$createdAt, updatedAt:$updatedAt,
-                    adoptedDisk:$adoptedDisk, running:$running,
+                    adoptedDisk:$adoptedDisk, running:$running, workerAlive:$workerAlive,
                     removable:($running|not)}]' <<< "$instances")"
     done
     shopt -u nullglob
@@ -2534,7 +2754,7 @@ provision_inventory() {
               totalAllocatedBytes:$total}'
     else
         if [ "$(jq 'length' <<< "$instances")" = "0" ]; then
-            echo "Nenhuma VM concluída encontrada."
+            echo "Nenhuma instalação Windows ocupa espaço no staging do PhaseZero."
             return 0
         fi
         jq -r '.[] | "\(.id)  edição \(.imageIndex)  \(.allocatedBytes) bytes  \(.vmDir)"' \
@@ -2594,7 +2814,7 @@ provision_remove() {
     local -a blockers=()
     local op_dir="$OPERATIONS_DIR/$operation_id" operation_file=""
     operation_file="$op_dir/operation.json"
-    local vm_dir="" state="" allocated=0 mode="trash" blockers_json='[]' running=false
+    local vm_dir="" state="" persisted_state="" allocated=0 mode="trash" blockers_json='[]' running=false
     case "$operation_id" in
         op-* ) ;;
         *) blockers+=("identificador da instalação inválido") ;;
@@ -2605,8 +2825,13 @@ provision_remove() {
         [ -f "$operation_file" ] && [ ! -L "$operation_file" ] || blockers+=("registro da instalação ausente ou inseguro")
     fi
     if [ "${#blockers[@]}" -eq 0 ]; then
-        state="$(jq -r '.state // ""' "$operation_file" 2>/dev/null || true)"
-        [ "$state" = "completed" ] || blockers+=("somente instalações concluídas podem ser removidas")
+        persisted_state="$(jq -r '.state // ""' "$operation_file" 2>/dev/null || true)"
+        state="$(provision_effective_state "$operation_id")"
+        case "$state" in
+            completed|interrupted|failed|cancelled) ;;
+            running) blockers+=("instalação ainda está ativa; aguarde ou cancele antes de remover") ;;
+            *) blockers+=("estado da instalação não permite remoção segura: $state") ;;
+        esac
         [ "$(jq -r '.vmRemovedAt // ""' "$operation_file" 2>/dev/null || true)" = "" ] || blockers+=("esta VM já foi removida")
         vm_dir="$(resolve_vm_staging_dir "$operation_id" 2>/dev/null || true)"
         [ -n "$vm_dir" ] && [ -d "$vm_dir" ] || blockers+=("diretório gerenciado da VM não foi encontrado ou é inseguro")
@@ -2617,6 +2842,9 @@ provision_remove() {
             running=true
         fi
         [ "$running" = false ] || blockers+=("desligue esta VM antes de removê-la")
+        if [ "$persisted_state" = "running" ] && [ "$state" = "interrupted" ] && provision_worker_effectively_alive "$operation_id"; then
+            blockers+=("o supervisor ainda está iniciando; tente novamente em alguns segundos")
+        fi
     fi
     if [ "$purge" = "1" ]; then
         mode="purge"
@@ -2661,6 +2889,20 @@ provision_remove() {
     locked_vm_dir="$(resolve_vm_staging_dir "$operation_id")" || return 1
     [ "$locked_vm_dir" = "$vm_dir" ] || { pz_error "VM target changed after preview"; return 1; }
     [ -d "$locked_vm_dir" ] || { pz_error "VM target disappeared after preview"; return 1; }
+    if [ "$(jq -r '.state // ""' "$operation_file" 2>/dev/null || true)" = "running" ]; then
+        provision_mark_interrupted_locked "$operation_id" || return 1
+    fi
+    local locked_state
+    locked_state="$(provision_effective_state "$operation_id")"
+    case "$locked_state" in completed|interrupted|failed|cancelled) ;; *)
+        pz_error "operation changed state before removal: $locked_state"
+        return 1
+        ;;
+    esac
+    if operation_vm_running "$locked_vm_dir"; then
+        pz_error "QEMU started after preview; refusing to remove an open disk"
+        return 1
+    fi
 
     if [ "$purge" = "1" ]; then
         purge_operation_vm_dir "$operation_id" "$locked_vm_dir" || return 1

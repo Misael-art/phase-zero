@@ -1,5 +1,5 @@
 Name:           phasezero-control-center
-Version:        1.16.6
+Version:        1.22.5
 Release:        1%{?dist}
 Summary:        PhaseZero native Linux control center
 License:        MIT
@@ -27,6 +27,8 @@ install -d %{buildroot}%{_datadir}/applications %{buildroot}%{_datadir}/metainfo
 install -d %{buildroot}%{_datadir}/icons/hicolor/scalable/apps
 cp -a linux profiles assets version.json %{buildroot}%{_libdir}/phasezero/
 install -m755 packaging/linux/phasezero-control-center %{buildroot}%{_bindir}/
+# PZ-AUD-001: ship `pz` on PATH (SSH bridge calls it remotely).
+install -m755 packaging/linux/pz %{buildroot}%{_bindir}/
 install -m644 packaging/linux/io.phasezero.ControlCenter.desktop %{buildroot}%{_datadir}/applications/
 install -m644 packaging/linux/io.phasezero.ControlCenter.metainfo.xml %{buildroot}%{_datadir}/metainfo/
 install -m644 packaging/linux/io.phasezero.ControlCenter.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/
@@ -45,6 +47,9 @@ fi
 
 %files
 %{_bindir}/phasezero-control-center
+# PZ-AUD-001: instalado em %install desde que `pz` passou a ir para o PATH;
+# sem esta linha o rpmbuild aborta com "installed (but unpackaged) file".
+%{_bindir}/pz
 %{_libdir}/phasezero
 %{_datadir}/applications/io.phasezero.ControlCenter.desktop
 %{_datadir}/metainfo/io.phasezero.ControlCenter.metainfo.xml

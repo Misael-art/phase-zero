@@ -88,6 +88,26 @@ def save(kind: str, record_id: str, payload: dict) -> Path:
     return path
 
 
+def list_records(kind: str) -> list[dict]:
+    """Registros de um tipo, do mais recente para o mais antigo.
+
+    Arquivo ilegível ou corrompido é ignorado em vez de derrubar a leitura:
+    o histórico é evidência auxiliar, não pode bloquear uma remoção.
+    """
+    directory = root() / kind
+    if not directory.is_dir():
+        return []
+    records: list[dict] = []
+    for path in sorted(directory.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
+
+
 def load(kind: str, record_id: str) -> dict:
     if "/" in record_id or "\\" in record_id or ".." in record_id:
         raise ValueError("ID inválido")

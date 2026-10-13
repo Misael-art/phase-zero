@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# pz - public PhaseZero CLI entrypoint (PZ-AUD-001).
+# Installed to /usr/bin/pz by the Arch/Debian/RPM packages and to
+# ~/.local/bin/pz by install-user.sh, so remote shells (SSH bridge) and
+# clean hosts resolve `pz` without manual PATH setup.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+for root in \
+    "${PHASEZERO_ROOT:-}" \
+    "$(cd "$(dirname "$SELF")/../.." 2>/dev/null && pwd)" \
+    "/usr/lib/phasezero" \
+    "/usr/lib64/phasezero" \
+    "/app/lib/phasezero"
+do
+    if [ -n "$root" ] && [ -x "$root/linux/pz" ]; then
+        exec "$root/linux/pz" "$@"
+    fi
+done
+
+echo "PhaseZero installation not found" >&2
+exit 127

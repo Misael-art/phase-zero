@@ -1,0 +1,874 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-06",
+  "baseline": "2180c94fbfdf67c46050c1bbab9798adf66f3a91",
+  "release": "v1.19.0",
+  "scope": "Auditoria de código, contratos e fixtures; não atesta operação integral em host limpo real.",
+  "items": [
+    {
+      "id": "PZ-AUD-001",
+      "priority": "P1",
+      "area": "foundation",
+      "title": "Pacote Arch não publica CLI usada pelo acesso remoto",
+      "findingEvidence": "confirmed-artifact",
+      "source": {
+        "file": "packaging/linux/aur/PKGBUILD",
+        "line": 14,
+        "marker": "package()"
+      },
+      "symptomAndCause": "Pacote oficial contém usr/lib/phasezero/linux/pz, mas usr/bin contém apenas phasezero-control-center. Bridge remota executa pz --version/pz server homelab. README usa phasezero-admin antes de explicar seu bootstrap.",
+      "proposedWork": "Instalar entrypoints públicos pz e bootstrap administrativo compatível com host limpo; separar pacote appliance sem UI se necessário.",
+      "acceptance": "Instalar asset em Arch mínimo; shell SSH não interativo resolve pz --version; usuário abre preparação sem configurar PATH manualmente.",
+      "evidence": "evidence/arch-package.json",
+      "dependsOn": [],
+      "status": "verified",
+      "owner": "codex/aud-fase1",
+      "implementation": "codex/aud-fase1: b9523da (001), prepare+cap-compose (002), profile-order (003), compose-consumed (004), deps-provider (026), manifests (027)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 153 (capabilities, deps, cohesion, profile-packages, homelab player/web/agent, status-journey, native)",
+      "ciProof": "suites hermeticas locais verdes; Arch oficial limpo + CI descartavel pendentes (Fase 5)",
+      "closureNote": "/usr/bin/pz nos pacotes Arch/Deb/RPM + ~/.local/bin/pz no user-install; bridge SSH com retry via payload + PZ_REMOTE_PZ_BIN; README bootstrap admin apos install unico com sudo. Teste test_pz_entrypoint_shipped_on_path.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-002",
+      "priority": "P1",
+      "area": "foundation",
+      "title": "Preparar Homelab não prepara dependências",
+      "findingEvidence": "reproduced",
+      "source": {
+        "file": "linux/server/homelab-status.sh",
+        "line": 331,
+        "marker": "cmd_repair()"
+      },
+      "symptomAndCause": "repair gera secrets/configuração e ignora erro do reparo interno; Docker/Compose/Tailscale são pré-requisitos externos. Na fixture sem Docker retorna zero e after.ready=false.",
+      "proposedWork": "Criar operação prepare da solução com dependências, serviços, permissões, configuração e prova funcional; reutilizar providers existentes.",
+      "acceptance": "Arch com somente dependências do pacote: selecionar Vaultwarden instala requisitos, inicia engine, configura acesso do usuário e valida aplicação; repetição idempotente.",
+      "evidence": "evidence/reproductions.json",
+      "dependsOn": [
+        "PZ-AUD-001"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase1",
+      "implementation": "codex/aud-fase1: b9523da (001), prepare+cap-compose (002), profile-order (003), compose-consumed (004), deps-provider (026), manifests (027)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 153 (capabilities, deps, cohesion, profile-packages, homelab player/web/agent, status-journey, native)",
+      "ciProof": "suites hermeticas locais verdes; Arch oficial limpo + CI descartavel pendentes (Fase 5)",
+      "closureNote": "prepare --app: deps via capabilities (plan token) -> daemon -> acesso (grupo com re-login explicito) -> configure -> enable+reconcile -> verify. States ready/needs-reauth/failed; onboarding usa prepare; needs-config aponta prepare.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-003",
+      "priority": "P1",
+      "area": "foundation",
+      "title": "Perfis executam aplicações antes de habilitar serviços e absorvem falhas",
+      "findingEvidence": "reproduced",
+      "source": {
+        "file": "linux/lib/common.sh",
+        "line": 1188,
+        "marker": "if [ -n \"$scripts\" ]; then"
+      },
+      "symptomAndCause": "pz_run_profile executa scripts antes de systemd.enable. apply-common converte falhas de Homelab/LLM/Hermes em WARN e termina com server profile applied. Fixture com filho exit 42 termina exit 0.",
+      "proposedWork": "Ordenar pacote→serviço→readiness→configuração→workload; propagar falhas essenciais e persistir etapa recuperável.",
+      "acceptance": "Docker instalado porém parado não é usado antes da prontidão; filho exit 42 torna resultado failed e impede fase seguinte.",
+      "evidence": "evidence/reproductions.json",
+      "dependsOn": [
+        "PZ-AUD-002"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase1",
+      "implementation": "codex/aud-fase1: b9523da (001), prepare+cap-compose (002), profile-order (003), compose-consumed (004), deps-provider (026), manifests (027)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 153 (capabilities, deps, cohesion, profile-packages, homelab player/web/agent, status-journey, native)",
+      "ciProof": "suites hermeticas locais verdes; Arch oficial limpo + CI descartavel pendentes (Fase 5)",
+      "closureNote": "servicos antes de scripts; falhas de script/servico/sysctl abortam; sem bridge => rc 77 pre-mutacao; apply-common propaga workloads.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-004",
+      "priority": "P1",
+      "area": "foundation",
+      "title": "Perfil homelab declara Compose sem executá-lo",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "profiles/homelab.json",
+        "line": 49,
+        "marker": "\"docker_compose\""
+      },
+      "symptomAndCause": "Campo docker_compose aponta core/extras, mas runner legado não o lê; scripts do perfil incluem somente dev-tweaks. Perfil homelab, server-homelab e perfis appliance têm contratos distintos.",
+      "proposedWork": "Normalizar perfis como seleção de soluções; migrar campo sem consumidor para receita executável ou eliminar promessa de implantação.",
+      "acceptance": "Selecionar homelab na UI produz plano com apps/dependências reais e convergência observável; nenhum campo de manifesto sem consumidor.",
+      "evidence": "evidence/inventory.json",
+      "dependsOn": [
+        "PZ-AUD-002",
+        "PZ-AUD-003"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase1",
+      "implementation": "codex/aud-fase1: b9523da (001), prepare+cap-compose (002), profile-order (003), compose-consumed (004), deps-provider (026), manifests (027)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 153 (capabilities, deps, cohesion, profile-packages, homelab player/web/agent, status-journey, native)",
+      "ciProof": "suites hermeticas locais verdes; Arch oficial limpo + CI descartavel pendentes (Fase 5)",
+      "closureNote": "docker_compose validado e convergido (reconcile com registro, senao up; extras so com with_extras); core ausente falha fechado.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-005",
+      "priority": "P1",
+      "area": "lifecycle",
+      "title": "Habilitar, desabilitar e atualizar podem indicar sucesso incompleto",
+      "findingEvidence": "reproduced",
+      "source": {
+        "file": "linux/server/homelab-apps.sh",
+        "line": 471,
+        "marker": "cmd_enable()"
+      },
+      "symptomAndCause": "enable sem Docker grava enabled=true, ok=true, started=false. disable com rm falhando retorna ok=true. update força ok=true após pull mesmo quando up falha. Registro é alterado antes da operação.",
+      "proposedWork": "Separar desiredState de observedState; falha ou deferred explícitos; bloquear conclusão sem readiness e recuperar alteração parcial.",
+      "acceptance": "Fixtures Docker ausente, rm exit 42 e pull ok/up failed jamais resultam em ready/completed=true; reconciliador retoma estado desejado.",
+      "evidence": "evidence/reproductions.json",
+      "dependsOn": [],
+      "status": "verified",
+      "owner": "codex/aud-fase0",
+      "implementation": "codex/aud-fase0: 076b4ba (005/011/012), 1a47c15 (009/010), 98b75a1 (006)",
+      "behavioralProof": "tests/linux-homelab.sh verde (inclui regressoes novas); fixtures /tmp/pz-fase0-repro, /tmp/pz-r10, /tmp/pz-rec",
+      "ciProof": "suites hermeticas locais verdes (homelab, ai-proxies, 9router, agent-workspaces); CI descartavel/VM real pendente (Fase 5)",
+      "closureNote": "desired/observed separados (state applied/deferred/failed/noop); enable/disable/update com daemon down ou falha parcial retornam ok:false + exit 1; reconciliador retoma. Suite linux-homelab + fakedockers rm-fail/pull-ok-up-fail.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-006",
+      "priority": "P1",
+      "area": "lifecycle",
+      "title": "Status saudável com container incompleto e sem healthcheck",
+      "findingEvidence": "reproduced",
+      "source": {
+        "file": "linux/server/homelab-status.sh",
+        "line": 76,
+        "marker": "health_proofs()"
+      },
+      "symptomAndCause": "Health none/unknown não entra nas falhas; qualquer container phasezero-* basta para active. build_status não exige igualdade com conjunto esperado nem incorpora todos blockers da stack. Fixture retorna ready=true sem Docker e com um container fictício sem healthcheck.",
+      "proposedWork": "Calcular prontidão por projeto e conjunto desejado; sondas funcionais obrigatórias; missing/unknown/starting bloqueiam ready.",
+      "acceptance": "Um container isolado, sem check, serviço obrigatório faltando e engine indisponível mantêm ready=false; app real completa jornada antes de ficar pronto.",
+      "evidence": "evidence/reproductions.json",
+      "dependsOn": [
+        "PZ-AUD-005"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase0",
+      "implementation": "codex/aud-fase0: 076b4ba (005/011/012), 1a47c15 (009/010), 98b75a1 (006)",
+      "behavioralProof": "tests/linux-homelab.sh verde (inclui regressoes novas); fixtures /tmp/pz-fase0-repro, /tmp/pz-r10, /tmp/pz-rec",
+      "ciProof": "suites hermeticas locais verdes (homelab, ai-proxies, 9router, agent-workspaces); CI descartavel/VM real pendente (Fase 5)",
+      "closureNote": "health none/unknown vira unchecked e bloqueia healthy/ready; ready exige conjunto esperado (missing/unexpected), segredos completos e sondas TCP; campos novos no status JSON. Healthchecks por app = Fase 2 (030).",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-007",
+      "priority": "P1",
+      "area": "apps",
+      "title": "Paperless sem broker necessário",
+      "findingEvidence": "confirmed-source-upstream",
+      "source": {
+        "file": "assets/home-server/apps/compose/paperless.yml",
+        "line": 2,
+        "marker": "services:"
+      },
+      "symptomAndCause": "Compose modular e extras fornecem apenas Paperless; faltam Redis/Valkey e PAPERLESS_REDIS. Exemplo oficial da versão 2.16.3 inclui broker e URL. Faltam também fluxos consume/export.",
+      "proposedWork": "Adicionar broker compatível e dependência com readiness, volumes, configuração de importação/exportação e usuário inicial.",
+      "acceptance": "Fixture descartável importa PDF, OCR termina, documento é buscável e sobrevive backup/restore e reboot.",
+      "evidence": "evidence/compose.json",
+      "dependsOn": [
+        "PZ-AUD-002",
+        "PZ-AUD-006"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase2",
+      "implementation": "codex/aud-fase2 (commits de fase2)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 157; fixtures /tmp com stubs (daemon real intocado)",
+      "ciProof": "suites hermeticas locais verdes; E2E com daemon/VM real pendente (Fase 5)",
+      "closureNote": "broker Valkey dedicado (healthcheck, appendonly, sem portas) + PAPERLESS_REDIS + depends_on healthy + consume/export em modulo, extras, catalogo, lock, pesos; enable puxa broker via dependsOn.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-008",
+      "priority": "P2",
+      "area": "apps",
+      "title": "Receitas de aplicações terminam antes da experiência utilizável",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "assets/home-server/docker-compose.extras.yml",
+        "line": 9,
+        "marker": "services:"
+      },
+      "symptomAndCause": "Nextcloud sem cron/Redis/provisionamento de conta; n8n sem PostgreSQL e controles previstos no roadmap; Grafana sem datasource/dashboard; Prometheus sem configuração de targets; Node Exporter sem visibilidade explícita do host; Jellyfin sem seleção guiada de mídia; Vaultwarden com cadastro fechado sem jornada inicial integrada. Não são todos requisitos de boot; são lacunas de produto/roadmap.",
+      "proposedWork": "Completar receitas por app e distinguir essencial de opcional; gerar contas/configuração inicial, dados exemplo e ação Abrir após verificação.",
+      "acceptance": "Cada um dos dez apps executa caso de uso útil documentado; mídia/usuários/datasources/workflows e execução agendada verificados quando aplicáveis.",
+      "evidence": "evidence/compose.json",
+      "dependsOn": [
+        "PZ-AUD-002",
+        "PZ-AUD-006",
+        "PZ-AUD-030"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase2",
+      "implementation": "codex/aud-fase2 (commits de fase2)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 157; fixtures /tmp com stubs (daemon real intocado)",
+      "ciProof": "suites hermeticas locais verdes; E2E com daemon/VM real pendente (Fase 5)",
+      "closureNote": "firstUse (openPath, sonda http, passos) nos 10 apps; list expoe firstUse+openUrl; enable retorna nextAction da receita; sondas de status usam endpoints http por app.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-009",
+      "priority": "P1",
+      "area": "data",
+      "title": "Backup pode ser vazio, inconsistente ou inacessível",
+      "findingEvidence": "reproduced",
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 681,
+        "marker": "cmd_backup()"
+      },
+      "symptomAndCause": "Volumes ausentes são ignorados; todos ausentes geram ok=true, volumes=[] e verify=true. Backup usa tar direto de Mountpoint sem quiesce/dump nativo. Com usuário comum, permissões dos volumes podem impedir acesso. Cobertura depende core/extras, não registro de apps ativos.",
+      "proposedWork": "Inventário autoritativo, falha em volume requerido ausente, dumps consistentes ou quiesce, acesso mínimo explícito e restauração de dados/segredos/configuração como unidade.",
+      "acceptance": "Carga gravando SQLite/PostgreSQL/MariaDB durante backup; restore preserva consistência. Zero volumes esperados só aceita backup vazio com estado explícito; dados exigidos nunca são silenciosamente omitidos.",
+      "evidence": "evidence/reproductions.json",
+      "dependsOn": [
+        "PZ-AUD-011",
+        "PZ-AUD-012"
+      ],
+      "status": "in_progress",
+      "owner": "codex/rev-remediation",
+      "implementation": "codex/aud-fase0: 076b4ba (005/011/012), 1a47c15 (009/010), 98b75a1 (006)",
+      "behavioralProof": "tests/linux-homelab.sh verde (inclui regressoes novas); fixtures /tmp/pz-fase0-repro, /tmp/pz-r10, /tmp/pz-rec",
+      "ciProof": "suites hermeticas locais verdes (homelab, ai-proxies, 9router, agent-workspaces); CI descartavel/VM real pendente (Fase 5)",
+      "closureNote": "volumes ausentes falham fechado (listados, sem manifesto); vazio exige backup --allow-empty; staging + sqlite hot-backup; flags consistent/method no manifesto e verify. Dumps nativos MariaDB/PG = limitacao (receitas Fase 2). REV-002 (codex/rev-remediation 765e791): sqlite .backup na origem viva com busy timeout, WAL/SHM obsoletos descartados, TSDB/servidores consistent:false com reason; escritor concorrente + restore + integrity_check provados na suite.",
+      "evidenceTier": "implemented",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released",
+      "reopenedBy": "REV-002"
+    },
+    {
+      "id": "PZ-AUD-010",
+      "priority": "P0",
+      "area": "data",
+      "title": "Restore aplica arquivos não verificados e não restaura estado exato",
+      "findingEvidence": "reproduced",
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 867,
+        "marker": "for archive in \"$SOURCE\"/*.tgz; do"
+      },
+      "symptomAndCause": "Verifica entradas do manifesto, mas extrai todos *.tgz da pasta. Fixture comprovou extração de archive não listado e retenção de arquivo ausente no backup. Stop falho é ignorado; rollback apenas sobrepõe volumes concluídos, não limpa extras nem necessariamente reverte volume parcialmente falho.",
+      "proposedWork": "Restaurar exclusivamente manifesto validado; validar caminhos/links e identidade; staging por volume, parada obrigatória, troca transacional, rollback integral incluindo volume parcial; testar TOCTOU e backup prévio.",
+      "acceptance": "Arquivo adicional não listado nunca é aplicado; falha no meio da extração devolve exatamente hashes/árvore anteriores; stop falho impede mutação; restaurar backup elimina arquivos posteriores conforme plano confirmado.",
+      "evidence": "evidence/reproductions.json",
+      "dependsOn": [
+        "PZ-AUD-009",
+        "PZ-AUD-011"
+      ],
+      "status": "in_progress",
+      "owner": "codex/rev-remediation",
+      "implementation": "codex/aud-fase0: 076b4ba (005/011/012), 1a47c15 (009/010), 98b75a1 (006)",
+      "behavioralProof": "tests/linux-homelab.sh verde (inclui regressoes novas); fixtures /tmp/pz-fase0-repro, /tmp/pz-r10, /tmp/pz-rec",
+      "ciProof": "suites hermeticas locais verdes (homelab, ai-proxies, 9router, agent-workspaces); CI descartavel/VM real pendente (Fase 5)",
+      "closureNote": "restore so aplica entradas do manifesto (extra tgz ignorado, provado); checa identidade de projeto; stop falho bloqueia; re-checksum TOCTOU; scan de paths; swap exato via staging (remove posteriores); rollback integral com wipe+copy. REV-001/003 (codex/rev-remediation 765e791): volume registrado antes da primeira mutacao (swap falho entra no rollback), rollback incompleto = recoveryRequired:true, cmd_down antes do snapshot pre-restore, estado de execucao preservado (stackWasRunning/stackRestarted).",
+      "evidenceTier": "implemented",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released",
+      "reopenedBy": "REV-001/003"
+    },
+    {
+      "id": "PZ-AUD-011",
+      "priority": "P1",
+      "area": "data",
+      "title": "Identidade de containers/volumes não fica restrita ao projeto",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 647,
+        "marker": "volume_actual_name()"
+      },
+      "symptomAndCause": "Descoberta filtra name=phasezero- globalmente; volume_actual_name aceita qualquer sufixo _<logical> ou volume global. Compose usa container_name fixo, inclusive suíte disposable com nome global.",
+      "proposedWork": "Usar labels com host/instalação/projeto e resolução exata de volumes; remover nomes globais e validar propriedade antes de backup/restore/rm.",
+      "acceptance": "Dois projetos com mesmo app e volume lógico nunca compartilham status nem dados; operação em A deixa B byte a byte intacto.",
+      "evidence": "evidence/compose.json",
+      "dependsOn": [],
+      "status": "verified",
+      "owner": "codex/aud-fase0",
+      "implementation": "codex/aud-fase0: 076b4ba (005/011/012), 1a47c15 (009/010), 98b75a1 (006)",
+      "behavioralProof": "tests/linux-homelab.sh verde (inclui regressoes novas); fixtures /tmp/pz-fase0-repro, /tmp/pz-r10, /tmp/pz-rec",
+      "ciProof": "suites hermeticas locais verdes (homelab, ai-proxies, 9router, agent-workspaces); CI descartavel/VM real pendente (Fase 5)",
+      "closureNote": "volume_actual_name deterministico <projeto>_<logico>; descoberta por label com.docker.compose.project; refuse em label estrangeiro no backup/restore. container_name fixo mantido (colisao entre projetos falha rapido no up).",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-012",
+      "priority": "P1",
+      "area": "lifecycle",
+      "title": "Apps selecionados e stack completa não convergem pelo mesmo estado",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/server/homelab-stack.sh",
+        "line": 141,
+        "marker": "compose_args()"
+      },
+      "symptomAndCause": "apps.enabled.json pertence ao fluxo modular; up/down/restart/boot usam core ou core+extras. Habilitar/desabilitar individualmente não define o conjunto usado pelo próximo boot ou operação geral; backup também usa camadas.",
+      "proposedWork": "Um reconciliador para enabled apps, perfil, boot, restart, update e backup; migração dos registros existentes.",
+      "acceptance": "Desligar app e reiniciar host mantém app desligado; extras escolhidos reiniciam; backup cobre exatamente volumes em uso.",
+      "evidence": "evidence/inventory.json",
+      "dependsOn": [
+        "PZ-AUD-005",
+        "PZ-AUD-011"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase0",
+      "implementation": "codex/aud-fase0: 076b4ba (005/011/012), 1a47c15 (009/010), 98b75a1 (006)",
+      "behavioralProof": "tests/linux-homelab.sh verde (inclui regressoes novas); fixtures /tmp/pz-fase0-repro, /tmp/pz-r10, /tmp/pz-rec",
+      "ciProof": "suites hermeticas locais verdes (homelab, ai-proxies, 9router, agent-workspaces); CI descartavel/VM real pendente (Fase 5)",
+      "closureNote": "reconcile converge registro curado (boot usa; fallback legacy sem registro); backup cobre volumes em uso (+extras com --explicit); desligado permanece desligado apos reboot.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-013",
+      "priority": "P1",
+      "area": "ux",
+      "title": "Onboarding não executa descoberta/pareamento/preparação completos",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/ui_native/pages/homelab.py",
+        "line": 336,
+        "marker": "def onboard_advance"
+      },
+      "symptomAndCause": "Avanço registra descoberta placeholder, trata alias selecionado como pareamento e profile=True sem implantação. Apply chama repair. Botões de app disparam mutação com Prévia separada, sem vincular confirmação ao plano.",
+      "proposedWork": "Wizard conectado a operações reais: papel→host→descoberta/autenticação→solução→dependências→plano→aplicar→verificar→abrir; aprovação única do plano completo.",
+      "acceptance": "Usuário sem terminal prepara segundo host a partir de sessão limpa; não pode avançar pareamento falho; plano alterado exige nova revisão.",
+      "evidence": "evidence/pytest.log",
+      "dependsOn": [
+        "PZ-AUD-001",
+        "PZ-AUD-002",
+        "PZ-AUD-014",
+        "PZ-AUD-015"
+      ],
+      "status": "in_progress",
+      "owner": "codex/rev-remediation",
+      "implementation": "codex/aud-fase4",
+      "behavioralProof": "tests/linux-homelab.sh verde (pair); pytest player/navigation; viewport estreito preservado",
+      "ciProof": "hermetico local verde; usabilidade com usuarios reais + Windows nativo pendentes (Fase 5)",
+      "closureNote": "wizard executa: discover via agent, pair com resultado real (local explicito), profile registrado, apply em dois tempos (dry-run hash + execucao so com plano igual). Cartoes mantem one-click com estados honestos (005) e nextAction (008). REV-004..007 (codex/rev-remediation 87c31a1): parser unico de documento (pretty/compact/envelope), pair=false bloqueia avanco, plano amarrado a host capturado (troca de host invalida pair/confirmed/plan), perfil revisado transmitido ao backend (prepare --profile).",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released",
+      "reopenedBy": "REV-004/005/006/007"
+    },
+    {
+      "id": "PZ-AUD-014",
+      "priority": "P1",
+      "area": "ux",
+      "title": "Pareamento SSH exige acesso prévio e ignora porta customizada",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/ui_native/pages/homelab.py",
+        "line": 454,
+        "marker": "\"ssh-copy-id\""
+      },
+      "symptomAndCause": "Player exige chave pública existente ou manda executar ssh-keygen; ssh-copy-id usa BatchMode=yes, impedindo primeiro login por senha, e não inclui porta do registro. Não instala runtime remoto. Registro/bridge têm port, mas ação de parear não usa.",
+      "proposedWork": "Criar/importar chave por fluxo seguro, autenticação inicial interativa protegida ou token já provisionado, respeitar porta/host key e bootstrap remoto explícito.",
+      "acceptance": "Host novo sem authorized_keys e SSH em porta não padrão pareia; chave alterada falha com orientação; nenhuma senha em argv/log.",
+      "evidence": "evidence/pytest.log",
+      "dependsOn": [
+        "PZ-AUD-001"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase4",
+      "implementation": "codex/aud-fase4",
+      "behavioralProof": "tests/linux-homelab.sh verde (pair); pytest player/navigation; viewport estreito preservado",
+      "ciProof": "hermetico local verde; usabilidade com usuarios reais + Windows nativo pendentes (Fase 5)",
+      "closureNote": "hosts pair: porta do registro sempre, --key/reuso/--generate explicito, BatchMode sem senha, first-contact com comando exato com porta; Player pareia via CLI.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-015",
+      "priority": "P1",
+      "area": "lifecycle",
+      "title": "Instalar agente/habilitar dashboard não inicia serviços",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/server/homelab_agent.py",
+        "line": 209,
+        "marker": "def install(self)"
+      },
+      "symptomAndCause": "agent install e web enable escrevem unidades e retornam systemdStarted=false. Não encadeiam daemon-reload/start, sessão persistente, primeira conta e prova HTTPS acessível.",
+      "proposedWork": "Adicionar provisionamento appliance de unidades, lifecycle persistente, conta inicial, confiança TLS e bind coerente; preservar gate que protege host dev.",
+      "acceptance": "Após instalação e reboot sem login gráfico, agente/dashboard ficam acessíveis no host selecionado; conta criada em canal protegido; unit instalada mas inativa nunca aparece pronta.",
+      "evidence": "evidence/pytest.log",
+      "dependsOn": [
+        "PZ-AUD-002",
+        "PZ-AUD-014"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase2",
+      "implementation": "codex/aud-fase2 (commits de fase2)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 157; fixtures /tmp com stubs (daemon real intocado)",
+      "ciProof": "suites hermeticas locais verdes; E2E com daemon/VM real pendente (Fase 5)",
+      "closureNote": "units no user bus; install/enable encadeiam daemon-reload + enable --now + espera active; linger best-effort honesto; sonda TLS fecha ok; primeira conta web via nextAction (nunca auto-criada); status com unitActive.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-016",
+      "priority": "P1",
+      "area": "ai",
+      "title": "Proxies e 9Router dependem de runtime já existente",
+      "findingEvidence": "reproduced",
+      "source": {
+        "file": "linux/ai/proxy-suite.sh",
+        "line": 55,
+        "marker": "ensure_node_runtime()"
+      },
+      "symptomAndCause": "ensure_node_runtime exige npm; 9router exige socat em caminho absoluto e npm. install_selected prepara Node, mas ensure_one chama install_one diretamente; instalação gera launcher apontando runtime isolado mesmo se ausente. Playwright instala browser sem orquestrar libs nativas de Arch; caminho legado MiMo exige Go.",
+      "proposedWork": "Resolver requisitos por tipo e versão; chamar bootstrap compartilhado de qualquer entrada; testar Git/npm/Node/socat/browser/libs/build tools ausentes individualmente.",
+      "acceptance": "Arch mínimo instala e valida runtime/binários antes de clone/build; nenhum launcher aponta binário ausente; fluxo não depende de dev-ai previamente executado.",
+      "evidence": "evidence/reproductions.json",
+      "dependsOn": [
+        "PZ-AUD-001",
+        "PZ-AUD-002"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase3",
+      "implementation": "codex/aud-fase3",
+      "behavioralProof": "tests/linux-ai-proxies.sh + linux-agent-workspaces.sh + linux-homelab.sh verdes; pytest 158; pwsh direto p/ paridade Windows (Pester 6 incompativel local, teste p/ CI Windows)",
+      "ciProof": "hermetico local verde; inferencia autenticada real, Pester Windows e E2E daemon pendentes (Fase 5)",
+      "closureNote": "toolchains (git/node/go) antes de clone/build em todas entradas; chromium precisa abrir (libs OS faltando falham com acao); verificacao de artefatos bloqueia launchers pendurados; 9router via manager com prereqs proprios.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-017",
+      "priority": "P1",
+      "area": "ai",
+      "title": "Build de proxy pode falhar e instalador continuar",
+      "findingEvidence": "reproduced",
+      "source": {
+        "file": "linux/ai/proxy-suite.sh",
+        "line": 391,
+        "marker": "install_one()"
+      },
+      "symptomAndCause": "ensure_one chama install_one em if; comandos intermediários run_npm/build não verificam retorno. Errexit do Bash fica suprimido nesse contexto. Fixture npm exit 42 produz AI proxy installed e retorno aceito.",
+      "proposedWork": "Checar explicitamente cada etapa, staging transacional, validar artefatos/runtime antes de registrar instalação e escrever serviço.",
+      "acceptance": "Injetar falha em clone, npm ci, build, browser install e Go build; todas propagam failed, não escrevem registro pronto e permitem retry limpo.",
+      "evidence": "evidence/reproductions.json",
+      "dependsOn": [
+        "PZ-AUD-016"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase3",
+      "implementation": "codex/aud-fase3",
+      "behavioralProof": "tests/linux-ai-proxies.sh + linux-agent-workspaces.sh + linux-homelab.sh verdes; pytest 158; pwsh direto p/ paridade Windows (Pester 6 incompativel local, teste p/ CI Windows)",
+      "ciProof": "hermetico local verde; inferencia autenticada real, Pester Windows e E2E daemon pendentes (Fase 5)",
+      "closureNote": "cada etapa de build checada explicitamente; falha em clone fresco remove diretorio p/ retry limpo; ensure/install propagam.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-018",
+      "priority": "P2",
+      "area": "ai",
+      "title": "all tem conjuntos diferentes e instalação agregada bloqueia",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/ai/proxy-suite.sh",
+        "line": 481,
+        "marker": "install_selected()"
+      },
+      "symptomAndCause": "Catálogo lista onze IDs; install all exige snapshot de todos exceto 9router, mas só quatro possuem fonte aprovada, bloqueando lote. ensure all usa quatro; start all usa quatro. Seis IDs sem snapshot aparecem no mesmo universo.",
+      "proposedWork": "Definir conjuntos explícitos supported/default/experimental/external; manter all sem ambiguidade e apresentar indisponíveis com motivo.",
+      "acceptance": "Todas ações all operam mesmo conjunto aplicável declarado; uma integração experimental não impede preparar as disponíveis.",
+      "evidence": "evidence/linux-ai-proxies.log",
+      "dependsOn": [
+        "PZ-AUD-016",
+        "PZ-AUD-017"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase3",
+      "implementation": "codex/aud-fase3",
+      "behavioralProof": "tests/linux-ai-proxies.sh + linux-agent-workspaces.sh + linux-homelab.sh verdes; pytest 158; pwsh direto p/ paridade Windows (Pester 6 incompativel local, teste p/ CI Windows)",
+      "ciProof": "hermetico local verde; inferencia autenticada real, Pester Windows e E2E daemon pendentes (Fase 5)",
+      "closureNote": "SUPPORTED_PROXY_IDS unico p/ install/ensure/start/plan batch; status/auth/plan reportam universo com tier; experimental em batch vira preview explicito.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-019",
+      "priority": "P1",
+      "area": "ai",
+      "title": "Windows e Linux divergem em autenticação, fontes e defaults de proxies",
+      "findingEvidence": "confirmed-source-contract",
+      "source": {
+        "file": "bootstrap-tools.ps1",
+        "line": 17714,
+        "marker": "function Get-BootstrapAiProxyCatalog"
+      },
+      "symptomAndCause": "Linux MiMo usa API oficial; Windows usa proxy Go/env-session. Windows Sync-BootstrapAiProxyRepository clona branch rasa/faz pull sem consumir manifest de snapshots Linux. Defaults e catálogo diferem entre superfícies.",
+      "proposedWork": "Manifest comum de fontes, pins, runtimes, modelos, autenticação e maturidade; adapters por OS. Migrar MiMo Windows para contrato oficial aprovado e testar preservação dos clientes.",
+      "acceptance": "Mesma solução em Arch/Windows tem mesmo tipo de autenticação e origem imutável; reparo não atualiza branch sem aprovação/versionamento; modelos padrão consistentes.",
+      "evidence": "evidence/windows-contract.json",
+      "dependsOn": [
+        "PZ-AUD-016",
+        "PZ-AUD-018"
+      ],
+      "status": "in_progress",
+      "owner": "codex/rev-remediation",
+      "implementation": "codex/aud-fase3",
+      "behavioralProof": "tests/linux-ai-proxies.sh + linux-agent-workspaces.sh + linux-homelab.sh verdes; pytest 158; pwsh direto p/ paridade Windows (Pester 6 incompativel local, teste p/ CI Windows)",
+      "ciProof": "hermetico local verde; inferencia autenticada real, Pester Windows e E2E daemon pendentes (Fase 5)",
+      "closureNote": "proxy-manifest.json canonico; manifest-check linux impoe repo/pin/porta/runtime; Windows com leitor + paridade Pester (repo/porta) e migrations registradas (mimo auth, deeps default). Pester 3/5 nao roda neste host; CI Windows cobrira.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released",
+      "reopenedBy": "REV-016"
+    },
+    {
+      "id": "PZ-AUD-020",
+      "priority": "P1",
+      "area": "ai",
+      "title": "MiMo pode aparecer pronto somente pela presença de configuração",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/ai/proxy-suite.sh",
+        "line": 1253,
+        "marker": "if mimo_official_configured; then"
+      },
+      "symptomAndCause": "ensure_one marca ready=true/completed=true com chave presente e ignora falha de configure_mimo_official_clients. Não valida inferência nesse ramo. Credencial inválida/revogada pode parecer pronta.",
+      "proposedWork": "Separar configured de authenticated/ready; teste explícito e limitado de modelo com timeout, quota/custo informado e erro redigido.",
+      "acceptance": "Chave inválida, quota esgotada, offline e erro de configuração IDE jamais ficam ready; resposta real autorizada fecha prontidão.",
+      "evidence": "evidence/linux-ai-proxies.log",
+      "dependsOn": [
+        "PZ-AUD-019"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase3",
+      "implementation": "codex/aud-fase3",
+      "behavioralProof": "tests/linux-ai-proxies.sh + linux-agent-workspaces.sh + linux-homelab.sh verdes; pytest 158; pwsh direto p/ paridade Windows (Pester 6 incompativel local, teste p/ CI Windows)",
+      "ciProof": "hermetico local verde; inferencia autenticada real, Pester Windows e E2E daemon pendentes (Fase 5)",
+      "closureNote": "ensure mimo exige completion real (/chat/completions); chave armazenada sem resposta = needs-credentials resumable, nunca ready; sem vazamento de chave.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-021",
+      "priority": "P1",
+      "area": "ai",
+      "title": "Hermes não é solução automática aprovada no fluxo padrão",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/ai/setup-hermes.sh",
+        "line": 107,
+        "marker": "require_workload_release_gate()"
+      },
+      "symptomAndCause": "Gate exige PZ_HOMELAB_ALLOW_HOST_WORKLOADS=1; manifesto Hermes tem approvedForInstall=false, semanticAudit=false e transitiveArtifactsPinned=false. Instalação ainda exige uv gerenciado e credencial 9Router. dev-ai chama setup-hermes no meio de instalação ampla.",
+      "proposedWork": "Manter bloqueio honesto; separar proteção de host dev de maturidade de produto, completar distribuição auditada e dependências. Não remover gate como atalho.",
+      "acceptance": "Perfil padrão não aborta silenciosamente por Hermes bloqueado; UI explica maturidade. Versão aprovada instala em fixture limpa e conversa via 9Router com segredo referenciado.",
+      "evidence": "evidence/inventory.json",
+      "dependsOn": [
+        "PZ-AUD-016",
+        "PZ-AUD-019"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase3",
+      "implementation": "codex/aud-fase3",
+      "behavioralProof": "tests/linux-ai-proxies.sh + linux-agent-workspaces.sh + linux-homelab.sh verdes; pytest 158; pwsh direto p/ paridade Windows (Pester 6 incompativel local, teste p/ CI Windows)",
+      "ciProof": "hermetico local verde; inferencia autenticada real, Pester Windows e E2E daemon pendentes (Fase 5)",
+      "closureNote": "setup-hermes-optional: gate 69 vira skip explicado, erro real propaga; dev-ai usa wrapper; UI marca experimental. Auditoria da distribuicao segue gate humano.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-022",
+      "priority": "P1",
+      "area": "ai",
+      "title": "Seis perfis appliance descrevem serviços sem orquestração completa",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "assets/home-server/homelab-profiles.json",
+        "line": 37,
+        "marker": "\"profiles\""
+      },
+      "symptomAndCause": "assistant-private/multichannel, automation, ai-studio, developer e edge contêm serviços ausentes de Compose gerenciado. Código possui cobertura que bloqueia aplicação explícita; selecionar perfil pode mudar apenas orçamento.",
+      "proposedWork": "Converter perfis em grafo executável de adapters ou apresentar como planos preview indisponíveis para implantação; declarar um gateway e dependências reais.",
+      "acceptance": "Cada perfil anunciado instalável atinge cobertura 100%, memória e autenticação verificadas; demais ficam preview/blocked sem botão que promete instalação.",
+      "evidence": "evidence/inventory.json",
+      "dependsOn": [
+        "PZ-AUD-002",
+        "PZ-AUD-006",
+        "PZ-AUD-021"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase3",
+      "implementation": "codex/aud-fase3",
+      "behavioralProof": "tests/linux-ai-proxies.sh + linux-agent-workspaces.sh + linux-homelab.sh verdes; pytest 158; pwsh direto p/ paridade Windows (Pester 6 incompativel local, teste p/ CI Windows)",
+      "ciProof": "hermetico local verde; inferencia autenticada real, Pester Windows e E2E daemon pendentes (Fase 5)",
+      "closureNote": "installable/installNote no registry; list expoe; up --profile recusa nao-instalavel nomeando maturidade; UI mostra [maturity] e explica apply=orcamento.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-023",
+      "priority": "P1",
+      "area": "ai",
+      "title": "Policy Broker limita instalação, não execução das ações de agentes",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/server/ai-policy-broker.sh",
+        "line": 14,
+        "marker": "# Actions:"
+      },
+      "symptomAndCause": "Implementação checa cinco classes de instalação/pull; não implementa todo runtime de identidade, quotas, aprovações, filesystem/egress e idempotência descrito no roadmap. security.policyActive não prova esse enforcement.",
+      "proposedWork": "Delimitar rótulo atual como política de instalação; implementar broker de execução via ADR e adapters, com isolamento efetivo e prova de negação.",
+      "acceptance": "Ação externa não confiável tentando shell/segredo/arquivo fora do workspace é bloqueada no runtime, auditada e não executa efeito; ausência de broker não vira política ativa presumida.",
+      "evidence": "evidence/linux-agent-workspaces.log",
+      "dependsOn": [
+        "PZ-AUD-022"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase3",
+      "implementation": "codex/aud-fase3",
+      "behavioralProof": "tests/linux-ai-proxies.sh + linux-agent-workspaces.sh + linux-homelab.sh verdes; pytest 158; pwsh direto p/ paridade Windows (Pester 6 incompativel local, teste p/ CI Windows)",
+      "ciProof": "hermetico local verde; inferencia autenticada real, Pester Windows e E2E daemon pendentes (Fase 5)",
+      "closureNote": "scope install-policy + executionEnforced:false em broker e securityState; ADR-0005 delimita; allowlist do agente segue fronteira de runtime.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-024",
+      "priority": "P1",
+      "area": "ai",
+      "title": "Servidor LLM anuncia pronto antes de inferência e modelo disponível",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/server/llm-server.sh",
+        "line": 22,
+        "marker": "cmd_install()"
+      },
+      "symptomAndCause": "Setup base falho vira WARN; modelo é baixado via nohup em background; mensagem ready sai antes de download/inferência. Pull direto nessa rota não passa pelo broker de modelo.",
+      "proposedWork": "Unificar setup-ollama/llm-server; operação persistente de modelo com política, progresso, disco, retry e prova de inferência antes de ready.",
+      "acceptance": "Offline, disco cheio e pull interrompido ficam degradados/retomáveis; política conservative é respeitada em qualquer entrada; requisição real bem-sucedida fecha operação.",
+      "evidence": "evidence/inventory.json",
+      "dependsOn": [
+        "PZ-AUD-002",
+        "PZ-AUD-006"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase3",
+      "implementation": "codex/aud-fase3",
+      "behavioralProof": "tests/linux-ai-proxies.sh + linux-agent-workspaces.sh + linux-homelab.sh verdes; pytest 158; pwsh direto p/ paridade Windows (Pester 6 incompativel local, teste p/ CI Windows)",
+      "ciProof": "hermetico local verde; inferencia autenticada real, Pester Windows e E2E daemon pendentes (Fase 5)",
+      "closureNote": "pull foreground via path broker-gated com progresso; probe /api/generate fecha ready e persiste; nohup removido; modelo mudo falha fechado.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-025",
+      "priority": "P1",
+      "area": "lifecycle",
+      "title": "Boot Hermes chama função shell como executável de timeout",
+      "findingEvidence": "confirmed-source-language",
+      "source": {
+        "file": "linux/server/homelab-boot-prepare.sh",
+        "line": 132,
+        "marker": "if timeout 120 as_user"
+      },
+      "symptomAndCause": "as_user é função Bash, mas timeout tenta executar programa chamado as_user. Sem executável externo, etapa Hermes falha antes de executar hermes-remote.",
+      "proposedWork": "Aplicar timeout ao comando executável dentro da função de identidade, preservando HOME/XDG/UID e exit code.",
+      "acceptance": "Fixture boot Hermes captura identidade correta e início; timeout mata somente processo da operação; cenário passa sem executável artificial chamado as_user.",
+      "evidence": "evidence/linux-homelab.log",
+      "dependsOn": [
+        "PZ-AUD-003",
+        "PZ-AUD-015",
+        "PZ-AUD-021"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase2",
+      "implementation": "codex/aud-fase2 (commits de fase2)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 157; fixtures /tmp com stubs (daemon real intocado)",
+      "ciProof": "suites hermeticas locais verdes; E2E com daemon/VM real pendente (Fase 5)",
+      "closureNote": "timeout envolve o executavel interno (as_user timeout 120 bash ...); fixture runuser com chaining prova o wrap.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-026",
+      "priority": "P2",
+      "area": "foundation",
+      "title": "Dependências opcionais não substituem grafo de requisitos",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/deps/catalog.py",
+        "line": 31,
+        "marker": "DEPENDENCIES:"
+      },
+      "symptomAndCause": "Catálogo deps cobre cinco entradas opcionais. wallpaper-engine-kde aponta pacote -git do ecossistema AUR, enquanto engine instala tudo via pacman -S e declara installable por mapa, sem checar provider/repos. swtpm é descrito opcional apesar de ser requisito para cenário Win11.",
+      "proposedWork": "Manter deps como diagnóstico opcional ou consolidá-lo no modelo de capabilities; distinguir provider/repositório/requisito por solução e evitar installable sem disponibilidade.",
+      "acceptance": "Sem AUR/helper e em Arch oficial, item indisponível não oferece reparo impossível; requisito essencial aparece antes do uso; testes não presumem repositórios do host dev.",
+      "evidence": "evidence/pytest.log",
+      "dependsOn": [
+        "PZ-AUD-027"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase1",
+      "implementation": "codex/aud-fase1: b9523da (001), prepare+cap-compose (002), profile-order (003), compose-consumed (004), deps-provider (026), manifests (027)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 153 (capabilities, deps, cohesion, profile-packages, homelab player/web/agent, status-journey, native)",
+      "ciProof": "suites hermeticas locais verdes; Arch oficial limpo + CI descartavel pendentes (Fase 5)",
+      "closureNote": "provider por familia (official/aur); AUR sem helper nao instalavel; install AUR sem elevacao; required_by (swtpm/windows-11-vm).",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-027",
+      "priority": "P1",
+      "area": "foundation",
+      "title": "Compatibilidade Arch limpo ainda depende de manifests não validados nessa base",
+      "findingEvidence": "validation-gap",
+      "source": {
+        "file": "profiles/safe-base.json",
+        "line": 8,
+        "marker": "\"pacman\""
+      },
+      "symptomAndCause": "Perfis legados usam listas grandes pacman e abortam preflight quando qualquer pacote não resolve; há nomes como codecs, cockpit-docker e acme.sh que precisam validação nos repositórios alvo. Host auditado é BigLinux/Manjaro, não Arch limpo; disponibilidade oficial não foi confirmada nesta sessão. Provider Flatpak exige Flatpak/Flathub já existentes.",
+      "proposedWork": "Validar todos pacotes por OS/repositório em CI; separar base indispensável, opcionais e receitas específicas de derivadas; bootstrap Flatpak/remote quando requerido.",
+      "acceptance": "Todos os quinze perfis geram plano válido em Arch oficial recém-instalado ou incompatibilidade explícita por item; ausência opcional não aborta objetivo inteiro.",
+      "evidence": "evidence/inventory.json",
+      "dependsOn": [
+        "PZ-AUD-002"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase1",
+      "implementation": "codex/aud-fase1: b9523da (001), prepare+cap-compose (002), profile-order (003), compose-consumed (004), deps-provider (026), manifests (027)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 153 (capabilities, deps, cohesion, profile-packages, homelab player/web/agent, status-journey, native)",
+      "ciProof": "suites hermeticas locais verdes; Arch oficial limpo + CI descartavel pendentes (Fase 5)",
+      "closureNote": "fantasmas removidos (codecs, p7zip->7zip, cargo dup, redis->valkey); optionalPacman/Yay (warn/skip); monitoramento homelab opcional; flatpak auto-bootstrap + remote required falha fechado. Repo check em test_profile_packages.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-028",
+      "priority": "P1",
+      "area": "quality",
+      "title": "CI verde não cobre promessa de host limpo e todos os apps",
+      "findingEvidence": "confirmed-ci-scope",
+      "source": {
+        "file": "tests/linux-homelab-apps-disposable.sh",
+        "line": 2,
+        "marker": "# Disposable CI:"
+      },
+      "symptomAndCause": "E2E de apps cobre Vaultwarden; backup E2E usa arquivos sintéticos, não bancos sob carga; shell/Qt usam stubs; package-smoke copia árvore, não instala asset em Arch limpo. CI Windows possui Pester, mas não prova jornada WSL/Docker/reboot. Roadmaps registram verified com escopo mais amplo que provas atuais.",
+      "proposedWork": "Matriz produto×OS×canal×estado inicial; instalar assets reais em VMs descartáveis; usar cenários de falha, reboot, multi-host e inferência supervisionada. Reconciliar evidência histórica sem apagar ledger.",
+      "acceptance": "Cada solução stable liga a job/artefato e caso de uso; sem evidência mantém preview. CI inclui os defeitos reproduzidos e impede regressão.",
+      "evidence": "evidence/pytest.log",
+      "dependsOn": [
+        "PZ-AUD-001",
+        "PZ-AUD-006",
+        "PZ-AUD-007",
+        "PZ-AUD-010",
+        "PZ-AUD-019"
+      ],
+      "status": "in_progress",
+      "owner": "codex/rev-remediation",
+      "implementation": "codex/aud-fase5",
+      "behavioralProof": "arch-clean-host CI job proven locally in disposable archlinux containers (live repo resolution 15/15, asset build+install, pz entrypoints); hermetic suites green",
+      "ciProof": "ci.yml: arch-clean-host (Arch container), manifest gate, restore-exactness on real volumes, lock 14; Pester Windows unchanged; full matrix in docs/acceptance-evidence.md",
+      "closureNote": "CI agora prova host limpo Arch (repos+asset+entrypoints), paridade de manifesto e exatidao de restore com daemon; matriz de evidencia liga cada solucao a prova/limite; verified historico reconciliado como historico.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released",
+      "reopenedBy": "REV-017"
+    },
+    {
+      "id": "PZ-AUD-029",
+      "priority": "P2",
+      "area": "ux",
+      "title": "Portfólio expõe várias taxonomias técnicas para mesmo objetivo",
+      "findingEvidence": "product-gap",
+      "source": {
+        "file": "linux/ui_native/catalog.py",
+        "line": 11,
+        "marker": "CATEGORIES ="
+      },
+      "symptomAndCause": "Dezenove categorias e superfícies parcialmente sobrepostas: Perfis, Recursos, Linux, Servidor, Homelab, IA & Dev, Proxies e Roteamento. Usuário precisa saber qual fluxo instala dependências e qual somente configura.",
+      "proposedWork": "Página inicial por objetivo: computador pessoal, administrar servidor, hospedar serviços, IA/desenvolvimento, jogos/Android/VM. Cards com requisito, custo, maturidade e operação única Preparar e usar; detalhes avançados progressivos.",
+      "acceptance": "Usuário novo completa cinco jornadas principais sem terminal nem escolher entre APIs técnicas equivalentes; teste de usabilidade registra tempo, erros e recuperação.",
+      "evidence": "evidence/inventory.json",
+      "dependsOn": [
+        "PZ-AUD-002",
+        "PZ-AUD-013",
+        "PZ-AUD-028"
+      ],
+      "status": "in_progress",
+      "owner": "codex/rev-remediation",
+      "implementation": "codex/aud-fase4",
+      "behavioralProof": "tests/linux-homelab.sh verde (pair); pytest player/navigation; viewport estreito preservado",
+      "ciProof": "hermetico local verde; usabilidade com usuarios reais + Windows nativo pendentes (Fase 5)",
+      "closureNote": "Início com 5 jornadas por objetivo (requisito, custo, maturidade, UMA acao de entrada); homelab.hosts adicionada; detalhes seguem nas paginas (revelacao progressiva, sem scrollbar horizontal).",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released",
+      "reopenedBy": "REV-014/015"
+    },
+    {
+      "id": "PZ-AUD-030",
+      "priority": "P1",
+      "area": "apps",
+      "title": "Pins e isolamento de Compose não cumprem contrato de distribuição",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/server/homelab-apps.sh",
+        "line": 310,
+        "marker": "digest_for_lock_key()"
+      },
+      "symptomAndCause": "Lock usa tags; update registra RepoDigest, mas Compose continua referindo tags/defaults PZ_IMAGE e não consome digest salvo como fonte de execução. Serviços sem healthchecks, sem redes internas declaradas e sem rotação de logs; mídia Jellyfin montada rw. Variáveis de secrets são expandidas por compose config.",
+      "proposedWork": "Render único por manifesto: digest efetivamente executado, rede/egress mínimos, mídia ro por padrão, limites/log rotation e segredos por referência quando suportado; nunca registrar compose expandido.",
+      "acceptance": "Digest executado igual ao plano após update/reboot; scan de logs/planos não contém segredo; sem acesso de app comum ao socket-proxy; mídia read-only e rotação verificadas.",
+      "evidence": "evidence/compose.json",
+      "dependsOn": [
+        "PZ-AUD-006",
+        "PZ-AUD-011"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase2",
+      "implementation": "codex/aud-fase2 (commits de fase2)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 157; fixtures /tmp com stubs (daemon real intocado)",
+      "ciProof": "suites hermeticas locais verdes; E2E com daemon/VM real pendente (Fase 5)",
+      "closureNote": "image-pins.env (0600) leva RepoDigest do update para todo up/reconcile (pin vence tag, mesmo up aplica); rede pz-internal p/ proxy/db; midia jellyfin :ro; rotacao json-file em todos servicos; sweep sem segredo nos outputs.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    },
+    {
+      "id": "PZ-AUD-031",
+      "priority": "P1",
+      "area": "lifecycle",
+      "title": "Governor mede RAM total e diverge entre app e perfil",
+      "findingEvidence": "confirmed-source",
+      "source": {
+        "file": "linux/server/homelab-apps.sh",
+        "line": 258,
+        "marker": "governor_for_keys()"
+      },
+      "symptomAndCause": "availableMB vem de MemTotal. App governor soma catálogo e headroom, sem considerar MemAvailable, carga externa ou reserva WinVM usada pelo outro governor. Não há preflight completo de disco/VRAM para toda solução.",
+      "proposedWork": "Unificar orçamento por host e operação, separar capacidade total de memória disponível, usar incremento requerido, disco temporário/persistente e VRAM quando aplicável.",
+      "acceptance": "Host com RAM total alta mas MemAvailable baixo recusa incremento perigoso; seleção por app/perfil dá mesmo veredito; carga de VM e dois apps concorrentes não passa orçamento duplicado.",
+      "evidence": "evidence/inventory.json",
+      "dependsOn": [
+        "PZ-AUD-012",
+        "PZ-AUD-022"
+      ],
+      "status": "verified",
+      "owner": "codex/aud-fase2",
+      "implementation": "codex/aud-fase2 (commits de fase2)",
+      "behavioralProof": "tests/linux-homelab.sh verde + pytest 157; fixtures /tmp com stubs (daemon real intocado)",
+      "ciProof": "suites hermeticas locais verdes; E2E com daemon/VM real pendente (Fase 5)",
+      "closureNote": "MemAvailable via helpers compartilhados (total/disco expostos); governor por app subtrai reserva WinVM; vereditos convergem no mesmo host.",
+      "evidenceTier": "local-regression",
+      "tierLegend": "implemented/local-regression/ci/e2e-platform/physical/released"
+    }
+  ]
+}

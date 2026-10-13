@@ -63,6 +63,9 @@ super + shift + F7
 
 super + shift + F8
     $HOTKEY_BIN voice
+
+super + shift + F9
+    $HOTKEY_BIN overview
 EOF
 }
 
@@ -94,6 +97,9 @@ super + shift + f7
 
 super + shift + f8
     $HOTKEY_BIN voice
+
+super + shift + f9
+    $HOTKEY_BIN overview
 EOF
 }
 
@@ -162,6 +168,8 @@ install_desktop_entries() {
         "$(desktop_entry "PhaseZero Shortcut Cheat Sheet" "$HOTKEY_BIN cheatsheet" "Toggle the shortcut overlay table" "Meta+Shift+F7")"
     write_managed_file "$APPLICATIONS_DIR/phasezero-voice-typing.desktop" \
         "$(desktop_entry "PhaseZero Voice Typing" "$HOTKEY_BIN voice" "Speak-to-type into the focused window" "Meta+Shift+F8")"
+    write_managed_file "$APPLICATIONS_DIR/phasezero-activities-overview.desktop" \
+        "$(desktop_entry "PhaseZero Activities Overview" "$HOTKEY_BIN overview" "Toggle the KWin activities overview" "Meta+Shift+F9")"
     write_managed_file "$APPLICATIONS_DIR/phasezero-reboot-steamos-plus.desktop" \
         "$(desktop_entry "PhaseZero Reboot to SteamOS Plus" "$boot_exec" "Set one-shot GRUB boot to SteamOS Plus and reboot" "" "$boot_terminal")"
 }
@@ -250,7 +258,7 @@ kde_session_usable() {
         qdbus6 org.kde.kglobalaccel /kglobalaccel org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1
 }
 
-# Shortcut scheme: Meta+Shift+F1..F8.
+# Shortcut scheme: Meta+Shift+F1..F9.
 # Ctrl+Alt+Fn is unusable on Wayland (xkb turns it into XF86Switch_VT_n) and
 # plain Meta+Fn collides with KWin defaults (Overview, ExposeClass, ...).
 # Verified free on Plasma 6.6. Qt keycodes: Meta|Shift|Fn = 318767152 + n - 1.
@@ -263,6 +271,7 @@ kde_write_all_shortcuts() {
     kde_write_shortcut "phasezero-steamdeck-dev.desktop" "Meta+Shift+F6" "PhaseZero Desktop Dev Session" 318767157
     kde_write_shortcut "phasezero-shortcut-cheatsheet.desktop" "Meta+Shift+F7" "PhaseZero Shortcut Cheat Sheet" 318767158
     kde_write_shortcut "phasezero-voice-typing.desktop" "Meta+Shift+F8" "PhaseZero Voice Typing" 318767159
+    kde_write_shortcut "phasezero-activities-overview.desktop" "Meta+Shift+F9" "PhaseZero Activities Overview" 318767160
 }
 
 verify_kde_shortcuts() {
@@ -283,7 +292,8 @@ verify_kde_shortcuts() {
         phasezero-steam-gamepad-ui.desktop \
         phasezero-steamdeck-dev.desktop \
         phasezero-shortcut-cheatsheet.desktop \
-        phasezero-voice-typing.desktop; do
+        phasezero-voice-typing.desktop \
+        phasezero-activities-overview.desktop; do
         if printf '%s\n' "$registered" | grep -qx "$entry"; then
             pz_info "kglobalaccel OK: $entry"
         else

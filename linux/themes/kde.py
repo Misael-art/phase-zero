@@ -113,8 +113,16 @@ def set_ini_key(path: Path, group: str, key: str, value: str) -> bool:
         sections.append((header, [f"{key}={value}\n"]))
     content = _join_sections(sections)
     temporary = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    os.replace(temporary, path)
+    try:
+        temporary.write_text(content, encoding="utf-8")
+        if path.exists():
+            # os.replace herda o modo do temp (umask); sem isso um
+            # kdeglobals 0600 virava 0644 a cada escrita.
+            shutil.copymode(path, temporary)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
     return True
 
 
@@ -258,6 +266,28 @@ class KdeSession:
         return read_ini_key(config_path(config), group, key)
 
     def write_key(self, config: str, group: str, key: str, value: str) -> None:
+        # A live Plasma session keeps its own view of these files and flushes
+        # it back later. A byte-level rewrite races that cache - the daemon
+        # resurrected old keys alongside ours, leaving duplicates in the same
+        # section. kwriteconfig goes through KConfig itself, so the daemon
+        # stays in sync; the byte-level writer remains for environments
+        # without the binary (headless, hermetic tests).
+        if "][" in group:
+            # Composite section headers (kscreenlockerrc's
+            # [Greeter][Wallpaper][org.kde.image][General]) depend on the
+            # literal bracket spelling; kwriteconfig's --group splitting may
+            # not reproduce it. Byte-level keeps the section exact.
+            set_ini_key(config_path(config), group, key, value)
+            return
+        binary = self.facts.binaries.get("kwriteconfig6") or self.facts.binaries.get("kwriteconfig5")
+        if binary:
+            code, _out, err = _run(
+                [binary, "--file", str(config_path(config)), "--group", group, "--key", key, value],
+                timeout=10,
+            )
+            if code != 0:
+                raise KdeStateError(f"kwriteconfig falhou para {config} [{group}]/{key}: {err.strip()}")
+            return
         set_ini_key(config_path(config), group, key, value)
 
     def notify(self) -> None:
@@ -266,6 +296,42 @@ class KdeSession:
         if not qdbus:
             return
         _run([qdbus, "org.kde.KWin", "/KWin", "reconfigure"], timeout=5)
+
+    _KWIN_EFFECT_DIRS = (
+        "/usr/lib/qt6/plugins/kwin/effects/plugins",
+        "/usr/lib64/qt6/plugins/kwin/effects/plugins",
+        "/usr/lib/qt5/plugins/kwin/effects/plugins",
+        "/usr/lib64/qt5/plugins/kwin/effects/plugins",
+        "/usr/lib/kwin/effects/plugins",
+        "/usr/lib64/kwin/effects/plugins",
+        "/usr/local/lib/qt6/plugins/kwin/effects/plugins",
+        "/usr/local/lib64/qt6/plugins/kwin/effects/plugins",
+    )
+
+    def effect_supported(self, name: str) -> bool | None:
+        """Efeito existente neste KWin? None = indisponível para consultar.
+
+        Efeitos não builtin só existem se o plugin estiver instalado; sem a
+        checagem, escrever a chave de um efeito ausente produzia um
+        "ligado" auto-consistente que nunca fez nada. Este KWin não expõe
+        supportedEffects por D-Bus, então combina loadedEffects com a
+        presença do .so do plugin nos diretórios padrão.
+        """
+        qdbus = self.facts.binaries.get("qdbus") or self.facts.binaries.get("qdbus6")
+        if qdbus:
+            code, stdout, _err = _run(
+                [qdbus, "org.kde.KWin", "/Effects", "loadedEffects"], timeout=5
+            )
+            if code == 0 and name in stdout.split():
+                return True
+        import glob as _glob
+
+        for pattern in self._KWIN_EFFECT_DIRS:
+            if _glob.glob(f"{pattern}/*{name}*.so"):
+                return True
+        # Sem qdbus não dá para afirmar que não está carregado; com qdbus a
+        # resposta negativa (não carregado + sem .so) é conclusiva.
+        return False if qdbus else None
 
     # --- Aplicadores oficiais (fallback para escrita direta) -------------
 
@@ -355,7 +421,13 @@ class KdeSession:
             payload = json.loads(text[start:])
         except json.JSONDecodeError as exc:
             raise KdeStateError(f"estado KDE ilegível: JSON inválido ({exc})") from exc
-        return payload if isinstance(payload, list) else []
+        items = payload if isinstance(payload, list) else []
+        # Rollback restores by desktop array index: several containments report
+        # the same screen number (-1 for "unbound"), so a screen-equality match
+        # collapsed every one of them onto the first and the last restore won.
+        for index, item in enumerate(items):
+            item["desktopIndex"] = index
+        return items
 
     def write_wallpaper(
         self,
@@ -365,12 +437,14 @@ class KdeSession:
         *,
         mode: str = "SingleImage",
         slide_paths: list[str] | None = None,
+        desktop_index: int | None = None,
     ) -> None:
-        """Aplica wallpaper em um monitor via D-Bus, sem reescrever containments."""
-        parts = [
-            f'var d = null; var ds = desktops();',
-            f'for (var i = 0; i < ds.length; i++) {{ if (ds[i].screen === {screen}) {{ d = ds[i]; break; }} }}',
-            f'if (!d) {{ print("NO_SCREEN_" + {screen}); }} else {{',
+        """Aplica wallpaper em um monitor via D-Bus, sem reescrever containments.
+
+        `desktop_index` endereça o containment direto pelo índice do array
+        `desktops()`; sem ele, cai na busca por `screen`.
+        """
+        body = [
             # Assigning wallpaperPlugin resets the current config group, so
             # selecting the group first sent every writeConfig below into
             # whatever group the switch left selected. The plugin was applied
@@ -381,11 +455,25 @@ class KdeSession:
             f'  d.currentConfigGroup = ["Wallpaper", "{plugin}", "General"];',
         ]
         for key, value in params.items():
-            parts.append(f'  d.writeConfig("{key}", {json.dumps(str(value))});')
+            body.append(f'  d.writeConfig("{key}", {json.dumps(str(value))});')
         if slide_paths:
             encoded = ", ".join(json.dumps(str(item)) for item in slide_paths)
-            parts.append(f'  d.writeConfig("ImageSources", [{encoded}]);')
-        parts.append(f'  d.reloadConfig(); print("OK_" + {screen}); }}')
+            body.append(f'  d.writeConfig("ImageSources", [{encoded}]);')
+        body.append(f'  d.reloadConfig(); print("OK_" + {screen}); }}')
+        if desktop_index is not None:
+            parts = [
+                'var ds = desktops();',
+                f'if (ds.length <= {int(desktop_index)}) {{ print("NO_SCREEN_" + {screen}); }} else {{',
+                f'  var d = ds[{int(desktop_index)}];',
+                *body,
+            ]
+        else:
+            parts = [
+                f'var d = null; var ds = desktops();',
+                f'for (var i = 0; i < ds.length; i++) {{ if (ds[i].screen === {screen}) {{ d = ds[i]; break; }} }}',
+                f'if (!d) {{ print("NO_SCREEN_" + {screen}); }} else {{',
+                *body,
+            ]
         code, stdout, stderr = self.dbus_script("".join(parts))
         if code != 0:
             raise KdeStateError(f"falha ao aplicar wallpaper na tela {screen}: {stderr.strip()}")

@@ -13,10 +13,13 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+
+from linux.ai.account_contract import Grant
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "linux" / "ai"))
@@ -297,6 +300,13 @@ def config(sandbox):
     return rm.Config.load()
 
 
+@pytest.fixture()
+def transaction_gate_for_legacy_tests(monkeypatch):
+    # Exercise combo transaction mechanics in the fake server only. This does
+    # not prove PXA-008 request binding; production gate remains false.
+    monkeypatch.setattr(rm, "request_scoped_grants_enforced", lambda: True)
+
+
 def _fresh_inventory(client) -> dict:
     return rm.build_inventory(client, refresh_quota=True)
 
@@ -333,6 +343,66 @@ def test_quota_reset_and_min_bucket(fake):
     assert rm.quota_reset_at(kimi["quota"]) == "2026-08-01T00:00:00.000Z"
 
 
+def test_quota_provenance_and_estimate_are_separate():
+    state, quota, _confidence = rm.parse_quota({
+        "quotas": {"session": {"used": 25, "total": 100}},
+    }, observed_at="2026-09-24T12:00:00Z")
+    assert state == "unknown"
+    assert quota["source"] == "9router_usage_api"
+    assert quota["observedAt"] == "2026-09-24T12:00:00Z"
+    bucket = quota["buckets"][0]
+    assert bucket["dimension"] == "session"
+    assert bucket["unit"] == "unknown"
+    assert bucket["remaining"] is None
+    assert bucket["remainingPercentage"] is None
+    assert bucket["estimatedRemainingPercentage"] == 75
+    assert rm.quota_remaining_pct(quota) is None
+
+
+def test_quota_parser_rejects_invalid_numbers_and_reset_time():
+    state, quota, _confidence = rm.parse_quota({
+        "quotas": {"session": {
+            "used": 25, "total": 100, "remaining": float("nan"),
+            "remainingPercentage": True, "unit": "calls",
+            "resetAt": "not-a-time", "unlimited": "false",
+        }},
+    }, observed_at="2026-09-25T06:00:00Z")
+    bucket = quota["buckets"][0]
+    assert state == "unknown"
+    assert bucket["remaining"] is None
+    assert bucket["remainingPercentage"] is None
+    assert bucket["estimatedRemainingPercentage"] == 75
+    assert bucket["resetAt"] is None
+    assert bucket["unlimited"] is False
+    assert rm.quota_remaining_pct(quota) is None
+    assert rm.quota_remaining_pct({"buckets": [
+        {"remainingPercentage": True},
+        {"remainingPercentage": float("nan")},
+        {"remainingPercentage": 101},
+    ]}) is None
+    assert rm.quota_reset_at({"buckets": [
+        {"resetAt": "tomorrow"}, {"resetAt": "2026-09-25T06:00:00"},
+    ]}) is None
+
+    invalid_estimate = rm.parse_quota({
+        "quotas": {"session": {"used": True, "total": 100}},
+    })[1]["buckets"][0]
+    assert invalid_estimate["estimatedRemainingPercentage"] is None
+    malformed_time = rm.parse_quota({"message": "Usage not available"}, observed_at="tomorrow")[1]
+    parsed_time = datetime.fromisoformat(malformed_time["observedAt"].replace("Z", "+00:00"))
+    assert parsed_time.tzinfo is not None
+
+
+def test_quota_probe_exception_preserves_connection_rows(fake, monkeypatch):
+    _fake, base = fake
+    client = _client_for(fake, base)
+    monkeypatch.setattr(client, "usage_connection", lambda _connection_id: (_ for _ in ()).throw(TimeoutError()))
+    inventory = rm.build_inventory(client, refresh_quota=True)
+    assert len(inventory["connections"]) == len(client.providers())
+    assert all(c["quotaState"] == "unavailable" for c in inventory["connections"])
+    assert all(c["quota"]["error"] == "unavailable" for c in inventory["connections"])
+
+
 def test_cooldown_and_error_classification(fake):
     _fake, base = fake
     inv = _fresh_inventory(_client_for(fake, base))
@@ -367,6 +437,84 @@ def test_recommend_code_chain_and_health_wins(fake, config):
     assert chain[0] == "cx/gpt-5.6-sol"
     assert "cc/claude-opus-5" not in chain
     assert "cx/gpt-5.6-terra" in chain
+
+
+def test_consumer_grants_filter_routes_and_never_fallback(fake, config):
+    _fake, base = fake
+    client = _client_for(fake, base)
+    inv = _fresh_inventory(client)
+
+    denied = rm.recommend(client, config, inv, "code", "balanced",
+                          consumer_id="app.claude-code")
+    assert denied["recommendation"] == []
+    assert denied["eligibleCount"] == 0
+    assert any("no active grant" in item["reason"] for item in denied["excluded"])
+
+    grant = Grant("grant-test", rm._contract_connection_id("codex", "conn-codex-plus"),
+                  "app.claude-code", ("inference",), enabled=True,
+                  consented_at="2026-09-25T00:00:00Z")
+    wrong_scope = Grant("grant-read", grant.connection_id, "app.claude-code",
+                        ("status",), enabled=True, consented_at=grant.consented_at)
+    scope_denied = rm.recommend(client, config, inv, "code", "balanced",
+                                consumer_id="app.claude-code", grants=(wrong_scope,))
+    assert scope_denied["recommendation"] == []
+    allowed = rm.recommend(client, config, inv, "code", "balanced",
+                           consumer_id="app.claude-code", grants=(grant,))
+    chain = rm.recommendation_chain(allowed)
+    assert chain
+    assert all(model_id.startswith("cx/") for model_id in chain)
+
+    malformed_grants = (
+        {
+            "connectionId": grant.connection_id,
+            "consumerId": "app.claude-code",
+            "scopes": ["inference"],
+            "enabled": "false",
+            "consentedAt": grant.consented_at,
+        },
+        {
+            "connectionId": grant.connection_id,
+            "consumerId": "app.claude-code",
+            "scopes": ["inference"],
+            "enabled": 1,
+            "consentedAt": grant.consented_at,
+        },
+        {
+            "connectionId": grant.connection_id,
+            "consumerId": "app.claude-code",
+            "scopes": "inference",
+            "enabled": True,
+            "consentedAt": grant.consented_at,
+        },
+        {
+            "connectionId": grant.connection_id,
+            "consumerId": "app.claude-code",
+            "scopes": ["inference"],
+            "enabled": True,
+            "consentedAt": "not-a-time",
+        },
+    )
+    for malformed in malformed_grants:
+        rejected = rm.recommend(
+            client, config, inv, "code", "balanced",
+            consumer_id="app.claude-code", grants=(malformed,),
+        )
+        assert rejected["recommendation"] == []
+
+
+@pytest.mark.parametrize("client_name", ("claude", "opencode"))
+def test_client_launch_fails_closed_until_router_can_enforce_connection_grants(
+    client_name, config, monkeypatch, capsys,
+):
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("blocked launch must not inspect providers or start a process")
+
+    monkeypatch.setattr(rm.Config, "load", lambda **_kwargs: config)
+    monkeypatch.setattr(rm, "R9Client", object)
+    monkeypatch.setattr(rm, "build_inventory", unexpected)
+    monkeypatch.setattr(rm.subprocess, "call", unexpected)
+    assert rm.main(["run", "code", "--client", client_name]) == 1
+    assert "cannot enforce a connection grant" in capsys.readouterr().err
 
 
 def test_save_quota_requires_known_quota(fake, config):
@@ -445,7 +593,45 @@ def test_weights_must_sum_100(fake, config, sandbox):
 # Apply / idempotency / transactional behavior
 # ---------------------------------------------------------------------------
 
-def test_apply_creates_only_phasezero_combos(fake, config):
+def test_route_apply_mutation_blocks_before_contacting_9router():
+    class ForbiddenClient:
+        def __getattr__(self, name):
+            pytest.fail(f"route apply contacted 9Router through {name}")
+
+    result = rm.apply_plan(
+        ForbiddenClient(), config=None, task="code", policy="balanced", assume_yes=True,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["blockedReason"] == "connection-grant-not-enforceable"
+    assert result["applied"] is False
+    assert result["changes"] == {}
+    assert result["secretsRedacted"] is True
+
+
+def test_route_apply_cli_blocks_before_loading_config_or_router(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        rm.Config, "load",
+        lambda **_kwargs: pytest.fail("mutating apply loaded/created router config"),
+    )
+    monkeypatch.setattr(
+        rm, "R9Client", lambda: pytest.fail("mutating apply contacted router"),
+    )
+
+    code = rm.cmd_apply(SimpleNamespace(
+        task="code", policy="balanced", dry_run=False, yes=True, chain=None,
+    ))
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code != 0
+    assert payload["status"] == "blocked"
+    assert payload["blockedReason"] == "connection-grant-not-enforceable"
+    assert payload["applied"] is False
+
+
+def test_apply_creates_only_phasezero_combos(fake, config, transaction_gate_for_legacy_tests):
     _fake, base = fake
     client = _client_for(fake, base)
     before = {c["name"]: list(c["models"]) for c in client.combos()}
@@ -460,7 +646,7 @@ def test_apply_creates_only_phasezero_combos(fake, config):
     assert after["phasezero-plan"][0] == "cx/gpt-5.6-sol"
 
 
-def test_apply_idempotent_second_run_no_manifest(fake, config, sandbox):
+def test_apply_idempotent_second_run_no_manifest(fake, config, sandbox, transaction_gate_for_legacy_tests):
     _fake, base = fake
     client = _client_for(fake, base)
     rm.apply_plan(client, config, "code", "balanced", assume_yes=True)
@@ -486,7 +672,7 @@ def test_dry_run_leaves_no_trace(fake, config, sandbox, monkeypatch, tmp_path):
     assert not (tmp_path / "config2").exists()
 
 
-def test_apply_failure_midway_rolls_back(fake, config):
+def test_apply_failure_midway_rolls_back(fake, config, transaction_gate_for_legacy_tests):
     _fake, base = fake
     client = _client_for(fake, base)
     # pre-create code+analysis with wrong models so the apply PUTs them;
@@ -508,7 +694,7 @@ def test_apply_failure_midway_rolls_back(fake, config):
     assert after["Default"] == before["Default"]
 
 
-def test_rollback_restores_bytes_and_state(fake, config, sandbox):
+def test_rollback_restores_bytes_and_state(fake, config, sandbox, transaction_gate_for_legacy_tests):
     _fake, base = fake
     client = _client_for(fake, base)
     # pre-existing combo (stale models) so the apply PUTs it and rollback can restore bytes
@@ -527,7 +713,7 @@ def test_rollback_restores_bytes_and_state(fake, config, sandbox):
     assert "phasezero-code" not in after
 
 
-def test_rollback_refuses_drift_without_force(fake, config):
+def test_rollback_refuses_drift_without_force(fake, config, transaction_gate_for_legacy_tests):
     _fake, base = fake
     client = _client_for(fake, base)
     client.request("POST", "/api/combos", {"name": "phasezero-code",
@@ -547,7 +733,9 @@ def test_rollback_refuses_drift_without_force(fake, config):
     assert after["phasezero-code"] == ["stale-model"]
 
 
-def test_apply_propagates_combos_to_opencode_catalog(fake, config, sandbox, monkeypatch):
+def test_apply_never_syncs_opencode_catalog_without_account_bound_grant(
+    fake, config, sandbox, monkeypatch, transaction_gate_for_legacy_tests,
+):
     _fake, base = fake
     client = _client_for(fake, base)
     # opencode.json present with stale model list
@@ -563,17 +751,20 @@ def test_apply_propagates_combos_to_opencode_catalog(fake, config, sandbox, monk
                    "phasezero-analysis", "phasezero-plan"]
     monkeypatch.setenv("PZ_OPENCODE_ROUTER_COMBOS_JSON", json.dumps({"combos": combo_names}))
 
+    before = opencode_path.read_bytes()
     result = rm.apply_plan(client, config, "code", "balanced", assume_yes=True)
     catalog = result["opencodeCatalog"]
-    assert catalog["updated"] is True
-    assert set(catalog["models"]) == set(combo_names)
-    written = json.loads(opencode_path.read_text(encoding="utf-8"))
-    assert set(written["provider"]["9router"]["models"].keys()) == set(combo_names)
+    assert catalog["skipped"] is True
+    assert catalog["updated"] is False
+    assert catalog.get("blockedReason") == "connection-grant-not-enforceable", catalog
+    assert opencode_path.read_bytes() == before
     manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
-    assert manifest["opencodeCatalogBefore"]
+    assert manifest["opencodeCatalogBefore"] is None
 
 
-def test_rollback_restores_opencode_catalog_bytes(fake, config, sandbox, monkeypatch):
+def test_rollback_leaves_opencode_catalog_unchanged_when_sync_was_blocked(
+    fake, config, sandbox, monkeypatch, transaction_gate_for_legacy_tests,
+):
     _fake, base = fake
     client = _client_for(fake, base)
     opencode_path = rm.opencode_config_path()
@@ -584,14 +775,14 @@ def test_rollback_restores_opencode_catalog_bytes(fake, config, sandbox, monkeyp
                        json.dumps({"combos": ["Default", "phasezero-code", "phasezero-analysis", "phasezero-plan"]}))
 
     result = rm.apply_plan(client, config, "code", "balanced", assume_yes=True)
-    assert result["opencodeCatalog"]["updated"] is True
-    assert opencode_path.read_bytes() != before_bytes
+    assert result["opencodeCatalog"].get("blockedReason") == "connection-grant-not-enforceable", result["opencodeCatalog"]
+    assert opencode_path.read_bytes() == before_bytes
     rb = rm.rollback(client, result["manifest"], force=True)
-    assert rb["opencodeCatalogRestored"] is True
+    assert rb["opencodeCatalogRestored"] is False
     assert opencode_path.read_bytes() == before_bytes
 
 
-def test_apply_skips_opencode_sync_when_config_absent(fake, config, sandbox):
+def test_apply_skips_opencode_sync_when_config_absent(fake, config, sandbox, transaction_gate_for_legacy_tests):
     _fake, base = fake
     client = _client_for(fake, base)
     result = rm.apply_plan(client, config, "code", "balanced", assume_yes=True)
@@ -599,7 +790,7 @@ def test_apply_skips_opencode_sync_when_config_absent(fake, config, sandbox):
     assert result["opencodeCatalog"]["reason"] == "opencode.json absent"
 
 
-def test_chain_override_applies_manual_order(fake, config):
+def test_chain_override_applies_manual_order(fake, config, transaction_gate_for_legacy_tests):
     _fake, base = fake
     client = _client_for(fake, base)
     override = [
@@ -627,7 +818,7 @@ def test_output_redacts_accounts_and_errors(fake):
     assert "429" in json.dumps(claude["status"]["reason"])  # classified, not raw
 
 
-def test_state_and_manifest_redacted(fake, config, sandbox):
+def test_state_and_manifest_redacted(fake, config, sandbox, transaction_gate_for_legacy_tests):
     _fake, base = fake
     client = _client_for(fake, base)
     rm.apply_plan(client, config, "code", "balanced", assume_yes=True)
@@ -639,7 +830,7 @@ def test_state_and_manifest_redacted(fake, config, sandbox):
     assert "test-api-key" not in json.dumps(manifest)
 
 
-def test_file_permissions_private(fake, config, sandbox):
+def test_file_permissions_private(fake, config, sandbox, transaction_gate_for_legacy_tests):
     _fake, base = fake
     client = _client_for(fake, base)
     rm.apply_plan(client, config, "code", "balanced", assume_yes=True)
@@ -776,19 +967,18 @@ def test_cli_apply_dry_run_no_trace(sandbox, fake):
     assert not (sandbox[0] / "config").exists()
 
 
-def test_cli_apply_and_rollback(sandbox, fake):
+def test_cli_apply_blocks_global_routes_until_grants_bind_each_request(sandbox, fake):
+    fake_obj, _base = fake
+    combos_before = [dict(combo) for combo in fake_obj.combos]
     proc = _run_cli(sandbox, fake, "apply", "--task", "code", "--yes")
-    assert proc.returncode == 0, proc.stderr
+    assert proc.returncode == 2, proc.stderr
     data = json.loads(proc.stdout)
-    assert data["applied"] is True
-    manifest = data["manifest"]
-    assert manifest and (sandbox[0] / "data").exists()
-
-    proc = _run_cli(sandbox, fake, "rollback", manifest)
-    assert proc.returncode == 0, proc.stderr
-    roll = json.loads(proc.stdout)
-    assert set(roll["restoredCombos"]) == {"phasezero-code", "phasezero-analysis",
-                                           "phasezero-plan"}
+    assert data["status"] == "blocked"
+    assert data["blockedReason"] == "connection-grant-not-enforceable"
+    assert data["applied"] is False
+    assert fake_obj.combos == combos_before
+    assert not (sandbox[0] / "data").exists()
+    assert not (sandbox[0] / "config").exists()
 
 
 def test_cli_verify(sandbox, fake):
@@ -811,3 +1001,29 @@ def test_cli_status_cached_before_any_state(sandbox, fake):
     assert proc.returncode == 1
     data = json.loads(proc.stdout)
     assert data["cached"] is False
+
+
+def test_status_reports_provider_availability_and_redacts_errors(sandbox, fake):
+    # AISR-014: health stayed true with most providers down, and lastError /
+    # connectionName leaked upstream bodies and the account e-mail.
+    RM = rm
+
+    assert RM.provider_availability({}) == {"state": "down", "ready": 0, "unavailable": 0, "total": 0}
+    mixed = {"a": {"state": "ready"}, "b": {"state": "unavailable"}, "c": {"state": "unknown"}}
+    assert RM.provider_availability(mixed)["state"] == "degraded"
+    assert RM.provider_availability({"a": {"state": "unavailable"}})["state"] == "down"
+    assert RM.provider_availability({"a": {"state": "cooldown"}})["state"] == "ok"
+
+    redacted = RM.redact({"connectionName": "someone@example.com", "lastError": "[401]: raw body",
+                          "errorMessage": "raw", "nested": [{"apiKey": "sk-1"}]})
+    assert redacted["connectionName"] == "<email>"
+    assert redacted["lastError"] == "<redacted>"
+    assert redacted["errorMessage"] == "<redacted>"
+    assert redacted["nested"][0]["apiKey"] == "<redacted>"
+
+    proc = _run_cli(sandbox, fake, "status", "--json")
+    assert proc.returncode == 0, proc.stderr
+    data = json.loads(proc.stdout)
+    assert data["health"] is True
+    assert data["providerAvailability"]["state"] in ("ok", "degraded", "down")
+    assert data["providerAvailability"]["total"] == len(data["connections"])

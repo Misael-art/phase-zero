@@ -7,7 +7,7 @@ source "$PZ_ROOT/linux/lib/common.sh"
 
 ACTION="${1:-status}"
 shift 2>/dev/null || true
-REPO="https://github.com/pewdiepie-archdaemon/odysseus.git"
+REPO="https://github.com/odysseus-dev/odysseus.git"
 BRANCH="dev"
 ROOT="${PZ_ODYSSEUS_ROOT:-$HOME/.local/share/phasezero/odysseus}"
 RELEASES="$ROOT/releases"
@@ -28,6 +28,164 @@ DASHBOARD_ENTRY="${XDG_DATA_HOME:-$HOME/.local/share}/applications/phasezero-ody
 ROUTER_PROXY="$CONFIG/router-proxy.py"
 ROUTER_ENTRYPOINT="$CONFIG/entrypoint-router.sh"
 ROUTER_SOCKET_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/phasezero"
+TRUSTED_COMMITS_FILE="${PZ_ODYSSEUS_TRUSTED_COMMITS_FILE:-$PZ_ROOT/assets/ai/odysseus-trusted-commits.json}"
+TRUSTED_IMAGES_FILE="${PZ_ODYSSEUS_TRUSTED_IMAGES_FILE:-$PZ_ROOT/assets/ai/odysseus-dependency-images.json}"
+TRUSTED_BUILD_BASES_FILE="${PZ_ODYSSEUS_TRUSTED_BUILD_BASES_FILE:-$PZ_ROOT/assets/ai/odysseus-build-bases.json}"
+RELEASE_AUDIT_FILE="${PZ_ODYSSEUS_RELEASE_AUDIT_FILE:-$PZ_ROOT/assets/ai/odysseus-release-audit.json}"
+
+trusted_build_base_valid() {
+    [ -f "$TRUSTED_BUILD_BASES_FILE" ] || return 1
+    jq -e '
+      .schemaVersion == 1 and .trustMode == "registry-manifest-digest" and
+      .semanticAudit == false and (.images | length == 1) and
+      .images[0].service == "odysseus-python" and
+      .images[0].repository == "docker.io/library/python" and
+      .images[0].versionTag == "3.14-slim" and
+      (.images[0].digest | test("^sha256:[0-9a-f]{64}$")) and
+      .images[0].reference == (.images[0].repository + "@" + .images[0].digest) and
+      .images[0].mediaType == "application/vnd.oci.image.index.v1+json" and
+      .images[0].registryHeaderMatchedBodySha256 == true and
+      .images[0].approvedForBuild == true
+    ' "$TRUSTED_BUILD_BASES_FILE" >/dev/null 2>&1
+}
+
+trusted_build_base_reference() {
+    trusted_build_base_valid || return 1
+    jq -er '.images[0].reference' "$TRUSTED_BUILD_BASES_FILE"
+}
+
+release_audit_valid() {
+    [ -f "$RELEASE_AUDIT_FILE" ] || return 1
+    jq -e '
+      .schemaVersion == 1 and .id == "odysseus" and
+      .source.repository == "https://github.com/odysseus-dev/odysseus.git" and
+      .source.branch == "dev" and
+      (.source.commit | test("^[0-9a-f]{40}$")) and
+      (.source.tree | test("^[0-9a-f]{40}$")) and
+      (.source.commitSignatureVerified | type == "boolean") and
+      (.files.LICENSE | test("^[0-9a-f]{64}$")) and
+      (.files.Dockerfile | test("^[0-9a-f]{64}$")) and
+      (.files["docker-compose.yml"] | test("^[0-9a-f]{64}$")) and
+      (.files["pyproject.toml"] | test("^[0-9a-f]{64}$")) and
+      (.files["package-lock.json"] | test("^[0-9a-f]{64}$")) and
+      (.baseImagesPinned | type == "boolean") and
+      (.pythonDependenciesLocked | type == "boolean") and
+      (.shellExecutionSurface | type == "boolean") and
+      (.dockerSocketMountedByPhaseZero | type == "boolean") and
+      (.semanticAudit | type == "boolean") and
+      (.approvedForDeploy | type == "boolean") and
+      (.findings | type == "array" and length > 0)
+    ' "$RELEASE_AUDIT_FILE" >/dev/null 2>&1
+}
+
+release_audit_approved() {
+    local commit="${1:-}" tree="${2:-}"
+    release_audit_valid || return 1
+    jq -e --arg commit "$commit" --arg tree "$tree" '
+      .source.commit == $commit and .source.tree == $tree and
+      .source.commitSignatureVerified == true and .baseImagesPinned == true and
+      .pythonDependenciesLocked == true and .semanticAudit == true and
+      .approvedForDeploy == true and .dockerSocketMountedByPhaseZero == false
+    ' "$RELEASE_AUDIT_FILE" >/dev/null 2>&1
+}
+
+release_audit_json() {
+    if ! release_audit_valid; then
+        jq -cn --arg manifest "$RELEASE_AUDIT_FILE" \
+          '{manifestPath:$manifest,manifestValid:false,approvedForDeploy:false,semanticAudit:false,
+            baseImagesPinned:false,pythonDependenciesLocked:false,shellExecutionSurface:true,
+            dockerSocketMountedByPhaseZero:false,findings:[]}'
+        return
+    fi
+    jq -c --arg manifest "$RELEASE_AUDIT_FILE" '
+      {manifestPath:$manifest,manifestValid:true,commit:.source.commit,tree:.source.tree,
+       commitSignatureVerified:.source.commitSignatureVerified,license:.license,
+       baseImagesPinned:.baseImagesPinned,pythonDependenciesLocked:.pythonDependenciesLocked,
+       shellExecutionSurface:.shellExecutionSurface,
+       dockerSocketMountedByPhaseZero:.dockerSocketMountedByPhaseZero,
+       semanticAudit:.semanticAudit,approvedForDeploy:.approvedForDeploy,findings:.findings}' \
+      "$RELEASE_AUDIT_FILE"
+}
+
+trusted_images_valid() {
+    [ -f "$TRUSTED_IMAGES_FILE" ] || return 1
+    jq -e '
+      .schemaVersion == 1 and
+      .trustMode == "registry-manifest-digest" and
+      .semanticAudit == false and
+      (.images | length == 3) and
+      ([.images[].service] | sort == ["chromadb","ntfy","searxng"]) and
+      all(.images[];
+        .approvedForDeploy == true and
+        (.versionTag | type == "string" and length > 0 and . != "latest") and
+        (.repository | test("^docker\\.io/[a-z0-9._/-]+$")) and
+        (.digest | test("^sha256:[0-9a-f]{64}$")) and
+        .reference == (.repository + "@" + .digest))
+    ' "$TRUSTED_IMAGES_FILE" >/dev/null 2>&1
+}
+
+trusted_image_reference() {
+    local service="$1"
+    trusted_images_valid || return 1
+    jq -er --arg service "$service" '.images[] | select(.service == $service) | .reference' \
+        "$TRUSTED_IMAGES_FILE" 2>/dev/null
+}
+
+dependency_lock_valid() {
+    local service expected actual
+    trusted_images_valid || return 1
+    [ -f "$LOCK_FILE" ] || return 1
+    for service in chromadb searxng ntfy; do
+        expected="$(trusted_image_reference "$service")"
+        actual="$(awk -v service="$service" '
+          $0 ~ "^  " service ":$" {inside=1; next}
+          inside && $0 ~ "^  [^ ]" {inside=0}
+          inside && $1 == "image:" {print $2; exit}
+        ' "$LOCK_FILE")"
+        [ "$actual" = "$expected" ] || return 1
+    done
+    [ "$(grep -c '@sha256:' "$LOCK_FILE" 2>/dev/null || true)" -eq 3 ]
+}
+
+commit_allowlisted() {
+    local commit="${1:-}"
+    [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || return 1
+    [ -f "$TRUSTED_COMMITS_FILE" ] || return 1
+    jq -e --arg commit "$commit" \
+        '.schemaVersion == 1 and any(.commits[]?; type == "object" and .commit == $commit and (.tree|test("^[0-9a-f]{40}$")))' \
+        "$TRUSTED_COMMITS_FILE" >/dev/null 2>&1
+}
+
+trusted_tree_for_commit() {
+    local commit="${1:-}"
+    [ -f "$TRUSTED_COMMITS_FILE" ] || return 0
+    jq -r --arg commit "$commit" \
+        'first(.commits[]? | select(.commit == $commit) | .tree) // empty' \
+        "$TRUSTED_COMMITS_FILE" 2>/dev/null || true
+}
+
+release_trusted() {
+    local commit="${1:-}" tree="${2:-}"
+    [[ "$commit" =~ ^[0-9a-f]{40}$ && "$tree" =~ ^[0-9a-f]{40}$ ]] || return 1
+    [ -f "$TRUSTED_COMMITS_FILE" ] || return 1
+    jq -e --arg commit "$commit" --arg tree "$tree" \
+        '.schemaVersion == 1 and any(.commits[]?; type == "object" and .commit == $commit and .tree == $tree)' \
+        "$TRUSTED_COMMITS_FILE" >/dev/null 2>&1
+}
+
+require_workload_release_gate() {
+    [ "${PZ_HOMELAB_ALLOW_HOST_WORKLOADS:-0}" = 1 ] && return 0
+    pz_error "Odysseus changes blocked by Homelab release gate; run: pz ai workspaces plan"
+    return 69
+}
+
+path_within_root() {
+    local path="$1" root="$2" resolved base
+    [ ! -e "$path" ] && [ ! -L "$path" ] && return 0
+    resolved="$(realpath -e -- "$path" 2>/dev/null || true)"
+    base="$(realpath -m -- "$root" 2>/dev/null || true)"
+    [ -n "$resolved" ] && [ -n "$base" ] && { [ "$resolved" = "$base" ] || [[ "$resolved" == "$base"/* ]]; }
+}
 
 ensure_dirs() {
     install -d -m 0700 "$ROOT" "$RELEASES" "$DATA" "$LOGS" "$BACKUPS" "$CONFIG"
@@ -42,15 +200,23 @@ require_runtime() {
 }
 
 remote_sha() {
-    git ls-remote "$REPO" "refs/heads/$BRANCH" | awk 'NR==1 {print $1}'
+    timeout 20 git ls-remote "$REPO" "refs/heads/$BRANCH" | awk 'NR==1 {print $1}'
 }
 
 current_sha() {
     jq -r '.commit // empty' "$MANIFEST" 2>/dev/null || true
 }
 
-router_key() {
-    awk -F= '$1=="PHASEZERO_9ROUTER_API_KEY" {sub(/^[^=]*=/,""); print; exit}' "$ROUTER_ENV" 2>/dev/null || true
+router_credentials_ready() {
+    [ -f "$ROUTER_ENV" ] || return 1
+    [ "$(stat -c %a "$ROUTER_ENV" 2>/dev/null || echo unknown)" = 600 ] || return 1
+    awk -F= '
+        $1 == "PHASEZERO_9ROUTER_API_KEY" {
+            value=$0; sub(/^[^=]*=/, "", value)
+            if (value != "") found=1
+        }
+        END { exit(found ? 0 : 1) }
+    ' "$ROUTER_ENV"
 }
 
 random_secret() {
@@ -58,12 +224,11 @@ random_secret() {
 }
 
 write_env() {
-    local admin_password searxng_secret key
+    local admin_password searxng_secret
     admin_password="$(awk -F= '$1=="ODYSSEUS_ADMIN_PASSWORD" {sub(/^[^=]*=/,""); print; exit}' "$ENV_FILE" 2>/dev/null || true)"
     searxng_secret="$(awk -F= '$1=="SEARXNG_SECRET" {sub(/^[^=]*=/,""); print; exit}' "$ENV_FILE" 2>/dev/null || true)"
     [ -n "$admin_password" ] || admin_password="pz-$(random_secret)"
     [ -n "$searxng_secret" ] || searxng_secret="$(random_secret)"
-    key="$(router_key)"
     umask 077
     {
         printf 'COMPOSE_PROJECT_NAME=phasezero-odysseus\n'
@@ -76,7 +241,6 @@ write_env() {
         printf 'SEARXNG_SECRET=%s\n' "$searxng_secret"
         printf 'LLM_HOST=127.0.0.1:20128\n'
         printf 'LLM_HOSTS=127.0.0.1:20128\n'
-        printf 'OPENAI_API_KEY=%s\n' "$key"
         printf 'RESEARCH_LLM_ENDPOINT=http://127.0.0.1:20128/v1/chat/completions\n'
         printf 'CLEANUP_INTERVAL_HOURS=24\n'
     } > "$ENV_FILE"
@@ -85,24 +249,28 @@ write_env() {
 
 write_runtime() {
     local provider
+    router_credentials_ready || {
+        pz_error "canonical 9Router credential reference unavailable or unsafe: $ROUTER_ENV"
+        return 69
+    }
     provider="$(command -v docker-compose || command -v podman-compose || true)"
     [ -n "$provider" ] || { pz_error "Compose provider missing"; return 1; }
     pz_write_managed_file "$COMPOSE_WRAPPER" user <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export PODMAN_COMPOSE_PROVIDER="$provider"
-exec "$(command -v podman)" compose --env-file "$ENV_FILE" -f "$CURRENT/docker-compose.yml" -f "$LOCK_FILE" --project-directory "$CURRENT" "\$@"
+exec "$(command -v podman)" compose --env-file "$ROUTER_ENV" --env-file "$ENV_FILE" -f "$CURRENT/docker-compose.yml" -f "$LOCK_FILE" --project-directory "$CURRENT" "\$@"
 EOF
     chmod 0700 "$COMPOSE_WRAPPER"
     install -d "$(dirname "$DASHBOARD_ENTRY")"
     pz_write_managed_file "$DASHBOARD_ENTRY" user <<EOF
 [Desktop Entry]
 Type=Application
-Name=Odysseus
-Comment=PhaseZero agnostic AI workspace
+Name=Odysseus (uso bloqueado)
+Comment=Bloqueado: inferência compartilhada do 9Router sem grant por requisição.
 Exec=$HOME/.local/share/phasezero/current/linux/pz ai odysseus open
 Icon=applications-science
-Terminal=false
+Terminal=true
 Categories=X-PhaseZero-WebApp;
 X-PHZ-Group=ia
 X-PhaseZero-MenuGroup=web.ai
@@ -191,17 +359,14 @@ record_runtime_image() {
 
 lock_images() {
     local chroma searx ntfy
-    pz_info "Resolving Odysseus dependency image digests"
-    podman pull docker.io/chromadb/chroma:latest >/dev/null
-    podman pull docker.io/searxng/searxng:2026.5.31-7159b8aed >/dev/null
-    podman pull docker.io/binwiederhier/ntfy:latest >/dev/null
-    chroma="$(podman image inspect docker.io/chromadb/chroma:latest --format '{{index .RepoDigests 0}}')"
-    searx="$(podman image inspect docker.io/searxng/searxng:2026.5.31-7159b8aed --format '{{index .RepoDigests 0}}')"
-    ntfy="$(podman image inspect docker.io/binwiederhier/ntfy:latest --format '{{index .RepoDigests 0}}')"
-    [[ "$chroma" == *@sha256:* && "$searx" == *@sha256:* && "$ntfy" == *@sha256:* ]] || {
-        pz_error "dependency image digest resolution failed"
-        return 1
+    trusted_images_valid || {
+        pz_error "Odysseus dependency image manifest is absent or invalid: $TRUSTED_IMAGES_FILE"
+        return 69
     }
+    pz_info "Rendering approved Odysseus dependency image digests"
+    chroma="$(trusted_image_reference chromadb)"
+    searx="$(trusted_image_reference searxng)"
+    ntfy="$(trusted_image_reference ntfy)"
     pz_write_managed_file "$LOCK_FILE" user <<EOF
 services:
   odysseus:
@@ -216,6 +381,8 @@ services:
       - $ROUTER_ENTRYPOINT:/run/phasezero-config/entrypoint-router.sh:ro
     entrypoint:
       - /run/phasezero-config/entrypoint-router.sh
+    environment:
+      OPENAI_API_KEY: \${PHASEZERO_9ROUTER_API_KEY:?missing canonical 9Router credential}
   chromadb:
     image: $chroma
     mem_limit: 2g
@@ -233,11 +400,18 @@ services:
     pids_limit: 128
 EOF
     chmod 0600 "$LOCK_FILE"
+    dependency_lock_valid || {
+        pz_error "generated Odysseus dependency lock differs from approved image manifest"
+        return 69
+    }
     local tmp
     # shellcheck disable=SC2119 # pz_tempfile template arg optional; default mktemp template intended
     tmp="$(pz_tempfile)"
     jq --arg chroma "$chroma" --arg searx "$searx" --arg ntfy "$ntfy" \
-        '.dependencyImages={chromadb:$chroma,searxng:$searx,ntfy:$ntfy}' "$MANIFEST" > "$tmp"
+        --arg source "$TRUSTED_IMAGES_FILE" \
+        '.dependencyImages={chromadb:$chroma,searxng:$searx,ntfy:$ntfy} |
+         .dependencyImagePolicy={mode:"registry-manifest-digest",semanticAudit:false,source:$source}' \
+        "$MANIFEST" > "$tmp"
     install -m 0600 "$tmp" "$MANIFEST"
     rm -f "$tmp"
 }
@@ -246,6 +420,10 @@ install_release() {
     local expected="${1:-}" temporary head destination tree signature
     [ -n "$expected" ] || expected="$(remote_sha)"
     [[ "$expected" =~ ^[0-9a-f]{40}$ ]] || { pz_error "invalid Odysseus commit"; return 1; }
+    commit_allowlisted "$expected" || {
+        pz_error "Odysseus commit is absent from trusted allowlist: $expected"
+        return 69
+    }
     destination="$RELEASES/$expected"
     if [ ! -d "$destination/.git" ]; then
         temporary="$RELEASES/.stage-$expected-$$"
@@ -261,6 +439,10 @@ install_release() {
         mv "$temporary" "$destination"
     fi
     tree="$(git -C "$destination" rev-parse 'HEAD^{tree}')"
+    release_trusted "$expected" "$tree" || {
+        pz_error "Odysseus tree does not match trusted allowlist: $tree"
+        return 69
+    }
     signature="$(git -C "$destination" log -1 --format='%G?' 2>/dev/null || echo N)"
     ln -sfn "$destination" "$CURRENT"
     jq -n --arg source "$REPO" --arg branch "$BRANCH" --arg commit "$expected" \
@@ -270,8 +452,17 @@ install_release() {
 }
 
 harden_build_context() {
-    local script="$CURRENT/docker/build-realesrgan-wheels.sh" dockerfile="$CURRENT/Dockerfile" patch_hash tmp
+    local script="$CURRENT/docker/build-realesrgan-wheels.sh" dockerfile="$CURRENT/Dockerfile" patch_hash tmp base
     [ -f "$script" ] || { pz_error "Odysseus Real-ESRGAN build helper missing"; return 1; }
+    base="$(trusted_build_base_reference)" || {
+        pz_error "Odysseus build base manifest is absent or invalid: $TRUSTED_BUILD_BASES_FILE"
+        return 69
+    }
+    sed -i "s|^FROM python:3.14-slim|FROM $base|g" "$dockerfile"
+    if [ "$(grep -Fc "FROM $base" "$dockerfile" 2>/dev/null || true)" -ne 2 ]; then
+        pz_error "Odysseus Dockerfile base layout changed; refusing unreviewed build"
+        return 69
+    fi
     if ! grep -Fq 'PHASEZERO: pure-Python wheel build' "$script"; then
         # shellcheck disable=SC2016 # literal ${OUT} must stay unexpanded in sed pattern
         sed -i '/echo ">> building wheels into ${OUT}"/i\
@@ -287,7 +478,10 @@ sed -E -i "s/setup_requires=\\[[^]]*\\]/setup_requires=[]/" ./*/setup.py' "$scri
     # shellcheck disable=SC2119 # pz_tempfile template arg optional; default mktemp template intended
     tmp="$(pz_tempfile)"
     jq --arg hash "$patch_hash" \
-        '.localPatches=[{id:"phasezero-container-build-hardening",sha256:$hash,reason:"avoid Torch/CUDA setup_requires; force bounded IPv4 APT retries"}]' \
+        --arg base "$base" --arg baseSource "$TRUSTED_BUILD_BASES_FILE" \
+        '.localPatches=[{id:"phasezero-container-build-hardening",sha256:$hash,
+           reason:"pin Python OCI base; avoid Torch/CUDA setup_requires; force bounded IPv4 APT retries"}] |
+         .buildBase={reference:$base,source:$baseSource,trustMode:"registry-manifest-digest",semanticAudit:false}' \
         "$MANIFEST" > "$tmp"
     install -m 0600 "$tmp" "$MANIFEST"
     rm -f "$tmp"
@@ -303,10 +497,34 @@ wait_ready() {
     return 1
 }
 
+# shellcheck disable=SC2317
+# PXA-008 retains provisioning code behind its request-bound grant gate.
 provision() {
+    odysseus_usage_blocked
+    return 69
+    require_workload_release_gate
+    local expected expected_tree
+    expected="$(remote_sha)"
+    commit_allowlisted "$expected" || {
+        pz_error "Odysseus upstream has no trusted release commit: $expected"
+        return 69
+    }
+    expected_tree="$(trusted_tree_for_commit "$expected")"
+    release_audit_approved "$expected" "$expected_tree" || {
+        pz_error "Odysseus release audit is incomplete or unapproved: $RELEASE_AUDIT_FILE"
+        return 69
+    }
+    trusted_images_valid || {
+        pz_error "Odysseus dependency images are not approved by digest"
+        return 69
+    }
+    trusted_build_base_valid || {
+        pz_error "Odysseus build base is not approved by digest"
+        return 69
+    }
     ensure_dirs
     require_runtime
-    install_release
+    install_release "$expected"
     harden_build_context
     write_env
     write_router_proxy
@@ -325,33 +543,109 @@ provision() {
 }
 
 status_json() {
-    local installed=false service healthy=false containers='[]' sha latest=""
+    local installed=false configured=false service healthy=false ready=false containers='[]' sha="" podman_rootless=false
+    local manifest_valid=false commit_is_trusted=false audit_approved=false env_mode="missing" lock_valid=false image_manifest_valid=false build_base_valid=false paths_safe=false router_credential=false audit
     [ -L "$CURRENT" ] && [ -f "$CURRENT/docker-compose.yml" ] && installed=true
     service="$(systemctl --user is-active "$SERVICE" 2>/dev/null || true)"; service="${service:-inactive}"
     curl -fsS --max-time 2 "$ENDPOINT" >/dev/null 2>&1 && healthy=true
     if command -v podman >/dev/null 2>&1; then
+        [ "$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo false)" = true ] && podman_rootless=true
         containers="$(podman ps -a --filter label=com.docker.compose.project=phasezero-odysseus --format json 2>/dev/null \
             | jq '[.[] | {name:(.Names[0] // .Names // ""),state:(.State // .Status // "unknown"),image:(.Image // "")}]' 2>/dev/null || echo '[]')"
     fi
     sha="$(current_sha)"
-    jq -cn --argjson installed "$installed" --arg service "$service" --argjson healthy "$healthy" \
+    [ -f "$MANIFEST" ] && jq -e '.schemaVersion == 1 and (.commit|test("^[0-9a-f]{40}$")) and (.tree|test("^[0-9a-f]{40}$"))' "$MANIFEST" >/dev/null 2>&1 && manifest_valid=true
+    release_trusted "$sha" "$(jq -r '.tree // empty' "$MANIFEST" 2>/dev/null || true)" && commit_is_trusted=true
+    release_audit_approved "$sha" "$(jq -r '.tree // empty' "$MANIFEST" 2>/dev/null || true)" && audit_approved=true
+    audit="$(release_audit_json)"
+    [ -f "$ENV_FILE" ] && env_mode="$(stat -c %a "$ENV_FILE" 2>/dev/null || echo unknown)"
+    trusted_images_valid && image_manifest_valid=true
+    trusted_build_base_valid && build_base_valid=true
+    dependency_lock_valid && lock_valid=true
+    router_credentials_ready && router_credential=true
+    if path_within_root "$CURRENT" "$ROOT" && path_within_root "$ENV_FILE" "$CONFIG" &&
+        path_within_root "$LOCK_FILE" "$CONFIG"; then
+        paths_safe=true
+    fi
+    if [ "$installed" = true ] && [ "$manifest_valid" = true ] && [ "$commit_is_trusted" = true ] && [ "$audit_approved" = true ] &&
+        [ "$env_mode" = 600 ] && [ "$lock_valid" = true ] && [ "$build_base_valid" = true ] && [ "$paths_safe" = true ] &&
+        [ "$router_credential" = true ] && [ "$podman_rootless" = true ]; then
+        configured=true
+    fi
+    if [ "$configured" = true ] && [ "$healthy" = true ] && [ "$service" = active ]; then
+        ready=true
+    fi
+    jq -cn --argjson installed "$installed" --argjson configured "$configured" --argjson ready "$ready" \
+        --arg service "$service" --argjson healthy "$healthy" \
         --arg endpoint "$ENDPOINT" --arg commit "$sha" --arg manifest "$MANIFEST" --arg credentials "$ENV_FILE" \
-        --argjson containers "$containers" \
-        '{schemaVersion:1,id:"odysseus",installed:$installed,service:$service,healthy:$healthy,endpoint:$endpoint,commit:$commit,releaseModel:"pinned-commit",containers:$containers,manifestPath:$manifest,credentialsPath:$credentials,secretsRedacted:true}'
+        --arg trustedCommits "$TRUSTED_COMMITS_FILE" --arg envMode "$env_mode" \
+        --arg trustedImages "$TRUSTED_IMAGES_FILE" \
+        --argjson containers "$containers" --argjson podmanRootless "$podman_rootless" \
+        --argjson manifestValid "$manifest_valid" --argjson commitTrusted "$commit_is_trusted" \
+        --argjson releaseAuditApproved "$audit_approved" --argjson releaseAudit "$audit" \
+        --argjson dependencyImageManifestValid "$image_manifest_valid" \
+        --argjson buildBaseManifestValid "$build_base_valid" --arg trustedBuildBases "$TRUSTED_BUILD_BASES_FILE" \
+        --argjson dependencyImagesLocked "$lock_valid" --argjson pathsSafe "$paths_safe" \
+        --argjson routerCredentialReference "$router_credential" \
+        '{schemaVersion:1,id:"odysseus",installed:$installed,configured:$configured,ready:$ready,
+          usageBlocked:true,blockedReason:"connection-grant-not-enforceable",
+          service:$service,healthy:$healthy,endpoint:$endpoint,commit:$commit,releaseModel:"pinned-commit",
+          podmanRootless:$podmanRootless,
+          provenance:{manifestValid:$manifestValid,commitTrusted:$commitTrusted,trustedCommitsPath:$trustedCommits,
+            releaseAuditApproved:$releaseAuditApproved,releaseAudit:$releaseAudit,
+            dependencyImageManifestValid:$dependencyImageManifestValid,dependencyImagesLocked:$dependencyImagesLocked,
+            trustedImagesPath:$trustedImages,buildBaseManifestValid:$buildBaseManifestValid,
+            trustedBuildBasesPath:$trustedBuildBases,semanticAudit:false},pathsSafe:$pathsSafe,envMode:$envMode,
+          routerCredential:{source:"canonical-9router-env",configured:$routerCredentialReference,secretsRedacted:true},
+          containers:$containers,manifestPath:$manifest,credentialsPath:$credentials,secretsRedacted:true}'
+}
+
+odysseus_usage_blocked() {
+    jq -nc '{schemaVersion:1,ok:false,status:"blocked",
+      blockedReason:"connection-grant-not-enforceable",
+      summary:"Uso Odysseus bloqueado: workspace encaminha inferência pela credencial compartilhada do 9Router.",
+      next:"Aguarde grant por requisição aplicado ao workspace e rejeição de fallback."}'
 }
 
 check_update() {
-    local current latest
+    local current latest tree="" trusted=false audited=false
     current="$(current_sha)"; latest="$(remote_sha)"
-    jq -cn --arg current "$current" --arg latest "$latest" \
-        '{id:"odysseus",branch:"dev",releaseAvailable:false,currentCommit:$current,latestCommit:$latest,updateAvailable:($current!=$latest),policy:"manual-pinned-commit"}'
+    commit_allowlisted "$latest" && trusted=true
+    tree="$(trusted_tree_for_commit "$latest")"
+    release_audit_approved "$latest" "$tree" && audited=true
+    jq -cn --arg current "$current" --arg latest "$latest" --argjson trusted "$trusted" --argjson audited "$audited" \
+        '{schemaVersion:1,id:"odysseus",branch:"dev",releaseAvailable:$trusted,currentCommit:$current,
+          latestCommit:$latest,latestCommitTrusted:$trusted,releaseAuditApproved:$audited,
+          updateAvailable:($trusted and $audited and $current!=$latest),
+          policy:"manual-allowlisted-commit",secretsRedacted:true}'
 }
 
+# shellcheck disable=SC2317
+# PXA-008 retains update code behind its request-bound grant gate.
 update_odysseus() {
-    local before latest
+    odysseus_usage_blocked
+    return 69
+    local before latest latest_tree
     before="$(current_sha)"; latest="$(remote_sha)"
     [ -n "$before" ] || { provision; return; }
     [ "$before" != "$latest" ] || { check_update; return; }
+    commit_allowlisted "$latest" || {
+        pz_error "Odysseus update commit is absent from trusted allowlist: $latest"
+        return 69
+    }
+    latest_tree="$(trusted_tree_for_commit "$latest")"
+    release_audit_approved "$latest" "$latest_tree" || {
+        pz_error "Odysseus update audit is incomplete or unapproved: $RELEASE_AUDIT_FILE"
+        return 69
+    }
+    trusted_images_valid || {
+        pz_error "Odysseus dependency images are not approved by digest"
+        return 69
+    }
+    trusted_build_base_valid || {
+        pz_error "Odysseus build base is not approved by digest"
+        return 69
+    }
     systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
     install_release "$latest"
     harden_build_context
@@ -379,7 +673,8 @@ update_odysseus() {
 }
 
 backup_data() {
-    local output="$BACKUPS/odysseus-$(date +%Y%m%d-%H%M%S).tar.gz"
+    local output
+    output="$BACKUPS/odysseus-$(date +%Y%m%d-%H%M%S).tar.gz"
     tar -C "$ROOT" -czf "$output" data
     chmod 0600 "$output"
     jq -cn --arg path "$output" --arg sha256 "$(sha256sum "$output" | awk '{print $1}')" '{status:"complete",backup:$path,sha256:$sha256}'
@@ -387,37 +682,140 @@ backup_data() {
 
 doctor_odysseus() {
     local compose=false rootless=false env_mode="missing" current=false auth=false bypass=true socket=false images_locked=false router_bridge=false
-    if podman compose version >/dev/null 2>&1; then compose=true; fi
-    [ "$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo false)" = true ] && rootless=true
+    local manifest_valid=false trusted=false audit_approved=false image_manifest_valid=false build_base_valid=false paths_safe=false podman_available=false healthy=false service="inactive" sha="" router_credential=false audit
+    command -v podman >/dev/null 2>&1 && podman_available=true
+    [ "$podman_available" = true ] && podman compose version >/dev/null 2>&1 && compose=true
+    [ "$podman_available" = true ] && [ "$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo false)" = true ] && rootless=true
     [ -f "$ENV_FILE" ] && env_mode="$(stat -c %a "$ENV_FILE")"
     [ -f "$CURRENT/docker-compose.yml" ] && current=true
     grep -qx 'AUTH_ENABLED=true' "$ENV_FILE" 2>/dev/null && auth=true
     grep -qx 'LOCALHOST_BYPASS=false' "$ENV_FILE" 2>/dev/null && bypass=false
     if grep -Rqs '/var/run/docker.sock' "$CONFIG" 2>/dev/null; then socket=true; fi
-    [ "$(grep -c '@sha256:' "$LOCK_FILE" 2>/dev/null || true)" -eq 3 ] && images_locked=true
+    trusted_images_valid && image_manifest_valid=true
+    trusted_build_base_valid && build_base_valid=true
+    dependency_lock_valid && images_locked=true
     [ -S "$ROUTER_SOCKET_DIR/9router.sock" ] && router_bridge=true
-    jq -cn --argjson compose "$compose" --argjson rootless "$rootless" --arg envMode "$env_mode" \
+    router_credentials_ready && router_credential=true
+    sha="$(current_sha)"
+    [ -f "$MANIFEST" ] && jq -e '.schemaVersion == 1 and (.commit|test("^[0-9a-f]{40}$")) and (.tree|test("^[0-9a-f]{40}$"))' "$MANIFEST" >/dev/null 2>&1 && manifest_valid=true
+    release_trusted "$sha" "$(jq -r '.tree // empty' "$MANIFEST" 2>/dev/null || true)" && trusted=true
+    release_audit_approved "$sha" "$(jq -r '.tree // empty' "$MANIFEST" 2>/dev/null || true)" && audit_approved=true
+    audit="$(release_audit_json)"
+    if path_within_root "$CURRENT" "$ROOT" && path_within_root "$ENV_FILE" "$CONFIG" && path_within_root "$LOCK_FILE" "$CONFIG"; then paths_safe=true; fi
+    service="$(systemctl --user is-active "$SERVICE" 2>/dev/null || true)"; service="${service:-inactive}"
+    curl -fsS --max-time 2 "$ENDPOINT" >/dev/null 2>&1 && healthy=true
+    local configured=false ready=false
+    if [ "$current" = true ] && [ "$manifest_valid" = true ] && [ "$trusted" = true ] && [ "$audit_approved" = true ] &&
+        [ "$images_locked" = true ] && [ "$build_base_valid" = true ] && [ "$env_mode" = 600 ] && [ "$paths_safe" = true ] &&
+        [ "$router_credential" = true ]; then
+        configured=true
+    fi
+    if [ "$configured" = true ] && [ "$compose" = true ] && [ "$rootless" = true ] &&
+        [ "$auth" = true ] && [ "$bypass" = false ] && [ "$socket" = false ] &&
+        [ "$router_bridge" = true ] && [ "$service" = active ] && [ "$healthy" = true ]; then
+        ready=true
+    fi
+    jq -cn --argjson podman "$podman_available" --argjson compose "$compose" --argjson rootless "$rootless" --arg envMode "$env_mode" \
         --argjson current "$current" --argjson auth "$auth" --argjson bypass "$bypass" --argjson socket "$socket" --argjson locked "$images_locked" --argjson routerBridge "$router_bridge" \
-        '{id:"odysseus",compose:$compose,rootless:$rootless,currentRelease:$current,dependencyImagesLocked:$locked,envMode:$envMode,authEnabled:$auth,localhostBypass:$bypass,dockerSocketMounted:$socket,routerPrivateBridge:$routerBridge,secure:($compose and $rootless and $current and $locked and $envMode=="600" and $auth and ($bypass|not) and ($socket|not) and $routerBridge),secretsRedacted:true}'
+        --argjson manifestValid "$manifest_valid" --argjson trusted "$trusted" --argjson releaseAuditApproved "$audit_approved" --argjson releaseAudit "$audit" --argjson imageManifestValid "$image_manifest_valid" --argjson buildBaseManifestValid "$build_base_valid" --argjson pathsSafe "$paths_safe" \
+        --arg service "$service" --argjson healthy "$healthy" --argjson configured "$configured" --argjson ready "$ready" \
+        --argjson routerCredentialReference "$router_credential" \
+        '{schemaVersion:1,id:"odysseus",diagnosticComplete:true,configured:$configured,ready:$ready,podman:$podman,compose:$compose,rootless:$rootless,
+          currentRelease:$current,manifestValid:$manifestValid,commitTrusted:$trusted,
+          releaseAuditApproved:$releaseAuditApproved,releaseAudit:$releaseAudit,
+          dependencyImageManifestValid:$imageManifestValid,dependencyImagesLocked:$locked,
+          buildBaseManifestValid:$buildBaseManifestValid,
+          envMode:$envMode,authEnabled:$auth,localhostBypass:$bypass,dockerSocketMounted:$socket,
+          routerPrivateBridge:$routerBridge,routerCredentialReference:$routerCredentialReference,
+          pathsSafe:$pathsSafe,service:$service,healthy:$healthy,
+          secure:($compose and $rootless and $current and $manifestValid and $trusted and $releaseAuditApproved and $locked and $buildBaseManifestValid and
+            $envMode=="600" and $auth and ($bypass|not) and ($socket|not) and $routerBridge and
+            $routerCredentialReference and $pathsSafe),
+          issues:([if ($podman|not) then {severity:"error",component:"odysseus",code:"podman-missing"} else empty end,
+            if ($current|not) then {severity:"error",component:"odysseus",code:"odysseus-not-installed"} else empty end,
+            if ($trusted|not) then {severity:"error",component:"odysseus",code:"odysseus-commit-untrusted"} else empty end,
+            if ($releaseAudit.manifestValid|not) then {severity:"error",component:"odysseus",code:"odysseus-release-audit-invalid"} else empty end,
+            if ($releaseAudit.approvedForDeploy|not) then {severity:"error",component:"odysseus",code:"odysseus-release-unapproved"} else empty end,
+            if ($releaseAudit.baseImagesPinned|not) then {severity:"error",component:"odysseus",code:"odysseus-base-images-unpinned"} else empty end,
+            if ($releaseAudit.pythonDependenciesLocked|not) then {severity:"error",component:"odysseus",code:"odysseus-python-dependencies-unlocked"} else empty end,
+            if ($releaseAudit.semanticAudit|not) then {severity:"error",component:"odysseus",code:"odysseus-semantic-audit-incomplete"} else empty end,
+            if $releaseAudit.shellExecutionSurface then {severity:"warning",component:"odysseus",code:"odysseus-shell-execution-surface"} else empty end,
+            if ($imageManifestValid|not) then {severity:"error",component:"odysseus",code:"dependency-image-manifest-untrusted"} else empty end,
+            if ($buildBaseManifestValid|not) then {severity:"error",component:"odysseus",code:"odysseus-build-base-untrusted"} else empty end,
+            if ($locked|not) then {severity:"error",component:"odysseus",code:"dependency-images-unlocked"} else empty end,
+            if ($routerBridge|not) then {severity:"warning",component:"9router",code:"router-bridge-unavailable"} else empty end,
+            if ($routerCredentialReference|not) then {severity:"error",component:"9router",code:"router-credential-reference-unavailable"} else empty end,
+            if ($pathsSafe|not) then {severity:"error",component:"odysseus",code:"odysseus-path-unsafe"} else empty end]),secretsRedacted:true}'
 }
 
+plan_odysseus() {
+    local status doctor deployment_allowed=false release_gate=false proposed="" proposed_tree="" proposed_trusted=false release_audited=false images_approved=false build_base_approved=false
+    status="$(status_json)"
+    doctor="$(doctor_odysseus)"
+    proposed="$(remote_sha 2>/dev/null || true)"
+    commit_allowlisted "$proposed" && proposed_trusted=true
+    proposed_tree="$(trusted_tree_for_commit "$proposed")"
+    release_audit_approved "$proposed" "$proposed_tree" && release_audited=true
+    trusted_images_valid && images_approved=true
+    trusted_build_base_valid && build_base_approved=true
+    [ "${PZ_HOMELAB_ALLOW_HOST_WORKLOADS:-0}" = 1 ] && release_gate=true
+    [ "$release_gate" = true ] && [ "$proposed_trusted" = true ] && [ "$release_audited" = true ] && [ "$images_approved" = true ] && [ "$build_base_approved" = true ] && deployment_allowed=true
+    jq -cn --argjson status "$status" --argjson doctor "$doctor" --arg proposedCommit "$proposed" \
+        --argjson proposedCommitTrusted "$proposed_trusted" --argjson releaseGate "$release_gate" \
+        --argjson releaseAuditApproved "$release_audited" --argjson dependencyImagesApproved "$images_approved" --argjson buildBaseApproved "$build_base_approved" --argjson deploymentAllowed "$deployment_allowed" \
+        '{schemaVersion:1,id:"odysseus",mode:"read-only-plan",releaseGate:$releaseGate,
+          deploymentAllowed:$deploymentAllowed,proposedCommit:$proposedCommit,proposedCommitTrusted:$proposedCommitTrusted,
+          releaseAuditApproved:$releaseAuditApproved,dependencyImagesApproved:$dependencyImagesApproved,
+          buildBaseApproved:$buildBaseApproved,
+          ready:$status.ready,status:$status,doctor:$doctor,
+          phases:["verify immutable commit allowlist and release audit","pin build base and Python dependency graph",
+            "complete semantic security audit","verify rootless runtime and resource budget",
+            "generate secret references","resolve all images to digests","stage release transactionally",
+            "validate compose without starting services","request explicit operator confirmation",
+            "start and prove authenticated readiness","record rollback manifest"],
+          blockers:(([if ($releaseGate|not) then "roadmap-host-deployment-blocked" else empty end,
+            if ($proposedCommitTrusted|not) then "upstream-commit-untrusted" else empty end] +
+            [if ($releaseAuditApproved|not) then "odysseus-release-audit-unapproved" else empty end] +
+            [if ($dependencyImagesApproved|not) then "dependency-images-unapproved" else empty end] +
+            [if ($buildBaseApproved|not) then "odysseus-build-base-unapproved" else empty end] +
+            [$doctor.issues[]?.code]) | unique),secretsRedacted:true}'
+}
+
+require_runtime_provenance() {
+    status_json | jq -e '.configured == true and .provenance.commitTrusted == true and
+      .provenance.releaseAuditApproved == true and
+      .provenance.buildBaseManifestValid == true and
+      .provenance.dependencyImageManifestValid == true and .provenance.dependencyImagesLocked == true' \
+      >/dev/null || {
+        pz_error "Odysseus runtime blocked: release or dependency image provenance is invalid"
+        return 69
+    }
+}
+
+# shellcheck disable=SC2317
+# PXA-008 keeps workspace access behind its request-bound grant gate.
 open_ui() {
+    odysseus_usage_blocked
+    return 69
+    curl -fsS --max-time 2 "$ENDPOINT" >/dev/null 2>&1 || {
+        pz_error "Odysseus is not healthy; run: pz ai odysseus doctor"
+        return 69
+    }
     xdg-open "$ENDPOINT" >/dev/null 2>&1 &
     pz_info "Odysseus opened: $ENDPOINT"
 }
 
 case "$ACTION" in
-    install|setup|provision) provision ;;
+    install|setup|provision|update|upgrade|start|restart|open|dashboard)
+        odysseus_usage_blocked
+        exit 69 ;;
     status) status_json ;;
     check|check-update) check_update ;;
-    update|upgrade) update_odysseus ;;
-    start) systemctl --user enable --now "$SERVICE"; wait_ready 600 ;;
     stop) systemctl --user disable --now "$SERVICE" ;;
-    restart) systemctl --user restart "$SERVICE"; wait_ready 600 ;;
-    open|dashboard) open_ui ;;
     logs) "$COMPOSE_WRAPPER" logs --tail "${1:-150}" ;;
     backup) backup_data ;;
     doctor|health) doctor_odysseus ;;
+    plan|dry-run|diagnose) plan_odysseus ;;
     credentials-path) printf '%s\n' "$ENV_FILE" ;;
-    *) pz_error "usage: pz ai odysseus (status|install|start|stop|restart|open|logs|check-update|update|backup|doctor|credentials-path)"; exit 2 ;;
+    *) pz_error "usage: pz ai odysseus (status|plan|install|start|stop|restart|open|logs|check-update|update|backup|doctor|credentials-path)"; exit 2 ;;
 esac

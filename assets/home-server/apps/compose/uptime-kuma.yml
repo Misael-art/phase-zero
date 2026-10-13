@@ -1,0 +1,23 @@
+# Per-app compose module. Segredos nunca inline.
+services:
+  uptime-kuma:
+    image: ${PZ_IMAGE_UPTIME_KUMA:-louislam/uptime-kuma:1.23.16}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-uptime-kuma
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.5
+    ports:
+      - "${HOMELAB_ADMIN_BIND_ADDR:-127.0.0.1}:3001:3001"
+    volumes:
+      - uptimekuma_data:/app/data
+
+volumes:
+  uptimekuma_data:

@@ -3,12 +3,318 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 As versões seguem a data de build em `version.json`.
 
-## [1.17.0] - Não lançado
+## [1.22.5] - 2026-10-11
+
+### Adicionado
+- **Steam+X abre o teclado do Plasma.** O mesmo caminho do botão de acesso rápido. Se o modo do teclado virtual estiver em Nunca ou Só sem mouse, o acorde passa um instante por Qualquer entrada, chama `forceActivate` e devolve o modo anterior. O painel continua visível depois dessa devolução.
+- **Toque no terminal abre o teclado.** Ashyterm, Konsole, kitty e Yakuake não pedem o painel de entrada. Um toque na tela, com um deles em foco e o teclado oculto, chama a abertura. Não fecha o teclado e não captura o dispositivo.
+- **Steam+Y, Steam+B e Steam+A.** Print (Spectacle neste host), copiar (Ctrl+C) e colar (Ctrl+V). Sozinhos, Y continua espaço, B Esc e A Enter. No Ashyterm, Ctrl+C interrompe o comando; a cópia de lá é Ctrl+Shift+C e a cola é Ctrl+Shift+V.
+- **Widget PhaseZero Deck no painel.** `org.phasezero.deckpanel` mostra CPU, RAM e disco, o mapa gerado do perfil versionado do controle e a opacidade oficial do painel que contém o applet (Adaptativo, Opaco, Translúcido). Não troca o tema global e não altera os outros painéis. A instalação pelo `kpackagetool6` não reinicia o Plasma nem o controle.
+
+### Limitações
+- Um caractere digitado no teclado virtual e a volta Game Mode → Switch Desktop continuam sem prova. A opacidade Translúcido fica no popup do widget; o instalador não grava esse modo sozinho.
+
+## [1.22.4] - 2026-10-10
+
+### Corrigido
+- **O pacote Linux da 1.22.3 não foi publicado.** O `appimagetool` vinha do canal `continuous`, cujo arquivo mudou e deixou de bater com o SHA256 fixo. O job morria depois de gerar deb, rpm e o pacote Arch, então o artefato não subia. O download agora aponta para a release numerada 1.9.1, com o digest conferido. A tag `v1.22.3` não é movida.
+
+## [1.22.3] - 2026-10-10
+
+### Corrigido
+- **CI Python deixou de publicar release.** O `pip install PySide6` passou a puxar 6.12.0, que encerra o interpretador com sinal 11 depois de a suíte passar. Os jobs `python-test` e `homelab-python-test` ficam vermelhos e o `ci-gate` da release recusa o pacote. O workflow fixa `PySide6==6.11.1`, a última série que termina com código 0. A tag `v1.22.2` existe e não será movida; ela não gera artefatos enquanto esse gate recusar o commit.
+
+## [1.22.2] - 2026-10-10
+
+### Corrigido
+- **Teclado virtual do KDE no Steam Deck apontava para o Maliit e lia uma propriedade D-Bus que não existe.** A configuração legada gerida pelo PhaseZero (`InputMethod` simples no desktop do Maliit, sem `InputMethod[$e]`) passa a migrar para o Plasma Keyboard quando esse desktop está instalado. Uma escolha explícita válida fica como está. O status separa configuração, disponibilidade no D-Bus e abertura efetiva. Onboard ou wvkbd vivo no Wayland não conta como teclado aberto.
+- **Reescrever o `kwinrc` não recarregava o método de entrada do KWin 6.7.** O compositor só observa o sinal `org.kde.kconfig.notify` / `ConfigChanged` no caminho `/kwinrc`, e o KConfig só emite esse sinal quando a chave muda. `kwriteconfig6 --notify` com o mesmo valor é silencioso. O reparo apaga a chave e grava de novo, os dois com `--notify`, e devolve `InputMethod[$e]` em texto, sem novo sinal. Medido nesta sessão: o KWin (PID estável) passou a ter o `plasma-keyboard` como filho e `available=true`.
+
+### Adicionado
+- **Diagnóstico somente leitura do cursor na volta do Game Mode.** `pz steamdeck cursor` registra nós do SCController, o serviço do mapa e se o KWin enxerga o mouse virtual. Não captura o dispositivo, não reinicia o mapa e não reinicia o KWin. Sem amostra de movimento a conclusão fica `not-proven`.
+
+### Limitações
+- Digitar num campo real e a volta Game Mode → Switch Desktop não foram executados: o primeiro precisa de toque, o segundo encerra a sessão. Canal beta. O procedimento está em `docs/roadmaps/steamdeck-kde-input-v1.md`.
+
+## [1.21.1] - 2026-09-23
+
+### Adicionado
+- **Mapa do controle compatível com o Ashyterm.** O terminal da BigCommunity troca de aba com `Ctrl+PageUp/PageDown` e entrega `Ctrl+Tab` ao shell, então L1/R1 do mapa desktop não faziam nada visível nele. Um perfil derivado (`PhaseZero-Ashyterm`) troca só as abas, lendo os atalhos efetivos do Ashyterm — padrões mais o `~/.config/ashyterm/settings.json` do usuário, sem escrever nele —, e um serviço de usuário preso ao do mapa (`phasezero-controller-apps.service`) segue a janela em foco via `kdotool` e alterna o perfil pelo `scc set-profile`, sem reiniciar o daemon. Atalho desativado no Ashyterm mantém o botão do mapa desktop e avisa. A tabela de aplicativos (`linux/steamdeck/controller_apps.py`) aceita outros programas com atalhos próprios.
+
+### Corrigido
+- **Instalação Windows abandonada podia permanecer `running` para sempre.** O supervisor registra identidade de processo resistente a reutilização de PID, separa o worker, libera descritor de lock nos processos filhos e reconcilia operação órfã como interrompida, preservando arquivos para retomar ou remover.
+- **Inventário ocultava staging parcial e remoção não recuperava operações presas.** Instalações interrompidas, falhas e cancelamentos passam a aparecer com espaço ocupado, retomada, lixeira e liberação permanente confirmada; QEMU vivo bloqueia mutação.
+- **Seletor de edição usava índice global e não inspecionava a mídia escolhida.** O diálogo lê índices da ISO de forma assíncrona e associa conclusões ao SHA-256 da mídia; reinstalar a mesma edição fica permitido.
+- ISO válida com WIM/ESD que não pôde ser interpretado não sugere índice 1 nem opções fictícias: pede o índice manual exato. ISO inválida bloqueia o início.
+- **O mapa do controle sumia quando a sessão gráfica piscava.** A unit declarava `PartOf=graphical-session.target` mas `WantedBy=default.target`: o pareamento era de mão única, então uma sessão que reinicia por segundos — o Plasma se reiniciando basta — derrubava o mapa e nunca o trazia de volta. Medido num Deck real: `graphical-session.target` inativo às 09:46:42, ativo de novo às 09:47:00, e o mapa morto por onze horas sem erro em lugar nenhum. As duas diretivas passam a nomear o mesmo alvo, e um teste recusa que divirjam. O `Restart` também virou `always`: o daemon já saiu 0 sozinho depois de perder o controle, e `on-failure` trata isso como fim normal e deixa o Deck sem ponteiro. `StartLimitBurst` evita trocar um silêncio por um laço.
+- **O `stop` prometia o retorno do lizard mode, que não volta.** Assumir o controle o desprende do `hid-steam`, e devolvê-lo deixa a emulação de mouse e teclado do firmware desligada — o Deck medido ficou só com o nó de gamepad, sem handler de mouse algum. A mensagem passa a dizer o que acontece de fato e como recuperar o ponteiro.
+- **`confirm` deixava para trás o link de enable da unit anterior.** `systemctl enable` só cria o link do alvo que a unit nomeia hoje; quem atualizava ficava com os dois e o serviço subia também fora da sessão gráfica. O `confirm` passa a remover os antigos antes de habilitar.
+- **O teste do temporizador de reversão era sensível à carga da máquina.** Esperava um tempo fixo enquanto a limpeza ainda parava o serviço e disparava o aviso de OSD; falhava 1 em 5 execuções com uma VM ocupando sete vCPUs. Passa a aguardar o estado, com prazo.
+
+### Testes
+- Suíte hermética de recuperação no CI; `test_provision.sh`, suíte de remoção e testes Qt.
+- A validação de instalação, desligamento, remoção, reinstalação e aceleração no Steam Deck exige execução física e medição no Windows; continua pendente.
+
+## [1.21.0] - 2026-09-23
+
+### Corrigido
+- **A prévia de 159 ações que alteram o sistema era só uma leitura de estado, mas o diálogo dizia "Preview concluído".** A prévia de estado passa a se identificar ("isto não simula a mudança") e mostra o que aplicar vai fazer antes do campo CONFIRMAR. Ações de alto risco sem simulação real exigem texto de impacto — o catálogo recusa a ausência (LUX-001).
+- **Esc cancelava a operação em andamento sem perguntar**, na janela principal e no diálogo de progresso, matando o processo no meio de uma instalação. Esc agora só limpa a busca, fechar o progresso só o esconde, e cancelar pede uma segunda decisão (LUX-002).
+- **Falha aparecia como "concluída com avisos"** quando o envelope trazia `state: failed` junto de um próximo passo; e `requiresRestart` aparecia como falha. Agora falha é erro e reinício pendente é "Reinício necessário" (LUX-003).
+- **Tema claro: o item ativo da barra lateral era branco sobre lilás claro (1,2:1).** Novos pares de cor, medidos pelo gate de acessibilidade (LUX-010).
+- **A Visão geral dizia "com avisos" num host saudável** porque contava itens informativos como aviso (LUX-011).
+- **Diálogos maiores que a tela do Steam Deck a 150%/200%** empurravam o botão de confirmar para fora da tela; agora cabem, com corpo rolável e rodapé fixo (LUX-012).
+- **A janela congelava** ao medir gráficos antes de instalar o Windows (até 20 s) e no seletor de boot (até 120 s, esperando a senha); ambos são assíncronos, e o seletor explica a falha pela sessão escolhida (LUX-015).
+- **Início no primeiro uso com 18 botões e ações repetidas**, e o card "Jogos, Android e VM" que só rodava o perfil de jogos (LUX-013). **"Retomar" mostrava leituras de status como a última tarefa**; falhas oferecem "Ver o que falhou" e "Tentar de novo" (LUX-014).
+- **Ctrl+1..9 não seguiam a barra lateral** (LUX-016); **a ajuda do `pz` citava Ctrl+Alt+F1..F6** em vez de Meta+Shift+F1..F8 (LUX-018).
+- **A interface de terminal (`pz ui tui`) rodava instalações privilegiadas sem confirmação e escondia falhas.** Passa a ser só leitura, aponta para `pz ui` e sempre mostra o código de saída (LUX-017).
+- Progresso só de marcadores explícitos (antes "disco 95% usado" movia a barra), leituras expiram em 10 min, falhas do provisionamento do Windows em português (LUX-022); prévia bloqueada explica o motivo (LUX-023); perfis com o recomendado primeiro (LUX-024); Tab do campo CONFIRMAR vai ao botão que ele libera (LUX-025); nomes acessíveis em português e título sem emoji (LUX-030..032).
+
+### Alterado
+- **Barra lateral vira trilho de ícones entre 850 e 1100 px** (Steam Deck a 150%) em vez de sumir atrás do menu; o texto acompanha a fonte do sistema; o tema escolhido é lembrado e o movimento reduzido do desktop desliga a animação de carregamento (LUX-020, LUX-021).
+
+## [1.20.9] - 2026-09-15
+
+### Adicionado
+- **Mapa de controle para o desktop KDE** (`pz steamdeck controller`). O driver `hid-steam` já entrega o lizard mode, que move o cursor pelo trackpad e pouco mais: ABXY, os paddles traseiros e os acordes de ombro não emitem nada, então um mapa de desktop precisa de um mapeador em espaço de usuário. O perfil versionado em `linux/steamdeck/profiles/` cobre trackpad como cursor e rolagem, R2/L2 como cliques, ABXY como Enter/Esc/Backspace/Espaço, L1/R1 para navegar abas, L4/R4 para campos, L5 no menu iniciar e R5 na visão geral das atividades. O `start` se recusa a rodar com Steam ou gamescope ativos — dois mapeadores no mesmo controle produzem entrada dobrada, não um mapa combinado.
+- **Atalho para a visão geral das atividades**, no controle (R5) e no teclado (`Meta+Shift+F9`), alternando o efeito `overview` do KWin por D-Bus em vez de sintetizar a tecla, para que o botão e o atalho façam a mesma coisa mesmo se o usuário remapear `Meta+W`.
+
+### Corrigido
+- **O mapa do controle não sobrevivia a nada.** Nem ao login, porque nada iniciava o daemon — o `sc-controller` não traz autostart e não havia unit; nem ao próprio teste, porque a janela de reversão de 90s derrubava o daemon no meio, sem avisar. De fora não há erro em lugar nenhum: o controle volta ao lizard mode e o resultado é um recurso instalado que não funciona. Agora uma unit de usuário mantém o mapa e `confirm` a habilita no login; a janela subiu para 300s e a reversão anuncia-se por OSD ao disparar.
+- **`start` declarava sucesso sobre um serviço em laço de reinício.** A unit passava o perfil ao `scc-daemon` sem o subcomando posicional que ele exige, então o processo saía com erro de argumento e reiniciava a cada 3s — e o systemd reporta `active` durante um laço, de modo que a mensagem "perfil desktop ativo" saía igual. O start passa a checar `NRestarts` antes de afirmar qualquer coisa, e `daemon_running` deixa de olhar só o pidfile, que o modo `--foreground` nunca escreve.
+- **A reversão automática do perfil de controle não revertia.** Assumir o controle desliga o lizard mode, e num Deck sem teclado externo um daemon que morre no meio deixa o operador sem ponteiro; por isso todo `start` arma um temporizador. Ele tinha três defeitos, nenhum visível fora de hardware real: `$!` depois de `setsid` registra o wrapper, não o temporizador, e só diverge sob job control (isto é, num terminal), de modo que o arquivo apontava para um processo morto e `confirm` não cancelava nada; o temporizador matava o daemon por padrão de nome, e a própria linha de comando dele contém esse nome, então se matava antes de reverter; e `stop` confiava em `scc-daemon stop`, que devolve sucesso mesmo sem encontrar o daemon. O estado passa a ser lido e escrito por pid registrado, nunca por padrão de processo.
+- **A janela do QEMU nascia pequena e decorada dentro do Gamescope.** O `--expose-wayland` deixava o GTK do QEMU falar xdg-shell nativo, e nesse caminho quem aplica escala e tela cheia forçada é o XWM do Gamescope — que não vê um cliente Wayland nativo. O `-full-screen` do QEMU então não produzia tela cheia nenhuma, em Handheld e em Dock. O cliente passa a ser Xwayland (`GDK_BACKEND=x11`) e o `--expose-wayland` sai; um teste recusa o retorno da flag.
+- **O resultado do teclado touch era do boot anterior.** Nada reescrevia `touch-input.log` ao começar uma sessão, então um boot curto exibia indefinidamente o `timeout` — ou o sucesso — do boot passado, e não havia como distinguir "ainda esperando" de "falhou". A sessão agora abre o registro em `pending`, encerra em `interrupted` se o boot acaba antes do QGA responder, e grava `lastFailure` para separar socket ausente de guest que não aplica a política. A tentativa também passa a ser limitada pelo tempo restante da janela, não pelo tempo do helper: um helper travado consumia o orçamento inteiro de uma vez.
+- **O provisionamento criava a imagem da VM sem `nodatacow`, e o Windows apanhava por isso.** `windows-vm.sh` marca o diretório antes de criar o qcow2 — o comentário ali registra que uma imagem copy-on-write com checksum, aberta pelo QEMU com `cache=none`, falha o próprio checksum na releitura e o btrfs devolve EIO ao guest no meio da escrita, o que já derrubara um Windows antes. `provision.sh` também cria imagens e nunca chamava nada disso: o remédio existia e simplesmente não estava nesta estrada. Numa VM provisionada por esse caminho, sobre `/home` com `compress-force=zstd:3`, o resultado foi `aio failed` no QEMU e `csum failed` no kernel apenas sob carga da VM — com o disco íntegro o tempo todo (`btrfs scrub` sem erros em 654 GiB, `qemu-img check` limpo, SMART com `Media and Data Integrity Errors: 0`). O aviso de falha do `chattr` virou linha de log: antes ele avisava no vazio e um `chattr` malsucedido era indistinguível de um bem-sucedido.
+- **A suíte do Windows VM lia `/proc/cmdline` do host**, e `resolve_display_target` deixa um token de boot vencer o ambiente — correto em produção, veneno em teste. O resultado da suíte passava a depender de qual entrada do GRUB a máquina usara no boot: num host entrado pela entrada `(Dock)`, o `phasezero.windowsvm-display=external` real sobrepunha o override interno que os casos definiam, e a mesma revisão passava na CI e falhava na bancada.
+
+## [1.20.8] - 2026-09-14
+
+### Corrigido
+- **O controle do Deck chegava ao Windows como gamepad genérico.** O boot direto já mapeava os três nós evdev do controle por `virtio-input-host-pci`, e eles carregam tudo (paddles traseiros em `BTN_TRIGGER_HAPPY`, o botão STEAM em `BTN_MODE`, os trackpads como hats) — mas o driver virtio apresenta isso ao guest como um HID comum. O Steam Deck Tools e o Steam Input falam com o HID nativo da Valve, então não enxergavam dispositivo algum: nenhum atalho `STEAM + …`, nenhum perfil Desktop, nenhum botão traseiro. No boot direto pelo GRUB o `28de:1205` passa a ser entregue cru via `usb-host`. O host perde o controle enquanto a VM roda, o que só é aceitável aí — o Windows é a sessão inteira, não há UI do host para onde voltar. Fora do boot direto nada muda: `virtio-input` como antes. `PZ_WINDOWS_VM_STEAMDECK_CONTROLLER=raw|virtio|off` sobrepõe; sem o controle presente o launch degrada para `virtio-input` em vez de falhar.
+- `--usb-mode peripherals` combinado com o boot direto anexava o mesmo controle duas vezes, e o QEMU recusa iniciar com dois `usb-host` para o mesmo `hostbus/hostaddr`.
+
+## [1.20.7] - 2026-09-13
+
+### Corrigido
+- **A janela de espera da política de teclado touch era menor que o boot do guest.** O helper aguardava até 180s pelo agente do convidado, mas um Windows arrancando do zero em hardware handheld costuma responder depois disso — e a política era descartada como `timeout` antes de o guest sequer ter chance. Inspeção offline da imagem descartou todas as causas do lado do convidado (`qemu-ga.exe` presente, os sete drivers virtio incluindo `vioser.inf`, serviço com `Start=2`, `DelayedAutoStart=0` e `--retry-path`), o que deixa a janela como a explicação restante. O padrão passa a 420s, configurável até 900s por `PZ_WINDOWS_VM_TOUCH_INPUT_TIMEOUT_SECONDS`.
+
+### Adicionado
+- O registro de `timeout` da política de teclado touch passa a gravar `waitedSeconds` e `attempts`. Sem isso, uma falha futura não distingue "a janela foi curta demais" de "o agente nunca responde" — e a hipótese acima só se confirma ou cai com esse dado.
+
+## [1.20.6] - 2026-09-12
+
+Reportado de hardware real: no boot handheld o Windows ficava preso numa janela pequena do QEMU, sem preencher os 1280x800 do painel, e sem teclado touch.
+
+### Corrigido
+- **O boot direto nunca conseguiu usar o perfil de vídeo acelerado.** A sessão sonda o host, o `graphics plan` responde elegível sem blockers, a sessão pede `--graphics virtio-gl` — e o launcher recusa, porque a forma explícita exige `--experimental`, flag que a sessão nunca passava. O mesmo perfil lido do arquivo de config era aceito sem a flag: o único chamador que verificava elegibilidade antes de pedir era o único que jamais usava o resultado. Sem `virtio-gl` o guest ignora `xres/yres` e cai em 1024x768 encaixotado, exatamente como o comentário no código já descrevia.
+- **A política de teclado touch falhava em silêncio.** O Windows esconde o teclado touch enquanto houver teclado USB conectado, e o QEMU sempre conecta um — sem essa política não há como digitar num guest handheld. O helper gravava o resultado num log que nada lia; num host real registrou `{"success":false,"state":"timeout"}` e a falha só apareceu quando alguém tentou usar o Windows. `boot status` passa a reportar `touch_input` (`applied`/`timeout`/`unknown`), em texto e JSON.
+
+## [1.20.5] - 2026-09-12
+
+Investigação disparada por um `P:` vazio no guest Windows: a pasta estava correta, mas três defeitos separados impediam o compartilhamento de fazer o que promete.
+
+### Alterado
+- **A política de compartilhamento passa a ser `full` por padrão**, com `home`, `/mnt/sdcard`, mídia removível e `/mnt` expostos **somente leitura** e o `exchange` como única porta gravável. O guest lê tudo do lado Linux e a escrita continua passando por um caminho controlado. `PZ_WINDOWS_VM_SHARE_POLICY=minimal` volta ao conjunto antigo; `PZ_WINDOWS_VM_SHARE_WRITABLE=1` continua sendo uma decisão explícita, porque o `smb.conf` gerado usa `guest ok` e `force user` — qualquer coisa rodando no Windows escreveria na home inteira com a identidade do operador.
+
+### Adicionado
+- **Entrada de GRUB `(Handheld)`**, hotkey `h`, que fixa o painel interno via `phasezero.windowsvm-display=internal`. A sessão já entendia essa cmdline, mas nenhum `menuentry` a emitia: bootando acoplado não havia como voltar para a tela do Deck pelo menu. A entrada `(Dock)` existente passa a vir habilitada por padrão — com as duas desligadas não havia como sobrepor a autodetecção pelo boot menu. Nenhuma das duas carrega geometria: gravar resolução num `menuentry` a congelaria no monitor que estivesse ligado no `boot install`. Elas carregam intenção; a resolução continua resolvida no início da sessão, que é onde o monitor realmente é lido.
+
+### Corrigido
+- `boot status` deixa de afirmar estado errado sem privilégio: a leitura de `menuentry` num `/etc/grub.d` ilegível reporta `unknown-permission` em vez de `missing`.
+- `ROOT_ENV_FILE` virou sobreponível (`PZ_WINDOWS_VM_ROOT_ENV_FILE`) para a suíte verificar os defaults distribuídos em vez do que o `/etc` da máquina de quem roda o teste tiver persistido.
+- **Pendrive nunca chegava ao guest**: os compartilhamentos usavam `mount --bind`, que expõe o diretório mas não os sistemas de arquivos montados dentro dele. Cada mídia montada pelo udisks é um mount próprio sob `/run/media/$USER`, então a pasta aparecia vazia mesmo com a política ampla. Agora o bind é `--rbind` com `--make-rslave`: carrega os mounts existentes, deixa os futuros propagarem (que é o que hotplug exige) e impede que um umount do lado do guest volte a propagar para a mídia real do operador.
+- **A raiz de mídia removível não era criada**: o `udisks` só cria `/run/media/$USER` ao montar o primeiro dispositivo, e um alvo inexistente era pulado em silêncio — de modo que nada inserido depois do boot podia aparecer. A raiz passa a ser criada antecipadamente, com um guard que só permite isso nos caminhos de mídia.
+- **O guest recusava cópias grandes alegando disco cheio**: a raiz do compartilhamento ficava no tmpfs de `RUNTIME_DIR`, e o Windows reporta o espaço livre do volume da raiz, não do bind onde o arquivo realmente cai. Com ~1,4 GB anunciados, uma cópia maior era barrada mesmo havendo centenas de GB no destino. A raiz passa a ser persistente e em disco, com degradação anunciada para o tmpfs quando não há como criá-la.
+- `umount -R` na poda de binds obsoletos: um umount simples desanexava o topo e deixava submounts (um pendrive sob `removable/`) ainda visíveis ao guest sob uma política que já não os permitia.
+
+## [1.20.4] - 2026-09-11
+
+Defeito encontrado clicando na página Temas de um host real, mais dois follow-ups de release que a própria varredura expôs.
+
+### Corrigido
+- **Os interruptores não respondiam ao clique**: o controle é desenhado por inteiro — rótulo à esquerda, trilho colado na borda direita —, mas o Qt só aceita clique dentro da área do indicador nativo, que fica à esquerda e nunca é pintada. Num interruptor de 126px a região sensível ia até 40px, então todo clique no trilho ou no botão visível era descartado sem nada acontecer. Atingia Temas, Serviços, Windows VM e o "Modo avançado" do cabeçalho.
+- **Upgrade não deixava mais o runtime de boot do Windows VM para trás**: `windows-vm` ressincroniza sozinho em vez de exigir um `boot install` manual depois de cada atualização de pacote.
+- **`.SRCINFO` parou de se corromper a cada release**: o campo `source` vinha acumulando a URL de todas as versões desde a 1.8.0 numa única linha inutilizável, porque a expressão de bump só reescrevia o dígito maior e deixava o resto da linha antiga. Agora a linha é reescrita inteira e bate com o que o PKGBUILD declara.
+- `shell-lint` voltou ao verde: estava vermelho em main desde a 1.20.3 por um SC2016 que é falso positivo — as aspas simples ali existem para a chave de API não aparecer na linha de comando de cada job paralelo.
+
+## [1.20.3] - 2026-09-10
+
+Trabalho desenvolvido e host-verificado na branch `release/v1.19.0` (não publicada no main como release) e mesclado aqui: bateria de testes reais no host (Plasma 6/Wayland) que expôs defeitos invisíveis às suítes herméticas — daemon vivo, multi-containment, semântica de ferramenta oficial.
+
+### Adicionado
+- **Roteamento Hermes pelo 9Router**: `pz ai hermes route|provider|models` (apply/status/doctor/models/heal) com timer de auto-curativo de 5 minutos. O `config.yaml` vivo agora é reescrito com backup e escrita staged atômica — o heal nunca mais trunca a configuração do agente.
+
+### Corrigido (motor de temas)
+- Preview de wallpaper vencido reverte em qualquer comando `pz themes`; apply confirmado nunca é revertido pela expiração do preview anterior.
+- `--param` conta na detecção de no-op: trocar o modo do tema (sistema→escuro) aplica de verdade em vez de no-op silencioso.
+- Escrita de configuração KDE via `kwriteconfig` quando disponível — a escrita byte a byte disputava o cache do daemon KConfig e duplicava chaves no `kdeglobals` vivo.
+- `reduce-motion off` restaura o `AnimationDurationFactor` anterior do usuário (registro de override permanente) em vez do padrão fixo `1`.
+- Rollback de wallpaper endereça cada desktop pelo índice real; telas `-1` colapsavam na primeira e sobrescreviam o wallpaper errado.
+- `pz themes verify` respeita a direção da operação e falha de wallpaper não é mais reportada como aplicada; `verify`/`rescue-wallpaper` com `ok:false` saem com exit 1.
+- Preview de tela de bloqueio reverte em host stock; restore atômico preservando permissões, `SlidePaths` de slideshow e reconfigure do KWin.
+- Snapshot cobre todo o raio do apply (`theme.phasezero`, `theme.accent`, `power.*`); plano bloqueado não consome snapshot; snapshot órfão não derruba a CLI.
+- Efeito colorblind ausente reporta `indisponivel` e bloqueia o plano com motivo (antes gravava `Enabled=true` e jurava "ligado"); zoom/colorblind marcados `key_verified=False`; alto contraste aplica só o esquema de cores.
+- `rescue-wallpaper` sem colisão de telas `-1`; Orca já em execução não falha o plano; disputa de lock responde JSON em vez de traceback.
+
+### Corrigido (interface nativa)
+- Interruptores da página Temas voltam a disparar operações (nenhum toggle funcionava; controle preso em "Aplicando…").
+- "Tentar novamente" de timeout funciona; `ok:false` com exit 0 mostra falha; contagem de wallpapers respeita checksum; hero mostra o wallpaper real; poll de provisionamento mata o filho em timeout.
+
+### Corrigido (shell)
+- `pz ai omniroute install/update`: backup + escrita staged do EnvironmentFile do systemd, preservação de `OMNIROUTE_API_KEY` e correção do jq (`$port` sem `--arg port` matava toda escrita de runtime).
+- `pz emulation dualscreen apply azahar` funciona (faltava o `source` de `pz_ini_set`); status lê o formato `chave = valor`.
+- `pz ai secrets rotate` lê o prompt do TTY; `pz ai 9router rollback` filtra diretórios `failed-*`; `pz ai hermes setup` reescreve `config.yaml` com backup atômico; Cancelar/Esc no whiptail volta ao menu; `pz tune apply` repetido registra o backup do conteúdo original.
+
+### Testes
+- +14 testes de regressão herméticos; suíte completa: 809 passed + shell suite.
+
+## [1.20.2] - 2026-09-09
+
+Correção encontrada ao iniciar o Windows num host real, depois de rodar `boot install` com privilégio.
+
+### Corrigido
+- **VM não iniciava depois de um comando elevado**: o `windows-vm` já resolvia a base do runtime para `/run/user/<uid do usuário>` quando rodava como root, mas criava o diretório sem devolver o dono. Ele nascia `root:root` dentro do runtime dir do próprio usuário, e a partir daí todo `windows-vm start` sem privilégio parava em `install: não foi possível mudar permissões de "/run/user/1000/phasezero-windows-vm"`. Bastava um `pz windows-vm boot install` pela ponte admin para deixar a VM do usuário travada até alguém corrigir o dono à mão. Os três pontos que criam o diretório passam por um helper que o devolve ao usuário alvo.
+
+### Interface
+- **Ajustes de host pulados viram um resumo com ação**: iniciar a VM sem privilégio imprimia treze avisos `requires root; skipped` seguidos — a maioria um por núcleo de CPU —, sem dizer o que fazer com aquilo. Agora sai uma linha com o que ficou de fora e outra com o comando que aplica (`phasezero-admin pz windows-vm optimize`). A VM inicia com ou sem esses ajustes; eles são otimização, não requisito.
+
+## [1.20.1] - 2026-09-09
+
+Correções encontradas ao instalar a 1.20.0 num host real e rodar o diagnóstico.
+
+### Corrigido
+- **`pz doctor` terminava sem terminar**: o comando morria com SIGPIPE no meio do relatório, quando o diretório de operações era grande o bastante para o `ls` ainda estar escrevendo enquanto o `head` já tinha saído. No host de teste o relatório parava no check 44 de 136 — toda a parte de gráficos do Windows VM, TPM e swtpm era pulada em silêncio, e a saída ainda parecia completa.
+- **`pz doctor --json` ignorava a flag** e imprimia o relatório humano; qualquer flag desconhecida era aceita sem aviso. Agora emite o mesmo envelope objeto dos demais comandos de status (`schemaVersion`, `summary`, `ok`, `checks[]`), sai 0 como relatório deve sair, e recusa o que não conhece.
+- O caso 9 de `tests/audit-doctor.sh` exigia `WARN` para subsistema opcional sem configuração, regra que o produto abandonou de propósito em favor de `INFO: not opted in`. O arquivo nunca era executado pelo runner — o nome não casava com os padrões varridos —, então a contradição sobreviveu sem ser vista. Renomeado para `tests/linux-audit-doctor.sh` e alinhado à regra atual.
+
+### Adicionado
+- Check `STATE01`: conta os registros locais de operação e aponta `pz installation prune` quando passam de 500. A poda já existia; faltava alguém dizer que era hora. O host de teste tinha 5126 registros acumulados.
+
+## [1.20.0] - 2026-09-08
+
+### Adicionado
+- **Jornada por solução no Homelab**: cada aplicativo do catálogo percorre não instalado → preparando → configurar acesso → pronto para usar, com os passos de primeiro uso em português no próprio cartão. "Rodando" deixou de significar "pronto": sem sonda funcional respondendo, o cartão continua em preparação.
+- **Primeiro pareamento remoto sem terminal** (`hosts pair --password-stdin [--timeout S]`): a senha é lida de stdin e entregue ao ssh por um helper askpass em arquivo 0600 dentro de diretório 0700, destruídos em toda saída — nunca em argumento, variável de ambiente, JSON ou log. Espera limitada, cancelamento seguro, e desfechos distintos (`paired`, `auth-failed`, `timeout`, `unreachable`, `empty-password`) com o que fazer a seguir.
+- **Início por objetivo**: os cartões abrem a jornada que nomeiam — hospedar leva ao Homelab, cuidar de outro computador leva à etapa de pareamento, e o novo objetivo de Windows leva ao controle de instalação. Tarefa interrompida volta com um cartão para retomar de onde parou.
+- **Gate de acessibilidade na suíte**: contraste WCAG AA nos temas escuro e claro, nome acessível e alcance por teclado em todas as páginas, e ausência de overflow horizontal em 150% e 200%.
+
+### Corrigido
+- **Perfil de orçamento parou de fingir instalação**: um perfil sem receita reservava memória e seguia instalando os aplicativos padrão, como se atendesse o objetivo escolhido. Agora a interface nomeia os serviços que aquele perfil não instala e exige decisão explícita entre simular recursos e instalar a base do servidor.
+- **Windows não promete mais 3D que não pode provar**: `virtio-gl` era anunciado como estável e "aceleração OpenGL" enquanto o próprio backend o classifica como experimental. O modo simples passa a oferecer só o que esta máquina mede como estável, com o display recomendado e o motivo; sem medição, fica no perfil compatível.
+- **Canal de instalação sob elevação**: `pz` executado via sudo/pkexec lia `XDG_DATA_HOME` de quem invocou, e reportava como ausente uma instalação de usuário que existia.
+- **`emulation dualscreen detect` não trava mais**: `kscreen-doctor` bloqueia indefinidamente sem sessão KDE e era chamado sem limite, deixando o diagnóstico pendurado sob serviço ou runner de teste.
+- Contraste abaixo do mínimo WCAG AA em dois pares de estado (erro no tema escuro, aviso no claro) e anel de foco imperceptível sobre superfícies escuras, agora com token próprio.
+- Windows VM saía do viewport em escala de 200%: o limiar de reflow era fixo em pixels e a página permitia rolagem horizontal.
+
+### Interface
+- Abrir uma solução deixou de marcar o primeiro acesso sozinho: quem confirma que a conta foi criada é o operador, com os passos daquela solução à vista.
+- Plano de instalação resumido em linguagem de produto — servidor, aplicativos, acesso, memória e etapas —, com o JSON preservado na visão avançada.
+- Falha de comando explica a causa e oferece retomar por um controle visível, sem exigir leitura de log.
+
+## [1.19.0] - 2026-08-27
+
+### Adicionado
+- **Página Linux no Control Center**: uma vitrine categorizada com os apps, serviços e otimizações do projeto. Cada cartão traz ícone real do app, o que ele faz, como é desfeito, se é recomendado ou opcional, e um interruptor que reflete o estado do host — instalar/remover para recursos, aplicar/reverter para otimizações.
+- **Tuning reversível**: `pz tune <área> apply|revert|status` nas três áreas (gaming, navegador, desenvolvimento). Cada mutação é registrada com backup, hash do conteúdo e valor anterior das preferências de ferramenta, então `revert` devolve o que era do usuário em vez de apagar.
+- **Remoção de recursos por id**: `pz capabilities remove-plan|remove|verify-removal`, espelhando o ciclo de instalação. A remoção é recusada quando o histórico não mostra que o PhaseZero instalou o item, ou quando outro recurso instalado ainda depende dele.
+- Metadados honestos no catálogo de recursos: `mode` (recomendado/opcional/avançado), `rollback` (mecanismos que o motor realmente executa) e `hasStatus`, que distingue "não instalado" de "não sondamos o host".
+
+### Corrigido
+- `pz ai status` deixava de responder quando o Hermes estava instalado sem nenhum bloco MCP gerenciado: `grep -c` imprime a contagem **e** sai com 1 quando ela é zero, o ramo `|| echo 0` imprimia um segundo zero, e o `--argjson` recebia JSON inválido. A página de IA ficava sem nada para renderizar.
+- `pz tune dev` não escreve mais com `sudo tee` direto; passa pelo arquivo gerenciado e pela ponte administrativa como o resto do projeto.
+- Selo de reversibilidade deixa de pintar de verde o que ninguém desfaz sozinho: `manual` e `sem reversão` não contam como reversível.
+
+### Interface
+- Estado nunca otimista: o interruptor vai para "aplicando…" e só assume o novo valor quando o host reconfirma; prévia recusada devolve o interruptor ao lugar; leitura que falha desabilita o controle com o motivo, em vez de exibir um "desligado" em que o usuário poderia agir.
+- Ícone original do app resolvido a partir do `.desktop` instalado, sem baixar nada da rede.
+
+## [1.18.0] - 2026-08-27
+
+Versão marcada em `810d9b9` cujo workflow de release foi cancelado; nunca chegou a publicar
+artefatos. O conteúdo abaixo está incluído na 1.19.0 e fica registrado aqui para o histórico
+não pular de 1.17.4 para 1.19.0.
+
+### Adicionado (Homelab paridade umbrelOS v1)
+- **Catálogo um clique por app**: `pz server homelab apps list/enable/disable/update --json`, com isolamento por app validado em CI descartável.
+- **Ponte multi-host**: `--host` por SSH para administrar um Homelab remoto a partir do painel.
+- **Contratos do dashboard web**: HTTPS, unidade de usuário via template, allowlist de token e TLS do agente, com ADR de modelo de ameaças.
+- Fatos honestos do host e primeiro uso orientado no Player.
+
+### Corrigido (AppTuning)
+- Itens fantasma passam a existir de fato; `status` deixa de relatar sucesso falso.
+- `ConvertTo-BootstrapHashtable` não perde mais dado na conversão.
+- Tuning de captura, templates e sondas de known folder implementados.
+
+## [1.17.4] - 2026-08-25
+
+### Adicionado (CCS-040/041/042)
+- **Homelab Player v2**: padrões visuais da Central, rótulos em português, bloqueio honesto durante operações e **restauração assistida** — prévia legível, confirmação digitada (`RESTAURAR <backup>`) e aplicação sem `--yes` na UI (CLI ganha `--confirm-file`).
+- **Primeiro uso orientado**: Início detecta host novo e oferece "Comece por aqui" com três passos reais (Diagnosticar → Agentes de IA → Backup).
+- **Confiança global**: timeout com botão Tentar novamente, aviso central quando já há operação em andamento, toggles liberados quando a leitura falha, nota clara sobre onde segredos ficam.
+
+### Corrigido
+- Glossário único para o leigo: Prévia/Aplicar; dry-run → "simulação"; conectores MCP, fontes Flatpak e assistente de dock descritos por benefício.
+- Acessibilidade fina: botão default e foco nos diálogos, rótulos acessíveis em todos os campos, tooltips com linguagem humana.
+
+## [1.17.3] - 2026-08-25
+
+### Corrigido
+- **Jornadas sem beco sem saída**: relatório de diagnóstico válido nunca sai como erro — status de leitura com estado pendente (não configurado, VM desligada, QGA ausente, LaunchBox/9Router/headroom ausentes, drift de emulação) responde rc0 com envelope `state/summary/nextAction`; falha real da ferramenta continua honesta.
+- Preview mutável com pendência vira aviso explicativo (botão Confirmar permanece disponível); ResultDialog/PreviewDialog renderizam "Próximo passo" unificado (`nextAction`/`next`/`reasons`).
+- Temas não fica mais presa em "Verificando…" quando a leitura falha; Servidor exibe motivos e próximo passo do Homelab; saúde contextual, boot direto, IA & Dev, Roteamento, Resultados, Ajustes e Assistente Windows com orientação acionável.
+
+### Adicionado
+- Guarda transversal `tests/test_status_contract.py`: 60 ações de status do catálogo vigiadas (rc0 + envelope quando `--json`) — a classe "diagnóstico indisponível" não renasce.
+
+## [1.17.2] - 2026-08-25
+
+### Corrigido
+- **Diagnóstico Homelab deixa de ser erro**: `server homelab status` com stack não pronto (inclusive nunca configurado) sai `exit 0` com relatório honesto `state` (`needs-config|stopped|degraded|unhealthy|ready`), `summary` em pt-BR e `nextAction` acionável; falha real da ferramenta emite envelope `unavailable` em vez de texto cru.
+- **Homelab Player**: estados traduzidos ("Ainda não configurado", "Desligado · dados preservados"…), motivos listados e próximo passo exibido; fim do "status indisponível (exit N)" sem orientação.
+
+## [1.17.1] - 2026-08-25
+
+> Recuperação de UX da integração IA: fim do `ok:true` enganoso, MiMo por API oficial, backup portátil criptografado e `ai-memory` nativo 1.31.1.
+
+### Corrigido
+- **Contrato honesto de jornada**: `needs-login`/`needs-credentials` saem com `ok:false`, campos `ready/completed/resumable` e `nextAction`; o runner da UI trata JSON `ok:false` como falha mesmo com exit 0 — a fila nunca mais registra pendência como conclusão.
+- **Compat audit no workspace certo**: diagnóstico passa a apontar o projeto registrado (`workspaceSource=registered|explicit|needs-project`) em vez de `/usr/lib/phasezero`.
+- **Asserções de teste**: verificações de ausência com `!` sob `set -e` não falhavam silenciosamente (SC2251); guardas SC2015 reescritos.
+
+### Adicionado
+- **MiMo via API oficial Xiaomi**: portal oficial + chave única validada contra `/models`, host na allowlist; chave em arquivo `0600`; OpenCode por referência `{file:…}`; registro ZCode sem embutir segredo; fim das instruções de DevTools/cookies.
+- **Backup portátil (ADR 0002)**: `pz ai backup plan|create|verify|restore` com GPG AES-256, allowlist de credenciais, manifesto sem segredos, pré-backup e rollback na restauração.
+- **ai-memory nativo 1.31.1**: binário verificado por SHA-256 pinado (conferido com o release upstream), wrapper Docker removido, status honesto (`ready/status/integrations`) e adapter correto `open-code`.
+- **Integrações declaradas**: Grok Build e Kimi Code detectados como clientes (regras via AGENTS.md), providers separados de clientes; ZCode consome MCP canônico sem prometer hooks inexistentes.
+
+## [1.17.0] - 2026-08-24
 
 > Atual estável publicada: **1.16.x** (`version.json`).
 > Entradas abaixo cobrem WinVM, IA, Homelab e Central desde 1.13.0.
 
 ### Adicionado
+- Central IA reorganizada por jornada: catálogo separa base essencial de
+  opcionais, páginas dedicadas para IA & Dev, Proxies e Roteamento, próxima ação
+  pedagógica, progresso persistente e repetição segura após interrupção.
+- Registro central de autenticação redigido (`pz ai auth`) para clientes,
+  providers 9Router, proxies e workspaces; nenhuma identidade ou credencial
+  aparece no contrato público.
+- Ledger privado de operações da Central com estados running/completed/failed/
+  interrupted, recuperação após encerramento da UI e retry sempre submetido a
+  nova prévia e confirmação.
+- Hermes Agent `v0.20.5` integrado ponta a ponta ao 9Router: distribuição e
+  instalador fixados, aceite de risco preso ao commit, launchers protegidos,
+  MCP ai-memory, Playwright, desktop entry e gateway user persistente por
+  drop-in systemd.
+- Procedência fail-closed para Kimi, Qwen, DeepSeek e Mimo: repo, commit, árvore,
+  licença e lockfiles versionados; instalação atômica em staging; divergência
+  bloqueia execução sem impedir parada segura.
+- Diagnóstico e plano agregados para Hermes, Odysseus, 9Router, Ollama,
+  ai-memory, Podman, Tailscale, portas, política e orçamento do host.
+- Odysseus ganhou manifests de release, imagens por digest OCI e base Python
+  por digest, mantendo instalação bloqueada enquanto auditoria semântica e
+  dependências Python não forem aprovadas.
 - Entrada GRUB dedicada "PhaseZero Windows VM (Dock)": `boot install
   --dock-entry` cria uma segunda entrada (hotkey `d`, mesma classe de ícone
   do Windows) que inicia a sessão sempre no monitor da dock via
@@ -78,6 +384,16 @@ As versões seguem a data de build em `version.json`.
 - Smoke `pz ai routing` em `tests/linux-ai.sh` (degrada sem 9Router).
 
 ### Corrigido
+- Proxies deixam de declarar sucesso após falha de serviço: início, readiness,
+  porta e chat real agora determinam resultado terminal e próxima ação.
+- Fluxo Mimo não inicia sem credencial; salvar valores válidos continua
+  automaticamente por iniciar, verificar e abrir. Falhas de IDE são degradadas,
+  nunca descartadas.
+- Roteamento IA usa uma política global coerente para code/analysis/plan;
+  recomendações, preview e aplicação transacional compartilham o mesmo estado.
+- Status IA executa sondas independentes em paralelo e reduz espera da Central.
+- Hermes gateway preserva integração 9Router após reboot mesmo quando upstream
+  autorregenera sua unit systemd.
 - A sessão de boot direto não mata mais o Windows em execução ao ser
   encerrada. Todo fim de sessão (logout do SDDM, sinal, arquivo
   `shutdown.requested`) pede primeiro o desligamento do convidado via QGA

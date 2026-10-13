@@ -1,7 +1,7 @@
 {
   "schema": "https://phasezero.local/schemas/profile.json",
   "name": "homelab",
-  "description": "Home server stack via Docker: media, cloud, monitoring, automation",
+  "description": "Home server stack via Docker: media, sync, passwords, monitoring (core). Extras opt-in via with_extras or per-app enable.",
   "os": ["linux", "windows"],
   "packages": {
     "linux": {
@@ -11,14 +11,16 @@
         "git",
         "git-lfs",
         "github-cli",
+        "tailscale",
+        "rsync",
+        "restic",
+        "borg"
+      ],
+      "optionalPacman": [
         "cockpit",
         "cockpit-docker",
         "cockpit-podman",
         "netdata",
-        "tailscale",
-        "rsync",
-        "restic",
-        "borg",
         "nginx",
         "certbot",
         "acme.sh"

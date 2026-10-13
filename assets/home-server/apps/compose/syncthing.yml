@@ -1,0 +1,26 @@
+# Per-app compose module. Segredos nunca inline.
+services:
+  syncthing:
+    image: ${PZ_IMAGE_SYNCTHING:-syncthing/syncthing:1.29.6}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-syncthing
+    restart: unless-stopped
+    hostname: phasezero-syncthing
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    ports:
+      - "${HOMELAB_ADMIN_BIND_ADDR:-127.0.0.1}:8384:8384"
+      - "${HOMELAB_PUBLIC_BIND_ADDR:-127.0.0.1}:22000:22000/tcp"
+      - "${HOMELAB_PUBLIC_BIND_ADDR:-127.0.0.1}:22000:22000/udp"
+    volumes:
+      - syncthing_data:/var/syncthing
+
+volumes:
+  syncthing_data:

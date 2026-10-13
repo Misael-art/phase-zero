@@ -1,0 +1,327 @@
+
+=== System Info ===
+Host:       Jupiter
+Kernel:     6.18.45-1-MANJARO
+OS:         BigLinux based on Manjaro Linux
+Uptime:     up 19 hours, 52 minutes
+Shell:      /bin/bash
+CPU:        AMD Custom APU 0405
+
+=== Memory ===
+[PASS] MEM01: Total RAM >= 4GB
+[PASS] MEM02: Available RAM >= 1GB
+[PASS] MEM03: Swap >= 2GB
+
+=== Disk ===
+[FAIL] DISK__mnt_sdcard: /mnt/sdcard usage
+[PASS] DISK_ROOT: root partition usage
+[PASS] FS01: Root filesystem type
+[PASS] FS02: Btrfs available
+[WARN] STATE01: Local operation records bounded
+
+=== CPU / Temperature ===
+[FAIL] CPU01: CPU temperature < 85°C
+[WARN] CPU02: CPU load (1m) < cores
+
+=== GPU (AMD) ===
+[PASS] GPU01: AMD GPU detected
+[PASS] GPU02: GPU device in sysfs
+
+=== Network ===
+[PASS] NET01: Internet connectivity
+[INFO] NET02: Tailscale connected
+
+=== Services ===
+[PASS] SVC_docker: docker running
+[WARN] SVC_sshd: sshd running
+[PASS] SVC_NetworkManager: NetworkManager running
+[PASS] SVC_bluetooth: bluetooth running
+
+=== Steam Deck ===
+[PASS] SD01: Steam Deck hardware
+[PASS] SD02: Gamescope installed
+[PASS] SD03: Steam installed
+
+=== SteamOS UX ===
+[PASS] UX01: Steam client available
+[PASS] UX02: Gamescope available
+[PASS] UX03: MangoHud available
+[PASS] UX04: GameMode launcher available
+[WARN] UX05: Virtual keyboard available
+[PASS] UX06: Steam Deck hotkey config installed
+[PASS] UX07: Steam Deck hotkeys active
+[WARN] UX08: Steam Deck mode watcher installed
+[WARN] UX09: Steam Deck mode watcher active
+[PASS] UX10: TDP control available
+[WARN] UX11: Privileged TDP/GPU bridge installed
+[INFO] UX12: Steam Big Picture Plus OpenGamepadUI
+[WARN] UX13: Decky Loader Big Picture integration
+[WARN] UX14: Decky PowerTools TDP plugin
+[WARN] UX15: Decky CSS Loader themes
+[PASS] UX16: Decky plugin package health
+[WARN] UX17: SteamOS desktop handoff without login
+
+=== Windows VM ===
+[PASS] WINVM01: QEMU available
+[PASS] WINVM02: KVM device available
+[PASS] WINVM03: Windows 11 firmware/TPM ready
+[PASS] WINVM04: Windows VM configured
+[INFO] WINVM08: Existing libvirt Windows domain selected
+[PASS] WINVM07: Existing Windows VM install usable
+[PASS] WINVM05: Host folder sharing available
+[INFO] WINVM06: Windows VM direct GRUB boot installed
+[FAIL] WINVM16: Windows VM boot runtime matches this install
+[PASS] WINVM09: Windows host storage shares ready
+[WARN] WINVM10: Windows USB redirection ready
+[WARN] WINVM11: Windows graphics integration
+[PASS] WINVM14: swtpm daemon running
+[WARN] WINVM15: virtio-win up-to-date
+[WARN] WINVM12: WinBoat + WinPodX Podman host
+[PASS] WINVM13: Windows guest concurrency
+
+=== Waydroid ===
+[INFO] WAYDROID00: Waydroid subsystem
+
+=== Emulation ===
+[WARN] EMU01: Shared emulation root
+[PASS] EMU02: EmuDeck Steam Deck launcher installed
+[WARN] EMU03: Eden AppImage installed
+[WARN] EMU06: Hydra AppImage installed
+[WARN] EMU07: Hydra Steam shortcut installed
+[WARN] EMU08: Hydra Classic flags enabled
+[INFO] EMU09: Hydra emulator mappings configured
+[WARN] EMU04: Local BIOS import folder
+[INFO] EMU05: Switch keys imported locally
+[INFO] EMU10: Steam ROM Manager available
+[WARN] EMU11: RPCS3 PS3 paths configured
+[WARN] EMU12: Desktop AppImage launchers clean
+[WARN] EMU13: Adaptive emulator profiles
+[INFO] EMU14: LSFG Vulkan frame generation
+
+=== Lua Runtime ===
+[PASS] LUA01: Lua installed
+[PASS] LUA02: Lua 5.4 installed
+[PASS] LUA03: LuaJIT installed
+[WARN] LUA04: LuaRocks installed
+
+=== Steam Tools ===
+[WARN] ST01: Protontricks installed
+[WARN] ST02: ProtonUp-Qt installed
+[PASS] ST03: RetroArch installed
+[INFO] ST04: Ludusavi available
+[INFO] ST05: Steam ROM Manager available
+[INFO] ST06: BoilR available
+[INFO] ST07: SteamTinkerLaunch available
+
+=== SteamOS Boot ===
+[INFO] BOOT01: PhaseZero SteamOS GRUB entry installed
+[INFO] BOOT02: GRUB rescue card available
+[INFO] BOOT03: PhaseZero standalone EFI fallback available
+[INFO] BOOT05: Active EFI GRUB prefix safe
+[WARN] BOOT06: GRUB menu visible with safe timeout
+[PASS] BOOT04: Emergency shell GRUB entry inactive
+[PASS] BOOTISO01: Registered ISO boot entries healthy
+[INFO] BOOTUSB01: Removable EFI boot generator installed
+[INFO] BOOTFM01: Experimental grubfm payload audited
+
+=== Security ===
+[PASS] SEC01: UFW firewall active
+[INFO] SEC02: SSH server running
+
+=== Containers ===
+[PASS] DOCKER01: Docker daemon accessible
+[PASS] DOCKER02: Docker Compose
+
+=== Development ===
+[PASS] DEV_node: node installed
+[PASS] DEV_npm: npm installed
+[PASS] DEV_python3: python3 installed
+[PASS] DEV_rustc: rustc installed
+[PASS] DEV_cargo: cargo installed
+[PASS] DEV_go: go installed
+[PASS] DEV_jq: jq installed
+[PASS] DEV_git: git installed
+[PASS] DEV_gh: gh installed
+[WARN] DEV_git-lfs: git-lfs installed
+
+=== AI Tools ===
+[PASS] AI_codex: codex installed
+[PASS] AI_claude: claude installed
+[PASS] AI_opencode: opencode installed
+[PASS] AI_hermes: hermes installed
+[WARN] AI_openclaw: openclaw installed
+[WARN] AI_ollama: ollama installed
+[WARN] AI_CODEXBAR_CLI: CodexBar CLI available
+[WARN] AI_CODEXBAR_CONFIG: CodexBar config valid
+[WARN] AI_CODEXBAR_USAGE: CodexBar providers return usage
+[INFO] AI_CODEXBAR_PLASMOID: KodexBar Plasma widget package
+[WARN] AI_CLAUDE_DESKTOP: Claude Desktop installed
+[PASS] AI_CODEX_DESKTOP_UPDATE: Codex Desktop updater healthy
+[WARN] AI_DESKTOP_UPDATE_TIMER: AI desktop automatic updates enabled
+[PASS] AI_9ROUTER: 9Router local gateway
+[INFO] AI_ODYSSEUS: Odysseus workspace
+[WARN] AI_UPDATE_INVENTORY: PhaseZero app update inventory
+[PASS] AI_OPENCODE_SYNC: OpenCode CLI/desktop in lockstep
+[PASS] AI_OPENCODE_MODEL: OpenCode has a usable model
+[INFO] AI_OMO: oh-my-openagent OpenCode plugin
+[PASS] DEV_GITHUB_AUTH: GitHub CLI authenticated
+[PASS] AI_HERMES_MCP: Hermes MCP configured
+[PASS] AI_OPENCLAW_MCP: OpenClaw MCP configured
+[INFO] AI_OPENCLAW_DAEMON: OpenClaw daemon active
+[PASS] AI_MEMORY: ai-memory configured
+[PASS] AI_RTK: RTK available
+[WARN] AI_CAVEMAN: Caveman/PhaseZero rules configured
+[PASS] AI_HEADROOM: Headroom available
+[WARN] AI_CONTEXT_FRUGALITY: AI context frugality pack configured
+[PASS] AI_ADMIN_BRIDGE: Admin escalation bridge ready
+[INFO] AI_PONYTAIL: Ponytail workspace rules
+[INFO] AI_GRAPHIFY: Graphify placeholder
+[PASS] AI_MCP: MCP definitions synced
+[PASS] AI_IDE: AI-capable IDE/editor available
+[PASS] DEPS01: Optional dependencies present
+
+=== Summary ===
+PASS: 69  WARN: 39  FAIL: 3  ERROR: 0  INFO: 26
+Total: 137 checks
+>>> Some checks FAILED
+
+Results JSON:
+[
+  "[PASS] MEM01: Total RAM >= 4GB — 14GB",
+  "[PASS] MEM02: Available RAM >= 1GB — 3GB",
+  "[PASS] MEM03: Swap >= 2GB — 22GB",
+  "[FAIL] DISK__mnt_sdcard: /mnt/sdcard usage — 92% used",
+  "[PASS] DISK_ROOT: root partition usage — 70%",
+  "[PASS] FS01: Root filesystem type — btrfs",
+  "[PASS] FS02: Btrfs available — yes",
+  "[WARN] STATE01: Local operation records bounded — 5262 registros em /home/misael/.local/state/phasezero/operations; poda: pz installation prune",
+  "[FAIL] CPU01: CPU temperature < 85°C — 88°C",
+  "[WARN] CPU02: CPU load (1m) < cores — 12 / 8",
+  "[PASS] GPU01: AMD GPU detected — VanGogh 0405",
+  "[PASS] GPU02: GPU device in sysfs — ",
+  "[PASS] NET01: Internet connectivity — ",
+  "[INFO] NET02: Tailscale connected — not configured on Steam Deck",
+  "[PASS] SVC_docker: docker running — ",
+  "[WARN] SVC_sshd: sshd running — inactive",
+  "[PASS] SVC_NetworkManager: NetworkManager running — ",
+  "[PASS] SVC_bluetooth: bluetooth running — ",
+  "[PASS] SD01: Steam Deck hardware — steamdeck-lcd",
+  "[PASS] SD02: Gamescope installed — [gamescope] [\u001b[0;34mInfo\u001b[0m]  \u001b[0;37mconsole:\u001b[0m gamescope version 3.16.25 (gcc 16.1.1)",
+  "[PASS] SD03: Steam installed — ",
+  "[PASS] UX01: Steam client available — /usr/sbin/steam",
+  "[PASS] UX02: Gamescope available — /usr/sbin/gamescope",
+  "[PASS] UX03: MangoHud available — /usr/sbin/mangohud",
+  "[PASS] UX04: GameMode launcher available — /usr/sbin/gamemoderun",
+  "[WARN] UX05: Virtual keyboard available — provider present but not fully configured; run: linux/pz steamdeck keyboard repair",
+  "[PASS] UX06: Steam Deck hotkey config installed — found",
+  "[PASS] UX07: Steam Deck hotkeys active — KDE native shortcuts",
+  "[WARN] UX08: Steam Deck mode watcher installed — run: linux/pz steamdeck watcher install",
+  "[WARN] UX09: Steam Deck mode watcher active — not running",
+  "[PASS] UX10: TDP control available — /usr/sbin/ryzenadj",
+  "[WARN] UX11: Privileged TDP/GPU bridge installed — run: sudo linux/steamdeck/install-privileged-controls.sh install",
+  "[INFO] UX12: Steam Big Picture Plus OpenGamepadUI — missing; user fallback starts Steam Big Picture without QAM overlay",
+  "[WARN] UX13: Decky Loader Big Picture integration — run: linux/pz steamdeck plugins install",
+  "[WARN] UX14: Decky PowerTools TDP plugin — run: linux/pz steamdeck plugins install-plugins",
+  "[WARN] UX15: Decky CSS Loader themes — run: linux/pz steamdeck plugins install-themes",
+  "[PASS] UX16: Decky plugin package health — all installed curated plugins have runnable package layout",
+  "[WARN] UX17: SteamOS desktop handoff without login — run: sudo linux/steamdeck/install-steamos-boot.sh install",
+  "[PASS] WINVM01: QEMU available — /usr/sbin/qemu-system-x86_64",
+  "[PASS] WINVM02: KVM device available — /dev/kvm",
+  "[PASS] WINVM03: Windows 11 firmware/TPM ready — OVMF + swtpm",
+  "[PASS] WINVM04: Windows VM configured — /home/misael/VirtualMachines/PhaseZero-Windows-20260820-050749-32490/phasezero-windows.qcow2",
+  "[INFO] WINVM08: Existing libvirt Windows domain selected — no Windows domain; QEMU disk path will be used",
+  "[PASS] WINVM07: Existing Windows VM install usable — /home/misael/VirtualMachines/PhaseZero-Windows-20260820-050749-32490/phasezero-windows.qcow2",
+  "[PASS] WINVM05: Host folder sharing available — SMB + virtiofs",
+  "[INFO] WINVM06: Windows VM direct GRUB boot installed — GRUB boot expected on Steam Deck; VM install will enable it",
+  "[FAIL] WINVM16: Windows VM boot runtime matches this install — GRUB boot path runs an outdated runtime; run: phasezero-admin linux/pz windows-vm boot install",
+  "[PASS] WINVM09: Windows host storage shares ready — PZExchange",
+  "[WARN] WINVM10: Windows USB redirection ready — run: phasezero-admin linux/pz windows-vm shares repair",
+  "[WARN] WINVM11: Windows graphics integration — run: phasezero-admin linux/pz windows-vm graphics runtime install --json; Steam Deck (VanGogh APU) VFIO passthrough nao suportado",
+  "[PASS] WINVM14: swtpm daemon running — /run/user/1000/swtpm.sock",
+  "[WARN] WINVM15: virtio-win up-to-date — pinned 0.1.285, latest 0.1.302 — run: linux/windows-vm/preflight.sh --auto-fix",
+  "[WARN] WINVM12: WinBoat + WinPodX Podman host — run: linux/pz windows-vm apps setup",
+  "[PASS] WINVM13: Windows guest concurrency — one-guest policy available",
+  "[INFO] WAYDROID00: Waydroid subsystem — not opted in; run linux/pz install waydroid-linux to enable",
+  "[WARN] EMU01: Shared emulation root — run: linux/pz emulation layout",
+  "[PASS] EMU02: EmuDeck Steam Deck launcher installed — /home/misael/Downloads/EmuDeck.desktop",
+  "[WARN] EMU03: Eden AppImage installed — run: linux/pz emulation eden install",
+  "[WARN] EMU06: Hydra AppImage installed — run: linux/pz emulation hydra install",
+  "[WARN] EMU07: Hydra Steam shortcut installed — run: linux/pz emulation hydra steam-shortcut",
+  "[WARN] EMU08: Hydra Classic flags enabled — run: linux/pz emulation hydra classic-config",
+  "[INFO] EMU09: Hydra emulator mappings configured — install DuckStation/PCSX2/RPCS3 then run: linux/pz emulation hydra emulators-config",
+  "[WARN] EMU04: Local BIOS import folder — run: linux/pz emulation layout",
+  "[INFO] EMU05: Switch keys imported locally — optional: linux/pz emulation switch import-keys <owned-dump-path>",
+  "[INFO] EMU10: Steam ROM Manager available — optional: install via EmuDeck",
+  "[WARN] EMU11: RPCS3 PS3 paths configured — run: linux/pz emulation ps3 configure",
+  "[WARN] EMU12: Desktop AppImage launchers clean — 1 issue(s); run: linux/pz emulation shortcuts repair",
+  "[WARN] EMU13: Adaptive emulator profiles — run: linux/pz emulation performance apply",
+  "[INFO] EMU14: LSFG Vulkan frame generation — optional; needs Decky LSFG-VK plus owned Lossless Scaling",
+  "[PASS] LUA01: Lua installed — Lua 5.5.1  Copyright (C) 1994-2026 Lua.org, PUC-Rio",
+  "[PASS] LUA02: Lua 5.4 installed — Lua 5.4.8  Copyright (C) 1994-2025 Lua.org, PUC-Rio",
+  "[PASS] LUA03: LuaJIT installed — LuaJIT 2.1.1787058514 -- Copyright (C) 2005-2026 Mike Pall. https://luajit.org/",
+  "[WARN] LUA04: LuaRocks installed — run: linux/pz emulation lua install",
+  "[WARN] ST01: Protontricks installed — run: linux/pz emulation steam-tools install",
+  "[WARN] ST02: ProtonUp-Qt installed — run: linux/pz emulation steam-tools install",
+  "[PASS] ST03: RetroArch installed — flatpak",
+  "[INFO] ST04: Ludusavi available — optional save backup tool",
+  "[INFO] ST05: Steam ROM Manager available — optional; EmuDeck may manage SRM internally",
+  "[INFO] ST06: BoilR available — optional non-Steam importer",
+  "[INFO] ST07: SteamTinkerLaunch available — optional Proton/Wine per-game tool",
+  "[INFO] BOOT01: PhaseZero SteamOS GRUB entry installed — optional: sudo linux/steamdeck/install-steamos-boot.sh install",
+  "[INFO] BOOT02: GRUB rescue card available — optional: sudo linux/pz boot install-card",
+  "[INFO] BOOT03: PhaseZero standalone EFI fallback available — permission denied; verify with: sudo linux/pz boot status",
+  "[INFO] BOOT05: Active EFI GRUB prefix safe — permission denied; verify with: sudo linux/pz boot status",
+  "[WARN] BOOT06: GRUB menu visible with safe timeout — run: sudo linux/pz boot install-safe-menu",
+  "[PASS] BOOT04: Emergency shell GRUB entry inactive — not installed",
+  "[PASS] BOOTISO01: Registered ISO boot entries healthy — 0 registered",
+  "[INFO] BOOTUSB01: Removable EFI boot generator installed — install with: sudo linux/pz boot usb install",
+  "[INFO] BOOTFM01: Experimental grubfm payload audited — not installed (optional, upstream archived)",
+  "[PASS] SEC01: UFW firewall active — ",
+  "[INFO] SEC02: SSH server running — disabled (ok if not needed)",
+  "[PASS] DOCKER01: Docker daemon accessible — ",
+  "[PASS] DOCKER02: Docker Compose — Docker Compose version 5.5.0",
+  "[PASS] DEV_node: node installed — v26.7.0",
+  "[PASS] DEV_npm: npm installed — 12.0.2",
+  "[PASS] DEV_python3: python3 installed — Python 3.14.7",
+  "[PASS] DEV_rustc: rustc installed — rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "[PASS] DEV_cargo: cargo installed — cargo 1.97.0 (c980f4866 2026-06-30)",
+  "[PASS] DEV_go: go installed — go version go1.26.6-X:nodwarf5 linux/amd64",
+  "[PASS] DEV_jq: jq installed — jq-1.8.2",
+  "[PASS] DEV_git: git installed — git version 2.55.0",
+  "[PASS] DEV_gh: gh installed — gh version 2.97.0 (2026-07-31)",
+  "[WARN] DEV_git-lfs: git-lfs installed — ",
+  "[PASS] AI_codex: codex installed — /home/misael/.local/bin/codex",
+  "[PASS] AI_claude: claude installed — /home/misael/.local/bin/claude",
+  "[PASS] AI_opencode: opencode installed — /home/misael/.local/bin/opencode",
+  "[PASS] AI_hermes: hermes installed — /home/misael/.local/bin/hermes",
+  "[WARN] AI_openclaw: openclaw installed — run: linux/pz ai setup openclaw",
+  "[WARN] AI_ollama: ollama installed — run: linux/pz ai setup ollama",
+  "[WARN] AI_CODEXBAR_CLI: CodexBar CLI available — run: linux/pz ai setup codexbar",
+  "[WARN] AI_CODEXBAR_CONFIG: CodexBar config valid — config_missing; run: linux/pz ai codexbar repair",
+  "[WARN] AI_CODEXBAR_USAGE: CodexBar providers return usage — cli_missing, config_missing",
+  "[INFO] AI_CODEXBAR_PLASMOID: KodexBar Plasma widget package — not installed; native PhaseZero UI remains available",
+  "[WARN] AI_CLAUDE_DESKTOP: Claude Desktop installed — run: linux/pz ai desktop install-claude",
+  "[PASS] AI_CODEX_DESKTOP_UPDATE: Codex Desktop updater healthy — ready_to_install",
+  "[WARN] AI_DESKTOP_UPDATE_TIMER: AI desktop automatic updates enabled — run: linux/pz ai desktop install-services",
+  "[PASS] AI_9ROUTER: 9Router local gateway — loopback; API key; private container bridge; passive watchdog",
+  "[INFO] AI_ODYSSEUS: Odysseus workspace — optional: linux/pz ai odysseus install",
+  "[WARN] AI_UPDATE_INVENTORY: PhaseZero app update inventory — run: linux/pz updates install-service",
+  "[PASS] AI_OPENCODE_SYNC: OpenCode CLI/desktop in lockstep — 1.18.23 == desktop",
+  "[PASS] AI_OPENCODE_MODEL: OpenCode has a usable model — cloud credentials",
+  "[INFO] AI_OMO: oh-my-openagent OpenCode plugin — optional; enable with: linux/pz ai setup omo",
+  "[PASS] DEV_GITHUB_AUTH: GitHub CLI authenticated — gh auth status",
+  "[PASS] AI_HERMES_MCP: Hermes MCP configured — /home/misael/.hermes/config.yaml",
+  "[PASS] AI_OPENCLAW_MCP: OpenClaw MCP configured — /home/misael/.openclaw/config.json",
+  "[INFO] AI_OPENCLAW_DAEMON: OpenClaw daemon active — optional: linux/ai/setup-openclaw.sh daemon",
+  "[PASS] AI_MEMORY: ai-memory configured — http://127.0.0.1:49374",
+  "[PASS] AI_RTK: RTK available — /home/misael/.local/bin/rtk",
+  "[WARN] AI_CAVEMAN: Caveman/PhaseZero rules configured — run: linux/pz ai setup caveman",
+  "[PASS] AI_HEADROOM: Headroom available — /home/misael/.local/bin/headroom",
+  "[WARN] AI_CONTEXT_FRUGALITY: AI context frugality pack configured — run: linux/pz ai setup frugality",
+  "[PASS] AI_ADMIN_BRIDGE: Admin escalation bridge ready — bigsudo",
+  "[INFO] AI_PONYTAIL: Ponytail workspace rules — inactive; only applied in Ponytail workspaces",
+  "[INFO] AI_GRAPHIFY: Graphify placeholder — not configured; safe placeholder",
+  "[PASS] AI_MCP: MCP definitions synced — definitions=6 installed=10",
+  "[PASS] AI_IDE: AI-capable IDE/editor available — 2 detected",
+  "[PASS] DEPS01: Optional dependencies present — nada ausente"
+]

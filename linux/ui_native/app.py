@@ -14,14 +14,16 @@ if __package__ in {None, ""}:
     from linux.ui_native import __version__
     from linux.ui_native.boot_selector import BootSelectorWindow
     from linux.ui_native.main_window import MainWindow
-    from linux.ui_native.tokens import DARK, LIGHT, render_qss
+    from linux.ui_native.tokens import DARK, LIGHT, font_scale, render_qss
     from linux.ui_native.platform import current_platform
+    from linux.ui_native.preferences import UiPreferences, resolve_theme
 else:
     from . import __version__
     from .boot_selector import BootSelectorWindow
     from .main_window import MainWindow
-    from .tokens import DARK, LIGHT, render_qss
+    from .tokens import DARK, LIGHT, font_scale, render_qss
     from .platform import current_platform
+    from .preferences import UiPreferences, resolve_theme
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,7 +40,7 @@ def _init_icon_theme() -> None:
 def apply_theme(app: QApplication, theme: str) -> None:
     tokens = LIGHT if theme == "light" else DARK
     app.setStyle("Fusion")
-    app.setStyleSheet(render_qss(tokens))
+    app.setStyleSheet(render_qss(tokens, font_scale(app.font().pointSizeF())))
     palette = QPalette()
     palette.setColor(QPalette.Window, QColor(tokens.bg))
     palette.setColor(QPalette.WindowText, QColor(tokens.text))
@@ -71,7 +73,9 @@ def main() -> int:
     app.setOrganizationName("PhaseZero")
     app.setDesktopFileName("io.phasezero.ControlCenter")
     app.setQuitOnLastWindowClosed(True)
-    apply_theme(app, "light" if args.light else "dark")
+    # LUX-021: preferência salva (padrão: seguir o desktop); --light força.
+    theme = "light" if args.light else resolve_theme(UiPreferences().theme)
+    apply_theme(app, theme)
     if args.boot_selector:
         if current_platform() != "linux":
             parser_message = "Seletor de boot disponível somente no Linux."
@@ -80,6 +84,7 @@ def main() -> int:
         window = BootSelectorWindow(ROOT, smoke_test=args.smoke_test)
     else:
         window = MainWindow(ROOT, initial_category=args.category)
+        window.dark_theme = theme == "dark"
         window.theme_changed.connect(lambda theme: apply_theme(app, theme))
     window.show()
     if args.smoke_test:

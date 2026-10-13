@@ -53,6 +53,9 @@ CURRENT_STAGE=""
 RELEASE_BACKUP=""
 ln -sfn "$CURRENT_LINK/packaging/linux/phasezero-control-center" \
     "$BIN_HOME/phasezero-control-center"
+# PZ-AUD-001: same PATH contract as the system packages.
+ln -sfn "$CURRENT_LINK/packaging/linux/pz" \
+    "$BIN_HOME/pz"
 # Absolute Exec: desktop launchers don't always have ~/.local/bin on PATH.
 awk -v executable="$BIN_HOME/phasezero-control-center" \
     '/^Exec=/{print "Exec=" executable; next} {print}' \

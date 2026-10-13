@@ -69,7 +69,8 @@ class OverviewPage(BasePage):
         hero.setObjectName("healthHero")
         row = QHBoxLayout(hero)
         row.setContentsMargins(20, 18, 20, 18)
-        icon = QLabel("✓")
+        # LUX-011: nada de ✓ antes de medir.
+        icon = QLabel("…")
         icon.setObjectName("healthShield")
         icon.setAlignment(Qt.AlignCenter)
         icon.setFixedSize(58, 58)
@@ -177,7 +178,10 @@ class OverviewPage(BasePage):
             self.health_icon.setText("i")
             return
         passed = sum(check.status == "PASS" for check in checks)
-        warnings = sum(check.status in {"WARN", "INFO"} for check in checks)
+        # LUX-011: INFO é informativo (subsistema não optado, CCS-016); não
+        # conta como aviso nem muda o veredito — igual a needs_attention.
+        warnings = sum(check.status == "WARN" for check in checks)
+        infos = sum(check.status == "INFO" for check in checks)
         failures = sum(check.status in {"FAIL", "ERROR"} for check in checks)
         if failures:
             self.health_title.setText(f"{failures} item(ns) precisam de atenção")
@@ -195,6 +199,7 @@ class OverviewPage(BasePage):
             ("Tudo certo", passed, "success"),
             ("Avisos", warnings, "warning"),
             ("Erros", failures, "error"),
+            ("Informativos", infos, "info"),
         )):
             self.metrics.addWidget(self._metric(title, value, state), 0, column)
             self.metrics.setColumnStretch(column, 1)
@@ -270,11 +275,13 @@ class OverviewPage(BasePage):
         self.health_refresh.setEnabled(True)
         self.health_icon.setText("!")
         self.health_title.setText("Não foi possível verificar agora")
-        self.health_summary.setText("Tente novamente. Se persistir, abra o histórico técnico.")
-        retry = QPushButton("Tentar novamente")
-        retry.setObjectName("primaryButton")
-        retry.clicked.connect(self.reload)
-        self.health_layout.addWidget(retry)
+        self.health_summary.setText("Tente novamente. Se persistir, veja o histórico em Resultados.")
+        # LUX-011: o botão "Verificar novamente" do topo já repete; aqui só
+        # o caminho para o histórico.
+        history = QPushButton("Abrir Resultados")
+        history.setObjectName("secondaryButton")
+        history.clicked.connect(lambda: self.request_category("Resultados"))
+        self.health_layout.addWidget(history)
 
     def set_advanced_mode(self, enabled: bool) -> None:
         super().set_advanced_mode(enabled)

@@ -43,6 +43,23 @@ def _target_account() -> tuple[str, int, int, Path]:
     return row.pw_name, row.pw_uid, row.pw_gid, Path(row.pw_dir)
 
 
+def _data_home(home: Path) -> Path:
+    """XDG data dir of the TARGET account, not of the caller.
+
+    `pz` runs elevated through sudo/pkexec (the admin bridge), where
+    XDG_DATA_HOME still points at the invoking account — root's, usually.
+    Honour the variable only while it belongs to the same home the target
+    account resolves to; otherwise derive it from that home, so the user
+    channel is looked up where it actually lives.
+    """
+    declared = os.environ.get("XDG_DATA_HOME") or ""
+    if declared:
+        caller_home = os.environ.get("HOME") or ""
+        if caller_home and Path(caller_home) == home:
+            return Path(declared)
+    return home / ".local/share"
+
+
 def _version(path: Path) -> str:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -87,8 +104,7 @@ def _flatpak(scope: str) -> dict:
 
 def status() -> dict:
     _user, _uid, _gid, home = _target_account()
-    data_home = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
-    user_base = data_home / "phasezero"
+    user_base = _data_home(home) / "phasezero"
     current = user_base / "current"
     user_version = _version(current / "version.json") if current.exists() else ""
     native = _native_package()

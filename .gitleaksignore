@@ -3,3 +3,14 @@
 # tipo 'activeCredential = ...'), nao segredos reais. Fingerprints: commit:arquivo:regra:linha
 7abc0355c3fc398e3bdae4c02c244733b965ab19:tests/bootstrap-api-center.tests.ps1:generic-api-key:145
 b7299b936a96d10c57cd454f7d174eaf27fdc3fe:tests/bootstrap-managed-mcps.tests.ps1:generic-api-key:95
+
+# UX-008: senha de fixture dos testes de primeiro pareamento. O valor nunca
+# foi credencial — os testes so precisam de algo rastreavel em argv/log para
+# provar que a senha NAO aparece la. Renomeado depois para 'senha-fake-de-teste';
+# estas entradas cobrem o commit que ainda carrega o valor antigo no historico.
+a549f827b89d017238a1e5fd46e94c35ed4eefc3:tests/test_first_pairing.py:generic-api-key:76
+a549f827b89d017238a1e5fd46e94c35ed4eefc3:tests/linux-homelab.sh:generic-api-key:690
+
+# Mapa do controle no plasmoid. O campo "keys" é o atalho mostrado na tela
+# (Ctrl+Shift+Tab no L1), não uma credencial. generic-api-key casa o nome.
+b623574efeea3c27bdf3fe3231062cf2923a6c54:linux/steamdeck/plasmoid/org.phasezero.deckpanel/contents/data/deck-shortcuts.json:generic-api-key:42

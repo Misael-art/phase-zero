@@ -1,0 +1,7 @@
+{
+  "sandbox": "/run/user/1000/codex-desktop/tmp/pz-portfolio-audit-0jnglibc",
+  "home": "/run/user/1000/codex-desktop/tmp/pz-portfolio-audit-0jnglibc/home",
+  "state": "/run/user/1000/codex-desktop/tmp/pz-portfolio-audit-0jnglibc/state",
+  "runtime": "/run/user/1000/codex-desktop/tmp/pz-portfolio-audit-0jnglibc/run",
+  "docker": "disabled stub"
+}

@@ -150,6 +150,30 @@ pz_admin_run() {
 # Verdadeiro quando alguma chamada nesta execução foi degradada.
 pz_degraded() { [ "${PZ_DEGRADED:-0}" = "1" ]; }
 
+# --- host capacity (PZ-AUD-031): one definition of available memory/disk ---
+#
+# availableMB is memory actually free for new workloads (MemAvailable), not
+# MemTotal. Total is reported separately for transparency. Both governors
+# (per-app and per-profile) read through these helpers so app and profile
+# verdicts can never diverge on the same host.
+
+pz_mem_available_mb() {
+    if [ -n "${PZ_HOMELAB_RAM_TOTAL_OVERRIDE:-}" ]; then
+        printf '%s\n' "$PZ_HOMELAB_RAM_TOTAL_OVERRIDE"
+        return 0
+    fi
+    awk '/^MemAvailable:/ {printf "%d", $2/1024; exit}' /proc/meminfo 2>/dev/null         || { pz_error "cannot read available RAM"; return 1; }
+}
+
+pz_mem_total_mb() {
+    awk '/^MemTotal:/ {printf "%d", $2/1024; exit}' /proc/meminfo 2>/dev/null         || { pz_error "cannot read total RAM"; return 1; }
+}
+
+pz_disk_available_mb() {
+    local path="${1:-$PZ_STATE}"
+    df -Pm "$path" 2>/dev/null | awk 'NR==2 {printf "%d", $4; exit}'         || { pz_error "cannot read free disk for $path"; return 1; }
+}
+
 # --- backups centralizados ------------------------------------------------
 #
 # Backup NUNCA fica ao lado do arquivo original (isso é lixo no host do
@@ -1002,9 +1026,16 @@ pz_run_profile() {
     if ! jq -e '
         ((.extends // []) | type == "array") and
         ((.packages.linux.pacman // []) | type == "array") and
+        ((.packages.linux.archRepos // []) | type == "array") and
         ((.packages.linux.yay // []) | type == "array") and
+        ((.packages.linux.optionalPacman // []) | type == "array") and
+        ((.packages.linux.optionalYay // []) | type == "array") and
         (((.packages.linux.flatpak // []) | type) as $t | $t == "array" or $t == "object") and
         ((.scripts.linux // []) | type == "array") and
+        ((.docker_compose // {}) | type == "object") and
+        (((.docker_compose.core // "") | type) as $t | $t == "string") and
+        (((.docker_compose.extras // "") | type) as $t | $t == "string") and
+        (((.docker_compose.with_extras // false) | type) as $t | $t == "boolean") and
         ((.systemd.linux.enable // []) | type == "array") and
         ((.systemd.linux.user // []) | type == "array") and
         ((.tuning.linux.sysctl // {}) | type == "object") and
@@ -1068,10 +1099,57 @@ pz_run_profile() {
     done < <(jq -er '(.extends // []) | if type == "array" then .[] else error("extends must be an array") end' "$profile_file")
 
     local dry_run="${PZ_DRY_RUN:-0}"
+    local arch_repos
+    arch_repos=$(jq -r '.packages.linux.archRepos // [] | .[]' "$profile_file" 2>/dev/null || true)
+    if [ -n "$arch_repos" ]; then
+        # PZ-AUD-027: clean Arch ships [multilib] commented out; lib32/steam
+        # packages cannot resolve without it. Enabling a repo is explicit,
+        # admin-gated and dry-run visible — never silent.
+        local repo
+        while IFS= read -r repo; do
+            [ -z "$repo" ] && continue
+            case "$repo" in
+                multilib) ;;
+                *) pz_error "unsupported arch repo: $repo"; return 2 ;;
+            esac
+            if grep -Eq '^\[multilib\]' /etc/pacman.conf 2>/dev/null; then
+                [ "$dry_run" = "1" ] && pz_info "repo [$repo] already enabled"
+                continue
+            fi
+            if [ "$dry_run" = "1" ]; then
+                pz_info "would enable [$repo] in /etc/pacman.conf and refresh databases"
+                continue
+            fi
+            pz_info "enabling [$repo] repository..."
+            if grep -Eq '^#\[multilib\]' /etc/pacman.conf 2>/dev/null; then
+                pz_admin_run sed -i '/^#\[multilib\]/,/^#Include/s/^#//' /etc/pacman.conf || {
+                    pz_error "could not enable [$repo] (admin bridge needed)"
+                    return "$PZ_RC_NO_ADMIN"
+                }
+            else
+                # Minimal images ship no [multilib] block at all: append it.
+                pz_admin_run bash -c 'printf "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf' || {
+                    pz_error "could not enable [$repo] (admin bridge needed)"
+                    return "$PZ_RC_NO_ADMIN"
+                }
+            fi
+            grep -Eq '^\[multilib\]' /etc/pacman.conf || {
+                pz_error "[$repo] section still disabled after edit"
+                return 1
+            }
+            pz_admin_run pacman -Sy || {
+                pz_error "database refresh failed after enabling [$repo]"
+                return 1
+            }
+        done <<< "$arch_repos"
+    fi
     local packages
     packages=$(jq -r '.packages.linux.pacman // [] | .[]' "$profile_file" 2>/dev/null || true)
     local yay_pkgs
     yay_pkgs=$(jq -r '.packages.linux.yay // [] | .[]' "$profile_file" 2>/dev/null || true)
+    local opt_pacman opt_yay
+    opt_pacman=$(jq -r '.packages.linux.optionalPacman // [] | .[]' "$profile_file" 2>/dev/null || true)
+    opt_yay=$(jq -r '.packages.linux.optionalYay // [] | .[]' "$profile_file" 2>/dev/null || true)
     local flatpak_pkgs
     flatpak_pkgs=$(jq -r '
       if .packages.linux.flatpak | type == "object"
@@ -1087,6 +1165,10 @@ pz_run_profile() {
     fi
     local scripts
     scripts=$(jq -r '.scripts.linux // [] | .[]' "$profile_file" 2>/dev/null || true)
+    local compose_core compose_extras compose_with_extras
+    compose_core=$(jq -r '.docker_compose.core // empty' "$profile_file" 2>/dev/null || true)
+    compose_extras=$(jq -r '.docker_compose.extras // empty' "$profile_file" 2>/dev/null || true)
+    compose_with_extras=$(jq -r '.docker_compose.with_extras // false' "$profile_file" 2>/dev/null || true)
     local system_services
     system_services=$(jq -r '.systemd.linux.enable // [] | .[]' "$profile_file" 2>/dev/null || true)
     local user_services
@@ -1094,6 +1176,13 @@ pz_run_profile() {
     local sysctl_entries
     sysctl_entries=$(jq -r '.tuning.linux.sysctl // {} | to_entries[] | "\(.key)=\(.value)"' "$profile_file" 2>/dev/null || true)
 
+    if [ "$dry_run" != "1" ] && { [ -n "$packages" ] || [ -n "$yay_pkgs" ] || [ -n "$system_services" ] || [ -n "$sysctl_entries" ]; }; then
+        if [ "$EUID" -ne 0 ] && ! pz_admin_available; then
+            pz_error "profile '$profile_name' needs privileged steps but no admin bridge is ready"
+            pz_admin_howtofix
+            return "$PZ_RC_NO_ADMIN"
+        fi
+    fi
     if [ "$dry_run" != "1" ]; then
         command -v pacman >/dev/null 2>&1 || {
             pz_error "legacy profile '$profile_name' requires an Arch/pacman host; use 'pz capabilities' on other distributions"
@@ -1116,6 +1205,13 @@ pz_run_profile() {
         if [ "${#missing_packages[@]}" -gt 0 ]; then
             pz_error "profile preflight failed before mutation: ${missing_packages[*]}"
             return 69
+        fi
+        if [ -n "$opt_pacman" ]; then
+            local opt_pkg
+            while IFS= read -r opt_pkg; do
+                [ -z "$opt_pkg" ] && continue
+                pacman -Q "$opt_pkg" >/dev/null 2>&1 || pacman -Si "$opt_pkg" >/dev/null 2>&1 ||                     pz_warn "optional package unavailable, will skip: $opt_pkg"
+            done <<< "$opt_pacman"
         fi
     fi
 
@@ -1157,6 +1253,42 @@ pz_run_profile() {
         done <<< "$yay_pkgs"
     fi
 
+    if [ -n "$opt_pacman" ] || [ -n "$opt_yay" ]; then
+        if [ "$dry_run" = "1" ]; then
+            pz_info "planning optional packages (best effort)..."
+        else
+            pz_info "installing optional packages (best effort)..."
+        fi
+        while IFS= read -r pkg; do
+            [ -z "$pkg" ] && continue
+            if [ "$dry_run" = "1" ]; then
+                pz_info "would try optional pacman package: $pkg"
+                continue
+            fi
+            if ! pacman -Q "$pkg" >/dev/null 2>&1 && ! pacman -Si "$pkg" >/dev/null 2>&1; then
+                pz_warn "optional package unavailable, skipped: $pkg"
+                continue
+            fi
+            pz_admin_run pacman -S --needed --noconfirm "$pkg" ||                 pz_warn "optional package failed, skipped: $pkg"
+        done <<< "$opt_pacman"
+        while IFS= read -r pkg; do
+            [ -z "$pkg" ] && continue
+            if [ "$dry_run" = "1" ]; then
+                pz_info "would try optional AUR package: $pkg"
+                continue
+            fi
+            if ! command -v yay >/dev/null 2>&1; then
+                pz_warn "yay unavailable, optional AUR package skipped: $pkg"
+                continue
+            fi
+            if ! pacman -Q "$pkg" >/dev/null 2>&1 && ! yay -Si "$pkg" >/dev/null 2>&1; then
+                pz_warn "optional AUR package unavailable, skipped: $pkg"
+                continue
+            fi
+            yay -S --needed --noconfirm "$pkg" ||                 pz_warn "optional AUR package failed, skipped: $pkg"
+        done <<< "$opt_yay"
+    fi
+
     if [ "$flatpak_is_object" = true ]; then
         source "$PZ_ROOT/linux/lib/flatpak.sh"
         PZ_DRY_RUN="$dry_run" pz_flatpak_setup_from_profile "$profile_file"
@@ -1183,6 +1315,106 @@ pz_run_profile() {
             flatpak --user install -y "$remote_name" "$pkg"
             [ "$flatpak_preexisting" = "1" ] || pz_rollback_register flatpak-package "$pkg" ""
         done <<< "$flatpak_pkgs"
+    fi
+
+    if [ -n "$system_services" ]; then
+        if [ "$dry_run" = "1" ]; then
+            pz_info "planning system services..."
+        else
+            pz_info "enabling system services..."
+        fi
+        while IFS= read -r service; do
+            [ -z "$service" ] && continue
+            if [ "$dry_run" = "1" ]; then
+                pz_info "would enable system service: $service"
+                continue
+            fi
+            pz_admin_run systemctl enable --now "$service" || {
+                pz_error "failed to enable system service: $service"
+                PZ_PROFILE_CALL_DEPTH="$call_depth"
+                PZ_PROFILE_ACTIVE="$active_before"
+                return 1
+            }
+            systemctl is-active --quiet "$service" || {
+                pz_error "system service not active after enable: $service"
+                PZ_PROFILE_CALL_DEPTH="$call_depth"
+                PZ_PROFILE_ACTIVE="$active_before"
+                return 1
+            }
+        done <<< "$system_services"
+    fi
+
+    if [ -n "$user_services" ]; then
+        if [ "$dry_run" = "1" ]; then
+            pz_info "planning user services..."
+        else
+            pz_info "enabling user services..."
+        fi
+        while IFS= read -r service; do
+            [ -z "$service" ] && continue
+            if [ "$dry_run" = "1" ]; then
+                pz_info "would enable user service: $service"
+                continue
+            fi
+            systemctl --user enable --now "$service" || {
+                pz_error "failed to enable user service: $service"
+                PZ_PROFILE_CALL_DEPTH="$call_depth"
+                PZ_PROFILE_ACTIVE="$active_before"
+                return 1
+            }
+        done <<< "$user_services"
+    fi
+
+    if [ -n "$sysctl_entries" ]; then
+        if [ "$dry_run" = "1" ]; then
+            pz_info "planning sysctl tuning..."
+        else
+            pz_info "applying sysctl tuning..."
+        fi
+        while IFS= read -r entry; do
+            [ -z "$entry" ] && continue
+            if [ "$dry_run" = "1" ]; then
+                pz_info "would set sysctl: $entry"
+                continue
+            fi
+            pz_admin_run sysctl -w "$entry" || {
+                pz_error "failed to apply sysctl: $entry"
+                PZ_PROFILE_CALL_DEPTH="$call_depth"
+                PZ_PROFILE_ACTIVE="$active_before"
+                return 1
+            }
+        done <<< "$sysctl_entries"
+    fi
+
+    if [ -n "$compose_core" ] || [ -n "$compose_extras" ]; then
+        # PZ-AUD-004: docker_compose is executable selection, not decoration.
+        # Registry present -> reconcile the curated set; otherwise legacy
+        # layer up from the declared files (extras only on explicit opt-in).
+        if [ -n "$compose_core" ] && [ ! -f "$PZ_ROOT/$compose_core" ]; then
+            pz_error "profile declares missing compose core: $compose_core"
+            PZ_PROFILE_CALL_DEPTH="$call_depth"
+            PZ_PROFILE_ACTIVE="$active_before"
+            return 1
+        fi
+        local -a compose_args=()
+        if [ -f "${PZ_HOMELAB_STATE:-$PZ_STATE/homelab}/apps.enabled.json" ]; then
+            compose_args=(reconcile)
+        elif [ "$compose_with_extras" = "true" ]; then
+            compose_args=(up --extras)
+        else
+            compose_args=(up)
+        fi
+        if [ "$dry_run" = "1" ]; then
+            pz_info "would converge declared compose: ${compose_args[*]} (core=$compose_core extras=$compose_extras)"
+        else
+            pz_info "converging declared compose: ${compose_args[*]}"
+            bash "$PZ_ROOT/linux/server/homelab-stack.sh" "${compose_args[@]}" || {
+                pz_error "declared compose failed to converge for profile: $profile_name"
+                PZ_PROFILE_CALL_DEPTH="$call_depth"
+                PZ_PROFILE_ACTIVE="$active_before"
+                return 1
+            }
+        fi
     fi
 
     if [ -n "$scripts" ]; then
@@ -1216,59 +1448,19 @@ pz_run_profile() {
                     continue
                 fi
                 pz_info "executing $script_path"
-                bash "$script_path"
+                bash "$script_path" || {
+                    pz_error "profile script failed: $script"
+                    PZ_PROFILE_CALL_DEPTH="$call_depth"
+                    PZ_PROFILE_ACTIVE="$active_before"
+                    return 1
+                }
             else
-                pz_warn "script not found: $script_path"
+                pz_error "profile script missing: $script_path"
+                PZ_PROFILE_CALL_DEPTH="$call_depth"
+                PZ_PROFILE_ACTIVE="$active_before"
+                return 1
             fi
         done <<< "$scripts"
-    fi
-
-    if [ -n "$system_services" ]; then
-        if [ "$dry_run" = "1" ]; then
-            pz_info "planning system services..."
-        else
-            pz_info "enabling system services..."
-        fi
-        while IFS= read -r service; do
-            [ -z "$service" ] && continue
-            if [ "$dry_run" = "1" ]; then
-                pz_info "would enable system service: $service"
-                continue
-            fi
-            pz_admin_run systemctl enable --now "$service"
-        done <<< "$system_services"
-    fi
-
-    if [ -n "$user_services" ]; then
-        if [ "$dry_run" = "1" ]; then
-            pz_info "planning user services..."
-        else
-            pz_info "enabling user services..."
-        fi
-        while IFS= read -r service; do
-            [ -z "$service" ] && continue
-            if [ "$dry_run" = "1" ]; then
-                pz_info "would enable user service: $service"
-                continue
-            fi
-            systemctl --user enable --now "$service"
-        done <<< "$user_services"
-    fi
-
-    if [ -n "$sysctl_entries" ]; then
-        if [ "$dry_run" = "1" ]; then
-            pz_info "planning sysctl tuning..."
-        else
-            pz_info "applying sysctl tuning..."
-        fi
-        while IFS= read -r entry; do
-            [ -z "$entry" ] && continue
-            if [ "$dry_run" = "1" ]; then
-                pz_info "would set sysctl: $entry"
-                continue
-            fi
-            pz_admin_run sysctl -w "$entry"
-        done <<< "$sysctl_entries"
     fi
 
     pz_info "profile $profile_file complete"

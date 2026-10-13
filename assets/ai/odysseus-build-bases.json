@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "trustMode": "registry-manifest-digest",
+  "auditedAt": "2026-08-24T14:37:28Z",
+  "semanticAudit": false,
+  "images": [
+    {
+      "service": "odysseus-python",
+      "repository": "docker.io/library/python",
+      "versionTag": "3.14-slim",
+      "digest": "sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4",
+      "reference": "docker.io/library/python@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4",
+      "mediaType": "application/vnd.oci.image.index.v1+json",
+      "registryHeaderMatchedBodySha256": true,
+      "approvedForBuild": true
+    }
+  ]
+}

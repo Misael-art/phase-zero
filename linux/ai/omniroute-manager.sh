@@ -9,6 +9,15 @@ source "$PZ_ROOT/linux/lib/common.sh"
 ACTION="${1:-status}"
 shift 2>/dev/null || true
 
+connection_grant_blocked() {
+    jq -cn --arg action "$ACTION" \
+        '{schemaVersion:1,action:$action,status:"blocked",usageBlocked:true,
+          blockedReason:"connection-grant-not-enforceable",
+          message:"OmniRoute cannot pin each request to one granted connection; no provider, route, dashboard or client action was performed.",
+          secretsRedacted:true}'
+    return 69
+}
+
 PROXY_ROOT="${PZ_AI_PROXY_ROOT:-$HOME/.local/share/phasezero/ai-proxies}"
 INSTALL_PREFIX="${PZ_OMNIROUTE_PREFIX:-$HOME/.local/share/npm}"
 LOCAL_BIN="${PZ_LOCAL_BIN:-$HOME/.local/bin}"
@@ -27,7 +36,6 @@ DASHBOARD_ENTRY="${XDG_DATA_HOME:-$HOME/.local/share}/applications/phasezero-omn
 CLIENT_WRAPPER="$LOCAL_BIN/phasezero-omniroute-run"
 OPENCODE_CONFIG="${HOME}/.config/opencode/opencode.json"
 OPENCODE_CONFIG_JSON="${HOME}/.config/opencode/opencode.jsonc"
-OMNIROUTE_BIN="${INSTALL_PREFIX}/bin/omniroute"
 BACKUP_ROOT="$PROXY_ROOT/.omniroute-backups"
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
@@ -102,7 +110,18 @@ write_runtime_config() {
     [ -n "$api_secret" ] || api_secret="$(random_hex 32)"
     [ -n "$machine_salt" ] || machine_salt="$(random_hex 24)"
 
-    cat > "$ENV_FILE" <<EOF
+    # A chave de cliente vem de env_upsert e precisa sobreviver ao rewrite:
+    # descartá-la fazia ensure_api_key recriá-la, invalidando a chave já
+    # colada no opencode.json.
+    local client_key
+    client_key="$(env_get OMNIROUTE_API_KEY)"
+    # EnvironmentFile do systemd vivo: nunca truncar no lugar (mesma lição
+    # do incidente 9router.env). Backup + escrita staged no mesmo diretório.
+    if [ -f "$ENV_FILE" ]; then
+        cp -a "$ENV_FILE" "$ENV_FILE.pz-bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+    fi
+    local tmp="$ENV_FILE.tmp.$$"
+    cat > "$tmp" <<EOF
 PORT=$port
 HOSTNAME=127.0.0.1
 NODE_ENV=production
@@ -115,11 +134,14 @@ ENABLE_REQUEST_LOGS=false
 AUTH_COOKIE_SECURE=false
 OMNIROUTE_DATA_DIR=$DATA_DIR
 EOF
-    chmod 0600 "$ENV_FILE"
+    [ -n "$client_key" ] && printf 'OMNIROUTE_API_KEY=%s\n' "$client_key" >> "$tmp"
+    chmod 0600 "$tmp"
+    mv -f "$tmp" "$ENV_FILE"
 
     local active_combo
     active_combo="$(jq -r '.activeCombo // "phasezero-smart"' "$SETTINGS_FILE" 2>/dev/null || echo phasezero-smart)"
-    jq -n --arg baseUrl "http://127.0.0.1:$port" \
+    jq -n --arg port "$port" \
+        --arg baseUrl "http://127.0.0.1:$port" \
         --arg endpoint "http://127.0.0.1:$port/v1" \
         --arg dashboard "http://127.0.0.1:$port/dashboard" \
         --arg combo "$active_combo" \
@@ -143,20 +165,8 @@ exec omniroute --port "$port" --host 127.0.0.1 --no-browser "\$@"
 EOF
     chmod +x "$LOCAL_BIN/omniroute"
 
-    pz_write_managed_file "$CLIENT_WRAPPER" user <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-[ -r "$ENV_FILE" ] || { echo "OmniRoute environment missing" >&2; exit 1; }
-set -a
-source "$ENV_FILE"
-set +a
-export OPENAI_BASE_URL="http://127.0.0.1:$port/v1"
-export OPENAI_API_KEY="\$OMNIROUTE_API_KEY"
-export ANTHROPIC_BASE_URL="http://127.0.0.1:$port"
-export ANTHROPIC_API_KEY="\$OMNIROUTE_API_KEY"
-[ "\$#" -gt 0 ] || { echo "usage: phasezero-omniroute-run <command> [args...]" >&2; exit 2; }
-exec "\$@"
-EOF
+    pz_write_managed_file "$CLIENT_WRAPPER" user \
+        < "$PZ_ROOT/linux/ai/omniroute-client-wrapper.sh"
     chmod 0700 "$CLIENT_WRAPPER"
 
     install -d "$(dirname "$DASHBOARD_ENTRY")"
@@ -357,8 +367,8 @@ status_json() {
           endpoint:$endpoint,dashboard:$dashboard,settingsPath:$settings,
           providers:{total:($providers|length),active:[$providers[] | select(.active==true)]|length,list:$providers},
           combos:{total:($combos|length),names:[$combos[] | .name],list:$combos},
-          usage:$usage,
-          nextAction:(if ($installed|not) then "linux/pz ai omniroute install" elif ($health|not) then "linux/pz ai omniroute start" elif ($providers|length)==0 then "Abra o dashboard e conecte um provider" else "linux/pz ai omniroute combo auto" end)}'
+          usage:$usage,usageBlocked:true,blockedReason:"connection-grant-not-enforceable",
+          nextAction:"connection-grant-not-enforceable"}'
 }
 
 usage_summary() {
@@ -375,20 +385,33 @@ usage_summary() {
 # ─── API request helper ───────────────────────────────────────────────────────
 
 api_request() {
-    local method="$1" path="$2" data_file="${3:-}" max_time="${4:-8}" port key args
+    local method="$1" path="$2" data_file="${3:-}" max_time="${4:-8}" port key args out
     port="$(detect_port)"
     key="$(env_get OMNIROUTE_API_KEY)"
-    [ -n "$key" ] || { pz_error "OmniRoute API key unavailable; run install first"; return 1; }
+    if [ -z "$key" ]; then
+        if [ "$method" = "GET" ]; then
+            printf '{"ok":false,"state":"needs-config","summary":"OmniRoute nao tem chave de API; o servico pode nao estar instalado.","nextAction":"linux/pz ai omniroute install"}\n'
+            return 0
+        fi
+        pz_error "OmniRoute API key unavailable; run install first"
+        return 1
+    fi
     args=(-fsS --max-time "$max_time" -X "$method" -H "Authorization: Bearer $key" -H 'Content-Type: application/json')
     [ -z "$data_file" ] || args+=(--data-binary "@$data_file")
-    curl "${args[@]}" "http://127.0.0.1:$port$path"
+    if ! out="$(curl "${args[@]}" "http://127.0.0.1:$port$path")"; then
+        if [ "$method" = "GET" ]; then
+            printf '{"ok":false,"state":"unavailable","summary":"O servico OmniRoute nao respondeu na porta %s.","nextAction":"linux/pz ai omniroute install"}\n' "$port"
+            return 0
+        fi
+        return 1
+    fi
+    printf '%s\n' "$out"
 }
 
 # ─── test ─────────────────────────────────────────────────────────────────────
 
 test_omniroute() {
-    local port key health=false models_ok=false chat_status="provider-required" \
-          chat_code="" provider_count=0 model payload
+    local port key health=false models_ok=false chat_status="blocked" provider_count=0
     port="$(detect_port)"
     curl -fsS --max-time 3 "http://127.0.0.1:$port/api/health" >/dev/null 2>&1 && health=true
     key="$(env_get OMNIROUTE_API_KEY)"
@@ -398,31 +421,12 @@ test_omniroute() {
     code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H "Authorization: Bearer $key" "http://127.0.0.1:$port/v1/models" 2>/dev/null || true)"
     jq -e '(.data // []) | type == "array"' <<< "$body" >/dev/null 2>&1 && [ "$code" = 200 ] && models_ok=true
 
-    local active_combo
-    active_combo="$(jq -r '.activeCombo // "phasezero-smart"' "$SETTINGS_FILE" 2>/dev/null || echo phasezero-smart)"
-
     provider_count="$(api_request GET /api/providers 2>/dev/null | jq '[.connections // .providers // .data // . | .[]? | select((.isActive // true)==true)] | length' 2>/dev/null || echo 0)"
-
-    if [ "$provider_count" -gt 0 ] && $models_ok; then
-        model="$(api_request GET /api/combos 2>/dev/null | jq -r --arg name "$active_combo" '[.combos // .data // .[]? | select(.name==$name) | .models[0] // empty][0]' 2>/dev/null || true)"
-        [ -n "$model" ] || model="$(jq -r '.data[0].id // empty' <<< "$body" 2>/dev/null || true)"
-
-        if [ -n "$model" ]; then
-            # shellcheck disable=SC2119 # pz_tempfile forwards args to mktemp; no args is intentional
-            payload="$(pz_tempfile)"
-            jq -n --arg model "$model" '{model:$model,messages:[{role:"user",content:"Reply only: OK"}],stream:false,max_tokens:8}' > "$payload"
-            chat_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 -X POST "http://127.0.0.1:$port/v1/chat/completions" \
-                -H "Authorization: Bearer $key" -H 'Content-Type: application/json' --data-binary "@$payload" 2>/dev/null || true)"
-            rm -f "$payload"
-            [ "$chat_code" = 200 ] && chat_status=ok || chat_status=failed
-        fi
-    fi
-
     jq -cn --arg endpoint "http://127.0.0.1:$port/v1" --arg httpCode "$code" \
-        --argjson health "$health" --arg chat "$chat_status" --arg chatHttpCode "$chat_code" \
+        --argjson health "$health" --arg chat "$chat_status" \
         --argjson providers "$provider_count" --argjson models "$models_ok" \
         --argjson count "$(jq '(.data // []) | length' <<< "$body" 2>/dev/null || echo 0)" \
-        '{id:"omniroute",endpoint:$endpoint,health:$health,modelsEndpoint:$models,httpCode:$httpCode,modelCount:$count,providerCount:$providers,chat:$chat,chatHttpCode:$chatHttpCode}'
+        '{id:"omniroute",endpoint:$endpoint,health:$health,modelsEndpoint:$models,httpCode:$httpCode,modelCount:$count,providerCount:$providers,chat:$chat,blockedReason:"connection-grant-not-enforceable"}'
     $health && $models_ok
 }
 
@@ -618,7 +622,7 @@ opencode_integration() {
 # ─── doctor ───────────────────────────────────────────────────────────────────
 
 doctor_omniroute() {
-    local port installed=false service health=false env_mode="missing" data_mode="missing" timer bridge=false
+    local port installed=false service health=false env_mode="missing" data_mode="missing" timer
     port="$(detect_port)"
     [ -x "$(command -v omniroute 2>/dev/null || true)" ] || [ -f "$INSTALL_PREFIX/bin/omniroute" ] && installed=true
     service="$(service_state)"; service="${service:-inactive}"
@@ -628,9 +632,9 @@ doctor_omniroute() {
     timer="$(systemctl --user is-enabled "$WATCH_TIMER" 2>/dev/null || echo disabled)"
 
     local problems=() next_actions=()
-    $installed || { problems+=("not_installed"); next_actions+=("linux/pz ai omniroute install"); }
-    [ "$service" = "active" ] || { problems+=("service_$service"); next_actions+=("linux/pz ai omniroute start"); }
-    $health || { problems+=("unhealthy"); next_actions+=("linux/pz ai omniroute doctor"); }
+    $installed || { problems+=("not_installed"); next_actions+=("connection-grant-not-enforceable"); }
+    [ "$service" = "active" ] || { problems+=("service_$service"); next_actions+=("connection-grant-not-enforceable"); }
+    $health || { problems+=("unhealthy"); next_actions+=("connection-grant-not-enforceable"); }
     [ "$env_mode" = "600" ] || { problems+=("env_perms_$env_mode"); next_actions+=("chmod 600 $ENV_FILE"); }
     [ "$data_mode" = "700" ] || { problems+=("data_perms_$data_mode"); next_actions+=("chmod 700 $DATA_DIR"); }
 
@@ -643,7 +647,7 @@ doctor_omniroute() {
           timer:$timer,
           secure:($envMode=="600" and $dataMode=="700"),
           problems:$problems,
-          nextActions:$nextActions,
+          nextActions:$nextActions,usageBlocked:true,blockedReason:"connection-grant-not-enforceable",
           secretsRedacted:true}'
 }
 
@@ -702,6 +706,21 @@ check_update() {
 }
 
 # ─── dispatch ─────────────────────────────────────────────────────────────────
+
+case "$ACTION" in
+    install|setup|start|restart|dashboard|open|update|upgrade|opencode|opencode-integration|integrate)
+        connection_grant_blocked
+        ;;
+    provider)
+        case "${1:-status}" in sync|sync-secrets) connection_grant_blocked ;; esac
+        ;;
+    combo)
+        case "${1:-auto}" in auto|sync) connection_grant_blocked ;; esac
+        ;;
+    client)
+        case "${1:-status}" in run) connection_grant_blocked ;; esac
+        ;;
+esac
 
 case "$ACTION" in
     install|setup)
@@ -777,8 +796,7 @@ case "$ACTION" in
         case "${1:-status}" in
             status|env)
                 jq -cn --arg wrapper "$CLIENT_WRAPPER" --arg port "$(detect_port)" \
-                    --argjson ready "$([ -x "$CLIENT_WRAPPER" ] && [ -n "$(env_get OMNIROUTE_API_KEY)" ] && echo true || echo false)" \
-                    '{ready:$ready,wrapper:$wrapper,endpoint:("http://127.0.0.1:"+$port+"/v1"),usage:"phasezero-omniroute-run <codex|claude|opencode> [args...]"}'
+                    '{ready:false,wrapper:$wrapper,endpoint:("http://127.0.0.1:"+$port+"/v1"),usageBlocked:true,blockedReason:"connection-grant-not-enforceable",secretsRedacted:true}'
                 ;;
             run) shift; [ "$#" -gt 0 ] || { pz_error "usage: pz ai omniroute client run <command> [args...]"; exit 2; }; exec "$CLIENT_WRAPPER" "$@" ;;
             *) pz_error "usage: pz ai omniroute client (status|run <command>)"; exit 2 ;;
@@ -788,23 +806,24 @@ case "$ACTION" in
 PhaseZero OmniRoute Manager
 
 Usage:
-  pz ai omniroute install              Install OmniRoute + config + systemd + combos + OpenCode
+  pz ai omniroute install              Blocked until request-bound account grants exist
   pz ai omniroute status               JSON status
-  pz ai omniroute start/stop/restart   systemd lifecycle
-  pz ai omniroute test                 Probe real: /v1/models + chat completions
-  pz ai omniroute dashboard            Open web dashboard
+  pz ai omniroute stop                 Stop managed service
+  pz ai omniroute start/restart        Blocked until request-bound account grants exist
+  pz ai omniroute test                 Probe health/models only; chat inference blocked
+  pz ai omniroute dashboard            Blocked; upstream dashboard can bypass grants
   pz ai omniroute doctor               Diagnostico de seguranca
   pz ai omniroute provider status      List providers
-  pz ai omniroute provider sync        Import providers do bootstrap-secrets
-  pz ai omniroute combo auto           Auto-classifica + cria combos fallback
+  pz ai omniroute provider sync        Blocked; importing secrets does not grant usage
+  pz ai omniroute combo auto           Blocked; global fallback combos lack account binding
   pz ai omniroute combo list           List combos
-  pz ai omniroute opencode             Configura OpenCode (plugin nativo + fallback custom)
+  pz ai omniroute opencode             Blocked until request-bound account grants exist
   pz ai omniroute usage                Token/request telemetry
-  pz ai omniroute update               npm update + health check + rollback
+  pz ai omniroute update               Blocked until request-bound account grants exist
   pz ai omniroute check-update         Check npm for newer version
   pz ai omniroute watchdog status      Watchdog health
   pz ai omniroute watchdog install     Enable passive watchdog (10min timer)
-  pz ai omniroute client run <cmd>     Run tool with OmniRoute env injected
+  pz ai omniroute client run <cmd>     Blocked until request-bound account grants exist
 EOF
         exit 0 ;;
 esac

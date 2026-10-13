@@ -254,6 +254,15 @@ test ! -e "$sddm_test_dir/92-phasezero-waydroid.conf"
 PZ_DRY_RUN=1 "$REPO_ROOT/linux/pz" waydroid optimize >/dev/null
 launch_output="$("$REPO_ROOT/linux/pz" waydroid launch --dry-run)"
 grep -q 'Waydroid launcher dry-run' <<< "$launch_output"
+# Shares sem tooling instalado é relatório válido rc0 (state needs-install).
+shares_early="$(PZ_WAYDROID_SHARES_SOURCE=/nonexistent/waydroid-shares-prepare.sh \
+    PZ_WAYDROID_SHARES_TARGET=/nonexistent/waydroid-shares-prepare \
+    "$REPO_ROOT/linux/pz" waydroid shares status 2>/dev/null)"; shares_rc=$?
+[ "$shares_rc" -eq 0 ] || { echo "FAIL: shares status pré-instalação deve sair 0 (rc=$shares_rc)" >&2; exit 1; }
+jq -e '.state == "needs-install" and (.nextAction | type == "string")' <<< "$shares_early" >/dev/null \
+    || { echo "FAIL: envelope needs-install ausente" >&2; echo "$shares_early"; exit 1; }
+echo "  shares pre-install envelope ok"
+
 "$REPO_ROOT/linux/pz" waydroid install >/dev/null
 test -f "$XDG_CONFIG_HOME/phasezero/waydroid.conf"
 test -f "$XDG_DATA_HOME/applications/phasezero-waydroid.desktop"

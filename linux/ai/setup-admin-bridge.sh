@@ -197,7 +197,13 @@ EOF
 }
 
 apply_agent_rules() {
-    bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" rules >/dev/null || pz_warn "agent rule sync failed"
+    local rc=0
+    bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" rules >/dev/null || rc=$?
+    case "$rc" in
+        0) ;;
+        2) pz_info "no registered project; agent rules skipped (run: linux/pz ai init <dir>)" ;;
+        *) pz_warn "agent rule sync failed" ;;
+    esac
 }
 
 setup_admin_bridge() {

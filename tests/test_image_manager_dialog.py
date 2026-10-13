@@ -121,7 +121,10 @@ def _seed_completed_operation(ops: Path, image_index: int, op_id: str = "op-2026
     op_dir = ops / op_id
     op_dir.mkdir(parents=True, exist_ok=True)
     (op_dir / "operation.json").write_text(json.dumps({"state": "completed"}))
-    (op_dir / "plan.json").write_text(json.dumps({"imageIndex": image_index}))
+    (op_dir / "plan.json").write_text(json.dumps({
+        "imageIndex": image_index,
+        "iso": {"sha256": "a" * 64},
+    }))
 
 
 # ── Empty / disabled state ──
@@ -136,7 +139,7 @@ def test_empty_state_disables_actions(qapp, tmp_path: Path) -> None:
 
 # ── Seeded image: characteristics + "já instalada" badge ──
 
-def test_seeded_image_shows_indices_and_installed_badge(qapp, tmp_path: Path) -> None:
+def test_seeded_image_shows_indices_used_by_same_iso(qapp, tmp_path: Path) -> None:
     ops = tmp_path / "ops"
     ops.mkdir(parents=True, exist_ok=True)
     _seed_completed_operation(ops, image_index=4)
@@ -154,6 +157,33 @@ def test_seeded_image_shows_indices_and_installed_badge(qapp, tmp_path: Path) ->
     # First usable (index 1) is selected, so play is enabled.
     assert dlg.index_list.currentItem().data(Qt.UserRole) == 1
     assert dlg.play_button.isEnabled()
+
+
+def test_same_index_on_different_iso_is_not_marked_installed(qapp, tmp_path: Path) -> None:
+    ops = tmp_path / "ops"
+    ops.mkdir(parents=True, exist_ok=True)
+    _seed_completed_operation(ops, image_index=4)
+    dlg = _make_dialog(
+        tmp_path,
+        seeded=[_entry("/iso/another.iso", sha="b" * 64)],
+        operations_dir=ops,
+    )
+    row_texts = [dlg.index_list.item(r).text() for r in range(dlg.index_list.count())]
+    assert any("[#4]" in text and "já instalada" not in text for text in row_texts)
+
+
+def test_interrupted_install_resume_action_uses_selected_operation(qapp, tmp_path: Path) -> None:
+    dlg = _make_dialog(tmp_path, by_id=_real_by_id())
+    dlg._prepare_vm_resume({"id": "op-interrupted-1", "state": "interrupted"})
+    action = dlg.pending_action()
+    assert action is not None
+    assert action.id == "windows.provision.resume"
+    assert action.args == (
+        "windows-vm", "provision", "resume", "--operation-id", "op-interrupted-1",
+    )
+    assert action.preview_args == (
+        "windows-vm", "provision", "status", "--operation-id", "op-interrupted-1", "--json",
+    )
 
 
 # ── Play delegates to ProvisionPlayerWindow.open ──
@@ -256,7 +286,7 @@ def test_inventory_button_reports_count_and_real_space(qapp, tmp_path: Path) -> 
     }])
     dlg = _make_dialog(tmp_path, by_id=_real_by_id())
     assert _wait_for(lambda: not dlg._reader.is_running("vm-inventory"))
-    assert dlg.vms_button.text() == "VMs instaladas · 1"
+    assert dlg.vms_button.text() == "Instalações Windows · 1"
     assert dlg.vms_button.isEnabled()
     assert "19.6 GB" in dlg.vms_button.toolTip()
     assert dlg.remove_vm_button is not dlg.vms_button

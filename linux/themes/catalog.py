@@ -31,7 +31,21 @@ FEATURES: dict[str, FeatureSpec] = {
         section="aparência",
         kind="kde-config",
         params=("mode",),
-        config_keys=("phasezero/theme.conf:[interface]/theme",),
+        # dark/light/highcontrast apply a colourscheme and a look-and-feel,
+        # which rewrite the same files theme.kde declares; snapshotting only
+        # theme.conf left every other disturbed file outside rollback reach.
+        config_keys=(
+            "phasezero/theme.conf:[interface]/theme",
+            "kdeglobals:[KDE]/LookAndFeelPackage",
+            "kdeglobals:[General]/ColorScheme",
+            "plasmarc:[Theme]/name",
+            "kcminputrc:[Mouse]/cursorTheme",
+            "kwinrc:[Effect-blur]/BlurStrength",
+            "ksplashrc:[KSplash]/Theme",
+            "gtkrc:[Settings]/gtk-theme-name",
+            "gtkrc-2.0:[Settings]/gtk-theme-name",
+            "Trolltech.conf:[Qt]/style",
+        ),
         default_state="desligado",
         default_params={"mode": "system"},
     ),
@@ -100,7 +114,10 @@ FEATURES: dict[str, FeatureSpec] = {
         section="aparência",
         kind="kde-config",
         params=("mode", "color"),
-        config_keys=("kdeglobals:[General]/AccentColor",),
+        config_keys=(
+            "kdeglobals:[General]/AccentColor",
+            "phasezero/theme.conf:[accent]/color",
+        ),
         default_params={"mode": "auto", "color": ""},
     ),
     "theme.auto-dark": FeatureSpec(
@@ -164,18 +181,26 @@ FEATURES: dict[str, FeatureSpec] = {
     "access.zoom": FeatureSpec(
         id="access.zoom",
         title="Zoom",
-        description="Efeito de zoom do KWin (kwinrc [Effect-zoom]).",
+        description=(
+            "Efeito de zoom do KWin (kwinrc [Effect-zoom]). O efeito builtin "
+            "já vem carregado; a ativação no dia a dia é pelo atalho de teclado."
+        ),
         section="acessibilidade",
         kind="kde-config",
+        key_verified=False,
         config_keys=("kwinrc:[Effect-zoom]/Enabled",),
     ),
     "access.colorblind": FeatureSpec(
         id="access.colorblind",
         title="Correção de daltonismo",
-        description="Filtro de daltonismo do KWin (kwinrc [Effect-colorblind]).",
+        description=(
+            "Filtro de daltonismo do KWin (kwinrc [Effect-colorblind]). "
+            "Exige o plugin do efeito instalado; sem ele o recurso é indisponível."
+        ),
         section="acessibilidade",
         kind="kde-config",
         params=("type",),
+        key_verified=False,
         config_keys=("kwinrc:[Effect-colorblind]/Enabled", "kwinrc:[Effect-colorblind]/Type"),
         default_params={"type": "deuteranopia"},
     ),
@@ -279,6 +304,13 @@ FEATURES: dict[str, FeatureSpec] = {
         ),
         section="vídeo",
         kind="internal",
+        # O apply grava estes dois arquivos; sem declará-los o snapshot sai
+        # vazio e o rollback de um plano falho não devolve o
+        # AnimationDurationFactor do usuário.
+        config_keys=(
+            "phasezero/theme.conf:[power]/adaptive",
+            "kdeglobals:[KDE]/AnimationDurationFactor",
+        ),
         default_state="desligado",
     ),
     # --- Wallpaper -------------------------------------------------------
@@ -385,6 +417,10 @@ FEATURES["power.pause-on-game"] = FeatureSpec(
     description="Pausa animações e vídeo de fundo quando o Steam Gaming Mode está ativo.",
     section="vídeo",
     kind="internal",
+    config_keys=(
+        "phasezero/theme.conf:[power]/pause-on-game",
+        "kdeglobals:[KDE]/AnimationDurationFactor",
+    ),
     default_state="desligado",
 )
 

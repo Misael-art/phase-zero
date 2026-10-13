@@ -168,6 +168,11 @@ run_session >/dev/null 2>&1 &
 wait $! || exit 21
 grep -q 'direct boot graphics: --graphics virtio-gl' "$STATE_DIR/session.log" || { echo "FAIL: eligible probe must pick virtio-gl" >&2; exit 22; }
 grep -q -- '--graphics virtio-gl' < <(grep 'launching Windows VM' "$STATE_DIR/session.log" | tail -n1) || { echo "FAIL: launcher args missing virtio-gl" >&2; exit 23; }
+# The launcher refuses an explicitly requested virtio-gl unless --experimental
+# comes with it. Choosing the profile is not enough: without this flag every
+# direct boot logged "adicione --experimental", fell back to compat, and left
+# the guest at 1024x768 letterboxed on the 1280x800 panel.
+grep -q -- '--experimental' < <(grep 'launching Windows VM' "$STATE_DIR/session.log" | tail -n1) || { echo "FAIL: explicit virtio-gl must carry --experimental or the launcher rejects it" >&2; exit 27; }
 
 # --- 7: ineligible host -> keep the configured profile, no extra flag.
 set_stub_mode exit0

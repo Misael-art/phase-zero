@@ -89,13 +89,37 @@ Describe 'Bootstrap AppTuning catalog and selection' {
 
         $doc = Get-Content -LiteralPath $docPath -Raw
         $script = Get-Content -LiteralPath $scriptPath -Raw
-        foreach ($expected in @('headroom wrap claude --memory','headroom wrap codex --memory','headroom wrap aider','headroom wrap cursor','headroom wrap openclaw','n8n','OpenCode')) {
+        foreach ($expected in @('headroom wrap claude --memory','headroom wrap codex --memory','headroom wrap aider','headroom wrap cursor','OpenClaw: blocked until each request can enforce an explicit account grant (exit 69)','n8n','OpenCode')) {
             $doc | Should Match ([regex]::Escape($expected))
         }
         $doc | Should Match 'OpenCode.+manual'
         foreach ($expectedAction in @('wrap-claude','wrap-codex','wrap-aider','wrap-cursor','wrap-copilot','wrap-gemini','wrap-openclaw','mcp-install','proxy','stats')) {
             $script | Should Match ([regex]::Escape($expectedAction))
         }
+        $script | Should Match 'connection-grant-not-enforceable'
+        $script | Should Match 'exit 69'
+
+        $pwsh = (Get-Command pwsh -ErrorAction Stop).Source
+        $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $pwsh
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.Arguments = ('-NoLogo -NoProfile -File "{0}" -Action wrap-openclaw' -f $scriptPath)
+        $startInfo.EnvironmentVariables['PATH'] = ''
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $startInfo
+        [void]$process.Start()
+        if (-not $process.WaitForExit(10000)) {
+            $process.Kill()
+            throw 'OpenClaw wrapper fixture timed out.'
+        }
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        [int]$process.ExitCode | Should Be 69
+        $stdout | Should Match '"usageBlocked":true'
+        $stdout | Should Match 'connection-grant-not-enforceable'
+        $stderr | Should Match 'grants are not bound to each request'
     }
 
     It 'exposes AI context frugality pack as opt-in reversible agent config' {
@@ -610,10 +634,19 @@ function Invoke-SampleThing {
 
         $item.category | Should Be 'dev-ai'
         $item.defaultMode | Should Be 'recommended'
-        (@($item.targetApps) -contains 'openclaw') | Should Be $true
+        (@($item.targetApps) -contains 'openclaw') | Should Be $false
         (@($item.targetApps) -contains 'hermes') | Should Be $true
         (@($item.targetApps) -contains 'kilo') | Should Be $true
         (@($item.actions) -contains 'config-file') | Should Be $true
+    }
+
+    It 'keeps OpenClaw outside AI provider gateway propagation' {
+        $catalog = Get-BootstrapAppTuningCatalog
+        $item = @($catalog.items | Where-Object { $_.id -eq 'ai-provider-gateway-config' })[0]
+
+        $item | Should Not Be $null
+        (@($item.targetApps) -contains 'openclaw') | Should Be $false
+        (@($item.installComponents) -contains 'openclaw') | Should Be $false
     }
 
     It 'exposes GitHub CLI agent auth as dev-ai recommended tuning' {
@@ -725,7 +758,7 @@ Describe 'AppTuning installComponents e catalogo de componentes' {
         $e = @(Get-BootstrapAppTuningInstallComponents -Item $by['ai-agent-byok-config'])
         (@($e) -contains 'bootstrap-secrets') | Should Be $true
         (@($e) -contains 'kilo-cli') | Should Be $true
-        (@($e) -contains 'openclaw') | Should Be $true
+        (@($e) -contains 'openclaw') | Should Be $false
         (@($e) -contains 'hermes') | Should Be $true
         $b = @(Get-BootstrapAppTuningInstallComponents -Item $by['comet-manual'])
         $b.Count | Should Be 1

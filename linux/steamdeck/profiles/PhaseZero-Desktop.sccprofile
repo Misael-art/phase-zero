@@ -1,0 +1,117 @@
+{
+ "_": "PhaseZero Desktop - mapa de controle para o KDE Plasma no Steam Deck. Editar via linux/steamdeck/controller-desktop.sh, nao pela GUI do sc-controller: a GUI reescreve o arquivo no perfil do usuario e a copia versionada deixa de ser a fonte.",
+ "buttons": {
+  "A": {
+   "action": "button(Keys.KEY_ENTER)",
+   "name": "Confirmar",
+   "modes": {
+    "C": {
+     "action": "button(Keys.KEY_LEFTCTRL) and button(Keys.KEY_V)",
+     "name": "Colar"
+    }
+   }
+  },
+  "B": {
+   "action": "button(Keys.KEY_ESC)",
+   "name": "Cancelar",
+   "modes": {
+    "C": {
+     "action": "button(Keys.KEY_LEFTCTRL) and button(Keys.KEY_C)",
+     "name": "Copiar"
+    }
+   }
+  },
+  "X": {
+   "action": "button(Keys.KEY_BACKSPACE)",
+   "name": "Apagar",
+   "modes": {
+    "C": {
+     "action": "shell('bash PZ_ROOT/linux/steamdeck/hotkey-actions.sh keyboard')",
+     "name": "Teclado virtual"
+    }
+   }
+  },
+  "Y": {
+   "action": "button(Keys.KEY_SPACE)",
+   "name": "Espaco",
+   "modes": {
+    "C": {
+     "action": "button(Keys.KEY_SYSRQ)",
+     "name": "Captura de tela"
+    }
+   }
+  },
+  "LB": {
+   "action": "button(Keys.KEY_LEFTCTRL) and button(Keys.KEY_LEFTSHIFT) and button(Keys.KEY_TAB)",
+   "name": "Aba anterior"
+  },
+  "RB": {
+   "action": "button(Keys.KEY_LEFTCTRL) and button(Keys.KEY_TAB)",
+   "name": "Proxima aba"
+  },
+  "LGRIP": {
+   "action": "button(Keys.KEY_LEFTSHIFT) and button(Keys.KEY_TAB)",
+   "name": "Campo anterior"
+  },
+  "RGRIP": {
+   "action": "button(Keys.KEY_TAB)",
+   "name": "Proximo campo"
+  },
+  "LGRIP2": {
+   "action": "button(Keys.KEY_LEFTMETA)",
+   "name": "Menu Iniciar"
+  },
+  "RGRIP2": {
+   "action": "button(Keys.KEY_LEFTMETA) and button(Keys.KEY_W)",
+   "name": "Visao geral das atividades"
+  },
+  "RPAD": {
+   "action": "button(Keys.BTN_LEFT)",
+   "name": "Clique esquerdo"
+  },
+  "DOTS": {
+   "action": "shell('bash PZ_ROOT/linux/steamdeck/hotkey-actions.sh keyboard')",
+   "name": "Teclado virtual"
+  },
+  "START": {
+   "action": "button(Keys.KEY_LEFTMETA) and button(Keys.KEY_W)",
+   "name": "Visao geral das atividades"
+  },
+  "BACK": {
+   "action": "button(Keys.KEY_LEFTALT) and button(Keys.KEY_TAB)",
+   "name": "Alternar janelas"
+  }
+ },
+ "dpad": {
+  "action": "dpad(button(Keys.KEY_UP), button(Keys.KEY_DOWN), button(Keys.KEY_LEFT), button(Keys.KEY_RIGHT))",
+  "name": "Setas"
+ },
+ "gyro": {},
+ "is_template": false,
+ "menus": {},
+ "pad_left": {
+  "action": "feedback(LEFT, 4096, 16, ball(XY(mouse(Rels.REL_HWHEEL, 1.0), mouse(Rels.REL_WHEEL, 1.0))))",
+  "name": "Rolagem"
+ },
+ "pad_right": {
+  "action": "smooth(8, 0.78, 2.0, feedback(RIGHT, 256, ball(mouse())))",
+  "name": "Cursor"
+ },
+ "lstick": {
+  "action": "dpad(button(Keys.KEY_UP), button(Keys.KEY_DOWN), button(Keys.KEY_LEFT), button(Keys.KEY_RIGHT))",
+  "name": "Setas"
+ },
+ "rstick": {
+  "action": "smooth(8, 0.78, 2.0, ball(mouse()))",
+  "name": "Cursor"
+ },
+ "trigger_left": {
+  "action": "button(Keys.BTN_RIGHT)",
+  "name": "Clique direito"
+ },
+ "trigger_right": {
+  "action": "button(Keys.BTN_LEFT)",
+  "name": "Clique esquerdo"
+ },
+ "version": 1.6
+}

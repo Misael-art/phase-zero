@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Ignore caller XDG config; cases set their own temporary override when needed.
+unset XDG_CONFIG_HOME
 REPO="$(cd "$HERE/.." && pwd)"
-MOCK_BIN="$HERE/.bin"
+TEST_SCRATCH="$(mktemp -d "$HERE/.audit-doctor.XXXXXX")"
+printf '  scratch: %s\n' "$TEST_SCRATCH"
+MOCK_BIN="$TEST_SCRATCH/bin"
+MOCK_HOME="$TEST_SCRATCH/home"
 DOCTOR="$REPO/linux/audit/doctor.sh"
 PASS=0 FAIL=0
 STUBBED_FILES=()
@@ -14,7 +19,7 @@ mock_cleanup() {
         fi
     done
     STUBBED_FILES=()
-    rm -rf "$MOCK_BIN"
+    rm -rf "$TEST_SCRATCH"
 }
 trap mock_cleanup EXIT
 
@@ -36,7 +41,28 @@ mock_install_df() { mock_install df "$1"; }
 mock_install_free() { mock_install free "$1"; }
 
 mock_run() {
-    PATH="$MOCK_BIN:/usr/bin:/bin" timeout 30 bash "$DOCTOR" 2>/dev/null || true
+    local output rc
+    mkdir -p "$MOCK_HOME"
+    # Never turn a timeout or an interrupted run into empty, successful output.
+    if output=$(
+        HOME="$MOCK_HOME" \
+        XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$MOCK_HOME/.config}" \
+        XDG_DATA_HOME="$MOCK_HOME/.local/share" \
+        XDG_STATE_HOME="$MOCK_HOME/.local/state" \
+        XDG_CACHE_HOME="$MOCK_HOME/.cache" \
+        PZ_DOCTOR_CMD_TIMEOUT=2 \
+        PATH="$MOCK_BIN:/usr/bin:/bin" \
+            timeout 90 bash "$DOCTOR" 2>/dev/null
+    ); then
+        rc=0
+    else
+        rc=$?
+    fi
+    if [[ "$rc" -eq 124 ]] || ! grep -Fq '=== Summary ===' <<< "$output"; then
+        echo "FAIL: doctor did not reach summary (exit $rc)" >&2
+        return 1
+    fi
+    printf '%s\n' "$output"
 }
 
 DF_BASIC() {
@@ -73,6 +99,9 @@ stub_all_subscripts() {
     local stub='#!/usr/bin/env bash
 echo "{}"
 '
+    local fail_stub='#!/usr/bin/env bash
+exit 1
+'
     for sub in \
         linux/windows-vm/windows-vm.sh \
         linux/windows-vm/graphics.sh \
@@ -95,6 +124,10 @@ echo "{}"
         linux/boot/iso-boot.sh \
         linux/steamdeck/install-steamos-boot.sh; do
         stub_repo_file "$sub" "$stub"
+    done
+    # Host service, network, and user-session probes must stay deterministic.
+    for tool in systemctl ping lspci ip qdbus6 docker flatpak tailscale btrfs; do
+        mock_install "$tool" "$fail_stub"
     done
 }
 
@@ -120,7 +153,7 @@ echo "/dev/sda1       50G   25G   25G  50% /"
 '
     mock_install_free "$(FREE_VALID)"
     local output
-    output=$(mock_run)
+    output=$(mock_run) || return 1
     if echo "$output" | grep -q 'DISK_var_lib_snapd_snap'; then
         echo "FAIL: case 1 (snap-not-fail) — snap line appeared in output" >&2
         return 1
@@ -140,7 +173,7 @@ Swap:          ?       ?       ?
 EOF'
     mock_install_df "$(DF_BASIC)"
     local output
-    output=$(mock_run)
+    output=$(mock_run) || return 1
     if ! echo "$output" | grep -Eq '(ERROR.*MEM01|MEM01.*ERROR)'; then
         echo "FAIL: case 2 (mem-localized-error) — expected MEM01 ERROR" >&2
         echo "MEM01: $(echo "$output" | grep MEM01 || true)" >&2
@@ -156,7 +189,7 @@ test_mem_valid_pass() {
     mock_install_free "$(FREE_VALID)"
     mock_install_df "$(DF_BASIC)"
     local output
-    output=$(mock_run)
+    output=$(mock_run) || return 1
     local passes
     passes=$(echo "$output" | grep -cE '(PASS.*MEM|MEM.*PASS)' || true)
     if [ "$passes" -lt 3 ]; then
@@ -188,7 +221,7 @@ echo "Filesystem      Size  Used Avail Use% Mounted on"
 echo "/dev/sda1       50G   25G   25G  50% /"
 '
     local output
-    output=$(mock_run)
+    output=$(mock_run) || return 1
     if ! echo "$output" | grep -Eq '(ERROR.*_mnt_data|_mnt_data.*ERROR)'; then
         echo "FAIL: case 4 (pct-malformed-error) — expected DISK_mnt_data ERROR" >&2
         echo "DISK lines: $(echo "$output" | grep 'DISK_' || true)" >&2
@@ -204,7 +237,7 @@ test_stdout_id() {
     mock_install_free "$(FREE_VALID)"
     mock_install_df "$(DF_BASIC)"
     local output
-    output=$(mock_run)
+    output=$(mock_run) || return 1
     if ! echo "$output" | grep -q '^\[PASS\] MEM01:'; then
         echo "FAIL: case 5 (stdout-id) — expected '[PASS] MEM01:' pattern" >&2
         echo "MEM01: $(echo "$output" | grep MEM01 || true)" >&2
@@ -226,7 +259,7 @@ if expr "$*" : ".*thermal_zone0" >/dev/null; then echo "0"; exit 0; fi
 /usr/bin/cat "$@"
 '
     local output
-    output=$(mock_run)
+    output=$(mock_run) || return 1
     if echo "$output" | grep -Eq '(WARN.*WINVM06|WINVM06.*WARN)'; then
         echo "FAIL: case 6 (host-profile-deck-winvm06) — expected WINVM06 INFO not WARN" >&2
         echo "WINVM06: $(echo "$output" | grep WINVM06 || true)" >&2
@@ -241,11 +274,11 @@ test_subsystem_never_waydroid() {
     stub_all_subscripts
     mock_install_free "$(FREE_VALID)"
     mock_install_df "$(DF_BASIC)"
-    export XDG_CONFIG_HOME="$HERE/.xdg"
+    export XDG_CONFIG_HOME="$TEST_SCRATCH/xdg"
     mkdir -p "$XDG_CONFIG_HOME/phasezero"
     printf 'SUBSYSTEM_WAYDROID=never\n' > "$XDG_CONFIG_HOME/phasezero/subsystems.conf"
     local output
-    output=$(mock_run)
+    output=$(mock_run) || return 1
     if echo "$output" | grep -Eq '(WARN.*WAYDROID|WAYDROID.*WARN)'; then
         echo "FAIL: case 7 (subsystem-never-waydroid) — expected no WAYDROID WARN" >&2
         echo "WAYDROID WARNs: $(echo "$output" | grep WAYDROID || true)" >&2
@@ -260,11 +293,11 @@ test_subsystem_partial_waydroid() {
     stub_all_subscripts
     mock_install_free "$(FREE_VALID)"
     mock_install_df "$(DF_BASIC)"
-    export XDG_CONFIG_HOME="$HERE/.xdg"
+    export XDG_CONFIG_HOME="$TEST_SCRATCH/xdg"
     mkdir -p "$XDG_CONFIG_HOME/phasezero"
     printf 'SUBSYSTEM_WAYDROID=partial\n' > "$XDG_CONFIG_HOME/phasezero/subsystems.conf"
     local output
-    output=$(mock_run)
+    output=$(mock_run) || return 1
     if ! echo "$output" | grep -Eq '(WARN.*WAYDROID|WAYDROID.*WARN)'; then
         echo "FAIL: case 8 (subsystem-partial) — expected some WAYDROID WARN" >&2
         echo "WAYDROID lines: $(echo "$output" | grep WAYDROID || true)" >&2
@@ -273,19 +306,27 @@ test_subsystem_partial_waydroid() {
     echo "ok"
 }
 
-# case 9: no subsystems.conf → default conservative (all checks run at stated severity)
-test_default_conservative() {
+# case 9: sem subsystems.conf → subsistema opcional fica em INFO, não em WARN.
+# CCS-016 inverteu a regra antiga ("ausência de conf = opted, WARN cheio"):
+# host novo não pode virar parede de avisos por subsistema que o usuário nunca
+# pediu. Este caso guardava a regra antiga e ninguém percebeu, porque o arquivo
+# ficava fora do runner.
+test_optional_subsystem_stays_quiet_without_config() {
     rm -rf "$MOCK_BIN"
     stub_all_subscripts
     mock_install_free "$(FREE_VALID)"
     mock_install_df "$(DF_BASIC)"
-    export XDG_CONFIG_HOME="$HERE/.xdg_none"
+    export XDG_CONFIG_HOME="$TEST_SCRATCH/xdg_none"
     mkdir -p "$XDG_CONFIG_HOME/phasezero"
     local output
-    output=$(mock_run)
-    if ! echo "$output" | grep -Eq '(WARN.*WAYDROID|WAYDROID.*WARN)'; then
-        echo "FAIL: case 9 (default-conservative) — expected WAYDROID WARN with no config" >&2
+    output=$(mock_run) || return 1
+    if ! echo "$output" | grep -Eq '\[INFO\] WAYDROID00.*not opted in'; then
+        echo "FAIL: sem config, Waydroid deveria ficar em INFO 'not opted in'" >&2
         echo "WAYDROID lines: $(echo "$output" | grep WAYDROID || true)" >&2
+        return 1
+    fi
+    if echo "$output" | grep -Eq '(WARN.*WAYDROID|WAYDROID.*WARN)'; then
+        echo "FAIL: subsistema não solicitado virou WARN num host sem config" >&2
         return 1
     fi
     echo "ok"
@@ -296,7 +337,7 @@ echo "=== audit/doctor.sh engine hardening tests ==="
 for case in test_snap_not_fail test_mem_localized_error test_mem_valid_pass \
             test_pct_malformed_error test_stdout_id test_host_profile_deck_winvm06 \
             test_subsystem_never_waydroid test_subsystem_partial_waydroid \
-            test_default_conservative; do
+            test_optional_subsystem_stays_quiet_without_config; do
     printf "  case %s: " "${case#test_}"
     mock_cleanup 2>/dev/null || true
     if "$case"; then

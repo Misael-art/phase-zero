@@ -1,0 +1,45 @@
+{
+  "action": "prepare",
+  "dryRun": true,
+  "host": "local",
+  "profile": "edge",
+  "profileInstallable": false,
+  "profileNote": "zeroclaw worker not implemented",
+  "profileServices": [
+    "zeroclaw",
+    "9router"
+  ],
+  "budget": {
+    "schemaVersion": 1,
+    "tool": "homelab-governor",
+    "profile": "edge",
+    "profileTitle": "Edge Gateway",
+    "coreBaseMB": 1024,
+    "serviceMB": 640,
+    "budgetMB": 1664,
+    "availableMB": 3877,
+    "totalMB": 14820,
+    "diskAvailableMB": 293627,
+    "headroomPct": 20,
+    "winvmActive": false,
+    "winvmWeightMB": 0,
+    "verdict": "pass",
+    "reasons": []
+  },
+  "appsSource": "catalog-defaults",
+  "access": "local",
+  "apps": [
+    "jellyfin",
+    "syncthing",
+    "vaultwarden",
+    "uptime-kuma"
+  ],
+  "steps": [
+    "dependencies",
+    "daemon",
+    "access",
+    "configure",
+    "apps",
+    "verify"
+  ]
+}

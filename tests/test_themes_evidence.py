@@ -25,6 +25,7 @@ from linux.themes.engine import (  # noqa: E402
     create_plan,
     preview_plan,
     rollback_snapshot,
+    status_payload,
 )
 from linux.themes.kde import ConfigWrite, KdeSession  # noqa: E402
 from linux.themes.platform import detect  # noqa: E402
@@ -151,6 +152,145 @@ def test_preview_rejects_non_wallpaper_plans(fake_plasma, fake_state, fake_confi
         preview_plan(plan["id"], confirmation=plan["confirmToken"], facts=facts, session=sess)
 
 
+def test_expired_preview_of_other_plan_reverts_on_next_command(fake_plasma, fake_state, fake_config):
+    """A expiração não pode depender de reentrar no MESMO plano: o comando
+    seguinte, de qualquer plano, reverte o preview vencido."""
+    facts = detect()
+    sess = KdeSession(facts)
+    plan_a = create_plan(wallpaper="pz.geo-dark", screen="0", facts=facts, session=sess)
+    preview_a = preview_plan(plan_a["id"], confirmation=plan_a["confirmToken"], facts=facts, session=sess)
+    assert preview_a["applied"] is True
+
+    record = themes_state.load("previews", preview_a["previewId"])
+    record["expiresAt"] = int(time.time()) - 1
+    themes_state.save("previews", preview_a["previewId"], record)
+
+    plan_b = create_plan(wallpaper="pz.aurora", screen="0", facts=facts, session=sess)
+    preview_b = preview_plan(plan_b["id"], confirmation=plan_b["confirmToken"], facts=facts, session=sess)
+    assert preview_b["applied"] is True
+
+    updated = themes_state.load("previews", preview_a["previewId"])
+    assert updated["applied"] is False
+    assert updated["expiredRolledBack"] is True
+
+
+def test_confirmed_apply_is_never_reverted_by_preview_expiry(fake_plasma, fake_state, fake_config):
+    """Apply confirmado é dono da mudança; a varredura consome o preview em vez
+    de restaurar o snapshot por cima do que o usuário confirmou."""
+    facts = detect()
+    sess = KdeSession(facts)
+    plan = create_plan(wallpaper="pz.geo-dark", screen="0", facts=facts, session=sess)
+    preview = preview_plan(plan["id"], confirmation=plan["confirmToken"], facts=facts, session=sess)
+    operation = apply_plan(plan["id"], confirmation=plan["confirmToken"], facts=facts, session=sess)
+    assert operation["status"] == "complete"
+
+    record = themes_state.load("previews", preview["previewId"])
+    record["expiresAt"] = int(time.time()) - 1
+    themes_state.save("previews", preview["previewId"], record)
+
+    status_payload(facts=facts, session=sess)  # qualquer comando dispara a varredura
+
+    updated = themes_state.load("previews", preview["previewId"])
+    assert updated["applied"] is False
+    assert updated["consumedByApply"] == operation["operationId"]
+    assert updated.get("expiredRolledBack") is not True
+
+
+def test_dangling_preview_snapshot_does_not_brick_the_cli(fake_plasma, fake_state, fake_config):
+    """Retenção apagando snapshot referenciado por preview vivo não pode
+    derrubar nenhum comando (ValueError não capturado = CLI morta)."""
+    facts = detect()
+    sess = KdeSession(facts)
+    plan = create_plan(wallpaper="pz.geo-dark", screen="0", facts=facts, session=sess)
+    preview = preview_plan(plan["id"], confirmation=plan["confirmToken"], facts=facts, session=sess)
+    record = themes_state.load("previews", preview["previewId"])
+    record["expiresAt"] = int(time.time()) - 1
+    themes_state.save("previews", preview["previewId"], record)
+    themes_state.save("snapshots", plan["snapshotId"], {})  # snapshotted corrompido/podado
+
+    payload = status_payload(facts=facts, session=sess)  # não pode levantar
+    assert payload["schema"] == "themes/v1"
+
+
+def test_lock_preview_reverts_to_empty_original(fake_plasma, fake_state, fake_config):
+    """Host stock: lockScreen original é "" e o restore antigo (gate
+    `if lock_image:`) deixava o preview de tela de bloqueio permanente."""
+    facts = detect()
+    sess = KdeSession(facts)
+    lock = fake_config / "kscreenlockerrc"
+    plan = create_plan(wallpaper="pz.geo-dark", screen="0", wallpaper_target="lock", facts=facts, session=sess)
+    preview = preview_plan(plan["id"], confirmation=plan["confirmToken"], facts=facts, session=sess)
+    assert preview["applied"] is True
+    assert "Image=" in lock.read_text(encoding="utf-8")
+
+    record = themes_state.load("previews", preview["previewId"])
+    record["expiresAt"] = int(time.time()) - 1
+    themes_state.save("previews", preview["previewId"], record)
+    status_payload(facts=facts, session=sess)
+
+    updated = themes_state.load("previews", preview["previewId"])
+    assert updated["expiredRolledBack"] is True
+    assert "Image=" in lock.read_text(encoding="utf-8")
+
+
+def test_verify_reports_failed_wallpaper_and_respected_off(fake_plasma, fake_state, fake_config):
+    """Wallpaper failed não pode virar "applied"; operação off bem-sucedida
+    não pode verificar como falha."""
+    from linux.themes.engine import verify_operation
+
+    facts = detect()
+    sess = KdeSession(facts)
+    # off: aplica on primeiro, depois off, e o verify da direção off passa
+    plan_on = create_plan(feature="access.reduce-motion", feature_state_target="on", facts=facts, session=sess)
+    apply_plan(plan_on["id"], confirmation=plan_on["confirmToken"], facts=facts, session=sess)
+    plan_off = create_plan(feature="access.reduce-motion", feature_state_target="off", facts=facts, session=sess)
+    operation = apply_plan(plan_off["id"], confirmation=plan_off["confirmToken"], facts=facts, session=sess)
+    assert operation["status"] == "complete"
+    verified = verify_operation(operation["operationId"], facts=facts, session=sess)
+    assert verified["ok"] is True, verified
+
+    # wallpaper failed: resultado "failed" sem featureId verifica como falha
+    themes_state.save("operations", "op-fake", {
+        "schema": "themes/v1", "kind": "operation", "id": "op-fake",
+        "planId": "plan-fake", "snapshotId": "", "createdAt": int(time.time()),
+        "status": "failed",
+        "results": [{"wallpaperId": "pz.geo-dark", "status": "failed", "error": "x"}],
+    })
+    verified = verify_operation("op-fake", facts=facts, session=sess)
+    assert verified["ok"] is False
+    assert verified["checks"][0]["status"] == "failed"
+
+
+def test_video_smart_wallpaper_is_plannable_when_explicit(fake_plasma, fake_state, fake_config):
+    """--state on é pedido explícito; o blocker "" (plano bloqueado sem
+    explicação) foi removido - qualquer blocker restante se explica."""
+    from tests.test_themes_contracts import run_cli
+    result = run_cli("plan", "--feature", "video.smart-wallpaper", "--state", "on")
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    assert all(str(b).strip() for b in plan["blockers"]), plan["blockers"]
+    assert "" not in plan["blockers"]
+
+
+def test_blocked_plan_creates_no_snapshot(fake_plasma, fake_state, fake_config, tmp_path):
+    """Plano bloqueado nunca executa; gastar snapshot do pool de retenção
+    que operações e previews referenciam era churn puro."""
+    fake = tmp_path / "plasma5.json"
+    payload = json.loads((tmp_path / "fake.json").read_text())
+    payload["plasmaMajor"] = 5
+    fake.write_text(json.dumps(payload))
+    os.environ["PZ_THEMES_FAKE_JSON"] = str(fake)
+    try:
+        facts = detect()
+        sess = KdeSession(facts)
+        plan = create_plan(wallpaper="pz.geo-dark", screen="0", facts=facts, session=sess)
+        assert plan["ok"] is False
+        assert plan["blockers"]
+        assert plan["snapshotId"] == ""
+    finally:
+        os.environ["PZ_THEMES_FAKE_JSON"] = str(tmp_path / "fake.json")
+
+
 # --------------------------------------------------------------------------
 # TH-RBK-001 — Rollback preserva painéis/widgets (byte a byte)
 # --------------------------------------------------------------------------
@@ -239,6 +379,21 @@ def test_wallpaper_reads_per_screen_state(multi_screen_plasma, fake_state, fake_
     assert screens[1]["screen"] == 1
     assert screens[1]["wallpaperPlugin"] == "org.kde.slideshow"
     assert screens[0]["config"]["Image"] == "file:///a.png"
+
+
+def test_snapshot_carries_desktop_index_and_restore_targets_it(multi_screen_plasma, fake_state, fake_config):
+    """Containments diferentes reportam o mesmo screen (-1); restaurar por
+    screen colapsa todos no primeiro. O índice do array desktops() endereça
+    o containment exato."""
+    facts = detect()
+    sess = KdeSession(facts)
+    plan = create_plan(wallpaper="pz.geo-dark", screen="1", facts=facts, session=sess)
+    snapshot = themes_state.load("snapshots", plan["snapshotId"])
+    assert [item.get("desktopIndex") for item in snapshot["wallpapers"]] == [0, 1]
+
+    rollback = rollback_snapshot(plan["snapshotId"], facts=facts, session=sess)
+    assert rollback["status"] == "complete"
+    assert rollback["restored"] is True
 
 
 def test_wallpaper_plan_writes_no_containments(fake_plasma, fake_state, fake_config):

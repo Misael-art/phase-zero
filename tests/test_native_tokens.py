@@ -79,3 +79,19 @@ def test_app_apply_theme_uses_tokens():
     # The old regex-rewrite had a 'replacements = {' block — must be gone.
     assert "replacements = {" not in source
     assert "from .tokens import" in source or "from linux.ui_native.tokens import" in source
+
+
+def test_type_scales_with_desktop_font_and_floor_is_readable():
+    """LUX-020: texto cresce com a fonte do sistema; mínimo de 11px."""
+    import re
+    from linux.ui_native.tokens import font_scale
+
+    assert DARK.text_xs >= 11 and LIGHT.text_xs >= 11
+    assert font_scale(10) == 1.0
+    assert font_scale(8) == 1.0
+    assert font_scale(12) == 1.2
+    base = render_qss(DARK)
+    big = render_qss(DARK, font_scale(15))
+    assert f"font-size: {DARK.text_base}px" in base
+    assert f"font-size: {round(DARK.text_base * 1.5)}px" in big
+    assert re.findall(r"#[0-9a-f]{6}", base) == re.findall(r"#[0-9a-f]{6}", big)

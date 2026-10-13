@@ -17,7 +17,7 @@
         "luajit",
         "luarocks",
         "unzip",
-        "p7zip",
+        "7zip",
         "cabextract",
         "desktop-file-utils",
         "fuse2",
@@ -26,12 +26,13 @@
         "wine",
         "winetricks",
         "protontricks",
-        "protonup-qt",
         "retroarch",
         "rsync",
         "zsync"
       ],
-      "yay": [],
+      "yay": [
+        "protonup-qt"
+      ],
       "flatpak": []
     },
     "windows": {

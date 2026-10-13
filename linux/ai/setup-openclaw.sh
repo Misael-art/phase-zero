@@ -55,6 +55,13 @@ link_managed_bin() {
 
 OPENCLAW_VERSION="${PZ_OPENCLAW_VERSION:-0.9.4}"
 
+require_connection_grant() {
+    pz_error "OpenClaw usage blocked: PhaseZero cannot bind an account grant to every request"
+    jq -cn '{schemaVersion:1,tool:"openclaw",id:"openclaw",status:"blocked",
+      ready:false,usageBlocked:true,blockedReason:"connection-grant-not-enforceable",secretsRedacted:true}'
+    return 69
+}
+
 install_openclaw() {
     pz_check_deps npm node jq
     if ! node_version_ok; then
@@ -211,7 +218,7 @@ status_json() {
         --argjson aiMemoryMcp "$ai_memory" \
         --argjson aiMemoryHooks "$hooks" \
         --argjson mcpServerCount "$phasezero_count" \
-        '{tool:"openclaw",available:$available,commandPath:$commandPath,version:$version,configPath:$configPath,configExists:$configExists,gatewayConfigPath:$gatewayConfigPath,gatewayConfigExists:$gatewayConfigExists,envFile:$envFile,envExists:$envExists,stateFile:$stateFile,stateExists:$stateExists,service:{unit:"openclaw-gateway.service",scope:"user",active:$serviceActive,enabled:$serviceEnabled},gatewayStatus:$gateway,mcp:{serverCount:$mcpServerCount,aiMemory:$aiMemoryMcp},hooks:{aiMemory:$aiMemoryHooks,pluginDir:$pluginDir}}'
+        '{tool:"openclaw",available:$available,commandPath:$commandPath,version:$version,configPath:$configPath,configExists:$configExists,gatewayConfigPath:$gatewayConfigPath,gatewayConfigExists:$gatewayConfigExists,envFile:$envFile,envExists:$envExists,stateFile:$stateFile,stateExists:$stateExists,service:{unit:"openclaw-gateway.service",scope:"user",active:$serviceActive,enabled:$serviceEnabled},gatewayStatus:$gateway,mcp:{serverCount:$mcpServerCount,aiMemory:$aiMemoryMcp},hooks:{aiMemory:$aiMemoryHooks,pluginDir:$pluginDir},status:"blocked",ready:false,usageBlocked:true,blockedReason:"connection-grant-not-enforceable",secretsRedacted:true}'
 }
 
 dry_run() {
@@ -220,19 +227,12 @@ dry_run() {
         --arg localBin "$LOCAL_BIN" \
         --arg configPath "$CONFIG_FILE" \
         --arg envFile "$ENV_FILE" \
-        '{tool:"openclaw",planned:["install npm package openclaw@<pinned> into user prefix","link openclaw into local bin","run openclaw setup --non-interactive --accept-risk","sync PhaseZero MCP servers into ~/.openclaw/config.json","wire ai-memory MCP/hooks plugin when available","write env template without secrets"],npmPrefix:$npmPrefix,localBin:$localBin,configPath:$configPath,envFile:$envFile}'
+        '{tool:"openclaw",status:"blocked",allowed:false,usageBlocked:true,blockedReason:"connection-grant-not-enforceable",planned:[],npmPrefix:$npmPrefix,localBin:$localBin,configPath:$configPath,envFile:$envFile,secretsRedacted:true}'
 }
 
 case "${1:-setup}" in
-    setup)
-        install_openclaw
-        configure_openclaw
-        status_json
-        ;;
-    install) install_openclaw ;;
-    configure) configure_openclaw ;;
-    daemon|install-daemon) install_daemon ;;
-    status) status_json ;;
+    setup|install|configure|daemon|install-daemon) require_connection_grant ;;
+    status|doctor) status_json ;;
     dry-run|plan) dry_run ;;
-    *) echo "usage: setup-openclaw.sh (setup|install|configure|daemon|status|dry-run)"; exit 1 ;;
+    *) echo "usage: setup-openclaw.sh (setup|install|configure|daemon|status|doctor|dry-run)"; exit 1 ;;
 esac

@@ -1,0 +1,838 @@
+{
+  "schemaVersion": 1,
+  "tool": "doctor",
+  "scope": "full",
+  "summary": {
+    "pass": 68,
+    "warn": 40,
+    "fail": 3,
+    "error": 0,
+    "info": 26,
+    "total": 137
+  },
+  "ok": false,
+  "checks": [
+    {
+      "id": "MEM01",
+      "title": "Total RAM >= 4GB",
+      "status": "PASS",
+      "detail": "14GB"
+    },
+    {
+      "id": "MEM02",
+      "title": "Available RAM >= 1GB",
+      "status": "PASS",
+      "detail": "2GB"
+    },
+    {
+      "id": "MEM03",
+      "title": "Swap >= 2GB",
+      "status": "PASS",
+      "detail": "22GB"
+    },
+    {
+      "id": "DISK__mnt_sdcard",
+      "title": "/mnt/sdcard usage",
+      "status": "FAIL",
+      "detail": "92% used"
+    },
+    {
+      "id": "DISK_ROOT",
+      "title": "root partition usage",
+      "status": "PASS",
+      "detail": "70%"
+    },
+    {
+      "id": "FS01",
+      "title": "Root filesystem type",
+      "status": "PASS",
+      "detail": "btrfs"
+    },
+    {
+      "id": "FS02",
+      "title": "Btrfs available",
+      "status": "PASS",
+      "detail": "yes"
+    },
+    {
+      "id": "STATE01",
+      "title": "Local operation records bounded",
+      "status": "WARN",
+      "detail": "5262 registros em /home/misael/.local/state/phasezero/operations; poda: pz installation prune"
+    },
+    {
+      "id": "CPU01",
+      "title": "CPU temperature < 85°C",
+      "status": "FAIL",
+      "detail": "90°C"
+    },
+    {
+      "id": "CPU02",
+      "title": "CPU load (1m) < cores",
+      "status": "WARN",
+      "detail": "15 / 8"
+    },
+    {
+      "id": "GPU01",
+      "title": "AMD GPU detected",
+      "status": "PASS",
+      "detail": "VanGogh 0405"
+    },
+    {
+      "id": "GPU02",
+      "title": "GPU device in sysfs",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "NET01",
+      "title": "Internet connectivity",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "NET02",
+      "title": "Tailscale connected",
+      "status": "INFO",
+      "detail": "not configured on Steam Deck"
+    },
+    {
+      "id": "SVC_docker",
+      "title": "docker running",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "SVC_sshd",
+      "title": "sshd running",
+      "status": "WARN",
+      "detail": "inactive"
+    },
+    {
+      "id": "SVC_NetworkManager",
+      "title": "NetworkManager running",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "SVC_bluetooth",
+      "title": "bluetooth running",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "SD01",
+      "title": "Steam Deck hardware",
+      "status": "PASS",
+      "detail": "steamdeck-lcd"
+    },
+    {
+      "id": "SD02",
+      "title": "Gamescope installed",
+      "status": "PASS",
+      "detail": "[gamescope] [\u001b[0;34mInfo\u001b[0m]  \u001b[0;37mconsole:\u001b[0m gamescope version 3.16.25 (gcc 16.1.1)"
+    },
+    {
+      "id": "SD03",
+      "title": "Steam installed",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "UX01",
+      "title": "Steam client available",
+      "status": "PASS",
+      "detail": "/usr/sbin/steam"
+    },
+    {
+      "id": "UX02",
+      "title": "Gamescope available",
+      "status": "PASS",
+      "detail": "/usr/sbin/gamescope"
+    },
+    {
+      "id": "UX03",
+      "title": "MangoHud available",
+      "status": "PASS",
+      "detail": "/usr/sbin/mangohud"
+    },
+    {
+      "id": "UX04",
+      "title": "GameMode launcher available",
+      "status": "PASS",
+      "detail": "/usr/sbin/gamemoderun"
+    },
+    {
+      "id": "UX05",
+      "title": "Virtual keyboard available",
+      "status": "WARN",
+      "detail": "provider present but not fully configured; run: linux/pz steamdeck keyboard repair"
+    },
+    {
+      "id": "UX06",
+      "title": "Steam Deck hotkey config installed",
+      "status": "PASS",
+      "detail": "found"
+    },
+    {
+      "id": "UX07",
+      "title": "Steam Deck hotkeys active",
+      "status": "PASS",
+      "detail": "KDE native shortcuts"
+    },
+    {
+      "id": "UX08",
+      "title": "Steam Deck mode watcher installed",
+      "status": "WARN",
+      "detail": "run: linux/pz steamdeck watcher install"
+    },
+    {
+      "id": "UX09",
+      "title": "Steam Deck mode watcher active",
+      "status": "WARN",
+      "detail": "not running"
+    },
+    {
+      "id": "UX10",
+      "title": "TDP control available",
+      "status": "PASS",
+      "detail": "/usr/sbin/ryzenadj"
+    },
+    {
+      "id": "UX11",
+      "title": "Privileged TDP/GPU bridge installed",
+      "status": "WARN",
+      "detail": "run: sudo linux/steamdeck/install-privileged-controls.sh install"
+    },
+    {
+      "id": "UX12",
+      "title": "Steam Big Picture Plus OpenGamepadUI",
+      "status": "INFO",
+      "detail": "missing; user fallback starts Steam Big Picture without QAM overlay"
+    },
+    {
+      "id": "UX13",
+      "title": "Decky Loader Big Picture integration",
+      "status": "WARN",
+      "detail": "run: linux/pz steamdeck plugins install"
+    },
+    {
+      "id": "UX14",
+      "title": "Decky PowerTools TDP plugin",
+      "status": "WARN",
+      "detail": "run: linux/pz steamdeck plugins install-plugins"
+    },
+    {
+      "id": "UX15",
+      "title": "Decky CSS Loader themes",
+      "status": "WARN",
+      "detail": "run: linux/pz steamdeck plugins install-themes"
+    },
+    {
+      "id": "UX16",
+      "title": "Decky plugin package health",
+      "status": "PASS",
+      "detail": "all installed curated plugins have runnable package layout"
+    },
+    {
+      "id": "UX17",
+      "title": "SteamOS desktop handoff without login",
+      "status": "WARN",
+      "detail": "run: sudo linux/steamdeck/install-steamos-boot.sh install"
+    },
+    {
+      "id": "WINVM01",
+      "title": "QEMU available",
+      "status": "PASS",
+      "detail": "/usr/sbin/qemu-system-x86_64"
+    },
+    {
+      "id": "WINVM02",
+      "title": "KVM device available",
+      "status": "PASS",
+      "detail": "/dev/kvm"
+    },
+    {
+      "id": "WINVM03",
+      "title": "Windows 11 firmware/TPM ready",
+      "status": "PASS",
+      "detail": "OVMF + swtpm"
+    },
+    {
+      "id": "WINVM04",
+      "title": "Windows VM configured",
+      "status": "PASS",
+      "detail": "/home/misael/VirtualMachines/PhaseZero-Windows-20260820-050749-32490/phasezero-windows.qcow2"
+    },
+    {
+      "id": "WINVM08",
+      "title": "Existing libvirt Windows domain selected",
+      "status": "INFO",
+      "detail": "no Windows domain; QEMU disk path will be used"
+    },
+    {
+      "id": "WINVM07",
+      "title": "Existing Windows VM install usable",
+      "status": "PASS",
+      "detail": "/home/misael/VirtualMachines/PhaseZero-Windows-20260820-050749-32490/phasezero-windows.qcow2"
+    },
+    {
+      "id": "WINVM05",
+      "title": "Host folder sharing available",
+      "status": "PASS",
+      "detail": "SMB + virtiofs"
+    },
+    {
+      "id": "WINVM06",
+      "title": "Windows VM direct GRUB boot installed",
+      "status": "INFO",
+      "detail": "GRUB boot expected on Steam Deck; VM install will enable it"
+    },
+    {
+      "id": "WINVM16",
+      "title": "Windows VM boot runtime matches this install",
+      "status": "FAIL",
+      "detail": "GRUB boot path runs an outdated runtime; run: phasezero-admin linux/pz windows-vm boot install"
+    },
+    {
+      "id": "WINVM09",
+      "title": "Windows host storage shares ready",
+      "status": "PASS",
+      "detail": "PZExchange"
+    },
+    {
+      "id": "WINVM10",
+      "title": "Windows USB redirection ready",
+      "status": "WARN",
+      "detail": "run: phasezero-admin linux/pz windows-vm shares repair"
+    },
+    {
+      "id": "WINVM11",
+      "title": "Windows graphics integration",
+      "status": "WARN",
+      "detail": "run: phasezero-admin linux/pz windows-vm graphics runtime install --json; Steam Deck (VanGogh APU) VFIO passthrough nao suportado"
+    },
+    {
+      "id": "WINVM14",
+      "title": "swtpm daemon running",
+      "status": "PASS",
+      "detail": "/run/user/1000/swtpm.sock"
+    },
+    {
+      "id": "WINVM15",
+      "title": "virtio-win up-to-date",
+      "status": "WARN",
+      "detail": "pinned 0.1.285, latest 0.1.302 — run: linux/windows-vm/preflight.sh --auto-fix"
+    },
+    {
+      "id": "WINVM12",
+      "title": "WinBoat + WinPodX Podman host",
+      "status": "WARN",
+      "detail": "run: linux/pz windows-vm apps setup"
+    },
+    {
+      "id": "WINVM13",
+      "title": "Windows guest concurrency",
+      "status": "PASS",
+      "detail": "one-guest policy available"
+    },
+    {
+      "id": "WAYDROID00",
+      "title": "Waydroid subsystem",
+      "status": "INFO",
+      "detail": "not opted in; run linux/pz install waydroid-linux to enable"
+    },
+    {
+      "id": "EMU01",
+      "title": "Shared emulation root",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation layout"
+    },
+    {
+      "id": "EMU02",
+      "title": "EmuDeck Steam Deck launcher installed",
+      "status": "PASS",
+      "detail": "/home/misael/Downloads/EmuDeck.desktop"
+    },
+    {
+      "id": "EMU03",
+      "title": "Eden AppImage installed",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation eden install"
+    },
+    {
+      "id": "EMU06",
+      "title": "Hydra AppImage installed",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation hydra install"
+    },
+    {
+      "id": "EMU07",
+      "title": "Hydra Steam shortcut installed",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation hydra steam-shortcut"
+    },
+    {
+      "id": "EMU08",
+      "title": "Hydra Classic flags enabled",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation hydra classic-config"
+    },
+    {
+      "id": "EMU09",
+      "title": "Hydra emulator mappings configured",
+      "status": "INFO",
+      "detail": "install DuckStation/PCSX2/RPCS3 then run: linux/pz emulation hydra emulators-config"
+    },
+    {
+      "id": "EMU04",
+      "title": "Local BIOS import folder",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation layout"
+    },
+    {
+      "id": "EMU05",
+      "title": "Switch keys imported locally",
+      "status": "INFO",
+      "detail": "optional: linux/pz emulation switch import-keys <owned-dump-path>"
+    },
+    {
+      "id": "EMU10",
+      "title": "Steam ROM Manager available",
+      "status": "INFO",
+      "detail": "optional: install via EmuDeck"
+    },
+    {
+      "id": "EMU11",
+      "title": "RPCS3 PS3 paths configured",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation ps3 configure"
+    },
+    {
+      "id": "EMU12",
+      "title": "Desktop AppImage launchers clean",
+      "status": "WARN",
+      "detail": "0 issue(s); run: linux/pz emulation shortcuts repair"
+    },
+    {
+      "id": "EMU13",
+      "title": "Adaptive emulator profiles",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation performance apply"
+    },
+    {
+      "id": "EMU14",
+      "title": "LSFG Vulkan frame generation",
+      "status": "INFO",
+      "detail": "optional; needs Decky LSFG-VK plus owned Lossless Scaling"
+    },
+    {
+      "id": "LUA01",
+      "title": "Lua installed",
+      "status": "PASS",
+      "detail": "Lua 5.5.1  Copyright (C) 1994-2026 Lua.org, PUC-Rio"
+    },
+    {
+      "id": "LUA02",
+      "title": "Lua 5.4 installed",
+      "status": "PASS",
+      "detail": "Lua 5.4.8  Copyright (C) 1994-2025 Lua.org, PUC-Rio"
+    },
+    {
+      "id": "LUA03",
+      "title": "LuaJIT installed",
+      "status": "PASS",
+      "detail": "LuaJIT 2.1.1787058514 -- Copyright (C) 2005-2026 Mike Pall. https://luajit.org/"
+    },
+    {
+      "id": "LUA04",
+      "title": "LuaRocks installed",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation lua install"
+    },
+    {
+      "id": "ST01",
+      "title": "Protontricks installed",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation steam-tools install"
+    },
+    {
+      "id": "ST02",
+      "title": "ProtonUp-Qt installed",
+      "status": "WARN",
+      "detail": "run: linux/pz emulation steam-tools install"
+    },
+    {
+      "id": "ST03",
+      "title": "RetroArch installed",
+      "status": "PASS",
+      "detail": "flatpak"
+    },
+    {
+      "id": "ST04",
+      "title": "Ludusavi available",
+      "status": "INFO",
+      "detail": "optional save backup tool"
+    },
+    {
+      "id": "ST05",
+      "title": "Steam ROM Manager available",
+      "status": "INFO",
+      "detail": "optional; EmuDeck may manage SRM internally"
+    },
+    {
+      "id": "ST06",
+      "title": "BoilR available",
+      "status": "INFO",
+      "detail": "optional non-Steam importer"
+    },
+    {
+      "id": "ST07",
+      "title": "SteamTinkerLaunch available",
+      "status": "INFO",
+      "detail": "optional Proton/Wine per-game tool"
+    },
+    {
+      "id": "BOOT01",
+      "title": "PhaseZero SteamOS GRUB entry installed",
+      "status": "INFO",
+      "detail": "optional: sudo linux/steamdeck/install-steamos-boot.sh install"
+    },
+    {
+      "id": "BOOT02",
+      "title": "GRUB rescue card available",
+      "status": "INFO",
+      "detail": "optional: sudo linux/pz boot install-card"
+    },
+    {
+      "id": "BOOT03",
+      "title": "PhaseZero standalone EFI fallback available",
+      "status": "INFO",
+      "detail": "permission denied; verify with: sudo linux/pz boot status"
+    },
+    {
+      "id": "BOOT05",
+      "title": "Active EFI GRUB prefix safe",
+      "status": "INFO",
+      "detail": "permission denied; verify with: sudo linux/pz boot status"
+    },
+    {
+      "id": "BOOT06",
+      "title": "GRUB menu visible with safe timeout",
+      "status": "WARN",
+      "detail": "run: sudo linux/pz boot install-safe-menu"
+    },
+    {
+      "id": "BOOT04",
+      "title": "Emergency shell GRUB entry inactive",
+      "status": "PASS",
+      "detail": "not installed"
+    },
+    {
+      "id": "BOOTISO01",
+      "title": "Registered ISO boot entries healthy",
+      "status": "PASS",
+      "detail": "0 registered"
+    },
+    {
+      "id": "BOOTUSB01",
+      "title": "Removable EFI boot generator installed",
+      "status": "INFO",
+      "detail": "install with: sudo linux/pz boot usb install"
+    },
+    {
+      "id": "BOOTFM01",
+      "title": "Experimental grubfm payload audited",
+      "status": "INFO",
+      "detail": "not installed (optional, upstream archived)"
+    },
+    {
+      "id": "SEC01",
+      "title": "UFW firewall active",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "SEC02",
+      "title": "SSH server running",
+      "status": "INFO",
+      "detail": "disabled (ok if not needed)"
+    },
+    {
+      "id": "DOCKER01",
+      "title": "Docker daemon accessible",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "DOCKER02",
+      "title": "Docker Compose",
+      "status": "PASS",
+      "detail": "Docker Compose version 5.5.0"
+    },
+    {
+      "id": "DEV_node",
+      "title": "node installed",
+      "status": "PASS",
+      "detail": "v26.7.0"
+    },
+    {
+      "id": "DEV_npm",
+      "title": "npm installed",
+      "status": "PASS",
+      "detail": "12.0.2"
+    },
+    {
+      "id": "DEV_python3",
+      "title": "python3 installed",
+      "status": "PASS",
+      "detail": "Python 3.14.7"
+    },
+    {
+      "id": "DEV_rustc",
+      "title": "rustc installed",
+      "status": "PASS",
+      "detail": "rustc 1.97.0 (2d8144b78 2026-07-07)"
+    },
+    {
+      "id": "DEV_cargo",
+      "title": "cargo installed",
+      "status": "PASS",
+      "detail": "cargo 1.97.0 (c980f4866 2026-06-30)"
+    },
+    {
+      "id": "DEV_go",
+      "title": "go installed",
+      "status": "PASS",
+      "detail": "go version go1.26.6-X:nodwarf5 linux/amd64"
+    },
+    {
+      "id": "DEV_jq",
+      "title": "jq installed",
+      "status": "PASS",
+      "detail": "jq-1.8.2"
+    },
+    {
+      "id": "DEV_git",
+      "title": "git installed",
+      "status": "PASS",
+      "detail": "git version 2.55.0"
+    },
+    {
+      "id": "DEV_gh",
+      "title": "gh installed",
+      "status": "PASS",
+      "detail": "gh version 2.97.0 (2026-07-31)"
+    },
+    {
+      "id": "DEV_git-lfs",
+      "title": "git-lfs installed",
+      "status": "WARN",
+      "detail": ""
+    },
+    {
+      "id": "AI_codex",
+      "title": "codex installed",
+      "status": "PASS",
+      "detail": "/home/misael/.local/bin/codex"
+    },
+    {
+      "id": "AI_claude",
+      "title": "claude installed",
+      "status": "PASS",
+      "detail": "/home/misael/.local/bin/claude"
+    },
+    {
+      "id": "AI_opencode",
+      "title": "opencode installed",
+      "status": "PASS",
+      "detail": "/home/misael/.local/bin/opencode"
+    },
+    {
+      "id": "AI_hermes",
+      "title": "hermes installed",
+      "status": "PASS",
+      "detail": "/home/misael/.local/bin/hermes"
+    },
+    {
+      "id": "AI_openclaw",
+      "title": "openclaw installed",
+      "status": "WARN",
+      "detail": "run: linux/pz ai setup openclaw"
+    },
+    {
+      "id": "AI_ollama",
+      "title": "ollama installed",
+      "status": "WARN",
+      "detail": "run: linux/pz ai setup ollama"
+    },
+    {
+      "id": "AI_CODEXBAR_CLI",
+      "title": "CodexBar CLI available",
+      "status": "WARN",
+      "detail": "run: linux/pz ai setup codexbar"
+    },
+    {
+      "id": "AI_CODEXBAR_CONFIG",
+      "title": "CodexBar config valid",
+      "status": "WARN",
+      "detail": "config_missing; run: linux/pz ai codexbar repair"
+    },
+    {
+      "id": "AI_CODEXBAR_USAGE",
+      "title": "CodexBar providers return usage",
+      "status": "WARN",
+      "detail": "cli_missing, config_missing"
+    },
+    {
+      "id": "AI_CODEXBAR_PLASMOID",
+      "title": "KodexBar Plasma widget package",
+      "status": "INFO",
+      "detail": "not installed; native PhaseZero UI remains available"
+    },
+    {
+      "id": "AI_CLAUDE_DESKTOP",
+      "title": "Claude Desktop installed",
+      "status": "WARN",
+      "detail": "run: linux/pz ai desktop install-claude"
+    },
+    {
+      "id": "AI_CODEX_DESKTOP_UPDATE",
+      "title": "Codex Desktop updater healthy",
+      "status": "PASS",
+      "detail": "ready_to_install"
+    },
+    {
+      "id": "AI_DESKTOP_UPDATE_TIMER",
+      "title": "AI desktop automatic updates enabled",
+      "status": "WARN",
+      "detail": "run: linux/pz ai desktop install-services"
+    },
+    {
+      "id": "AI_9ROUTER",
+      "title": "9Router local gateway",
+      "status": "PASS",
+      "detail": "loopback; API key; private container bridge; passive watchdog"
+    },
+    {
+      "id": "AI_ODYSSEUS",
+      "title": "Odysseus workspace",
+      "status": "INFO",
+      "detail": "optional: linux/pz ai odysseus install"
+    },
+    {
+      "id": "AI_UPDATE_INVENTORY",
+      "title": "PhaseZero app update inventory",
+      "status": "WARN",
+      "detail": "run: linux/pz updates install-service"
+    },
+    {
+      "id": "AI_OPENCODE_SYNC",
+      "title": "OpenCode CLI/desktop in lockstep",
+      "status": "PASS",
+      "detail": "1.18.23 == desktop"
+    },
+    {
+      "id": "AI_OPENCODE_MODEL",
+      "title": "OpenCode has a usable model",
+      "status": "PASS",
+      "detail": "cloud credentials"
+    },
+    {
+      "id": "AI_OMO",
+      "title": "oh-my-openagent OpenCode plugin",
+      "status": "INFO",
+      "detail": "optional; enable with: linux/pz ai setup omo"
+    },
+    {
+      "id": "DEV_GITHUB_AUTH",
+      "title": "GitHub CLI authenticated",
+      "status": "PASS",
+      "detail": "gh auth status"
+    },
+    {
+      "id": "AI_HERMES_MCP",
+      "title": "Hermes MCP configured",
+      "status": "WARN",
+      "detail": "run: linux/pz ai setup hermes"
+    },
+    {
+      "id": "AI_OPENCLAW_MCP",
+      "title": "OpenClaw MCP configured",
+      "status": "PASS",
+      "detail": "/home/misael/.openclaw/config.json"
+    },
+    {
+      "id": "AI_OPENCLAW_DAEMON",
+      "title": "OpenClaw daemon active",
+      "status": "INFO",
+      "detail": "optional: linux/ai/setup-openclaw.sh daemon"
+    },
+    {
+      "id": "AI_MEMORY",
+      "title": "ai-memory configured",
+      "status": "PASS",
+      "detail": "http://127.0.0.1:49374"
+    },
+    {
+      "id": "AI_RTK",
+      "title": "RTK available",
+      "status": "PASS",
+      "detail": "/home/misael/.local/bin/rtk"
+    },
+    {
+      "id": "AI_CAVEMAN",
+      "title": "Caveman/PhaseZero rules configured",
+      "status": "WARN",
+      "detail": "run: linux/pz ai setup caveman"
+    },
+    {
+      "id": "AI_HEADROOM",
+      "title": "Headroom available",
+      "status": "PASS",
+      "detail": "/home/misael/.local/bin/headroom"
+    },
+    {
+      "id": "AI_CONTEXT_FRUGALITY",
+      "title": "AI context frugality pack configured",
+      "status": "WARN",
+      "detail": "run: linux/pz ai setup frugality"
+    },
+    {
+      "id": "AI_ADMIN_BRIDGE",
+      "title": "Admin escalation bridge ready",
+      "status": "PASS",
+      "detail": "bigsudo"
+    },
+    {
+      "id": "AI_PONYTAIL",
+      "title": "Ponytail workspace rules",
+      "status": "INFO",
+      "detail": "inactive; only applied in Ponytail workspaces"
+    },
+    {
+      "id": "AI_GRAPHIFY",
+      "title": "Graphify placeholder",
+      "status": "INFO",
+      "detail": "not configured; safe placeholder"
+    },
+    {
+      "id": "AI_MCP",
+      "title": "MCP definitions synced",
+      "status": "PASS",
+      "detail": "definitions=6 installed=9"
+    },
+    {
+      "id": "AI_IDE",
+      "title": "AI-capable IDE/editor available",
+      "status": "PASS",
+      "detail": "2 detected"
+    },
+    {
+      "id": "DEPS01",
+      "title": "Optional dependencies present",
+      "status": "PASS",
+      "detail": "nada ausente"
+    }
+  ]
+}

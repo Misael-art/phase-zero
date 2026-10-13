@@ -3,13 +3,6 @@
     "sentry": {
       "type": "http",
       "url": "https://mcp.sentry.dev/mcp"
-    },
-    "bonsai": {
-      "type": "http",
-      "url": "https://mcp.bonsai-rx.org/mcp",
-      "headers": {
-        "Authorization": "Bearer <BONSAI_MCP_TOKEN>"
-      }
     }
   }
 }

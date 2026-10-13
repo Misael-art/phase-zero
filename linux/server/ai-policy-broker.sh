@@ -112,7 +112,10 @@ pz_policy_check() {
     fi
     jq -cn --arg action "$action" --arg mode "$mode" --argjson allow "$allow" \
         --argjson reasons "$reasons_json" \
-        '{schemaVersion:'"$SCHEMA_VERSION"', action:$action, mode:$mode, allow:$allow, reasons:$reasons}'
+        '{schemaVersion:'"$SCHEMA_VERSION"', action:$action, mode:$mode, allow:$allow, reasons:$reasons,
+          scope:"install-policy",
+          executionEnforced:false,
+          note:"this broker gates installs/pulls only; runtime tool execution is bounded by the caller allowlist (agent), never by this verdict"}'
 }
 
 pz_policy_status_json() {
@@ -125,7 +128,7 @@ pz_policy_status_json() {
         --argjson conservative "$([ "$mode" = "conservative" ] && echo true || echo false)" \
         --argjson actions "$actions_json" \
         '{schemaVersion:$schemaVersion, tool:"ai-policy-broker", mode:$mode, conservative:$conservative,
-          deniedActions:$actions}'
+          deniedActions:$actions, scope:"install-policy", executionEnforced:false}'
 }
 
 pz_policy_set() {
@@ -150,7 +153,7 @@ main() {
         check) pz_policy_check "$@" ;;
         list)
             jq -cn --argjson actions '["ollama-pull","openclaw-install","ai-memory-install","hermes-install","codex-install"]' \
-                '{schemaVersion:'"$SCHEMA_VERSION"', actions:$actions}'
+                '{schemaVersion:'"$SCHEMA_VERSION"', actions:$actions, scope:"install-policy", executionEnforced:false}'
             ;;
         *) echo "usage: ai-policy-broker.sh (status|set <mode>|check <action>|list)" >&2; return 2 ;;
     esac

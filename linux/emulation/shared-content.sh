@@ -166,7 +166,11 @@ cmd_status() {
     status="$(pz_shared_retrodeck_flatpak_status)"
     echo "  flatpak access: $status"
     [ "$status" = "missing" ] && ret=1
-    return "$ret"
+    # Drift is a reported state, not a tool failure (matches --json rc0).
+    if [ "$ret" -ne 0 ]; then
+        echo "  next: run 'pz emulation shared apply' to migrate/link divergent paths"
+    fi
+    return 0
 }
 
 cmd_plan() {

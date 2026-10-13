@@ -1,32 +1,22 @@
 #!/usr/bin/env bash
-# browser-hardening.sh - apply privacy/security hardening to browsers
+# browser-hardening.sh - privacy/security hardening (apply | revert | status)
 set -euo pipefail
 PZ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$PZ_ROOT/linux/lib/common.sh"
+source "$PZ_ROOT/linux/tuning/tune-common.sh"
 
-PZ_TUNE_MODE="${1:-apply}"
-case "$PZ_TUNE_MODE" in
-    apply) ;;
-    --dry-run) ;;
-    *) pz_error "usage: ${0##*/} [--dry-run]"; exit 1 ;;
-esac
+pz_tune_init browser "$@"
 
 pz_harden_firefox() {
-    local profile_dir
+    local profile_dir userjs
     # shellcheck disable=SC2012
     profile_dir=$(ls -d ~/.mozilla/firefox/*.default-release 2>/dev/null | head -1)
     # shellcheck disable=SC2012
     [ -z "$profile_dir" ] && profile_dir=$(ls -d ~/.mozilla/firefox/*.default 2>/dev/null | head -1)
-    [ -z "$profile_dir" ] && { pz_warn "no firefox profile found"; return; }
+    [ -z "$profile_dir" ] && { pz_warn "no firefox profile found"; return 0; }
 
-    local userjs="$profile_dir/user.js"
-    if [ "$PZ_TUNE_MODE" = "--dry-run" ]; then
-        pz_info "dry-run: faria backup e escreveria user.js de hardening Firefox em: $userjs"
-        return 0
-    fi
-    pz_backup_file "$userjs" user >/dev/null
-
-    cat > "$userjs" <<'EOF'
+    userjs="$profile_dir/user.js"
+    pz_tune_file "$userjs" user <<'EOF'
 // PhaseZero Firefox Hardening
 // Privacy & security preferences
 user_pref("privacy.trackingprotection.fingerprinting.enabled", true);
@@ -74,18 +64,12 @@ EOF
 }
 
 pz_harden_chromium() {
-    local config_dir="${HOME}/.config/chromium"
+    local config_dir="${HOME}/.config/chromium" policies_dir
     [ ! -d "$config_dir" ] && config_dir="${HOME}/.config/google-chrome"
-    [ ! -d "$config_dir" ] && { pz_warn "no chrome/chromium profile found"; return; }
+    [ ! -d "$config_dir" ] && { pz_warn "no chrome/chromium profile found"; return 0; }
 
-    local policies_dir="$config_dir/Default/policies/managed"
-    if [ "$PZ_TUNE_MODE" = "--dry-run" ]; then
-        pz_info "dry-run: escreveria políticas gerenciadas Chromium/Chrome em: $policies_dir/phasezero-hardening.json"
-        return 0
-    fi
-    mkdir -p "$policies_dir"
-
-    cat > "$policies_dir/phasezero-hardening.json" <<'EOF'
+    policies_dir="$config_dir/Default/policies/managed"
+    pz_tune_file "$policies_dir/phasezero-hardening.json" user <<'EOF'
 {
   "BlockThirdPartyCookies": true,
   "DoNotTrackEnabled": true,
@@ -111,6 +95,10 @@ EOF
     pz_info "chromium/chrome hardened via policies: $policies_dir"
 }
 
-pz_harden_firefox
-pz_harden_chromium
-pz_info "browser hardening complete"
+pz_tune_apply() {
+    pz_harden_firefox
+    pz_harden_chromium
+    pz_info "browser hardening complete"
+}
+
+pz_tune_main

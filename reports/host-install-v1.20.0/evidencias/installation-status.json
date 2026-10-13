@@ -1,0 +1,47 @@
+{
+  "schema": "pz.installation/v1",
+  "status": "ok",
+  "recommendedChannel": "user",
+  "activeChannels": [
+    "native"
+  ],
+  "user": {
+    "installed": false,
+    "version": "",
+    "root": ""
+  },
+  "native": {
+    "installed": true,
+    "manager": "pacman",
+    "version": "1.20.0-1",
+    "alteredFiles": 0
+  },
+  "flatpaks": [
+    {
+      "installed": false,
+      "scope": "user",
+      "version": ""
+    },
+    {
+      "installed": false,
+      "scope": "system",
+      "version": ""
+    }
+  ],
+  "systemRoots": [
+    {
+      "path": "/usr/lib/phasezero",
+      "exists": true,
+      "version": "1.20.0",
+      "aliasOf": ""
+    },
+    {
+      "path": "/usr/lib64/phasezero",
+      "exists": true,
+      "version": "1.20.0",
+      "aliasOf": "/usr/lib/phasezero"
+    }
+  ],
+  "conflicts": [],
+  "command": "/usr/sbin/phasezero-control-center"
+}

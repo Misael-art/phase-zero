@@ -1,0 +1,26 @@
+# Per-app compose module. Segredos nunca inline.
+services:
+  vaultwarden:
+    image: ${PZ_IMAGE_VAULTWARDEN:-vaultwarden/server:1.34.3}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-vaultwarden
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.5
+    environment:
+      - ADMIN_TOKEN=${VW_ADMIN_TOKEN}
+      - SIGNUPS_ALLOWED=${VW_SIGNUPS_ALLOWED:-false}
+    ports:
+      - "${HOMELAB_ADMIN_BIND_ADDR:-127.0.0.1}:8222:80"
+    volumes:
+      - vaultwarden_data:/data
+
+volumes:
+  vaultwarden_data:

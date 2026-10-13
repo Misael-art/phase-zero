@@ -12,12 +12,12 @@
     },
     {
       "id": "virtio-gl",
-      "label": "virtio-gl — aceleração OpenGL",
-      "helperText": "Usa virtio-gl/virgl. Requer render node acessível, virtio-vga-gl no QEMU e virglrenderer no host.",
+      "label": "virtio-gl — experimental, sem 3D garantido",
+      "helperText": "Valida o caminho gráfico no host (virtio-gl/virgl) e NÃO garante aceleração 3D dentro do Windows. Requer render node acessível, virtio-vga-gl no QEMU e virglrenderer no host.",
       "provisionSupported": true,
       "applySupported": true,
       "planSupported": true,
-      "mode": "stable"
+      "mode": "experimental"
     },
     {
       "id": "virtio-venus",

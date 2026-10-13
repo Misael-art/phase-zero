@@ -1,0 +1,18 @@
+# Per-app compose module. Segredos nunca inline.
+services:
+  node-exporter:
+    image: ${PZ_IMAGE_NODE_EXPORTER:-prom/node-exporter:v1.9.1}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-node-exporter
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    cpus: 0.5
+    ports:
+      - "${HOMELAB_ADMIN_BIND_ADDR:-127.0.0.1}:9100:9100"

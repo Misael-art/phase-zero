@@ -133,9 +133,11 @@ if command -v qdbus6 >/dev/null 2>&1 && ! qdbus6 org.kde.kglobalaccel 2>/dev/nul
 fi
 
 vk_status="$(bash "$PZ_ROOT/linux/steamdeck/input-actions.sh" status 2>/dev/null || echo '{}')"
-if ! jq -e '.kde.supported == true and .kde.available == true and .kde.enabled == true and (.kde.inputMethod | test("maliit"))' <<< "$vk_status" >/dev/null 2>&1; then
-    add_item "STEAMOS07" "medium" "KDE virtual keyboard not fully configured for Steam Deck desktop typing" "linux/pz steamdeck keyboard repair"
-fi
+vk_health="$(printf '%s\n' "$vk_status" | bash "$PZ_ROOT/linux/steamdeck/input-actions.sh" health-json 2>/dev/null || printf 'WARN\tunreadable\n')"
+case "$vk_health" in
+    PASS*) ;;
+    *) add_item "STEAMOS07" "medium" "KDE virtual keyboard not loaded by KWin" "linux/pz steamdeck keyboard repair" ;;
+esac
 
 steam_plus_fallback="${XDG_CONFIG_HOME:-$HOME/.config}/gamescope-session-plus/sessions.d/steam-plus"
 if ! command -v opengamepadui >/dev/null 2>&1 && [ ! -f "$steam_plus_fallback" ]; then
@@ -392,17 +394,6 @@ if ! jq -e '.clis.hermes.available == true' <<< "$ai_status" >/dev/null 2>&1; th
     add_item "AI08" "medium" "Hermes Agent missing" "linux/pz ai setup hermes"
 elif ! jq -e '.agentConfigs.hermes.mcpServerCount > 0' <<< "$ai_status" >/dev/null 2>&1; then
     add_item "AI10" "low" "Hermes MCP servers not configured" "linux/ai/setup-hermes.sh configure"
-fi
-
-if ! jq -e '.clis.openclaw.available == true' <<< "$ai_status" >/dev/null 2>&1; then
-    add_item "AI09" "medium" "OpenClaw CLI missing" "linux/pz ai setup openclaw"
-elif ! jq -e '.agentConfigs.openclaw.mcpServerCount > 0' <<< "$ai_status" >/dev/null 2>&1; then
-    add_item "AI11" "low" "OpenClaw MCP servers not configured" "linux/ai/setup-openclaw.sh configure"
-fi
-
-if jq -e '.clis.openclaw.available == true' <<< "$ai_status" >/dev/null 2>&1 &&
-    ! jq -e '.services.openclaw.active == true or .services["openclaw-gateway"].active == true' <<< "$ai_status" >/dev/null 2>&1; then
-    add_item "AI12" "low" "OpenClaw daemon inactive" "linux/ai/setup-openclaw.sh daemon"
 fi
 
 if ! jq -e '.memory.installed == true and (.memory.serverReachable == true or .memory.configuredMarker == true or .memory.userServiceActive == true)' <<< "$ai_status" >/dev/null 2>&1; then

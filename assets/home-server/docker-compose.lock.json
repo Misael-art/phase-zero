@@ -15,6 +15,7 @@
     "node-exporter": "prom/node-exporter:v1.9.1",
     "grafana": "grafana/grafana:12.0.2",
     "paperless": "ghcr.io/paperless-ngx/paperless-ngx:2.16.3",
+    "paperless-broker": "valkey/valkey:8.0",
     "n8n": "docker.n8n.io/n8nio/n8n:1.100.1"
   }
 }

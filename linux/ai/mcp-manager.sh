@@ -585,7 +585,9 @@ remove_zcode_target() {
 target_list() {
     local target="${1:-all}"
     case "$target" in
-        all) printf '%s\n' opencode claude claude-desktop codex codex-project vscode vscode-user cursor zed zcode hermes openclaw ;;
+        # Do not adopt or rewrite an externally installed OpenClaw during broad MCP sync.
+        # Operators can still select openclaw explicitly for an intentional MCP change.
+        all) printf '%s\n' opencode claude claude-desktop codex codex-project vscode vscode-user cursor zed zcode hermes ;;
         opencode|claude|claude-desktop|codex|codex-project|vscode|vscode-user|copilot|cursor|zed|zcode|hermes|openclaw) printf '%s\n' "$target" ;;
         *) pz_error "unknown MCP target: $target"; return 1 ;;
     esac

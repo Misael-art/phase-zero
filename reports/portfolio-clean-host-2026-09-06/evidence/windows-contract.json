@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "runtime": "PowerShell on Linux; AST-extracted product functions; fixture dependencies",
+  "parseErrors": 0,
+  "missingDocker": {
+    "logs": [
+      "homelab-stack: provisionando (destino <fixture>/homelab)...",
+      "homelab-stack: .env gerado com segredos aleatorios (valores mascarados).",
+      "homelab-stack: Docker indisponivel (instale/abra Docker Desktop ou habilite docker no WSL2). Composes/.env prontos; suba manualmente com: docker compose -f docker-compose.homelab.yml up -d"
+    ],
+    "returnedWithoutError": true
+  },
+  "composeFailure": {
+    "logs": [
+      "homelab-stack: provisionando (destino <fixture>/homelab)...",
+      "homelab-stack: 'docker compose up' falhou (exit=42); suba manualmente apos checar o Docker."
+    ],
+    "returnedWithoutError": true
+  },
+  "windowsMimo": {
+    "authentication": "env-session",
+    "runtime": "go"
+  },
+  "proxies": [
+    "kimiproxy",
+    "qwenproxy",
+    "deepsproxy",
+    "mimo-ai-proxy",
+    "antigravity-openai-adapter",
+    "dockernativemanager"
+  ]
+}

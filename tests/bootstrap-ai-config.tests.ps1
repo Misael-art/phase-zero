@@ -78,7 +78,12 @@ Describe 'PhaseZero AI Config Doctor and Sync' {
 
             [string]$report.schemaVersion | Should Be '1'
             @($report.providers).Count | Should BeGreaterThan 0
-            @($report.targets | Where-Object { [string]$_['id'] -eq 'openClaw' }).Count | Should Be 1
+            $openClawTarget = @($report.targets | Where-Object { [string]$_['id'] -eq 'openClaw' })[0]
+            @($openClawTarget).Count | Should Be 1
+            [string]$openClawTarget.status | Should Be 'blocked'
+            [bool]$report.openclaw.ready | Should Be $false
+            [bool]$report.openclaw.usageBlocked | Should Be $true
+            [string]$report.openclaw.blockedReason | Should Be 'connection-grant-not-enforceable'
             @($report.targets | Where-Object { [string]$_['id'] -eq 'hermes' }).Count | Should Be 1
             [bool]$report.manualRequired | Should Be $true
             $json | Should Not Match 'phasezero-ai-config-secret'

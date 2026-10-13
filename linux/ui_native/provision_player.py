@@ -15,8 +15,10 @@ from PySide6.QtWidgets import (
     QWidget, QMessageBox, QInputDialog, QLineEdit,
 )
 
+from .journey import failure_cause
 from .models import ActionSpec
 from .platform import admin_bridge, state_dir, secure_file
+from .widgets import fit_to_screen
 
 
 PLAYER_STATE_PATH = state_dir() / "windows-vm" / "player.json"
@@ -64,6 +66,29 @@ def recovery_password_strength(password: str) -> tuple[bool, str]:
             missing.append(label)
     return False, "Faltam: " + ", ".join(missing)
 
+
+
+# LUX-022: worker reasons are technical English; the user sees these.
+_PROVISION_FAILURES = {
+    "provision start timed out": "A instalação não começou a tempo. Tente de novo.",
+    "provision start failed": "A instalação não conseguiu começar. Veja os detalhes técnicos e tente de novo.",
+    "no operationId": "A instalação não foi registrada. Tente de novo.",
+    "status JSON invalid": "Perdemos o acompanhamento da instalação. Feche e reabra para reconectar.",
+    "failed": "A instalação do Windows falhou. Veja os detalhes técnicos; você pode tentar de novo.",
+    "cancelled": "A instalação foi cancelada. O disco foi preservado para retomar.",
+}
+
+
+def friendly_provision_failure(reason: str) -> str:
+    text = (reason or "").strip()
+    if text in _PROVISION_FAILURES:
+        return _PROVISION_FAILURES[text]
+    if text.startswith("status poll failed"):
+        return "Perdemos contato com a instalação em andamento. Ela pode continuar; reabra para reconectar."
+    if text.startswith("start JSON"):
+        return _PROVISION_FAILURES["provision start failed"]
+    cause, action = failure_cause(text)
+    return f"{cause} {action}"
 
 class RecoveryPasswordDialog(QDialog):
     """Collect a recovery secret in memory. No state or logging hooks."""
@@ -276,6 +301,11 @@ class ProvisionWorker(QThread):
             ])
             stat_proc.start()
             ok = stat_proc.waitForFinished(15_000)
+            if not ok:
+                # QProcess coletado com filho vivo vira órfão; mata antes de
+                # descartar e reprograma o poll.
+                stat_proc.kill()
+                stat_proc.waitForFinished(2_000)
             if self._aborted:
                 return
             if not ok or stat_proc.exitCode() != 0:
@@ -434,8 +464,7 @@ class ProvisionPlayerWindow(QDialog):
 
         self.setWindowTitle("Preparar Windows e reiniciar")
         self.setWindowModality(Qt.WindowModal)
-        self.setMinimumSize(720, 460)
-        self.resize(820, 540)
+        fit_to_screen(self, 820, 540)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -572,7 +601,10 @@ class ProvisionPlayerWindow(QDialog):
         self._log_frame.setVisible(visible)
         self._details_btn.setText("Ocultar detalhes técnicos" if visible else "Ver detalhes técnicos")
         if visible:
-            self.resize(max(self.width(), 820), max(self.height(), 640))
+            self.resize(
+                min(max(self.width(), 820), self.maximumWidth()),
+                min(max(self.height(), 640), self.maximumHeight()),
+            )
 
     def _set_state(self, state: str) -> None:
         self._state = state
@@ -865,7 +897,8 @@ class ProvisionPlayerWindow(QDialog):
     def _on_worker_failed(self, reason: str) -> None:
         self._elapsed_timer.stop()
         self._set_state(ST_FAILED)
-        self._checkpoint_label.setText(f"Falha: {reason}")
+        # LUX-022: rótulo em linguagem de produto; o motivo cru fica no log.
+        self._checkpoint_label.setText(friendly_provision_failure(reason))
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
         self._add_log(f"FALHA: {reason}")

@@ -11,6 +11,11 @@ services:
   # recursos que o Portainer realmente usa (containers/tasks), em rede interna.
   socket-proxy:
     image: ${PZ_IMAGE_SOCKET_PROXY:-tecnativa/docker-socket-proxy:0.2.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-socket-proxy
     restart: unless-stopped
     init: true
@@ -18,6 +23,8 @@ services:
       - no-new-privileges:true
     mem_limit: 64m
     cpus: 0.25
+    networks:
+      - pz-internal
     environment:
       CONTAINERS: "1"
       TASKS: "1"
@@ -27,6 +34,11 @@ services:
   # Gestão visual da stack Docker (opt-in). Só com HOMELAB_ADMIN_BIND_ADDR=127.0.0.1.
   portainer:
     image: ${PZ_IMAGE_PORTAINER:-portainer/portainer-ce:2.33.2}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-portainer
     restart: unless-stopped
     init: true
@@ -34,6 +46,8 @@ services:
       - no-new-privileges:true
     mem_limit: 128m
     cpus: 0.5
+    networks:
+      - pz-internal
     ports:
       - "${HOMELAB_ADMIN_BIND_ADDR:-127.0.0.1}:9000:9000"
     environment:
@@ -46,6 +60,11 @@ services:
   # "Drive" completo (alternativa pesada ao Syncthing)
   nextcloud-db:
     image: ${PZ_IMAGE_MARIADB:-mariadb:11.8.3}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-nextcloud-db
     restart: unless-stopped
     init: true
@@ -53,6 +72,8 @@ services:
       - no-new-privileges:true
     mem_limit: 512m
     cpus: 1.0
+    networks:
+      - pz-internal
     environment:
       - MARIADB_ROOT_PASSWORD=${NEXTCLOUD_DB_ROOT_PASSWORD}
       - MARIADB_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
@@ -63,6 +84,11 @@ services:
 
   nextcloud:
     image: ${PZ_IMAGE_NEXTCLOUD:-nextcloud:31.0.6}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-nextcloud
     restart: unless-stopped
     init: true
@@ -70,6 +96,8 @@ services:
       - no-new-privileges:true
     mem_limit: 1024m
     cpus: 1.0
+    networks:
+      - pz-internal
     depends_on:
       - nextcloud-db
     environment:
@@ -85,6 +113,11 @@ services:
   # Observabilidade
   prometheus:
     image: ${PZ_IMAGE_PROMETHEUS:-prom/prometheus:v3.5.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-prometheus
     restart: unless-stopped
     init: true
@@ -99,6 +132,11 @@ services:
 
   node-exporter:
     image: ${PZ_IMAGE_NODE_EXPORTER:-prom/node-exporter:v1.9.1}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-node-exporter
     restart: unless-stopped
     init: true
@@ -111,6 +149,11 @@ services:
 
   grafana:
     image: ${PZ_IMAGE_GRAFANA:-grafana/grafana:12.0.2}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-grafana
     restart: unless-stopped
     init: true
@@ -125,9 +168,39 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
 
-  # OCR de documentos
+  # OCR de documentos (broker Valkey obrigatório; ver apps/compose/paperless.yml)
+  paperless-broker:
+    image: ${PZ_IMAGE_PAPERLESS_BROKER:-valkey/valkey:8.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-paperless-broker
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    cpus: 0.5
+    command: ["valkey-server", "--appendonly", "yes"]
+    expose:
+      - "6379"
+    volumes:
+      - paperless_broker_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
   paperless:
     image: ${PZ_IMAGE_PAPERLESS:-ghcr.io/paperless-ngx/paperless-ngx:2.16.3}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-paperless
     restart: unless-stopped
     init: true
@@ -135,17 +208,28 @@ services:
       - no-new-privileges:true
     mem_limit: 1024m
     cpus: 1.5
+    depends_on:
+      paperless-broker:
+        condition: service_healthy
     environment:
       - PAPERLESS_SECRET_KEY=${PAPERLESS_SECRET_KEY}
+      - PAPERLESS_REDIS=redis://paperless-broker:6379/0
     ports:
       - "${HOMELAB_ADMIN_BIND_ADDR:-127.0.0.1}:8010:8000"
     volumes:
       - paperless_data:/usr/src/paperless/data
       - paperless_media:/usr/src/paperless/media
+      - paperless_consume:/usr/src/paperless/consume
+      - paperless_export:/usr/src/paperless/export
 
   # Workflows/automação
   n8n:
     image: ${PZ_IMAGE_N8N:-docker.n8n.io/n8nio/n8n:1.100.1}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-n8n
     restart: unless-stopped
     init: true
@@ -160,12 +244,19 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
 
+networks:
+  pz-internal:
+    internal: true
+
 volumes:
   portainer_data:
   nextcloud_db:
   nextcloud_data:
   prometheus_data:
   grafana_data:
+  paperless_broker_data:
   paperless_data:
   paperless_media:
+  paperless_consume:
+  paperless_export:
   n8n_data:

@@ -11,6 +11,9 @@ shift 2>/dev/null || true
 PROXY_ROOT="${PZ_AI_PROXY_ROOT:-$HOME/.local/share/phasezero/ai-proxies}"
 INSTALL_ROOT="${PZ_9ROUTER_INSTALL_ROOT:-$PROXY_ROOT/9router}"
 RUNTIME="$PROXY_ROOT/.runtime/node24"
+# 9Router may run on a newer system Node; its PATH shim lives apart from the
+# proxy suite shim ($RUNTIME/bin), whose native modules are built for Node 24.
+ROUTER_BIN="$PROXY_ROOT/.runtime/9router-bin"
 NODE_BIN="${PZ_9ROUTER_NODE_BIN:-$RUNTIME/node_modules/node/bin/node}"
 NPM_CLI="${PZ_9ROUTER_NPM_CLI:-$RUNTIME/node_modules/npm/bin/npm-cli.js}"
 LOCAL_BIN="${PZ_LOCAL_BIN:-$HOME/.local/bin}"
@@ -18,6 +21,7 @@ SYSTEMD_USER_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/phasezero/9router"
 PROXY_ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/phasezero/ai-proxies"
 ENV_FILE="$PROXY_ENV_DIR/9router.env"
+ENV_BACKUP_DIR="$PROXY_ENV_DIR/.9router-env-backups"
 SETTINGS_FILE="$CONFIG_DIR/settings.json"
 DATA_DIR="${PZ_9ROUTER_DATA_DIR:-$HOME/.9router}"
 STATE_DIR="$PZ_STATE/9router"
@@ -38,6 +42,13 @@ SERVER_WRAPPER="$LOCAL_BIN/phasezero-9router-server"
 BACKUP_ROOT="$PROXY_ROOT/.9router-backups"
 CLIENT_WRAPPER="$LOCAL_BIN/phasezero-9router-run"
 DASHBOARD_ENTRY="${XDG_DATA_HOME:-$HOME/.local/share}/applications/phasezero-9router.desktop"
+
+connection_grant_blocked() {
+    jq -nc '{schemaVersion:1,ok:false,status:"blocked",
+      blockedReason:"connection-grant-not-enforceable",
+      summary:"Uso do 9Router bloqueado: não há vínculo de conta e consumidor aplicado por requisição.",
+      next:"Aguarde adapter com grant por requisição e rejeição de fallback."}'
+}
 
 ensure_dirs() {
     install -d -m 700 "$CONFIG_DIR" "$PROXY_ENV_DIR" "$DATA_DIR" "$STATE_DIR"
@@ -63,9 +74,17 @@ env_get() {
 
 env_upsert() {
     local key="$1" value="$2" tmp
+    # Only real env names. A single-letter placeholder key is the signature of a
+    # test or scratch call that escaped its sandbox onto the live file.
+    [[ "$key" =~ ^[A-Z][A-Z0-9_]{2,}$ ]] || {
+        pz_error "refusing to write malformed 9Router env key: $key"
+        return 1
+    }
     ensure_dirs
     [ -f "$ENV_FILE" ] || : > "$ENV_FILE"
+    backup_env_file
     tmp="$(mktemp)"
+    chmod 0600 "$tmp"
     grep -vE "^${key}=" "$ENV_FILE" > "$tmp" 2>/dev/null || true
     printf '%s=%s\n' "$key" "$value" >> "$tmp"
     install -m 0600 "$tmp" "$ENV_FILE"
@@ -76,8 +95,8 @@ ensure_node_runtime() {
     local npm system_node system_npm_cli node_version node_major
     if [ -n "${PZ_9ROUTER_NODE_BIN:-}" ] && [ -x "$NODE_BIN" ] \
         && [ -n "${PZ_9ROUTER_NPM_CLI:-}" ] && [ -f "$NPM_CLI" ]; then
-        install -d "$RUNTIME/bin"
-        ln -sfn "$NODE_BIN" "$RUNTIME/bin/node"
+        install -d "$ROUTER_BIN"
+        ln -sfn "$NODE_BIN" "$ROUTER_BIN/node"
         pz_debug "Using verified external Node.js runtime for 9Router"
         return 0
     fi
@@ -93,8 +112,8 @@ ensure_node_runtime() {
             && [ -f "$system_npm_cli" ]; then
             NODE_BIN="$system_node"
             NPM_CLI="$system_npm_cli"
-            install -d "$RUNTIME/bin"
-            ln -sfn "$NODE_BIN" "$RUNTIME/bin/node"
+            install -d "$ROUTER_BIN"
+            ln -sfn "$NODE_BIN" "$ROUTER_BIN/node"
             pz_debug "Using existing Node.js $node_version for 9Router"
             return 0
         fi
@@ -104,21 +123,53 @@ ensure_node_runtime() {
         install -d "$RUNTIME"
         "$npm" install --prefix "$RUNTIME" --no-save "node@24" "npm@10"
     fi
-    install -d "$RUNTIME/bin"
-    ln -sfn "$NODE_BIN" "$RUNTIME/bin/node"
+    install -d "$ROUTER_BIN"
+    ln -sfn "$NODE_BIN" "$ROUTER_BIN/node"
+}
+
+# Keep a rotating 0600 copy of the env before every rewrite. This file holds the
+# only copy of the server secrets and the client credential: a truncating write
+# from any source (a stray env_upsert, a test pointed at the real $HOME) leaves
+# no way back, takes the systemd EnvironmentFile with it, and drops the service
+# to its defaults -- which binds 0.0.0.0:3000 instead of loopback.
+backup_env_file() {
+    local stamp
+    [ -s "$ENV_FILE" ] || return 0
+    install -d -m 0700 "$ENV_BACKUP_DIR"
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    install -m 0600 "$ENV_FILE" "$ENV_BACKUP_DIR/9router.env.$stamp"
+    find "$ENV_BACKUP_DIR" -maxdepth 1 -name '9router.env.*' -type f -printf '%T@ %p\n' 2>/dev/null |
+        sort -nr | tail -n +11 | cut -d' ' -f2- | xargs -r rm -f
+}
+
+env_file_is_complete() {
+    local file="${1:-$ENV_FILE}" key
+    [ -f "$file" ] || return 1
+    for key in DATA_DIR PORT HOSTNAME BASE_URL JWT_SECRET API_KEY_SECRET; do
+        grep -qE "^${key}=." "$file" || return 1
+    done
 }
 
 write_runtime_config() {
-    local initial_password jwt_secret api_secret machine_salt
+    local initial_password jwt_secret api_secret machine_salt client_key tmp
     initial_password="$(env_get INITIAL_PASSWORD)"
     jwt_secret="$(env_get JWT_SECRET)"
     api_secret="$(env_get API_KEY_SECRET)"
     machine_salt="$(env_get MACHINE_ID_SALT)"
+    # Carried, not regenerated: this is the credential every downstream client
+    # reads (Hermes launchers, Claude Code, OpenCode, Odysseus). Dropping it here
+    # used to break all of them on every install and update.
+    client_key="$(env_get PHASEZERO_9ROUTER_API_KEY)"
     [ -n "$initial_password" ] || initial_password="pz-$(random_hex 18)"
     [ -n "$jwt_secret" ] || jwt_secret="$(random_hex 32)"
     [ -n "$api_secret" ] || api_secret="$(random_hex 32)"
     [ -n "$machine_salt" ] || machine_salt="$(random_hex 24)"
-    cat > "$ENV_FILE" <<EOF
+    backup_env_file
+    # Staged write: a partial or failed write must not truncate the live file the
+    # service reads at boot.
+    tmp="$(mktemp)"
+    chmod 0600 "$tmp"
+    cat > "$tmp" <<EOF
 DATA_DIR=$DATA_DIR
 PORT=$PORT
 HOSTNAME=$HOST
@@ -133,7 +184,14 @@ REQUIRE_API_KEY=true
 ENABLE_REQUEST_LOGS=false
 AUTH_COOKIE_SECURE=false
 EOF
-    chmod 0600 "$ENV_FILE"
+    [ -z "$client_key" ] || printf 'PHASEZERO_9ROUTER_API_KEY=%s\n' "$client_key" >> "$tmp"
+    if ! env_file_is_complete "$tmp"; then
+        rm -f "$tmp"
+        pz_error "refusing to install incomplete 9Router environment"
+        return 1
+    fi
+    install -m 0600 "$tmp" "$ENV_FILE"
+    rm -f "$tmp"
 
     local active_model
     active_model="$(jq -r '.activeCombo // .model // "Default"' "$SETTINGS_FILE" 2>/dev/null || echo Default)"
@@ -159,10 +217,19 @@ exec "$managed_pz" ai 9router tui "\$@"
 EOF
     chmod +x "$LOCAL_BIN/9router"
 
+    # Fail closed on a damaged EnvironmentFile. systemd tolerates missing keys,
+    # and the upstream server then falls back to its own defaults -- which listen
+    # on 0.0.0.0:3000. Refusing to boot is the safe outcome: a dead loopback
+    # gateway is visible and repairable, a wildcard-bound one is neither.
     pz_write_managed_file "$SERVER_WRAPPER" user <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="$RUNTIME/bin:\$PATH"
+if [ "\${HOSTNAME:-}" != "$HOST" ] || [ "\${PORT:-}" != "$PORT" ]; then
+  echo "9Router refusing to start: managed environment missing or altered (expected $HOST:$PORT, got \${HOSTNAME:-unset}:\${PORT:-unset})" >&2
+  echo "repair with: pz ai 9router repair" >&2
+  exit 78
+fi
+export PATH="$ROUTER_BIN:\$PATH"
 exec "$NODE_BIN" "$SERVER_RUNNER" "$PACKAGE_ROOT"
 EOF
     chmod 0700 "$SERVER_WRAPPER"
@@ -170,17 +237,8 @@ EOF
     pz_write_managed_file "$CLIENT_WRAPPER" user <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-[ -r "$ENV_FILE" ] || { echo "9Router environment missing" >&2; exit 1; }
-set -a
-source "$ENV_FILE"
-set +a
-export OPENAI_BASE_URL="$BASE_URL/v1"
-export OPENAI_API_KEY="\$PHASEZERO_9ROUTER_API_KEY"
-export ANTHROPIC_BASE_URL="$BASE_URL"
-export ANTHROPIC_API_KEY="\$PHASEZERO_9ROUTER_API_KEY"
-export ANTHROPIC_AUTH_TOKEN="\$PHASEZERO_9ROUTER_API_KEY"
-[ "\$#" -gt 0 ] || { echo "usage: phasezero-9router-run <command> [args...]" >&2; exit 2; }
-exec "\$@"
+jq -nc '{ok:false,status:"blocked",blockedReason:"connection-grant-not-enforceable",summary:"9Router client launch blocked until per-request grants are enforced."}'
+exit 69
 EOF
     chmod 0700 "$CLIENT_WRAPPER"
 
@@ -188,11 +246,11 @@ EOF
     pz_write_managed_file "$DASHBOARD_ENTRY" user <<EOF
 [Desktop Entry]
 Type=Application
-Name=9Router
-Comment=PhaseZero AI routing dashboard
+Name=9Router dashboard (uso bloqueado)
+Comment=Bloqueado: testes de provider podem consumir cota sem grant por requisição.
 Exec=$managed_pz ai 9router dashboard
 Icon=applications-science
-Terminal=false
+Terminal=true
 Categories=X-PhaseZero-WebApp;
 X-PHZ-Group=ia
 X-PhaseZero-MenuGroup=web.ai
@@ -257,6 +315,9 @@ Type=simple
 RuntimeDirectory=phasezero
 RuntimeDirectoryMode=0700
 ExecStart=/usr/sbin/socat UNIX-LISTEN:%t/phasezero/9router.sock,fork,mode=0600 TCP:127.0.0.1:$PORT
+# socat exits 143 on SIGTERM. Without this, every ordinary stop -- including the
+# one an update performs -- leaves the unit in "failed" and it never comes back.
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=2
 
@@ -321,6 +382,31 @@ tui_9router() {
     done
 }
 
+# Recover a truncated or partially written env without a package reinstall.
+# Prefer the newest complete backup: it keeps the original server secrets, so
+# existing API keys and dashboard credentials survive. Regenerating is the last
+# resort and is announced, because it invalidates issued keys.
+ensure_env_file() {
+    local candidate
+    # Snapshot while it is still good: a backup taken only on write would not
+    # exist yet the first time something truncates the file.
+    if env_file_is_complete; then
+        backup_env_file
+        return 0
+    fi
+    pz_warn "9Router environment is incomplete: $ENV_FILE"
+    while read -r candidate; do
+        [ -n "$candidate" ] || continue
+        env_file_is_complete "$candidate" || continue
+        install -m 0600 "$candidate" "$ENV_FILE"
+        pz_info "restored 9Router environment from $(basename "$candidate")"
+        return 0
+    done < <(find "$ENV_BACKUP_DIR" -maxdepth 1 -name '9router.env.*' -type f -printf '%T@ %p\n' 2>/dev/null |
+        sort -nr | cut -d' ' -f2-)
+    pz_warn "no usable 9Router environment backup; regenerating server secrets (issued API keys will stop working)"
+    write_runtime_config
+}
+
 repair_9router() {
     ensure_dirs
     [ -x "$PACKAGE_BIN" ] || { pz_error "9Router package missing; run install first"; return 1; }
@@ -333,6 +419,7 @@ repair_9router() {
         pz_error "port $PORT is owned by a non-PhaseZero process; refusing to kill it"
         return 1
     fi
+    ensure_env_file
     write_wrapper_and_units
     systemctl --user daemon-reload
     systemctl --user enable "$SERVICE" "$BRIDGE_SERVICE" "$WATCH_TIMER" >/dev/null
@@ -343,12 +430,16 @@ repair_9router() {
     # oneshot start must succeed; systemd returns non-zero for 203/EXEC and
     # proves the migrated stable ExecStart path is executable now.
     systemctl --user start "$WATCH_SERVICE"
+    ensure_api_key
     status_json
 }
 
 registry_metadata() {
     ensure_node_runtime
-    PATH="$RUNTIME/bin:$PATH" "$NODE_BIN" "$NPM_CLI" view 9router version dist.integrity dist.shasum --json
+    # npm >= 10 wraps multi-field `view` output in an array; older npm emits a
+    # bare object.  Normalize to an object so callers can index fields directly.
+    PATH="$ROUTER_BIN:$PATH" "$NODE_BIN" "$NPM_CLI" view 9router version dist.integrity dist.shasum --json \
+        | jq -c 'if type == "array" then (.[0] // {}) else . end'
 }
 
 installed_version() {
@@ -365,7 +456,7 @@ install_verified_package() (
     work="$(mktemp -d)"
     stage="$PROXY_ROOT/.9router-stage.$$"
     trap 'rm -rf "${work:-}" "${stage:-}"' EXIT
-    pack_json="$(PATH="$RUNTIME/bin:$PATH" "$NODE_BIN" "$NPM_CLI" pack "9router@$version" --pack-destination "$work" --json)"
+    pack_json="$(PATH="$ROUTER_BIN:$PATH" "$NODE_BIN" "$NPM_CLI" pack "9router@$version" --pack-destination "$work" --json)"
     [ "$(jq -r '.[0].integrity // empty' <<< "$pack_json")" = "$expected_integrity" ] || {
         pz_error "9Router npm integrity mismatch"
         return 1
@@ -373,7 +464,7 @@ install_verified_package() (
     tarball="$work/$(jq -r '.[0].filename' <<< "$pack_json")"
     [ -f "$tarball" ] || { pz_error "9Router package archive missing"; return 1; }
     install -d "$stage"
-    PATH="$RUNTIME/bin:$PATH" "$NODE_BIN" "$NPM_CLI" install -g --prefix "$stage" --ignore-scripts "$tarball"
+    PATH="$ROUTER_BIN:$PATH" "$NODE_BIN" "$NPM_CLI" install -g --prefix "$stage" --ignore-scripts "$tarball"
     [ -x "$stage/bin/9router" ] || { pz_error "9Router staged binary missing"; return 1; }
     [ "$(jq -r '.version // empty' "$stage/lib/node_modules/9router/package.json")" = "$version" ] || {
         pz_error "9Router staged version mismatch"
@@ -404,6 +495,10 @@ install_verified_package() (
             pz_error "9Router update failed health check; rollback applied"
             return 1
         fi
+        # PartOf propagates the stop above to the bridge but never the start
+        # back, so an update would otherwise leave containers with no socket.
+        systemctl --user reset-failed "$BRIDGE_SERVICE" >/dev/null 2>&1 || true
+        systemctl --user start "$BRIDGE_SERVICE" >/dev/null 2>&1 || true
     fi
     find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null \
         | sort -nr | awk 'NR>2 {$1=""; sub(/^ /,""); print}' | xargs -r rm -rf --
@@ -433,7 +528,6 @@ install_9router() {
     fi
     wait_ready 90
     ensure_api_key
-    ensure_active_combo
     pz_info "9Router installed: $BASE_URL/dashboard"
 }
 
@@ -564,7 +658,7 @@ status_json() {
           combos:{total:(($combos.combos // $combos.data // [])|length),names:(($combos.combos // $combos.data // [])|map(.name))},
           usage:$usage,
           watchdog:{enabled:false,log:$healthLog},
-          nextAction:(if ($installed|not) then "linux/pz ai 9router install" elif ($health|not) then "linux/pz ai 9router start" elif (($providers.connections // [])|length)==0 then "Abra o dashboard e conecte um provider" else "linux/pz ai 9router combo sync" end)}' \
+          nextAction:(if ($installed|not) then "linux/pz ai 9router install" elif ($health|not) then "linux/pz ai 9router start" elif (($providers.connections // [])|length)==0 then "Abra o dashboard e conecte um provider" else "Uso por cliente bloqueado até grant por requisição" end)}' \
         | jq --argjson enabled "$(systemctl --user is-enabled "$WATCH_TIMER" >/dev/null 2>&1 && echo true || echo false)" '.watchdog.enabled=$enabled'
 }
 
@@ -582,28 +676,20 @@ usage_summary() {
 }
 
 test_9router() {
-    local key body code models_ok=false health_ok=false chat_status="provider-required" chat_code="" provider_count=0 model payload
+    local key body code models_ok=false health_ok=false provider_count=0
     curl -fsS --max-time 3 "$BASE_URL/api/health" >/dev/null 2>&1 && health_ok=true
     key="$(env_get PHASEZERO_9ROUTER_API_KEY)"
     body="$(curl -sS --max-time 10 -H "Authorization: Bearer $key" "$BASE_URL/v1/models" 2>/dev/null || true)"
     code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H "Authorization: Bearer $key" "$BASE_URL/v1/models" 2>/dev/null || true)"
     jq -e '(.data // []) | type == "array"' <<< "$body" >/dev/null 2>&1 && [ "$code" = 200 ] && models_ok=true
     provider_count="$(api_request GET /api/providers 2>/dev/null | jq '(.connections // .providers // []) | map(select((.isActive // true)==true)) | length' 2>/dev/null || echo 0)"
-    if [ "$provider_count" -gt 0 ] && $models_ok; then
-        model="$(jq -r '.activeCombo // .model // empty' "$SETTINGS_FILE" 2>/dev/null || true)"
-        [ -n "$model" ] || model="$(jq -r '.data[0].id // empty' <<< "$body")"
-        payload="$(mktemp)"
-        jq -n --arg model "$model" '{model:$model,messages:[{role:"user",content:"Reply only: OK"}],stream:false,max_tokens:8}' > "$payload"
-        chat_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 -X POST "$BASE_URL/v1/chat/completions" \
-            -H "Authorization: Bearer $key" -H 'Content-Type: application/json' --data-binary "@$payload" 2>/dev/null || true)"
-        rm -f "$payload"
-        [ "$chat_code" = 200 ] && chat_status=ok || chat_status=failed
-    fi
     jq -cn --arg endpoint "$BASE_URL/v1" --arg httpCode "$code" --argjson health "$health_ok" \
-        --arg chat "$chat_status" --arg chatHttpCode "$chat_code" --argjson providers "$provider_count" \
+        --argjson providers "$provider_count" \
         --argjson models "$models_ok" --argjson count "$(jq '(.data // []) | length' <<< "$body" 2>/dev/null || echo 0)" \
-        '{id:"9router",endpoint:$endpoint,health:$health,modelsEndpoint:$models,httpCode:$httpCode,modelCount:$count,providerCount:$providers,chat:$chat,chatHttpCode:$chatHttpCode}'
-    $health_ok && $models_ok && { [ "$provider_count" -eq 0 ] || [ "$chat_status" = ok ]; }
+        '{id:"9router",endpoint:$endpoint,health:$health,modelsEndpoint:$models,httpCode:$httpCode,
+          modelCount:$count,providerCount:$providers,chat:"blocked",
+          blockedReason:"connection-grant-not-enforceable"}'
+    $health_ok && $models_ok
 }
 
 provider_status() {
@@ -622,7 +708,11 @@ find_secrets_manifest() {
     return 1
 }
 
+# shellcheck disable=SC2317
+# PXA-008 keeps legacy provider writes unreachable until request-bound grants exist.
 sync_secrets() {
+    connection_grant_blocked
+    return 69
     local manifest provider secret name payload response imported=0 skipped=0
     manifest="${1:-}"
     [ -n "$manifest" ] || manifest="$(find_secrets_manifest || true)"
@@ -650,7 +740,11 @@ sync_secrets() {
         '{manifest:$manifest,imported:$imported,skipped:$skipped,secretsRedacted:true}'
 }
 
+# shellcheck disable=SC2317
+# PXA-008 retains this handler behind its request-bound grant gate.
 provider_remove() {
+    connection_grant_blocked
+    return 69
     local id="${1:-}"
     [ -n "$id" ] || { pz_error "usage: pz ai 9router provider remove <connection-id>"; return 2; }
     api_request DELETE "/api/providers/$id" | jq 'del(.apiKey,.secret,.token)'
@@ -680,7 +774,11 @@ tier_models_json() {
       | jq -R -s 'split("\n") | map(select(length>0))'
 }
 
+# shellcheck disable=SC2317
+# PXA-008 retains this handler behind its request-bound grant gate.
 upsert_combo() {
+    connection_grant_blocked
+    return 69
     local name="$1" models="$2" combos id payload
     [ "$(jq 'length' <<< "$models")" -gt 0 ] || return 0
     combos="$(api_request GET /api/combos)"
@@ -693,7 +791,11 @@ upsert_combo() {
     rm -f "$payload"
 }
 
+# shellcheck disable=SC2317
+# PXA-008 retains this handler behind its request-bound grant gate.
 combo_sync() {
+    connection_grant_blocked
+    return 69
     local free smart max
     free="$(tier_models_json free)"; smart="$(tier_models_json smart)"; max="$(tier_models_json max)"
     upsert_combo phasezero-free "$free"
@@ -707,7 +809,11 @@ combo_list() {
     api_request GET /api/combos | jq '{combos:(.combos // .data // [])|map({id,name,models})}'
 }
 
+# shellcheck disable=SC2317
+# PXA-008 retains this handler behind its request-bound grant gate.
 combo_create() {
+    connection_grant_blocked
+    return 69
     local name="${1:-}" csv="${2:-}" models payload
     if [ -z "$name" ] || [ -z "$csv" ]; then
         pz_error "usage: pz ai 9router combo create <name> <model1,model2>"
@@ -719,7 +825,11 @@ combo_create() {
     rm -f "$payload"
 }
 
+# shellcheck disable=SC2317
+# PXA-008 retains this handler behind its request-bound grant gate.
 combo_switch() {
+    connection_grant_blocked
+    return 69
     local name="${1:-}" tmp
     [ -n "$name" ] || { pz_error "usage: pz ai 9router combo switch <name>"; return 2; }
     combo_list | jq -e --arg name "$name" '.combos[] | select(.name==$name)' >/dev/null || { pz_error "combo not found: $name"; return 1; }
@@ -729,7 +839,11 @@ combo_switch() {
     jq -cn --arg combo "$name" --arg settings "$SETTINGS_FILE" '{activeCombo:$combo,settings:$settings}'
 }
 
+# shellcheck disable=SC2317
+# PXA-008 retains this handler behind its request-bound grant gate.
 ensure_active_combo() {
+    connection_grant_blocked
+    return 69
     local combo_json current selected
     combo_json="$(combo_list)"
     current="$(jq -r '.activeCombo // .model // empty' "$SETTINGS_FILE" 2>/dev/null || true)"
@@ -792,7 +906,9 @@ check_update() {
 
 rollback_package() {
     local backup current
-    backup="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
+    # failed-* é evidência de falha, não backup restaurável: sem o filtro, o
+    # rollback manual mais novo que o auto-rollback reinstalava a versão ruim.
+    backup="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d ! -name 'failed-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
     [ -n "$backup" ] || { pz_error "no 9Router rollback available"; return 1; }
     systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
     current="$BACKUP_ROOT/failed-$(installed_version)-$(date +%Y%m%d-%H%M%S)"
@@ -806,8 +922,8 @@ rollback_package() {
 
 client_status() {
     jq -cn --arg wrapper "$CLIENT_WRAPPER" --arg endpoint "$BASE_URL/v1" --arg model "$(jq -r '.model // "phasezero-smart"' "$SETTINGS_FILE" 2>/dev/null || echo phasezero-smart)" \
-        --argjson ready "$([ -x "$CLIENT_WRAPPER" ] && [ -n "$(env_get PHASEZERO_9ROUTER_API_KEY)" ] && echo true || echo false)" \
-        '{ready:$ready,wrapper:$wrapper,endpoint:$endpoint,model:$model,usage:"phasezero-9router-run <codex|claude|opencode|other> [args...]",secretsRedacted:true}'
+        --argjson ready false \
+        '{ready:$ready,wrapper:$wrapper,endpoint:$endpoint,model:$model,usage:"blocked until per-request connection grants are enforced",blockedReason:"connection-grant-not-enforceable",secretsRedacted:true}'
 }
 
 doctor_9router() {
@@ -833,16 +949,15 @@ doctor_9router() {
 }
 
 dashboard() {
-    command -v xdg-open >/dev/null 2>&1 || { pz_error "xdg-open missing"; return 1; }
-    xdg-open "$BASE_URL/dashboard" >/dev/null 2>&1 &
-    pz_info "9Router dashboard opened: $BASE_URL/dashboard"
+    connection_grant_blocked
+    return 69
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 case "$ACTION" in
     install|setup) install_9router ;;
     check-update|check) check_update ;;
-    update|upgrade) ensure_dirs; install_verified_package; ensure_api_key; ensure_active_combo ;;
+    update|upgrade) ensure_dirs; install_verified_package; ensure_api_key ;;
     rollback) rollback_package ;;
     doctor) doctor_9router ;;
     status) status_json ;;
@@ -873,7 +988,7 @@ case "$ACTION" in
     client)
         case "${1:-status}" in
             status|env) client_status ;;
-            run) shift; [ "$#" -gt 0 ] || { pz_error "usage: pz ai 9router client run <command> [args...]"; exit 2; }; exec "$CLIENT_WRAPPER" "$@" ;;
+            run) connection_grant_blocked; exit 69 ;;
             *) pz_error "usage: pz ai 9router client (status|run <command>)"; exit 2 ;;
         esac ;;
     watch-once) watch_once ;;

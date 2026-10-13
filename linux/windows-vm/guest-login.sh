@@ -352,13 +352,25 @@ verify_transport() {
 
 guest_status() {
     if ! qga_ping "$QGA_SOCKET"; then
+        # Valid report, not a tool failure: the VM being off/unreachable is a
+        # state the operator can act on (WBR: nenhum beco sem saída).
         jq -n --arg policy "$POLICY" \
             '{guestLoginPolicy:$policy,guestLoginVerified:false,qgaAvailable:false,
-              qgaServiceHealthy:false,lastVerifiedAt:null,error:"qga-unavailable"}'
-        return 1
+              qgaServiceHealthy:false,lastVerifiedAt:null,error:"qga-unavailable",
+              state:"needs-vm-running",
+              summary:"A VM Windows nao esta acessivel agora (agente convidado indisponivel).",
+              nextAction:"Inicie a VM e repita; o agente leva alguns segundos apos o boot."}'
+        return 0
     fi
     local result
-    result="$(qga_guest_exec_wait status "")" || return 1
+    if ! result="$(qga_guest_exec_wait status "")"; then
+        jq -n --arg policy "$POLICY" \
+            '{guestLoginPolicy:$policy,guestLoginVerified:false,qgaAvailable:false,
+              qgaServiceHealthy:false,lastVerifiedAt:null,error:"qga-exec-failed",
+              state:"unavailable",summary:"O agente convidado nao respondeu a consulta.",
+              nextAction:"Aguarde o boot concluir e repita; se persistir, use Reparar QGA."}'
+        return 0
+    fi
     printf '%s\n' "$result" | jq '{guestLoginPolicy:.policy,
         guestLoginVerified:(.configured == true and .registryPasswordStored == false),
         qgaAvailable:true,qgaServiceHealthy:(.qgaServiceHealthy == true),
@@ -372,8 +384,13 @@ guest_status() {
 recovery_status() {
     if ! qga_ping "$QGA_SOCKET"; then
         jq -n --arg account 'PZ-Recovery' \
-            '{recoveryAccount:$account,recoveryConfigured:false,recoveryEnabled:false,recoveryAdministrator:false,recoveryLocalOnly:true,qgaAvailable:false,qgaServiceHealthy:false,lastVerifiedAt:null,error:"qga-unavailable"}'
-        return 1
+            '{recoveryAccount:$account,recoveryConfigured:false,recoveryEnabled:false,
+              recoveryAdministrator:false,recoveryLocalOnly:true,qgaAvailable:false,
+              qgaServiceHealthy:false,lastVerifiedAt:null,error:"qga-unavailable",
+              state:"needs-vm-running",
+              summary:"A VM Windows nao esta acessivel agora (agente convidado indisponivel).",
+              nextAction:"Inicie a VM e repita para verificar a conta de recuperacao."}'
+        return 0
     fi
     local result
     result="$(qga_guest_exec_wait recovery-status "")" || return 1

@@ -861,6 +861,9 @@ def run(action: str, json_output: bool) -> int:
     data = {
         "launchboxRoot": str(ctx.launchbox_root),
         "installed": (ctx.launchbox_root / "LaunchBox.exe").exists(),
+        # Estado acionável embutido: status é relatório, não falha.
+        "state": "ready",
+        "nextAction": None,
         "bigBoxInstalled": (ctx.launchbox_root / "BigBox.exe").exists(),
         "compatRoms": str(ctx.compat_roms),
         "wrapperDir": str(ctx.wrapper_dir),
@@ -920,7 +923,14 @@ def run(action: str, json_output: bool) -> int:
             print("  missing samples:")
             for example in paths["missingExamples"][:5]:
                 print(f"    {example['source']} -> {example['expected']}")
-    return 0 if data["installed"] else 1
+        if not data["installed"]:
+            print("  next: LaunchBox não está instalado — use 'pz emulation launchbox install-clean'")
+    if not data["installed"]:
+        data["state"] = "needs-install"
+        data["nextAction"] = "linux/pz emulation launchbox install-clean"
+    # status é leitura: relatório sai rc0 mesmo sem o LaunchBox instalado;
+    # ações mutantes continuam recusando seguir sem a instalação.
+    return 0 if action == "status" or data["installed"] else 1
 
 
 def main() -> int:

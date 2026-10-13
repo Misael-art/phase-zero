@@ -50,4 +50,23 @@ grep -q '^count=1$' <<< "$config"
 grep -q '^rules=keep-id$' <<< "$config"
 find "$PZ_BACKUP_ROOT" -type f -name 'kwinrulesrc.bak.*' -print -quit | grep -q .
 
+# A diagnostic never hangs: kscreen-doctor blocks forever without a KDE
+# session, so the call is bounded and detect still answers with connectors.
+stub_bin="$TMP_ROOT/stubbin"
+mkdir -p "$stub_bin"
+cat > "$stub_bin/kscreen-doctor" <<'EOS'
+#!/usr/bin/env bash
+sleep 300
+EOS
+chmod +x "$stub_bin/kscreen-doctor"
+started="$(date +%s)"
+PATH="$stub_bin:$PATH" env -u PZ_DUALSCREEN_LIB_ONLY timeout 40 \
+    bash "$REPO_ROOT/linux/emulation/dualscreen.sh" detect \
+    > "$TMP_ROOT/detect.json" 2>"$TMP_ROOT/detect.err"
+elapsed=$(( $(date +%s) - started ))
+[ "$elapsed" -lt 30 ] || { echo "FAIL: detect levou ${elapsed}s com kscreen-doctor travado"; exit 1; }
+jq -e '.externalKwinIndex == "unknown" and .internalKwinIndex == "unknown"' \
+    "$TMP_ROOT/detect.json" >/dev/null
+echo "  detect bounded with a stuck kscreen-doctor ok"
+
 echo "linux dualscreen tests passed"

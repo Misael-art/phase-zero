@@ -939,12 +939,12 @@ assert_eq "plan has warnings array" "1" "$(echo "$PLAN_PRE" | jq 'has("warnings"
 rm -rf "$PZ_STATE_DIR2"
 
 echo ""
-echo "=== preflight: auto-fix dry run ==="
+echo "=== preflight: inspection stays read-only ==="
 PZ_STATE_DIR3="$(mktemp -d)"
-AUTO_FIX_OUT=$(PZ_STATE="$PZ_STATE_DIR3" bash "$PREFLIGHT_SCRIPT" --auto-fix 2>&1 || true)
-HAS_ERROR=0
-echo "$AUTO_FIX_OUT" | grep -q '^ERROR' 2>/dev/null && HAS_ERROR=1
-assert_eq "auto-fix completes without error" "0" "$HAS_ERROR"
+PREFLIGHT_READONLY="$(PZ_STATE="$PZ_STATE_DIR3" bash "$PREFLIGHT_SCRIPT" --json 2>/dev/null || echo '{}')"
+assert_contains "preflight read-only report has status" "$PREFLIGHT_READONLY" '"status"'
+assert_eq "read-only preflight does not create a guest staging tree" "0" \
+    "$([ -e "$PZ_STATE_DIR3/windows-vm/vm" ] && echo 1 || echo 0)"
 rm -rf "$PZ_STATE_DIR3"
 
 rm -rf "$DUMMY_ISO" "$(dirname "$DUMMY_ISO")" "$PZ_STATE_DIR"
@@ -1059,7 +1059,7 @@ LOCK_T="$(mktemp -d)"
     provision_lock_acquire "op-a" || exit 10
     # A is running -> a different operation B must be blocked
     mkdir -p "$OPERATIONS_DIR/op-a"
-    echo '{"id":"op-a","state":"running"}' > "$OPERATIONS_DIR/op-a/operation.json"
+    printf '{"id":"op-a","state":"running","workerSpawnedEpoch":%s}\n' "$(date +%s)" > "$OPERATIONS_DIR/op-a/operation.json"
     mkdir -p "$OPERATIONS_DIR/op-b"
     echo '{"id":"op-b","state":"failed"}' > "$OPERATIONS_DIR/op-b/operation.json"
     if provision_lock_acquire "op-b" 2>/dev/null; then exit 11; fi
@@ -1097,7 +1097,7 @@ LOCK2_T="$(mktemp -d)"
     XDG_STATE_HOME="$LOCK2_T"
     source "$PROVISION_SCRIPT" >/dev/null 2>&1 || true
     mkdir -p "$OPERATIONS_DIR/op-a" "$OPERATIONS_DIR/op-b"
-    echo '{"id":"op-a","state":"running"}' > "$OPERATIONS_DIR/op-a/operation.json"
+    printf '{"id":"op-a","state":"running","workerSpawnedEpoch":%s}\n' "$(date +%s)" > "$OPERATIONS_DIR/op-a/operation.json"
     echo '{"id":"op-b","state":"failed"}' > "$OPERATIONS_DIR/op-b/operation.json"
     provision_lock_acquire "op-a" || exit 20
     echo '{"id":"op-a","state":"completed"}' > "$OPERATIONS_DIR/op-a/operation.json"

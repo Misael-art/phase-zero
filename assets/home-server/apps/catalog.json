@@ -1,0 +1,457 @@
+{
+  "schemaVersion": 1,
+  "tool": "homelab-app-catalog",
+  "note": "Curated PhaseZero catalog. Image refs match docker-compose.lock.json; digests resolve at update time. No latest.",
+  "apps": [
+    {
+      "key": "jellyfin",
+      "title": "Jellyfin",
+      "layer": "core",
+      "userFacing": true,
+      "listInStatus": true,
+      "defaultEnabled": true,
+      "service": "jellyfin",
+      "services": ["jellyfin"],
+      "container": "phasezero-jellyfin",
+      "composeFile": "apps/compose/jellyfin.yml",
+      "port": 8096,
+      "bindKind": "public",
+      "sensitive": false,
+      "volumes": ["jellyfin_config", "jellyfin_cache"],
+      "secrets": [],
+      "dependsOn": [],
+      "imageLockKey": "jellyfin",
+      "imageRef": "jellyfin/jellyfin:10.10.7",
+      "budgetMB": 2048,
+      "firstUse": {
+        "openPath": "/",
+        "probe": {"kind": "http", "path": "/health", "expectMax": 499},
+        "steps": [
+        "Open the app and complete the first-run wizard (local media stays yours).",
+        "Point a library at your media folder (mounted read-only at /media).",
+        "Play one title to confirm indexing and playback."
+        ],
+        "stepsPtBr": [
+        "Abra e conclua o assistente inicial — sua mídia continua só sua.",
+        "Aponte uma biblioteca para sua pasta de mídia (montada como somente leitura em /media).",
+        "Reproduza um título para confirmar indexação e reprodução."
+        ]
+      }
+    },
+    {
+      "key": "syncthing",
+      "title": "Syncthing",
+      "layer": "core",
+      "userFacing": true,
+      "listInStatus": true,
+      "defaultEnabled": true,
+      "service": "syncthing",
+      "services": ["syncthing"],
+      "container": "phasezero-syncthing",
+      "composeFile": "apps/compose/syncthing.yml",
+      "port": 8384,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": ["syncthing_data"],
+      "secrets": [],
+      "dependsOn": [],
+      "imageLockKey": "syncthing",
+      "imageRef": "syncthing/syncthing:1.29.6",
+      "budgetMB": 512,
+      "firstUse": {
+        "openPath": "/",
+        "probe": {"kind": "http", "path": "/", "expectMax": 499},
+        "steps": [
+        "Open the GUI and set a GUI username/password under Settings.",
+        "On the second device, add this host via its Device ID (Actions > Show ID).",
+        "Share one folder and confirm one file syncs both ways."
+        ],
+        "stepsPtBr": [
+        "Abra a interface e defina usuário e senha em Configurações.",
+        "No segundo dispositivo, adicione este servidor pelo Device ID (Ações > Mostrar ID).",
+        "Compartilhe uma pasta e confirme que um arquivo sincroniza nos dois sentidos."
+        ]
+      }
+    },
+    {
+      "key": "vaultwarden",
+      "title": "Vaultwarden",
+      "layer": "core",
+      "userFacing": true,
+      "listInStatus": true,
+      "defaultEnabled": true,
+      "service": "vaultwarden",
+      "services": ["vaultwarden"],
+      "container": "phasezero-vaultwarden",
+      "composeFile": "apps/compose/vaultwarden.yml",
+      "port": 8222,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": ["vaultwarden_data"],
+      "secrets": ["VW_ADMIN_TOKEN"],
+      "dependsOn": [],
+      "imageLockKey": "vaultwarden",
+      "imageRef": "vaultwarden/server:1.34.3",
+      "budgetMB": 256,
+      "firstUse": {
+        "openPath": "/",
+        "probe": {"kind": "http", "path": "/alive", "expectMax": 499},
+        "steps": [
+        "Open the app and create the FIRST account (signups stay open until then).",
+        "Log in and save one vault item.",
+        "Admin panel at /admin uses VW_ADMIN_TOKEN from the homelab .env."
+        ],
+        "stepsPtBr": [
+        "Abra e crie a PRIMEIRA conta — o cadastro fecha depois dela.",
+        "Entre e salve um item no cofre.",
+        "O painel em /admin usa o VW_ADMIN_TOKEN do .env do homelab."
+        ]
+      }
+    },
+    {
+      "key": "uptime-kuma",
+      "title": "Uptime Kuma",
+      "layer": "core",
+      "userFacing": true,
+      "listInStatus": true,
+      "defaultEnabled": true,
+      "service": "uptime-kuma",
+      "services": ["uptime-kuma"],
+      "container": "phasezero-uptime-kuma",
+      "composeFile": "apps/compose/uptime-kuma.yml",
+      "port": 3001,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": ["uptimekuma_data"],
+      "secrets": [],
+      "dependsOn": [],
+      "imageLockKey": "uptime-kuma",
+      "imageRef": "louislam/uptime-kuma:1.23.16",
+      "budgetMB": 256,
+      "firstUse": {
+        "openPath": "/",
+        "probe": {"kind": "http", "path": "/", "expectMax": 499},
+        "steps": [
+        "Open the app and create the admin account on first launch.",
+        "Add one HTTP monitor for each PhaseZero endpoint you care about.",
+        "Stop one service and confirm the monitor flips to DOWN, then recovers."
+        ],
+        "stepsPtBr": [
+        "Abra e crie a conta de administrador no primeiro acesso.",
+        "Adicione um monitor HTTP para cada endereço que você quer acompanhar.",
+        "Pare um serviço e confirme que o monitor marca fora do ar e depois se recupera."
+        ]
+      }
+    },
+    {
+      "key": "socket-proxy",
+      "title": "Docker socket proxy",
+      "layer": "extras",
+      "userFacing": false,
+      "listInStatus": false,
+      "defaultEnabled": false,
+      "infra": true,
+      "service": "socket-proxy",
+      "services": ["socket-proxy"],
+      "container": "phasezero-socket-proxy",
+      "composeFile": "apps/compose/portainer.yml",
+      "port": 0,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": [],
+      "secrets": [],
+      "dependsOn": [],
+      "imageLockKey": "socket-proxy",
+      "imageRef": "tecnativa/docker-socket-proxy:0.2.0",
+      "budgetMB": 64
+    },
+    {
+      "key": "portainer",
+      "title": "Portainer",
+      "layer": "extras",
+      "userFacing": true,
+      "listInStatus": true,
+      "defaultEnabled": false,
+      "service": "portainer",
+      "services": ["socket-proxy", "portainer"],
+      "container": "phasezero-portainer",
+      "composeFile": "apps/compose/portainer.yml",
+      "port": 9000,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": ["portainer_data"],
+      "secrets": [],
+      "dependsOn": ["socket-proxy"],
+      "imageLockKey": "portainer",
+      "imageRef": "portainer/portainer-ce:2.33.2",
+      "budgetMB": 128,
+      "firstUse": {
+        "openPath": "/",
+        "probe": {"kind": "http", "path": "/", "expectMax": 499},
+        "steps": [
+        "Open the app and create the admin account (12+ chars) on first launch.",
+        "Connect the local socket-proxy environment when prompted.",
+        "List the homelab stack to confirm visibility through the proxy."
+        ],
+        "stepsPtBr": [
+        "Abra e crie a conta de administrador (12+ caracteres) no primeiro acesso.",
+        "Conecte o ambiente local do socket-proxy quando for solicitado.",
+        "Liste a stack do homelab para confirmar a visibilidade pelo proxy."
+        ]
+      }
+    },
+    {
+      "key": "nextcloud-db",
+      "title": "Nextcloud DB",
+      "layer": "extras",
+      "userFacing": false,
+      "listInStatus": false,
+      "defaultEnabled": false,
+      "infra": true,
+      "service": "nextcloud-db",
+      "services": ["nextcloud-db"],
+      "container": "phasezero-nextcloud-db",
+      "composeFile": "apps/compose/nextcloud.yml",
+      "port": 0,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": ["nextcloud_db"],
+      "secrets": ["NEXTCLOUD_DB_ROOT_PASSWORD"],
+      "dependsOn": [],
+      "imageLockKey": "mariadb",
+      "imageRef": "mariadb:11.8.3",
+      "budgetMB": 512
+    },
+    {
+      "key": "nextcloud",
+      "title": "Nextcloud",
+      "layer": "extras",
+      "userFacing": true,
+      "listInStatus": true,
+      "defaultEnabled": false,
+      "service": "nextcloud",
+      "services": ["nextcloud-db", "nextcloud"],
+      "container": "phasezero-nextcloud",
+      "composeFile": "apps/compose/nextcloud.yml",
+      "port": 8080,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": ["nextcloud_db", "nextcloud_data"],
+      "secrets": ["NEXTCLOUD_DB_PASSWORD"],
+      "dependsOn": ["nextcloud-db"],
+      "imageLockKey": "nextcloud",
+      "imageRef": "nextcloud:31.0.6",
+      "budgetMB": 1024,
+      "firstUse": {
+        "openPath": "/",
+        "probe": {"kind": "http", "path": "/status.php", "expectMax": 499},
+        "steps": [
+        "Wait for the database to accept connections, then open the app.",
+        "Create the admin account on the setup screen.",
+        "Upload and download one file; check background jobs under Settings."
+        ],
+        "stepsPtBr": [
+        "Espere o banco de dados aceitar conexões e abra o aplicativo.",
+        "Crie a conta de administrador na tela de instalação.",
+        "Envie e baixe um arquivo; confira as tarefas em segundo plano em Configurações."
+        ]
+      }
+    },
+    {
+      "key": "prometheus",
+      "title": "Prometheus",
+      "layer": "extras",
+      "userFacing": true,
+      "listInStatus": true,
+      "defaultEnabled": false,
+      "service": "prometheus",
+      "services": ["prometheus"],
+      "container": "phasezero-prometheus",
+      "composeFile": "apps/compose/prometheus.yml",
+      "port": 9090,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": ["prometheus_data"],
+      "secrets": [],
+      "dependsOn": [],
+      "imageLockKey": "prometheus",
+      "imageRef": "prom/prometheus:v3.5.0",
+      "budgetMB": 512,
+      "firstUse": {
+        "openPath": "/-/healthy",
+        "probe": {"kind": "http", "path": "/-/healthy", "expectMax": 499},
+        "steps": [
+        "Open /-/healthy to confirm the server is up.",
+        "Point a scrape job at the appliance targets (see homelab docs).",
+        "Query one metric, then stop a target and watch it go down."
+        ],
+        "stepsPtBr": [
+        "Abra /-/healthy para confirmar que o servidor está no ar.",
+        "Aponte uma coleta para os alvos do servidor (veja a documentação do homelab).",
+        "Consulte uma métrica, pare um alvo e acompanhe a queda."
+        ]
+      }
+    },
+    {
+      "key": "node-exporter",
+      "title": "Node Exporter",
+      "layer": "extras",
+      "userFacing": false,
+      "listInStatus": true,
+      "defaultEnabled": false,
+      "infra": true,
+      "service": "node-exporter",
+      "services": ["node-exporter"],
+      "container": "phasezero-node-exporter",
+      "composeFile": "apps/compose/node-exporter.yml",
+      "port": 9100,
+      "bindKind": "admin",
+      "sensitive": false,
+      "volumes": [],
+      "secrets": [],
+      "dependsOn": [],
+      "imageLockKey": "node-exporter",
+      "imageRef": "prom/node-exporter:v1.9.1",
+      "budgetMB": 128,
+      "firstUse": {
+        "openPath": "/metrics",
+        "probe": {"kind": "http", "path": "/-/healthy", "expectMax": 499},
+        "steps": [
+        "Confirm /metrics exposes this host (check the nodename label).",
+        "Wire it as a Prometheus scrape target on the appliance."
+        ],
+        "stepsPtBr": [
+        "Confirme que /metrics responde neste servidor.",
+        "Use o Prometheus para coletar estas métricas."
+        ]
+      }
+    },
+    {
+      "key": "grafana",
+      "title": "Grafana",
+      "layer": "extras",
+      "userFacing": true,
+      "listInStatus": true,
+      "defaultEnabled": false,
+      "service": "grafana",
+      "services": ["grafana"],
+      "container": "phasezero-grafana",
+      "composeFile": "apps/compose/grafana.yml",
+      "port": 3000,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": ["grafana_data"],
+      "secrets": ["GRAFANA_ADMIN_PASSWORD"],
+      "dependsOn": [],
+      "imageLockKey": "grafana",
+      "imageRef": "grafana/grafana:12.0.2",
+      "budgetMB": 512,
+      "firstUse": {
+        "openPath": "/",
+        "probe": {"kind": "http", "path": "/api/health", "expectMax": 499},
+        "steps": [
+        "Log in with admin and the GRAFANA_ADMIN_PASSWORD from the homelab .env.",
+        "Add Prometheus as a data source.",
+        "Import one host dashboard and confirm real data renders."
+        ],
+        "stepsPtBr": [
+        "Entre com admin e a GRAFANA_ADMIN_PASSWORD do .env do homelab.",
+        "Adicione o Prometheus como fonte de dados.",
+        "Importe um painel do host e confirme que dados reais aparecem."
+        ]
+      }
+    },
+    {
+      "key": "paperless",
+      "title": "Paperless",
+      "layer": "extras",
+      "userFacing": true,
+      "listInStatus": true,
+      "defaultEnabled": false,
+      "service": "paperless",
+      "services": ["paperless", "paperless-broker"],
+      "container": "phasezero-paperless",
+      "composeFile": "apps/compose/paperless.yml",
+      "port": 8010,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": ["paperless_data", "paperless_media", "paperless_consume", "paperless_export", "paperless_broker_data"],
+      "secrets": ["PAPERLESS_SECRET_KEY"],
+      "dependsOn": ["paperless-broker"],
+      "imageLockKey": "paperless",
+      "imageRef": "ghcr.io/paperless-ngx/paperless-ngx:2.16.3",
+      "budgetMB": 1024,
+      "firstUse": {
+        "openPath": "/",
+        "probe": {"kind": "http", "path": "/", "expectMax": 499},
+        "steps": [
+        "Create the superuser on first launch (createsuperuser via the app console).",
+        "Drop one PDF into the consume folder and wait for OCR.",
+        "Search the document text, then export it back out."
+        ],
+        "stepsPtBr": [
+        "Crie o superusuário no primeiro acesso (createsuperuser pelo console do aplicativo).",
+        "Coloque um PDF na pasta de entrada e aguarde o OCR.",
+        "Pesquise o texto do documento e exporte-o de volta."
+        ]
+      }
+    },
+    {
+      "key": "paperless-broker",
+      "title": "Paperless broker (Valkey)",
+      "layer": "extras",
+      "userFacing": false,
+      "listInStatus": false,
+      "defaultEnabled": false,
+      "infra": true,
+      "service": "paperless-broker",
+      "services": ["paperless-broker"],
+      "container": "phasezero-paperless-broker",
+      "composeFile": "apps/compose/paperless.yml",
+      "port": 0,
+      "bindKind": "admin",
+      "sensitive": false,
+      "volumes": ["paperless_broker_data"],
+      "secrets": [],
+      "dependsOn": [],
+      "imageLockKey": "paperless-broker",
+      "imageRef": "valkey/valkey:8.0",
+      "budgetMB": 128
+    },
+    {
+      "key": "n8n",
+      "title": "n8n",
+      "layer": "extras",
+      "userFacing": true,
+      "listInStatus": true,
+      "defaultEnabled": false,
+      "service": "n8n",
+      "services": ["n8n"],
+      "container": "phasezero-n8n",
+      "composeFile": "apps/compose/n8n.yml",
+      "port": 5678,
+      "bindKind": "admin",
+      "sensitive": true,
+      "volumes": ["n8n_data"],
+      "secrets": ["N8N_ENCRYPTION_KEY"],
+      "dependsOn": [],
+      "imageLockKey": "n8n",
+      "imageRef": "docker.n8n.io/n8nio/n8n:1.100.1",
+      "budgetMB": 1024,
+      "firstUse": {
+        "openPath": "/",
+        "probe": {"kind": "http", "path": "/healthz", "expectMax": 499},
+        "steps": [
+        "Create the owner account on first launch.",
+        "Build one two-step workflow and run it manually.",
+        "Deactivate/reactivate it and confirm executions persist after restore."
+        ],
+        "stepsPtBr": [
+        "Crie a conta de dono no primeiro acesso.",
+        "Monte um fluxo de dois passos e execute manualmente.",
+        "Desative e reative o fluxo e confirme que as execuções sobrevivem à restauração."
+        ]
+      }
+    }
+  ]
+}

@@ -7,8 +7,9 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushBut
 
 from ..command_runner import CommandRunner
 from ..models import ActionSpec
+from ..product_inventory import target_for
 from ..status_loader import StatusLoader
-from ..result_parser import severity_for
+from ..result_parser import guidance, severity_for
 from ..widgets import AdvancedActionsPanel, SkeletonCard, SkeletonTile, stop_shimmer
 
 
@@ -18,6 +19,11 @@ class BasePage(QWidget):
     action_requested = Signal(object)
     actions_requested = Signal(object)
     action_selected = Signal(object)
+    # UX-006: a goal card may lead to the page where that goal is actually
+    # carried out, instead of firing one action and leaving the operator to
+    # find the rest of the journey in the sidebar. The second argument names
+    # the journey to bring forward once that page is shown.
+    category_requested = Signal(str, str)
 
     def __init__(
         self,
@@ -120,7 +126,30 @@ class BasePage(QWidget):
         self.clear_skeletons()
 
     def request_action(self, action: ActionSpec) -> None:
+        try:
+            target = target_for(action)
+        except ValueError:
+            target = None
+        if target is not None and target.target_kind == "app":
+            # Legacy/custom-page app buttons are shortcuts. Route them through
+            # the canonical product detail so its observed state chooses the
+            # next action; the detail page emits its own action_requested only
+            # after the operator chooses Prepare/Configure/Resolve.
+            self.action_selected.emit(action)
+            return
         self.action_requested.emit(action)
+
+    def request_category(self, category: str, focus: str = "") -> None:
+        """UX-006: go to the page that carries out this goal."""
+        self.category_requested.emit(category, focus)
+
+    def focus_journey(self, key: str) -> None:
+        """Bring the journey named by ``key`` forward on this page.
+
+        The default is a no-op: a page without a specific entry point is
+        simply shown. Pages that own a multi-step journey override this so
+        arriving from a goal card lands on the right step.
+        """
 
     def request_actions(self, actions: list[ActionSpec]) -> None:
         if actions:
@@ -208,10 +237,12 @@ class BasePage(QWidget):
         if action is None or action.id != action_id or self._context_status is None:
             return
         state = severity_for(parsed, 0)
+        guide = guidance(parsed)
         detail = "OK" if state == "success" else "Atenção" if state == "warning" else "Verificar"
         label = self._context_status.findChild(QLabel, "contextStatusText")
         if label is not None:
-            label.setText(f"Saúde: {detail} — {action.title}")
+            suffix = f" — {guide['next_action']}" if guide["next_action"] and state != "success" else f" — {action.title}"
+            label.setText(f"Saúde: {detail}{suffix}")
             label.setProperty("state", state)
             label.style().unpolish(label)
             label.style().polish(label)
@@ -222,8 +253,10 @@ class BasePage(QWidget):
             return
         label = self._context_status.findChild(QLabel, "contextStatusText")
         if label is not None:
-            label.setText(f"Saúde indisponível — {message}")
-            label.setProperty("state", "error")
+            # Falha de LEITURA ≠ estado ruim: orienta repetir em vez de assustar.
+            cause = "" if message.startswith("exit code") or message == "timed out" else f" ({message})"
+            label.setText(f"Saúde: não foi possível verificar{cause} — clique para tentar de novo")
+            label.setProperty("state", "warning")
             label.style().unpolish(label)
             label.style().polish(label)
 

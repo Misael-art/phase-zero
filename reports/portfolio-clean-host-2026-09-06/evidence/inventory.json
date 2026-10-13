@@ -1,0 +1,1165 @@
+{
+  "profiles": [
+    {
+      "file": "profiles/dev-ai.json",
+      "name": "dev-ai",
+      "os": [
+        "linux",
+        "windows"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "nodejs",
+            "npm",
+            "pnpm",
+            "python",
+            "python-pip",
+            "python-pipx",
+            "uv",
+            "rust",
+            "cargo",
+            "go",
+            "base-devel",
+            "cmake",
+            "make",
+            "gcc",
+            "clang",
+            "lldb",
+            "jq",
+            "yq",
+            "curl",
+            "gnupg",
+            "libarchive",
+            "rsync",
+            "zstd",
+            "ripgrep",
+            "fd",
+            "fzf",
+            "bat",
+            "eza",
+            "zoxide",
+            "tmux",
+            "neovim",
+            "code",
+            "docker",
+            "docker-compose",
+            "ollama",
+            "redis",
+            "postgresql",
+            "sqlite",
+            "git",
+            "git-lfs",
+            "github-cli",
+            "direnv",
+            "openssh",
+            "tailscale",
+            "pass",
+            "age"
+          ],
+          "yay": [],
+          "flatpak": []
+        },
+        "windows": {
+          "winget": [
+            "Ollama.Ollama",
+            "Git.Git",
+            "OpenJS.NodeJS",
+            "Microsoft.VisualStudioCode"
+          ],
+          "choco": [
+            "nodejs",
+            "python",
+            "rust",
+            "docker-desktop"
+          ]
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/tuning/git-config.sh",
+          "linux/ai/setup-admin-bridge.sh",
+          "linux/ai/setup-agent-compat.sh",
+          "linux/ai/setup-ollama.sh",
+          "linux/ai/setup-open-webui.sh",
+          "linux/ai/setup-claude-code.sh",
+          "linux/ai/setup-desktop-apps.sh",
+          "linux/ai/setup-opencode.sh",
+          "linux/ai/setup-hermes.sh",
+          "linux/ai/setup-openclaw.sh",
+          "linux/ai/setup-memory.sh",
+          "linux/ai/setup-usagebar.sh",
+          "linux/ai/setup-codexbar.sh",
+          "linux/ai/setup-ides.sh"
+        ],
+        "windows": [
+          "Setup-AITools.ps1"
+        ]
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "docker",
+            "ollama",
+            "sshd",
+            "tailscaled"
+          ],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/emulation-linux.json",
+      "name": "emulation-linux",
+      "os": [
+        "linux"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "curl",
+            "git",
+            "git-lfs",
+            "github-cli",
+            "jq",
+            "python",
+            "lua",
+            "lua54",
+            "luajit",
+            "luarocks",
+            "unzip",
+            "p7zip",
+            "cabextract",
+            "desktop-file-utils",
+            "fuse2",
+            "gamemode",
+            "mangohud",
+            "wine",
+            "winetricks",
+            "protontricks",
+            "protonup-qt",
+            "retroarch",
+            "rsync",
+            "zsync"
+          ],
+          "yay": [],
+          "flatpak": []
+        },
+        "windows": {
+          "winget": [],
+          "choco": []
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/tuning/git-config.sh",
+          "linux/emulation/setup-emulation.sh"
+        ],
+        "windows": []
+      },
+      "systemd": {
+        "linux": {
+          "enable": [],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/full-workstation.json",
+      "name": "full-workstation",
+      "os": [
+        "linux",
+        "windows"
+      ],
+      "extends": [
+        "safe-base",
+        "dev-ai",
+        "gaming",
+        "homelab"
+      ],
+      "packages": {
+        "linux": {
+          "pacman": [],
+          "yay": [],
+          "flatpak": []
+        },
+        "windows": {
+          "winget": [],
+          "choco": []
+        }
+      },
+      "scripts": {
+        "linux": [],
+        "windows": []
+      },
+      "systemd": {}
+    },
+    {
+      "file": "profiles/gaming.json",
+      "name": "gaming",
+      "os": [
+        "linux",
+        "windows"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "steam",
+            "steam-devices",
+            "gamescope",
+            "gamescope-dbus",
+            "mangohud",
+            "gamemode",
+            "lutris",
+            "wine",
+            "winetricks",
+            "protontricks",
+            "git",
+            "git-lfs",
+            "github-cli",
+            "lib32-mangohud",
+            "lib32-gamemode",
+            "vulkan-radeon",
+            "lib32-vulkan-radeon",
+            "vulkan-tools",
+            "ryzenadj",
+            "corectrl",
+            "discord",
+            "obs-studio",
+            "goverlay"
+          ],
+          "yay": [
+            "heroic-games-launcher-bin",
+            "proton-ge-custom-bin",
+            "ananicy-git"
+          ],
+          "flatpak": {
+            "remotes": [
+              {
+                "name": "flathub",
+                "url": "https://dl.flathub.org/repo/flathub.flatpakrepo",
+                "required": true
+              },
+              {
+                "name": "flathub-beta",
+                "url": "https://flathub.org/beta-repo/flathub-beta.flatpakrepo",
+                "required": false
+              }
+            ],
+            "overrides": {
+              "gaming": true
+            },
+            "packages": [
+              "org.freedesktop.Platform.Compat.i386",
+              "org.freedesktop.Platform.GL32.default"
+            ]
+          }
+        },
+        "windows": {
+          "winget": [
+            "Valve.Steam"
+          ],
+          "choco": [
+            "steam",
+            "discord"
+          ]
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/tuning/git-config.sh",
+          "linux/tuning/gaming-tweaks.sh"
+        ],
+        "windows": []
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "ananicy",
+            "gamemoded"
+          ],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/homelab.json",
+      "name": "homelab",
+      "os": [
+        "linux",
+        "windows"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "docker",
+            "docker-compose",
+            "git",
+            "git-lfs",
+            "github-cli",
+            "cockpit",
+            "cockpit-docker",
+            "cockpit-podman",
+            "netdata",
+            "tailscale",
+            "rsync",
+            "restic",
+            "borg",
+            "nginx",
+            "certbot",
+            "acme.sh"
+          ],
+          "yay": [],
+          "flatpak": []
+        },
+        "windows": {
+          "winget": [
+            "Docker.DockerDesktop"
+          ],
+          "choco": [
+            "docker-desktop",
+            "tailscale"
+          ]
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/tuning/dev-tweaks.sh"
+        ],
+        "windows": []
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "docker",
+            "cockpit.socket",
+            "netdata",
+            "tailscaled"
+          ],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/safe-base.json",
+      "name": "safe-base",
+      "os": [
+        "linux",
+        "windows"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "firefox",
+            "keepassxc",
+            "syncthing",
+            "ufw",
+            "rsync",
+            "unzip",
+            "p7zip",
+            "git",
+            "git-lfs",
+            "github-cli",
+            "vim",
+            "htop",
+            "btop",
+            "fastfetch",
+            "timeshift",
+            "pipewire-audio",
+            "pipewire-pulse",
+            "wireplumber",
+            "ffmpeg",
+            "gst-plugins-good",
+            "gst-plugins-bad",
+            "gst-plugins-ugly",
+            "gst-libav",
+            "codecs",
+            "noto-fonts",
+            "noto-fonts-emoji",
+            "noto-fonts-cjk"
+          ],
+          "yay": [],
+          "flatpak": [
+            "com.microsoft.Edge"
+          ]
+        },
+        "windows": {
+          "winget": [],
+          "choco": []
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/tuning/git-config.sh"
+        ],
+        "windows": []
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "syncthing"
+          ],
+          "user": [
+            "syncthing"
+          ]
+        }
+      }
+    },
+    {
+      "file": "profiles/server-homelab-hermes.json",
+      "name": "server-homelab-hermes",
+      "os": [
+        "linux"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "docker",
+            "docker-compose",
+            "git",
+            "rsync",
+            "tailscale",
+            "jq",
+            "python",
+            "curl"
+          ],
+          "yay": [],
+          "flatpak": []
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/server/apply-server-homelab-hermes.sh"
+        ]
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "docker",
+            "tailscaled"
+          ],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/server-homelab.json",
+      "name": "server-homelab",
+      "os": [
+        "linux",
+        "windows"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "docker",
+            "docker-compose",
+            "git",
+            "rsync",
+            "tailscale",
+            "jq"
+          ],
+          "yay": [],
+          "flatpak": []
+        },
+        "windows": {
+          "winget": [
+            "Docker.DockerDesktop"
+          ],
+          "choco": [
+            "docker-desktop",
+            "tailscale"
+          ]
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/server/apply-server-homelab.sh"
+        ]
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "docker",
+            "tailscaled"
+          ],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/server-llm-hermes.json",
+      "name": "server-llm-hermes",
+      "os": [
+        "linux"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "ollama",
+            "git",
+            "curl",
+            "jq",
+            "python",
+            "tailscale"
+          ],
+          "yay": [],
+          "flatpak": []
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/server/apply-server-llm-hermes.sh"
+        ]
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "ollama",
+            "tailscaled"
+          ],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/server-llm-homelab-hermes.json",
+      "name": "server-llm-homelab-hermes",
+      "os": [
+        "linux"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "ollama",
+            "docker",
+            "docker-compose",
+            "git",
+            "rsync",
+            "tailscale",
+            "jq",
+            "python",
+            "curl"
+          ],
+          "yay": [],
+          "flatpak": []
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/server/apply-server-llm-homelab-hermes.sh"
+        ]
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "ollama",
+            "docker",
+            "tailscaled"
+          ],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/server-llm-homelab.json",
+      "name": "server-llm-homelab",
+      "os": [
+        "linux"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "ollama",
+            "docker",
+            "docker-compose",
+            "git",
+            "rsync",
+            "tailscale",
+            "jq",
+            "curl"
+          ],
+          "yay": [],
+          "flatpak": []
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/server/apply-server-llm-homelab.sh"
+        ]
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "ollama",
+            "docker",
+            "tailscaled"
+          ],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/server-llm.json",
+      "name": "server-llm",
+      "os": [
+        "linux"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "ollama",
+            "git",
+            "curl",
+            "jq"
+          ],
+          "yay": [],
+          "flatpak": []
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/server/apply-server-llm.sh"
+        ]
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "ollama"
+          ],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/steamdeck-linux.json",
+      "name": "steamdeck-linux",
+      "os": [
+        "linux"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "steam",
+            "steam-devices",
+            "gamescope",
+            "mangohud",
+            "gamemode",
+            "lib32-mangohud",
+            "lib32-gamemode",
+            "vulkan-radeon",
+            "lib32-vulkan-radeon",
+            "vulkan-tools",
+            "power-profiles-daemon",
+            "bluez",
+            "bluez-utils",
+            "maliit-keyboard",
+            "onboard",
+            "sxhkd",
+            "xorg-xrandr",
+            "wlr-randr",
+            "curl",
+            "git",
+            "git-lfs",
+            "github-cli",
+            "jq",
+            "unzip",
+            "bc",
+            "ryzenadj"
+          ],
+          "yay": [
+            "wvkbd",
+            "swhkd"
+          ],
+          "flatpak": {
+            "remotes": [
+              {
+                "name": "flathub",
+                "url": "https://dl.flathub.org/repo/flathub.flatpakrepo",
+                "required": true
+              },
+              {
+                "name": "flathub-beta",
+                "url": "https://flathub.org/beta-repo/flathub-beta.flatpakrepo",
+                "required": false
+              }
+            ],
+            "overrides": {
+              "steamdeck": true
+            },
+            "packages": [
+              "org.libretro.RetroArch",
+              "org.prismlauncher.PrismLauncher",
+              "org.freedesktop.Platform.Compat.i386",
+              "org.freedesktop.Platform.GL32.default"
+            ]
+          }
+        },
+        "windows": {
+          "winget": [],
+          "choco": []
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/tuning/git-config.sh",
+          "linux/tuning/gaming-tweaks.sh",
+          "linux/steamdeck/install-hotkeys.sh",
+          "linux/steamdeck/install-mode-watcher.sh",
+          "linux/steamdeck/install-plugins.sh"
+        ],
+        "windows": []
+      },
+      "systemd": {
+        "linux": {
+          "enable": [
+            "bluetooth",
+            "gamemoded",
+            "power-profiles-daemon"
+          ],
+          "user": [
+            "phasezero-steamdeck-hotkeys.service"
+          ]
+        }
+      }
+    },
+    {
+      "file": "profiles/waydroid-linux.json",
+      "name": "waydroid-linux",
+      "os": [
+        "linux"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "waydroid",
+            "cage",
+            "gamescope",
+            "dnsmasq",
+            "python-gbinder",
+            "lxc",
+            "nftables",
+            "power-profiles-daemon",
+            "cpupower",
+            "curl",
+            "wget",
+            "unzip",
+            "jq"
+          ],
+          "yay": [],
+          "flatpak": []
+        },
+        "windows": {
+          "winget": [],
+          "choco": []
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/waydroid/waydroid.sh"
+        ],
+        "windows": []
+      },
+      "systemd": {
+        "linux": {
+          "enable": [],
+          "user": []
+        }
+      }
+    },
+    {
+      "file": "profiles/windows-vm-linux.json",
+      "name": "windows-vm-linux",
+      "os": [
+        "linux"
+      ],
+      "extends": [],
+      "packages": {
+        "linux": {
+          "pacman": [
+            "qemu-base",
+            "qemu-desktop",
+            "libvirt",
+            "virt-viewer",
+            "edk2-ovmf",
+            "swtpm",
+            "samba",
+            "spice-gtk",
+            "usbredir",
+            "podman",
+            "podman-compose",
+            "freerdp",
+            "fuse2",
+            "power-profiles-daemon",
+            "cpupower",
+            "numactl",
+            "acl",
+            "virglrenderer",
+            "mesa",
+            "vulkan-radeon",
+            "jq",
+            "socat",
+            "libnewt"
+          ],
+          "yay": [],
+          "flatpak": []
+        },
+        "windows": {
+          "winget": [],
+          "choco": []
+        }
+      },
+      "scripts": {
+        "linux": [
+          "linux/windows-vm/windows-vm.sh",
+          "linux/windows-vm/container-frontends.sh"
+        ],
+        "windows": []
+      },
+      "systemd": {
+        "linux": {
+          "enable": [],
+          "user": []
+        }
+      }
+    }
+  ],
+  "missingProfileScripts": [],
+  "capabilities": [
+    {
+      "id": "gaming.gamescope",
+      "requires": []
+    },
+    {
+      "id": "gaming.gamemode",
+      "requires": []
+    },
+    {
+      "id": "gaming.mangohud",
+      "requires": []
+    },
+    {
+      "id": "gaming.goverlay",
+      "requires": [
+        "gaming.mangohud"
+      ]
+    },
+    {
+      "id": "gaming.gpu-recorder",
+      "requires": []
+    },
+    {
+      "id": "gaming.sunshine",
+      "requires": []
+    },
+    {
+      "id": "gaming.moonlight",
+      "requires": []
+    },
+    {
+      "id": "gaming.wivrn",
+      "requires": []
+    },
+    {
+      "id": "gaming.protonplus",
+      "requires": []
+    },
+    {
+      "id": "gaming.protontricks",
+      "requires": []
+    },
+    {
+      "id": "gaming.bottles",
+      "requires": []
+    },
+    {
+      "id": "gaming.prism",
+      "requires": []
+    },
+    {
+      "id": "gaming.lutris",
+      "requires": []
+    },
+    {
+      "id": "gaming.heroic",
+      "requires": []
+    },
+    {
+      "id": "gaming.steam",
+      "requires": []
+    },
+    {
+      "id": "hardware.openrgb",
+      "requires": []
+    },
+    {
+      "id": "hardware.piper",
+      "requires": []
+    },
+    {
+      "id": "hardware.solaar",
+      "requires": []
+    },
+    {
+      "id": "hardware.input-remapper",
+      "requires": []
+    },
+    {
+      "id": "hardware.oversteer",
+      "requires": []
+    },
+    {
+      "id": "hardware.lact",
+      "requires": []
+    },
+    {
+      "id": "hardware.cpu-x",
+      "requires": []
+    },
+    {
+      "id": "hardware.qdiskinfo",
+      "requires": []
+    },
+    {
+      "id": "hardware.f3",
+      "requires": []
+    },
+    {
+      "id": "hardware.xpadneo",
+      "requires": []
+    },
+    {
+      "id": "hardware.rocm",
+      "requires": []
+    },
+    {
+      "id": "hardware.intel-compute",
+      "requires": []
+    },
+    {
+      "id": "health.zram",
+      "requires": []
+    },
+    {
+      "id": "health.earlyoom",
+      "requires": []
+    },
+    {
+      "id": "health.ananicy",
+      "requires": []
+    },
+    {
+      "id": "health.btrfs-assistant",
+      "requires": []
+    },
+    {
+      "id": "health.iwd",
+      "requires": []
+    },
+    {
+      "id": "security.apparmor",
+      "requires": []
+    },
+    {
+      "id": "security.ufw",
+      "requires": []
+    },
+    {
+      "id": "security.flatseal",
+      "requires": []
+    },
+    {
+      "id": "security.bitwarden",
+      "requires": []
+    },
+    {
+      "id": "security.keepassxc",
+      "requires": []
+    },
+    {
+      "id": "security.cryptomator",
+      "requires": []
+    },
+    {
+      "id": "security.wireguard",
+      "requires": []
+    },
+    {
+      "id": "security.librewolf",
+      "requires": []
+    },
+    {
+      "id": "security.brave",
+      "requires": []
+    },
+    {
+      "id": "backup.pika",
+      "requires": []
+    },
+    {
+      "id": "backup.rclone",
+      "requires": []
+    },
+    {
+      "id": "backup.sirikali",
+      "requires": []
+    },
+    {
+      "id": "development.docker",
+      "requires": []
+    },
+    {
+      "id": "development.virt-manager",
+      "requires": []
+    },
+    {
+      "id": "development.kind",
+      "requires": [
+        "development.docker"
+      ]
+    },
+    {
+      "id": "development.dotnet",
+      "requires": []
+    },
+    {
+      "id": "development.jdk",
+      "requires": []
+    },
+    {
+      "id": "development.maven",
+      "requires": [
+        "development.jdk"
+      ]
+    },
+    {
+      "id": "development.mise",
+      "requires": []
+    },
+    {
+      "id": "development.pyenv",
+      "requires": []
+    },
+    {
+      "id": "development.pnpm",
+      "requires": []
+    },
+    {
+      "id": "development.k6",
+      "requires": []
+    },
+    {
+      "id": "development.httpie",
+      "requires": []
+    },
+    {
+      "id": "development.postman",
+      "requires": []
+    },
+    {
+      "id": "development.neovim",
+      "requires": []
+    },
+    {
+      "id": "development.vscode",
+      "requires": []
+    },
+    {
+      "id": "development.vscodium",
+      "requires": []
+    },
+    {
+      "id": "development.godot",
+      "requires": []
+    },
+    {
+      "id": "creative.blender",
+      "requires": []
+    },
+    {
+      "id": "creative.gimp",
+      "requires": []
+    },
+    {
+      "id": "creative.krita",
+      "requires": []
+    },
+    {
+      "id": "creative.kdenlive",
+      "requires": []
+    },
+    {
+      "id": "creative.inkscape",
+      "requires": []
+    },
+    {
+      "id": "creative.freecad",
+      "requires": []
+    },
+    {
+      "id": "creative.kicad",
+      "requires": []
+    },
+    {
+      "id": "creative.audacity",
+      "requires": []
+    },
+    {
+      "id": "creative.darktable",
+      "requires": []
+    },
+    {
+      "id": "creative.libreoffice",
+      "requires": []
+    },
+    {
+      "id": "creative.obsidian",
+      "requires": []
+    },
+    {
+      "id": "administration.cockpit",
+      "requires": []
+    },
+    {
+      "id": "administration.tailscale",
+      "requires": []
+    },
+    {
+      "id": "administration.zerotier",
+      "requires": []
+    },
+    {
+      "id": "administration.topgrade",
+      "requires": []
+    },
+    {
+      "id": "education.gcompris",
+      "requires": []
+    },
+    {
+      "id": "education.stellarium",
+      "requires": []
+    },
+    {
+      "id": "education.kalzium",
+      "requires": []
+    },
+    {
+      "id": "education.kolibri",
+      "requires": []
+    }
+  ]
+}

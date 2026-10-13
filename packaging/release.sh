@@ -59,7 +59,8 @@ sed -i -E "s/^Version:[[:space:]]+[^[:space:]]+/Version:        $NEW/" "$ROOT/pa
 sed -i -E "s/^pkgver=.*/pkgver=$NEW/" "$ROOT/packaging/linux/aur/PKGBUILD"
 sed -i -E \
     -e "s/^([[:space:]]*pkgver[[:space:]]*=[[:space:]]*).*/\\1$NEW/" \
-    -e "s#(source = PhaseZero-)[^.]*(\\.[^:]*)?#\\1$NEW.tar.gz::https://github.com/Misael-art/PhaseZero/archive/refs/tags/v$NEW.tar.gz#" \
+    -e "s#^([[:space:]]*source = ).*#\\1PhaseZero-$NEW.tar.gz#" \
+    -e "s#^([[:space:]]*sha256sums = ).*#\\1SKIP#" \
     "$ROOT/packaging/linux/aur/.SRCINFO"
 sed -i -E "s/^([[:space:]]*tag:[[:space:]]*)v.*/\\1v$NEW/" "$ROOT/packaging/linux/flatpak/io.phasezero.ControlCenter.yml"
 if ! grep -Fq "<release version=\"$NEW\"" "$ROOT/packaging/linux/io.phasezero.ControlCenter.metainfo.xml"; then

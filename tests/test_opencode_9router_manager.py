@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
-import stat
-import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -107,89 +107,95 @@ exit 1
         self.assertEqual("https://example.test/a//b", value["url"])
         self.assertEqual([1], value["items"])
 
-    def test_install_merges_config_removes_embedded_key_and_is_rollback_safe(self) -> None:
+    def test_install_fails_closed_without_mutating_existing_config(self) -> None:
         config_dir = self.home / ".config/opencode"
         config_dir.mkdir(parents=True)
         canonical = config_dir / "opencode.json"
         legacy = config_dir / "opencode.jsonc"
-        canonical_before = b'{"provider":{"9router":{"options":{"apiKey":"embedded-old"}}},"model":"9router/Default"}\n'
+        canonical_before = b'{"provider":{"9router":{"options":{"apiKey":"embedded-old"}}}}\n'
         legacy_before = b'{// legacy\n"mcp":{"ai-memory":{"type":"http","url":"http://127.0.0.1:49374/mcp"}},}\n'
         canonical.write_bytes(canonical_before)
         legacy.write_bytes(legacy_before)
 
         manager = OC.OpenCodeManager()
-        result = manager.install(dry_run=False, yes=True)
-        self.assertEqual("complete", result["status"])
-        configured = json.loads(canonical.read_text(encoding="utf-8"))
-        rendered = json.dumps(configured)
-        self.assertNotIn(self.secret, rendered)
-        self.assertEqual("9router/Default", configured["model"])
-        self.assertIn("ai-memory", configured["mcp"])
-        # every 9Router combo (incl. phasezero-*) must be selectable
-        models = set(configured["provider"]["9router"]["models"].keys())
-        self.assertIn("phasezero-code", models)
-        self.assertIn("phasezero-analysis", models)
-        self.assertIn("phasezero-plan", models)
-        self.assertIn("Default", models)
-        self.assertIn("claude-Combo_Cleude", models)
-        self.assertEqual(
-            f"{{file:{manager.router_key}}}", configured["provider"]["9router"]["options"]["apiKey"]
-        )
-        self.assertEqual(0o600, stat.S_IMODE(canonical.stat().st_mode))
-        self.assertEqual(0o600, stat.S_IMODE(manager.router_key.stat().st_mode))
-        self.assertFalse(legacy.exists())
-        self.assertEqual(1, len(list(config_dir.glob("opencode.jsonc.phasezero-migrated-*.bak"))))
-        self.assertTrue(manager.verify()["ok"])
-
-        config_mtime = canonical.stat().st_mtime_ns
-        key_mtime = manager.router_key.stat().st_mtime_ns
-        second = manager.install(dry_run=False, yes=True)
-        self.assertEqual("complete", second["status"])
-        self.assertEqual(config_mtime, canonical.stat().st_mtime_ns)
-        self.assertEqual(key_mtime, manager.router_key.stat().st_mtime_ns)
-
-        OC.cc.restore_manifest(Path(result["manifest"]))
+        preview = manager.install(dry_run=True, yes=True)
+        self.assertEqual("blocked", preview["status"])
+        self.assertEqual("connection-grant-not-enforceable", preview["blockedReason"])
+        self.assertEqual([], preview["plannedActions"])
+        with mock.patch.object(OC.cc, "run_capture") as run_capture:
+            with self.assertRaisesRegex(RuntimeError, "cannot bind each request"):
+                manager.install(dry_run=False, yes=True)
+        run_capture.assert_not_called()
         self.assertEqual(canonical_before, canonical.read_bytes())
         self.assertEqual(legacy_before, legacy.read_bytes())
         self.assertFalse(manager.router_key.exists())
         self.assertFalse(list(config_dir.glob("opencode.jsonc.phasezero-migrated-*.bak")))
 
+    def test_route_install_fails_closed_without_connection_bound_grant(self) -> None:
+        manager = OC.OpenCodeManager()
+
+        with self.assertRaisesRegex(RuntimeError, "cannot bind each request"):
+            manager.install(dry_run=False, yes=True)
+
+        self.assertFalse(manager.config.exists())
+        self.assertFalse(manager.router_key.exists())
+
+    def test_run_fails_closed_without_connection_bound_grant(self) -> None:
+        manager = OC.OpenCodeManager()
+        ready_state = {
+            "cli": {"installed": True, "path": str(self.opencode), "version": "1.18.4"},
+            "configuration": {"configured": True, "models": ["Default"]},
+            "router": {"healthy": True},
+        }
+        with mock.patch.object(manager, "status", return_value=ready_state):
+            with mock.patch.object(OC.subprocess, "run") as run:
+                with self.assertRaisesRegex(RuntimeError, "cannot bind each request"):
+                    manager.run("9router", ["run", "probe"])
+        run.assert_not_called()
+        self.assertFalse(self.receipt.exists())
+
+    def test_cli_run_reports_grant_gate_without_starting_client(self) -> None:
+        manager = OC.OpenCodeManager()
+        stderr = io.StringIO()
+        with mock.patch.object(OC, "OpenCodeManager", return_value=manager):
+            with mock.patch("sys.stderr", stderr):
+                rc = OC.main(["run", "--route=9router", "--", "run", "probe"])
+
+        self.assertEqual(1, rc)
+        payload = json.loads(stderr.getvalue())
+        self.assertIn("connection-grant-not-enforceable", payload["error"])
+        self.assertFalse(self.receipt.exists())
+
+    def test_live_verify_fails_closed_without_connection_bound_grant(self) -> None:
+        manager = OC.OpenCodeManager()
+        ready_state = {
+            "cli": {"installed": True, "path": str(self.opencode), "version": "1.18.4"},
+            "inSync": True,
+            "configuration": {"configured": True, "embeddedSecret": False, "models": ["Default"]},
+            "credential": {"secure": True},
+            "router": {"healthy": True, "loopbackOnly": True},
+        }
+        with mock.patch.object(manager, "status", return_value=ready_state), \
+                mock.patch.object(OC.subprocess, "run") as run:
+            result = manager.verify(live=True)
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["configurationOk"])
+        self.assertIsNone(result["live"]["passed"])
+        self.assertEqual("connection-grant-not-enforceable", result["live"]["blockedReason"])
+        run.assert_not_called()
+        self.assertFalse(self.receipt.exists())
+
     def test_dry_run_leaves_no_trace(self) -> None:
         manager = OC.OpenCodeManager()
         result = manager.install(dry_run=True, yes=True)
         self.assertTrue(result["dryRun"])
+        self.assertEqual("blocked", result["status"])
+        self.assertEqual("connection-grant-not-enforceable", result["blockedReason"])
         self.assertFalse(manager.data_root.exists())
         self.assertFalse(manager.router_key.exists())
 
-    def test_run_uses_9router_without_global_provider_variables(self) -> None:
-        manager = OC.OpenCodeManager()
-        manager.install(dry_run=False, yes=True)
-        for key in OC.ROUTE_ENV_KEYS | {"BONSAI_API_KEY"}:
-            os.environ[key] = "must-not-reach-child"
-        self.assertEqual(0, manager.run("9router", ["run", "probe"]))
-        child_env = json.loads(self.receipt.read_text(encoding="utf-8"))
-        self.assertTrue(all(value is None for value in child_env["environment"].values()))
-        self.assertIn("--model 9router/claude-Combo_Cleude", child_env["args"])
-        with self.assertRaisesRegex(RuntimeError, "unsupported in OpenCode"):
-            manager.run("direct", [])
-
-    def test_live_verify_uses_synthetic_fixture(self) -> None:
-        manager = OC.OpenCodeManager()
-        manager.install(dry_run=False, yes=True)
-        result = manager.verify(live=True)
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["live"]["passed"])
-
-    def test_live_verify_classifies_provider_rate_limit(self) -> None:
-        manager = OC.OpenCodeManager()
-        manager.install(dry_run=False, yes=True)
-        os.environ["PZ_TEST_OPENCODE_429"] = "1"
-        result = manager.verify(live=True)
-        self.assertTrue(result["ok"])
-        self.assertIsNone(result["live"]["passed"])
-        self.assertEqual("provider-rate-limit", result["live"]["blockedReason"])
-
-    def test_sync_catalog_exposes_all_combos_idempotently(self) -> None:
+    def test_sync_catalog_fails_closed_without_mutating_config(self) -> None:
         config_dir = self.home / ".config/opencode"
         config_dir.mkdir(parents=True)
         canonical = config_dir / "opencode.json"
@@ -199,22 +205,15 @@ exit 1
             encoding="utf-8",
         )
         manager = OC.OpenCodeManager()
-        first = manager.sync_catalog(dry_run=False)
-        self.assertTrue(first["updated"])
-        configured = json.loads(canonical.read_text(encoding="utf-8"))
-        models = set(configured["provider"]["9router"]["models"].keys())
-        self.assertEqual(
-            {"Default", "claude-Combo_Cleude", "phasezero-code", "phasezero-analysis", "phasezero-plan"},
-            models,
-        )
-        self.assertEqual(0o600, stat.S_IMODE(canonical.stat().st_mode))
-        # idempotent: second run reports no change
-        second = manager.sync_catalog(dry_run=False)
-        self.assertFalse(second["updated"])
-        # status reports catalog in sync
-        status = manager.status()
-        self.assertTrue(status["configuration"]["catalogInSync"])
-        self.assertEqual(sorted(models), sorted(status["configuration"]["models"]))
+        before = canonical.read_bytes()
+        preview = manager.sync_catalog(dry_run=True)
+        self.assertEqual("blocked", preview["status"])
+        self.assertFalse(preview["updated"])
+        with mock.patch.object(OC.cc, "run_capture") as run_capture:
+            with self.assertRaisesRegex(RuntimeError, "cannot bind each request"):
+                manager.sync_catalog(dry_run=False)
+        run_capture.assert_not_called()
+        self.assertEqual(before, canonical.read_bytes())
 
     def test_sync_catalog_dry_run_leaves_no_trace(self) -> None:
         config_dir = self.home / ".config/opencode"
@@ -225,6 +224,7 @@ exit 1
         manager = OC.OpenCodeManager()
         result = manager.sync_catalog(dry_run=True)
         self.assertTrue(result["dryRun"])
+        self.assertEqual("connection-grant-not-enforceable", result["blockedReason"])
         self.assertEqual(before, canonical.read_text(encoding="utf-8"))
 
     def test_env_combos_fixture_wins(self) -> None:

@@ -54,6 +54,12 @@ class WindowsVmPage(BasePage):
         self._technical_widgets: list[QWidget] = []
         self._integration_actions: dict[SwitchControl, tuple[str, str]] = {}
         self._pending_integrations: dict[str, tuple[SwitchControl, bool, QLabel, str]] = {}
+        # UX-004: reflow state; built widgets arrive in build().
+        self._narrow_layout: bool | None = None
+        self._cards: QGridLayout | None = None
+        self._hero_grid: QGridLayout | None = None
+        self._perf_card: QFrame | None = None
+        self._integration_card: QFrame | None = None
 
     def build(self) -> None:
         for action_id in self._PRIMARY_IDS:
@@ -63,6 +69,10 @@ class WindowsVmPage(BasePage):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        # UX-011: rolar na vertical, nunca na horizontal. Sem isto o
+        # conteúdo mantém a largura que quer (em 200% de escala, mais do
+        # que a janela) e os controles saem pela lateral em vez de refluir.
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         host = QWidget()
         layout = QVBoxLayout(host)
         layout.setContentsMargins(2, 2, 8, 12)
@@ -73,32 +83,110 @@ class WindowsVmPage(BasePage):
         cards.setContentsMargins(0, 0, 0, 0)
         cards.setHorizontalSpacing(14)
         cards.setVerticalSpacing(14)
-        cards.addWidget(self._build_performance(), 0, 0)
-        cards.addWidget(self._build_integrations(), 0, 1)
+        self._perf_card = self._build_performance()
+        self._integration_card = self._build_integrations()
+        cards.addWidget(self._perf_card, 0, 0)
+        cards.addWidget(self._integration_card, 0, 1)
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
+        self._cards = cards
         layout.addLayout(cards)
         layout.addWidget(self._build_setup_card())
         layout.addWidget(self._build_danger_zone())
         layout.addStretch()
         scroll.setWidget(host)
         self._layout.addWidget(scroll, 1)
+        self._page_scroll = scroll
 
         self.status_loader.status_ready.connect(self._on_status_ready)
         self.status_loader.status_failed.connect(self._on_status_failed)
 
+    def _wide_layout_min_width(self) -> int:
+        """Largura que a linha única do hero realmente exige, agora.
+
+        UX-011: um limiar fixo em pixels assume o tamanho de fonte padrão.
+        Em 200% os mesmos controles ficam muito maiores, continuam na
+        arrumação larga e vazam pela lateral. Perguntar aos widgets o que
+        eles precisam faz o reflow acompanhar a escala do sistema.
+        """
+        def row_width(grid, widgets) -> int:
+            present = [widget for widget in widgets if widget is not None]
+            if not grid or not present:
+                return 0
+            margins = grid.contentsMargins()
+            return (
+                sum(widget.sizeHint().width() for widget in present)
+                + grid.horizontalSpacing() * max(0, len(present) - 1)
+                + margins.left() + margins.right()
+            )
+
+        hero = row_width(self._hero_grid, (
+            self._hero_icon, self._hero_copy, self.refresh_button,
+            self.install_button, self.power_button,
+        ))
+        # A linha do card de instalação é a mais larga da arrumação ampla:
+        # o texto mais todos os botões de manutenção lado a lado.
+        setup = row_width(
+            getattr(self, "_setup_grid", None),
+            (getattr(self, "_setup_copy", None), *getattr(self, "_setup_buttons", ())),
+        )
+        return max(1000, hero, setup)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        if self._cards is None or self._hero_grid is None:
+            return
+        self._apply_reflow(self.width() < self._wide_layout_min_width())
+
+    def _reflow_hero(self, narrow: bool) -> None:
+        g = self._hero_grid
+        g.addWidget(self._hero_icon, 0, 0)
+        g.addWidget(self._hero_copy, 0, 1)
+        if narrow:
+            g.addWidget(self.refresh_button, 1, 1)
+            g.addWidget(self.install_button, 2, 1)
+            g.addWidget(self.power_button, 3, 1)
+        else:
+            g.addWidget(self.refresh_button, 0, 2)
+            g.addWidget(self.install_button, 0, 3)
+            g.addWidget(self.power_button, 0, 4)
+        g.setColumnStretch(0, 0)
+        g.setColumnStretch(1, 1)
+        for col in (2, 3, 4):
+            g.setColumnStretch(col, 0)
+
+    def _apply_reflow(self, narrow: bool) -> None:
+        if narrow == self._narrow_layout:
+            return
+        self._narrow_layout = narrow
+        self._reflow_hero(narrow)
+        if self._cards is not None:
+            # Cards: side by side (wide) or one per row spanning both columns.
+            if narrow:
+                self._cards.addWidget(self._perf_card, 0, 0, 1, 2)
+                self._cards.addWidget(self._integration_card, 1, 0, 1, 2)
+            else:
+                self._cards.addWidget(self._perf_card, 0, 0)
+                self._cards.addWidget(self._integration_card, 0, 1)
+        if getattr(self, "_setup_grid", None) is not None:
+            self._reflow_setup(narrow)
+
     def _build_hero(self) -> QFrame:
         hero = QFrame()
         hero.setObjectName("serviceHero")
-        row = QHBoxLayout(hero)
-        row.setContentsMargins(20, 18, 20, 18)
-        row.setSpacing(16)
+        # UX-004: the whole hero is one grid so the reflow can move icon,
+        # copy and actions between the wide (single row) and narrow
+        # (stacked) arrangements without leaving anything side by side.
+        self._hero_grid = QGridLayout(hero)
+        self._hero_grid.setContentsMargins(20, 18, 20, 18)
+        self._hero_grid.setHorizontalSpacing(16)
+        self._hero_grid.setVerticalSpacing(10)
         icon = QLabel()
         icon.setObjectName("serviceIcon")
         icon.setPixmap(themed_icon(hero, "computer", QStyle.SP_ComputerIcon).pixmap(38, 38))
         icon.setAlignment(Qt.AlignCenter)
         icon.setFixedSize(58, 58)
-        row.addWidget(icon)
+        self._hero_icon = icon
         copy = QVBoxLayout()
         copy.setSpacing(3)
         title = QLabel("Windows 11 VM")
@@ -108,25 +196,25 @@ class WindowsVmPage(BasePage):
         self.state_label.setProperty("state", "info")
         self.state_detail = QLabel("Lendo configuração e estado da máquina virtual")
         self.state_detail.setObjectName("cardDescription")
+        self.state_detail.setWordWrap(True)
         copy.addWidget(title)
         copy.addWidget(self.state_label)
         copy.addWidget(self.state_detail)
-        row.addLayout(copy, 1)
+        self._hero_copy = QWidget()
+        self._hero_copy.setLayout(copy)
         self.refresh_button = QPushButton("Atualizar")
         self.refresh_button.setObjectName("secondaryButton")
         self.refresh_button.clicked.connect(self.reload)
-        row.addWidget(self.refresh_button)
         self.install_button = QPushButton("Instalar automaticamente")
         self.install_button.setObjectName("secondaryButton")
         self.install_button.setMinimumHeight(50)
         self.install_button.clicked.connect(lambda: self.run_action("windows.provision.player"))
-        row.addWidget(self.install_button)
         self.power_button = QPushButton("Iniciar VM")
         self.power_button.setObjectName("primaryButton")
         self.power_button.setMinimumSize(150, 50)
         self.power_button.setEnabled(False)
         self.power_button.clicked.connect(self._power_action)
-        row.addWidget(self.power_button)
+        self._apply_reflow(bool(self._narrow_layout))
         return hero
 
     def _build_performance(self) -> QFrame:
@@ -254,8 +342,13 @@ class WindowsVmPage(BasePage):
     def _build_setup_card(self) -> QFrame:
         card = QFrame()
         card.setObjectName("settingsCard")
-        row = QHBoxLayout(card)
-        row.setContentsMargins(16, 14, 16, 14)
+        # UX-004: one grid — copy stays at (0,0) and the reflow moves the
+        # maintenance buttons between the wide side-by-side row and the
+        # narrow stacked column, so the card no longer dictates 785px.
+        self._setup_grid = QGridLayout(card)
+        self._setup_grid.setContentsMargins(16, 14, 16, 14)
+        self._setup_grid.setHorizontalSpacing(10)
+        self._setup_grid.setVerticalSpacing(10)
         copy = QVBoxLayout()
         title = QLabel("Instalação e manutenção")
         title.setObjectName("sectionHeading")
@@ -268,11 +361,15 @@ class WindowsVmPage(BasePage):
         self.maintenance_health.setObjectName("cardDescription")
         self.maintenance_health.setWordWrap(True)
         copy.addWidget(self.maintenance_health)
-        row.addLayout(copy, 1)
+        self._setup_copy = QWidget()
+        self._setup_copy.setLayout(copy)
+        self._setup_grid.addWidget(self._setup_copy, 0, 0)
+        self._setup_buttons = []
         self.repair_boot_button = QPushButton("Atualizar boot direto")
         self.repair_boot_button.setObjectName("secondaryButton")
         self.repair_boot_button.clicked.connect(lambda: self.run_action("windows.boot.install"))
         self.repair_boot_button.setVisible(False)
+        self._setup_buttons.append(self.repair_boot_button)
         self.dock_entry_button = QPushButton("GRUB: Windows (Dock)")
         self.dock_entry_button.setObjectName("secondaryButton")
         self.dock_entry_button.setCheckable(True)
@@ -285,6 +382,7 @@ class WindowsVmPage(BasePage):
                 else "windows.boot.dock.disable"
             )
         )
+        self._setup_buttons.append(self.dock_entry_button)
         images = QPushButton("Gerenciar imagens")
         images.setObjectName("secondaryButton")
         images.clicked.connect(lambda: self.run_action("windows.images.manage"))
@@ -294,12 +392,19 @@ class WindowsVmPage(BasePage):
         optimize = QPushButton("Otimizar")
         optimize.setObjectName("secondaryButton")
         optimize.clicked.connect(lambda: self.run_action("windows.optimize"))
-        row.addWidget(self.repair_boot_button)
-        row.addWidget(self.dock_entry_button)
-        row.addWidget(images)
-        row.addWidget(optimize)
-        row.addWidget(install)
+        self._setup_buttons += [images, optimize, install]
+        self._reflow_setup(bool(self._narrow_layout))
         return card
+
+    def _reflow_setup(self, narrow: bool) -> None:
+        for index, btn in enumerate(self._setup_buttons):
+            if narrow:
+                self._setup_grid.addWidget(btn, index + 1, 0)
+            else:
+                self._setup_grid.addWidget(btn, 0, index + 1)
+        self._setup_grid.setColumnStretch(0, 1)
+        for col in range(1, len(self._setup_buttons) + 1):
+            self._setup_grid.setColumnStretch(col, 0)
 
     def _build_danger_zone(self) -> QFrame:
         zone = QFrame()
@@ -335,6 +440,23 @@ class WindowsVmPage(BasePage):
         self.state_label.setText("● Verificando…")
         self._set_state("info")
         self.status_loader.fetch_action(action)
+
+    def focus_journey(self, key: str) -> None:
+        """UX-006: "Instalar e usar Windows" lands on the install entry.
+
+        The hero's install control is the entry point of the installation
+        journey, so arriving from the goal card brings it forward instead
+        of leaving the operator to find it among the maintenance switches.
+        """
+        if key != "install":
+            return
+        install = getattr(self, "install_button", None)
+        if install is None:
+            return
+        install.setFocus(Qt.FocusReason.OtherFocusReason)
+        scroll = self.findChild(QScrollArea)
+        if scroll is not None:
+            scroll.ensureWidgetVisible(install)
 
     def _set_state(self, state: str) -> None:
         self.state_label.setProperty("state", state)
@@ -435,7 +557,9 @@ class WindowsVmPage(BasePage):
         gpu_available = bool(host.get("qemu"))
         self._apply_toggle(self.gpu_toggle, gpu_available and profile != "compat", gpu_available)
         if not gpu_available:
-            self.gpu_note.setText("Indisponível: QEMU não foi encontrado no host")
+            self.gpu_note.setText(
+                "QEMU ausente no host — instale o runtime em Windows VM → Preparar (perfil windows-vm-linux)"
+            )
         else:
             self.gpu_note.setText(f"Perfil ativo: {profile}")
         usb_ready = int(access.get("usbRedirChannels") or 0) > 0 or bool(access.get("usbUdevManaged"))

@@ -1,5 +1,5 @@
 pkgname=phasezero-control-center
-pkgver=1.16.6
+pkgver=1.22.5
 pkgrel=1
 pkgdesc='PhaseZero native Linux control center'
 arch=('any')
@@ -17,6 +17,9 @@ package() {
   cp -a linux profiles assets version.json "$pkgdir/usr/lib/phasezero/"
   install -Dm755 packaging/linux/phasezero-control-center \
     "$pkgdir/usr/bin/phasezero-control-center"
+  # PZ-AUD-001: the SSH bridge and docs call `pz`; ship it on PATH.
+  install -Dm755 packaging/linux/pz \
+    "$pkgdir/usr/bin/pz"
   install -Dm644 packaging/linux/io.phasezero.ControlCenter.desktop \
     "$pkgdir/usr/share/applications/io.phasezero.ControlCenter.desktop"
   install -Dm644 packaging/linux/io.phasezero.ControlCenter.metainfo.xml \

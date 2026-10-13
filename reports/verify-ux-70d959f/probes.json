@@ -1,0 +1,68 @@
+{
+  "volatile_plan": {
+    "memory": [
+      16000,
+      15999
+    ],
+    "sameApps": true,
+    "verdicts": [
+      "pass",
+      "pass"
+    ],
+    "executeCalled": true,
+    "message": "Plano pronto — revise acima e pressione Aplicar de novo para executar"
+  },
+  "confirmation_visibility": {
+    "hidden": false,
+    "enabled": true,
+    "visibleRegionEmpty": false
+  },
+  "review_button": {
+    "confirmed": false,
+    "step": "review"
+  },
+  "geometry": {
+    "Início800": {
+      "horizontalMaxima": [
+        0
+      ]
+    },
+    "Homelab800": {
+      "horizontalMaxima": [
+        0,
+        0,
+        0
+      ]
+    },
+    "Windows VM800": {
+      "horizontalMaxima": [
+        0,
+        0
+      ],
+      "powerFullyInViewport": true,
+      "powerRight": 708,
+      "viewportRight": 737
+    },
+    "Início1280": {
+      "horizontalMaxima": [
+        0
+      ]
+    },
+    "Homelab1280": {
+      "horizontalMaxima": [
+        0,
+        0,
+        0
+      ]
+    },
+    "Windows VM1280": {
+      "horizontalMaxima": [
+        0,
+        0
+      ],
+      "powerFullyInViewport": true,
+      "powerRight": 958,
+      "viewportRight": 987
+    }
+  }
+}

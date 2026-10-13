@@ -26,6 +26,12 @@ class DepSpec:
     # Package name per distro family. A family absent from this map means we do
     # not know the package there and must say so rather than guess a name.
     packages: dict[str, str] = field(default_factory=dict)
+    # Provider per family: "official" (default) or "aur". An AUR entry is only
+    # installable when an AUR helper is present; never via pacman -S.
+    providers: dict[str, str] = field(default_factory=dict)
+    # Scenarios where this "optional" dep is a hard requirement. Callers
+    # owning those scenarios must fail closed, not degrade silently.
+    required_by: tuple[str, ...] = ()
 
 
 DEPENDENCIES: dict[str, DepSpec] = {
@@ -51,9 +57,10 @@ DEPENDENCIES: dict[str, DepSpec] = {
         degrades="papéis de parede animados da Steam Workshop no Plasma",
         probe="path",
         probe_target="/usr/share/plasma/wallpapers/com.github.catsout.wallpaperEngineKde",
-        # Only packaged for Arch derivatives today; elsewhere it is built from
-        # source, which is not something to run unattended behind a button.
+        # Only packaged for Arch derivatives today, via AUR; elsewhere it is
+        # built from source, which is not something to run unattended.
         packages={"arch": "plasma6-wallpapers-wallpaper-engine-git"},
+        providers={"arch": "aur"},
     ),
     "qdbus": DepSpec(
         id="qdbus",
@@ -86,5 +93,8 @@ DEPENDENCIES: dict[str, DepSpec] = {
         probe="binary",
         probe_target="swtpm",
         packages={"arch": "swtpm", "debian": "swtpm", "fedora": "swtpm"},
+        # Optional for the product overall, essential for this scenario:
+        # WinVM preflight must fail closed on it, not degrade silently.
+        required_by=("windows-11-vm",),
     ),
 }

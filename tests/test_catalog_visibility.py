@@ -182,6 +182,8 @@ def test_omniroute_appears_exactly_once_with_experimental_badge(catalog):
     assert "9router" in card.description.casefold(), (
         "copy precisa apontar o 9Router como router público"
     )
+    assert "uso bloqueado" in card.description.casefold()
+    assert "grants por requisição" in card.description.casefold()
 
 
 def test_9router_remains_the_public_router(catalog):
@@ -197,10 +199,10 @@ def test_scope_reduction_is_documented():
     assert "catalog.py" in text
 
 
-def test_ide_copy_uses_one_vocabulary(catalog):
-    """CCS-035: OpenCode, proxies e reparo compartilham o stem 'Configurar/Reparar IDEs'."""
+def test_proxy_page_labels_ide_usage_as_blocked_until_grant(catalog):
     by_id = {a.id: a for a in catalog}
     assert by_id["ai.ides"].title == "Configurar IDEs (agentes)"
     assert by_id["ai.repair"].title == "Reparar MCPs e IDEs"
     page_src = (ROOT / "linux/ui_native/pages/ai_proxies.py").read_text(encoding="utf-8")
-    assert '"Configurar IDEs (proxies)"' in page_src, "botão da página Proxies saiu do vocabulário"
+    assert '"Uso por IDE bloqueado"' in page_src
+    assert "grant por conexão" in page_src

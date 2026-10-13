@@ -14,6 +14,10 @@ from ..widgets import SectionHeader
 from .base import BasePage
 
 
+# LUX-024: o perfil seguro abre a lista; o resto segue em ordem alfabética.
+RECOMMENDED_PROFILE = "profile.safe-base"
+
+
 class ProfilesPage(BasePage):
     """Profile selection via ComboBox + Install button, instead of 15 cards."""
 
@@ -42,10 +46,14 @@ class ProfilesPage(BasePage):
         form.setSpacing(10)
         self.combo = QComboBox()
         self.combo.setObjectName("profileCombo")
-        self.combo.setMinimumWidth(400)
-        for action in sorted(self.actions, key=lambda a: a.title):
+        # LUX-024: sem largura mínima fixa — o combo encolhe com a janela.
+        self.combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.combo.setMinimumContentsLength(16)
+        ordered = sorted(self.actions, key=lambda a: (a.id != RECOMMENDED_PROFILE, a.title))
+        for action in ordered:
             self.mark_represented(action)
-            self.combo.addItem(action.title, action.id)
+            label = f"{action.title} — recomendado" if action.id == RECOMMENDED_PROFILE else action.title
+            self.combo.addItem(label, action.id)
         self.combo.currentIndexChanged.connect(self._on_select)
         form.addRow("Perfil:", self.combo)
 
@@ -76,7 +84,8 @@ class ProfilesPage(BasePage):
         if action is None:
             return
         self.desc_label.setText(action.description)
-        self.install_btn.setText("Instalar" if not action.mutable else "Pré-visualizar")
+        # Mutável = prévia primeiro; o botão diz o que vai acontecer agora.
+        self.install_btn.setText("Instalar" if not action.mutable else "Ver o que instala")
         if self._install_connected:
             self.install_btn.clicked.disconnect()
         self.install_btn.clicked.connect(lambda: self.request_action(action))

@@ -10,13 +10,18 @@ from .dashboard import DashboardPage
 from .overview import OverviewPage
 from .profiles import ProfilesPage
 from .homelab import HomelabPage
+from .linux_hub import LinuxHubPage
 from .emulation import EmulationPage
 from .ai_proxies import AiProxiesPage
 from .ai_routing import AiRoutingPage
+from .ai_dev import AiDevPage
 from .steamdeck import SteamDeckPage
 from .tuning import TuningPage
 from .results import ResultsPage
 from .workspace import CatalogWorkspacePage
+from .product_registry import ProductRegistryPage
+from .development import DevelopmentPage
+from .accounts import AccountsPage
 from .windows_vm import WindowsVmPage
 from .service_control import ServerPage, WaydroidPage
 from .themes import ThemesPage
@@ -41,6 +46,7 @@ class PageRegistry:
         "Início": DashboardPage,
         "Visão geral": OverviewPage,
         "Perfis": ProfilesPage,
+        "Linux": LinuxHubPage,
         "Steam Deck": SteamDeckPage,
         "Windows VM": WindowsVmPage,
         "Waydroid": WaydroidPage,
@@ -50,10 +56,12 @@ class PageRegistry:
         "Boot Direto": CatalogWorkspacePage,
         "Flatpak": CatalogWorkspacePage,
         "Recursos": CatalogWorkspacePage,
-        "IA & Dev": CatalogWorkspacePage,
+        "IA & Dev": AiDevPage,
         "Proxies IA": AiProxiesPage,
         "Roteamento IA": AiRoutingPage,
-        "Aplicativos": CatalogWorkspacePage,
+        "Aplicativos": ProductRegistryPage,
+        "Desenvolvimento": DevelopmentPage,
+        "Contas e conexões": AccountsPage,
         "Ajustes": TuningPage,
         "Temas": ThemesPage,
         "Resultados": ResultsPage,

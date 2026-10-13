@@ -103,3 +103,54 @@ def test_cli_install_requires_explicit_confirmation():
         _parser().parse_args(["install", "pillow"])
     args = _parser().parse_args(["install", "pillow", "--confirm"])
     assert args.confirm is True
+
+
+def test_aur_without_helper_is_not_installable(absent, monkeypatch):
+    """PZ-AUD-026: pacote AUR sem helper não pode oferecer `pacman -S`."""
+    monkeypatch.setenv("PZ_DEPS_DISTRO_FAMILY", "arch")
+    monkeypatch.setattr(engine.shutil, "which", lambda name: None)
+    entry = engine.inspect("wallpaper-engine-kde")
+    assert entry["provider"] == "aur"
+    assert entry["installable"] is False
+    assert "yay" in entry["reason"] or "paru" in entry["reason"]
+    assert "wallpaper-engine-kde" not in engine.status()["installable"]
+
+
+def test_aur_with_helper_offers_helper_command(absent, monkeypatch):
+    monkeypatch.setenv("PZ_DEPS_DISTRO_FAMILY", "arch")
+    monkeypatch.setattr(engine.shutil, "which", lambda name: "/usr/bin/yay" if name == "yay" else None)
+    entry = engine.inspect("wallpaper-engine-kde")
+    assert entry["installable"] is True
+    assert entry["command"].startswith("yay ")
+    assert "pacman" not in entry["command"]
+
+
+def test_aur_install_never_elevates(absent, monkeypatch):
+    """Helpers AUR recusam root: instalar sem bridge de elevação."""
+    monkeypatch.setenv("PZ_DEPS_DISTRO_FAMILY", "arch")
+    monkeypatch.setattr(engine.shutil, "which", lambda name: "/usr/bin/yay" if name == "yay" else None)
+    calls = []
+
+    class Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return Proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    result = engine.install(["wallpaper-engine-kde"], runner=lambda argv: (_ for _ in ()).throw(AssertionError("official runner usado p/ AUR")))
+    assert calls and calls[0][0] in ("yay", "/usr/bin/yay")
+    assert "phasezero-admin" not in calls[0] and "bigsudo" not in calls[0]
+    assert "sudo" not in calls[0]
+    assert result["status"] in ("complete", "failed")
+
+
+def test_essential_scenario_is_distinguished(absent, monkeypatch):
+    """PZ-AUD-026: swtpm é opcional no geral, essencial para windows-11-vm."""
+    monkeypatch.setenv("PZ_DEPS_DISTRO_FAMILY", "arch")
+    entry = engine.inspect("swtpm")
+    assert "windows-11-vm" in entry["requiredBy"]
+    assert engine.inspect("pillow")["requiredBy"] == []

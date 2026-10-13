@@ -16,12 +16,14 @@ Usage:
   pz install <profile> --dry-run
   pz steamdeck <mode>          Apply Steam Deck mode (handheld|docked-tv|docked-monitor)
   pz steamdeck watch           Start mode-watcher daemon
-  pz steamdeck keyboard        Toggle Steam/desktop virtual keyboard
-  pz steamdeck keyboard status Show virtual keyboard provider/config
-  pz steamdeck keyboard repair Configure KDE/Maliit virtual keyboard
+  pz steamdeck keyboard        Toggle the KDE Wayland virtual keyboard
+  pz steamdeck keyboard status Show config, D-Bus availability, and whether it is open
+  pz steamdeck keyboard repair Select Plasma Keyboard, or keep a valid explicit choice
+  pz steamdeck keyboard revert Restore kwinrc from the backup taken before repair
+  pz steamdeck cursor          Read-only pointer handoff diagnostic (does not restart anything)
   pz steamdeck console [mode]  Apply mode and launch Steam Gamepad UI
   pz steamdeck dev [mode]      Apply desktop/dev session mode
-  pz steamdeck hotkeys install Install Ctrl+Alt+F1..F6 shortcuts
+  pz steamdeck hotkeys install Install Meta+Shift+F1..F8 shortcuts
   pz steamdeck watcher install Install dynamic mode-watcher user service
   pz steamdeck privileged status Manage TDP/GPU privileged bridge
   pz steamdeck boot status   Manage GRUB SteamOS-like console boot entry
@@ -31,6 +33,7 @@ Usage:
   pz steamdeck status         Print SteamOS UX status JSON
   pz steamdeck removable install Auto-mount USB removable devices (gated on Windows VM)
   pz steamdeck display status Detect TV/monitor resolution for Game Mode
+  pz steamdeck controller status Map the Deck controller onto the KDE desktop
   pz windows-vm status        Print QEMU/KVM Windows VM status JSON
   pz windows-vm discover      Discover existing Windows VM disks on host
   pz windows-vm plan --iso PATH Preview Windows VM plan
@@ -51,7 +54,7 @@ Usage:
   pz waydroid boot status     Manage direct GRUB Waydroid boot entry (install|remove|status|next|next-reboot|set-default|clear-next)
   pz server status            Home server (LLM/homelab/boot) status
   pz server llm <action>      Local LLM server (install|expose-lan|restore|status)
-  pz server homelab <action>  Homelab: stack (plan|up|down|open|logs|backup|restore|update|repair) / status (status|verify) / profile (list|set <key>|get) / governor (list|weights|budget|check|winvm-status|winvm-suspend [--dry-run]|winvm-resume) [--extras] [--json] [--profile <key>]
+  pz server homelab <action>  Homelab: stack (plan|up|down|open|logs|backup|restore|update|repair) / apps (list|enable|disable|update) / hosts (add|list|remove|ping) / --host <alias> / agent / web (status|enable|user) / status (status|verify) / profile (list|set <key>|get) / governor ... [--extras] [--json] [--profile <key>]
   pz server casaos <action>   CasaOS opt-in compatibility gate (status|plan|install)
   pz server hermes <action>   Hermes remote actuation (setup|start|status)
   pz server slim <action>     Reversible OS slimming (apply [--aggressive]|restore|status)
@@ -176,18 +179,19 @@ Usage:
   pz ai ollama [--pull <m>]    Ollama install/config; model pulls broker-gated
   pz ai omo <action>           oh-my-openagent OpenCode plugin (setup|doctor|status|enable|disable|uninstall)
   pz ai opencode status        Audit CLI/Desktop, canonical config and 9Router route
-  pz ai opencode install       Configure canonical loopback 9Router provider transactionally
-  pz ai opencode verify        Verify config, secret isolation and optional live prompt
-  pz ai opencode run --route=9router -- <args>  Run OpenCode with isolated 9Router route
+  pz ai opencode install       Blocked until 9Router can enforce account-bound grants
+  pz ai opencode verify        Read-only config check; live inference blocked without grant binding
+  pz ai opencode run --route=9router -- <args>  Blocked until account-bound grants are enforceable
   pz ai opencode rollback <manifest> Restore an OpenCode route transaction
   pz ai opencode permissions-auto  Enable auto-accept permissions (CLI + desktop toggle)
-  pz ai setup <tool>           Setup AI tool (codex|ollama|webui|claude|desktop|opencode|omo|hermes|openclaw|memory|admin|rtk|caveman|headroom|compat|ides|ide-apps|usagebar|codexbar|all)
+  pz ai setup <tool>           Setup AI tool (codex|ollama|webui|claude|desktop|opencode|omo|openclaw|memory|admin|rtk|caveman|headroom|compat|ides|ide-apps|usagebar|codexbar|all)
+  pz ai drift [status|sync [--dry-run]]  Compare installed runtime copies with the repo (exit 2 on drift)
   pz ai codexbar <action>      CodexBar CLI + optional KodexBar plasmoid (status|setup|health|auth|watchdog|plasmoid|plasmoid-remove|repair)
   pz ai claude status          Audit Claude, Bonsai, routes, hooks and 9Router conflicts
   pz ai claude install         Transactional install/repair with backup and rollback
-  pz ai claude verify          Verify isolated subscription/Bonsai/9Router launchers
+  pz ai claude verify          Verify route configuration and status (no inference)
   pz ai claude preflight bonsai --cwd <dir>  Audit upload target without reading file contents
-  pz ai claude run bonsai --cwd <dir>  Run Bonsai only from an explicitly reviewed project
+  pz ai claude run <route>     Unavailable until account-bound grants are enforced
   pz ai claude rollback <file> Restore a cc-installer transaction manifest
   pz ai secrets rotate         Rotate AI API keys
   pz ai mcp install <server>   Install MCP server
@@ -197,42 +201,64 @@ Usage:
   pz ai mcp status             Print MCP status JSON
   pz ai mcp list               List installed MCP servers
   pz ai proxies status         Status Linux AI proxy suite
-  pz ai proxies install [id]   Install/update all or one Linux AI proxy (also wires IDEs)
-  pz ai proxies configure-ides Wire proxies into OpenCode, VS Code/Code-OSS and ZCode
+  pz ai proxies install [id]   Install source snapshots only; does not start or wire consumers
+  pz ai proxies configure-ides Blocked until per-request account grants are enforced
   pz ai proxies auth [id]      Redacted auth/login readiness for proxy suite
-  pz ai proxies login <id>     Open headed browser login for kimi/qwen/deeps
-  pz ai proxies test [id]      Honest target/all probe: /v1/models + chat (JSON)
-  pz ai 9router status         Managed smart router health, providers and combos
-  pz ai 9router install        Install 9Router, loopback service and watchdog
-  pz ai 9router dashboard      Open local 9Router dashboard
+  pz ai proxies provenance     Verify pinned source snapshots before runtime
+  pz ai proxies login <id>     Save local browser session; does not start service or infer
+  pz ai proxies ensure [id]    Blocked until per-request account grants are enforced
+  pz ai proxies test [id]      Blocked; inference probes require an enforced grant
+  pz ai backup plan            Inventário sem segredos do pacote portátil
+  pz ai backup create          Exporta ai-memory e acessos em pacote AES-256
+  pz ai backup verify          Valida senha, paths e SHA-256 sem restaurar
+  pz ai backup restore --plan  Prévia obrigatória da restauração e rollback
+  pz ai 9router status         Router health and redacted providers; clients stay blocked
+  pz ai 9router install        Install loopback service; consumer use still requires grants
+  pz ai 9router dashboard      Blocked until per-request connection grants are enforceable
+  pz ai 9router test           Check health/models; inference probe stays blocked
   pz ai 9router tui            Attach to existing service without restarting it
   pz ai 9router repair         Migrate stable units and verify watchdog
-  pz ai 9router provider ...   Provider status, secret sync and removal
-  pz ai 9router combo ...      List, create, sync or switch fallback combos
+  pz ai 9router provider ...   Status/removal; credential sync stays blocked
+  pz ai 9router combo ...      List combos; create/sync/switch stays blocked
+  pz ai 9router client ...     Status only; launching clients stays blocked
    pz ai 9router usage          Usage, latency and fallback telemetry
    pz ai routing status         Redacted routing status [--cached] [--json]
    pz ai routing inventory      Collect redacted inventory [--refresh-quota] [--json]
    pz ai routing recommend --task code|analysis|plan --policy quality|balanced|save-quota|privacy
    pz ai routing plan --task <t> --client claude|opencode
-   pz ai routing apply [--dry-run] [--yes] --task <t> [--policy <p>]
+   pz ai routing apply --dry-run --task <t> [--policy <p>]  Preview only; writes blocked until request grants are enforceable
    pz ai routing run <task> --client claude|opencode -- <args>
    pz ai routing rollback <manifest> [--force]
    pz ai routing verify [--live]
    pz ai routing refresh        Refresh quota (scheduler-safe, 5-10 min)
    pz ai omniroute <action>     OmniRoute multi-provider router (install|status|combo|opencode|test|dashboard)
    pz ai odysseus status        Audit pinned Odysseus workspace deployment
-  pz ai odysseus install       Provision rootless, loopback-only Odysseus stack
-  pz ai odysseus update        Update to verified official branch commit with rollback
+  pz ai odysseus install       Blocked until workspace inference enforces per-request grants
+  pz ai odysseus open          Blocked until workspace inference enforces per-request grants
+  pz ai odysseus update        Blocked until workspace inference enforces per-request grants
+  pz ai hermes status          Redacted Hermes configuration, auth and grant-block state
+  pz ai hermes doctor          Read-only Hermes integrity and policy diagnostic
+  pz ai hermes route           Read Hermes routing status (status|doctor|models|bai); writes blocked without request grants
+  pz ai workspaces doctor      Unified Hermes/Odysseus/9Router readiness audit
+  pz ai workspaces plan        Safe read-only deployment plan and blockers
+  pz ai auth status            Redacted registry for AI accounts and sessions
+  pz ai operations status      Persistent Control Center operation summary
+  pz ai operations resume-info Safe retry metadata for interrupted operations
   pz doctor                    Run full system diagnostics
   pz support-bundle [--plan]   Generate support tarball (--plan: preview sem escrita)
   pz repair-plan               Generate repair plan
-  pz tune <area> [--dry-run]   Apply tuning (browser|gaming|dev); --dry-run mostra o plano
+  pz tune <area> [apply|revert|status] [--dry-run]
+                               Tuning por área (browser|gaming|dev): aplica, reverte
+                               pelos backups gravados ou reporta estado em JSON
   pz capabilities detect      Detect host/package compatibility as JSON
   pz capabilities catalog     List trusted capabilities [--group ID]
   pz capabilities plan        Preview --profile/--capability/--manifest selection
   pz capabilities apply       Apply a confirmed plan
   pz capabilities verify      Verify an operation
   pz capabilities rollback    Revert only items installed by an operation
+  pz capabilities remove-plan Preview removal of what PhaseZero installed
+  pz capabilities remove      Execute a confirmed removal plan
+  pz capabilities verify-removal Confirm capabilities left the host
   pz themes status            Temas e acessibilidade: estado efetivo Plasma (JSON)
   pz themes catalog           Catálogo avaliado: features, wallpapers, extensões
   pz themes plan              Plano com snapshot (--profile|--feature|--wallpaper)
@@ -328,7 +354,7 @@ cmd_flatpak() {
 
 cmd_steamdeck() {
     local action="${1:-}" target="${2:-}"
-    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|console|dev|hotkeys|watcher|privileged|boot|plugins)"; return 1; }
+    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|terminal-keyboard|panel|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
     source "$PZ_ROOT/linux/steamdeck/common.sh"
     source "$PZ_ROOT/linux/steamdeck/input-actions.sh"
     case "$action" in
@@ -342,8 +368,18 @@ cmd_steamdeck() {
                 toggle|"") steamdeck_toggle_virtual_keyboard ;;
                 status) steamdeck_virtual_keyboard_status ;;
                 configure|install|repair) steamdeck_configure_virtual_keyboard ;;
-                *) pz_error "usage: pz steamdeck keyboard (toggle|status|configure|repair)"; return 1 ;;
+                revert|restore) steamdeck_revert_virtual_keyboard ;;
+                *) pz_error "usage: pz steamdeck keyboard (toggle|status|configure|repair|revert)"; return 1 ;;
             esac
+            ;;
+        cursor|pointer)
+            bash "$PZ_ROOT/linux/steamdeck/cursor-diagnose.sh" "${target:-snapshot}" "${3:-}"
+            ;;
+        terminal-keyboard)
+            bash "$PZ_ROOT/linux/steamdeck/terminal-keyboard.sh" "${target:-watch}"
+            ;;
+        panel)
+            bash "$PZ_ROOT/linux/steamdeck/install-deck-panel.sh" "${target:-status}"
             ;;
         console)      steamdeck_start_console_session "${target:-auto}" ;;
         dev|desktop)  steamdeck_start_dev_session "${target:-docked-monitor}" ;;
@@ -358,6 +394,7 @@ cmd_steamdeck() {
         conveniences|convenience|launchers) bash "$PZ_ROOT/linux/steamdeck/convenience-launchers.sh" "${target:-status}" ;;
         removable|removable-mount|usb-mount) bash "$PZ_ROOT/linux/steamdeck/install-removable-mount.sh" "${target:-status}" ;;
         display)       bash "$PZ_ROOT/linux/steamdeck/display-session.sh" "${target:-status}" ;;
+        controller|controller-desktop) bash "$PZ_ROOT/linux/steamdeck/controller-desktop.sh" "${target:-status}" ;;
         ux)           bash "$PZ_ROOT/linux/steamdeck/install-hotkeys.sh" "${target:-install}" ;;
         *)            pz_error "unknown steamdeck mode: $action"; return 1 ;;
     esac
@@ -463,6 +500,36 @@ cmd_server() {
             ;;
         llm)      bash "$PZ_ROOT/linux/server/llm-server.sh" "${1:-status}" "${@:2}" ;;
         homelab)
+            local host_alias=""
+            local -a hl_args=()
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --host)
+                        [ "${2:-}" ] || { pz_error "--host requires alias"; return 2; }
+                        host_alias="$2"
+                        shift 2
+                        ;;
+                    --host=*)
+                        host_alias="${1#--host=}"
+                        shift
+                        ;;
+                    *)
+                        hl_args+=("$1")
+                        shift
+                        ;;
+                esac
+            done
+            if [ -n "$host_alias" ]; then
+                case "${hl_args[0]:-}" in
+                    hosts)
+                        pz_error "hosts registry is local; do not combine --host with hosts"
+                        return 2
+                        ;;
+                esac
+                bash "$PZ_ROOT/linux/server/homelab-hosts.sh" exec "$host_alias" -- "${hl_args[@]}"
+                return
+            fi
+            set -- "${hl_args[@]}"
             case "${1:-status}" in
                 status|verify|repair) bash "$PZ_ROOT/linux/server/homelab-status.sh" "$@" ;;
                 profiles) bash "$PZ_ROOT/linux/server/homelab-governor.sh" list ;;
@@ -485,6 +552,12 @@ cmd_server() {
                     esac
                     ;;
                 governor) bash "$PZ_ROOT/linux/server/homelab-governor.sh" "${2:-list}" "${@:3}" ;;
+                apps) bash "$PZ_ROOT/linux/server/homelab-apps.sh" "${@:2}" ;;
+                hosts) bash "$PZ_ROOT/linux/server/homelab-hosts.sh" "${@:2}" ;;
+                agent) python3 "$PZ_ROOT/linux/server/homelab_agent.py" "${@:2}" ;;
+                discover) python3 "$PZ_ROOT/linux/server/homelab_agent.py" discover --json ;;
+                web) python3 "$PZ_ROOT/linux/server/homelab_web.py" "${@:2}" ;;
+                host-facts) bash "$PZ_ROOT/linux/server/homelab-host-facts.sh" "${@:2}" ;;
                 *) bash "$PZ_ROOT/linux/server/homelab-stack.sh" "$@" ;;
             esac
             ;;
@@ -500,7 +573,7 @@ cmd_server() {
 
 cmd_ai() {
     local sub="${1:-}" target="${2:-}"
-    [ -z "$sub" ] && { pz_error "usage: pz ai (status|setup|init|omo|compat|token-economy|secrets|mcp|policy|ollama) ..."; return 1; }
+    [ -z "$sub" ] && { pz_error "usage: pz ai (status|setup|init|omo|compat|token-economy|secrets|mcp|policy|ollama|webui) ..."; return 1; }
     case "$sub" in
         policy)
             shift
@@ -510,8 +583,17 @@ cmd_ai() {
             shift
             bash "$PZ_ROOT/linux/ai/setup-ollama.sh" "$@"
             ;;
+        webui)
+            shift
+            bash "$PZ_ROOT/linux/ai/open-webui-manager.sh" "${1:-status}"
+            ;;
         status)
             bash "$PZ_ROOT/linux/ai/status.sh"
+            ;;
+        product-status)
+            shift
+            PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+                python3 "$PZ_ROOT/linux/ai/product_status.py" "${@:-}"
             ;;
         omo|openagent|oh-my-openagent)
             shift
@@ -578,6 +660,10 @@ cmd_ai() {
             shift
             bash "$PZ_ROOT/linux/ai/proxy-suite.sh" "${@:-status}"
             ;;
+        backup|portability|export)
+            shift
+            bash "$PZ_ROOT/linux/ai/backup-manager.sh" "${@:-plan}"
+            ;;
         9router|router9|smart-router)
             shift
             bash "$PZ_ROOT/linux/ai/9router-manager.sh" "${@:-status}"
@@ -585,6 +671,11 @@ cmd_ai() {
         routing|ai-router|task-router)
             shift
             python3 "$PZ_ROOT/linux/ai/routing_manager.py" "$@"
+            ;;
+        chatgpt-web)
+            # Experimental and opt-in (PXA-010): kept out of help and catalog on purpose.
+            shift
+            python3 "$PZ_ROOT/linux/ai/chatgpt_web_bridge.py" "${@:-status}"
             ;;
         claude|claude-code|bonsai)
             shift
@@ -597,6 +688,36 @@ cmd_ai() {
         odysseus|odysseus-os|workspace)
             shift
             bash "$PZ_ROOT/linux/ai/odysseus-manager.sh" "${@:-status}"
+            ;;
+        hermes|hermes-agent)
+            shift
+            local hermes_action="${1:-status}"
+            case "$hermes_action" in
+                route|router|enforce) shift; bash "$PZ_ROOT/linux/ai/hermes-router.sh" "${@:-apply}" ;;
+                provider|providers|default)
+                    shift
+                    bash "$PZ_ROOT/linux/ai/9router-hermes-provider.sh" "${@:-status}" ;;
+                models|model|pin|bai|b-ai|b.ai|list-models)
+                    bash "$PZ_ROOT/linux/ai/hermes-router.sh" "$@" ;;
+                *) bash "$PZ_ROOT/linux/ai/setup-hermes.sh" "${@:-status}" ;;
+            esac
+            ;;
+        workspaces|agent-workspaces|agents-diagnostic)
+            shift
+            bash "$PZ_ROOT/linux/ai/agent-workspaces-diagnostic.sh" "${@:-doctor}"
+            ;;
+        auth|auth-registry|accounts)
+            shift
+            bash "$PZ_ROOT/linux/ai/auth-registry.sh" "${@:-status}"
+            ;;
+        operations|operation-ledger|op-ledger)
+            shift
+            PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+                python3 -m linux.ui_native.operation_ledger "${@:-status}"
+            ;;
+        drift|runtime-drift)
+            shift 2 2>/dev/null || shift
+            bash "$PZ_ROOT/linux/ai/runtime-drift.sh" "${target:-status}" "$@"
             ;;
         codexbar|kodexbar)
             shift
@@ -640,21 +761,44 @@ cmd_ai() {
                 usagebar|ai-usagebar) bash "$PZ_ROOT/linux/ai/setup-usagebar.sh" setup ;;
                 codexbar|kodexbar|codexbar-cli) bash "$PZ_ROOT/linux/ai/setup-codexbar.sh" setup ;;
                 all)
+                    local setup_blocked=0 setup_rc=0
                     bash "$PZ_ROOT/linux/ai/setup-codex.sh"
                     bash "$PZ_ROOT/linux/ai/setup-ollama.sh"
-                    bash "$PZ_ROOT/linux/ai/setup-open-webui.sh"
+                    if bash "$PZ_ROOT/linux/ai/setup-open-webui.sh"; then
+                        :
+                    else
+                        setup_rc=$?
+                        if [ "$setup_rc" -ne 69 ]; then return "$setup_rc"; fi
+                        pz_warn "Open WebUI omitted: request-bound account grants are unavailable; other setup steps continue"
+                        setup_blocked=69
+                    fi
                     bash "$PZ_ROOT/linux/ai/setup-claude-code.sh" install --yes
                     bash "$PZ_ROOT/linux/ai/desktop-apps.sh" install-claude
                     bash "$PZ_ROOT/linux/ai/desktop-apps.sh" install-services
                     bash "$PZ_ROOT/linux/ai/setup-opencode.sh"
-                    bash "$PZ_ROOT/linux/ai/setup-hermes.sh"
-                    bash "$PZ_ROOT/linux/ai/setup-openclaw.sh"
+                    if bash "$PZ_ROOT/linux/ai/setup-hermes.sh"; then
+                        :
+                    else
+                        setup_rc=$?
+                        if [ "$setup_rc" -ne 69 ]; then return "$setup_rc"; fi
+                        pz_warn "Hermes omitted: per-request account grants are unavailable; other setup steps continue"
+                        setup_blocked=69
+                    fi
+                    if bash "$PZ_ROOT/linux/ai/setup-openclaw.sh"; then
+                        :
+                    else
+                        setup_rc=$?
+                        if [ "$setup_rc" -ne 69 ]; then return "$setup_rc"; fi
+                        pz_warn "OpenClaw omitted: per-request account grants are unavailable; other setup steps continue"
+                        setup_blocked=69
+                    fi
                     bash "$PZ_ROOT/linux/ai/setup-memory.sh" setup
                     bash "$PZ_ROOT/linux/ai/setup-admin-bridge.sh" setup
                     bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" setup
                     bash "$PZ_ROOT/linux/ai/setup-usagebar.sh" setup
                     bash "$PZ_ROOT/linux/ai/setup-codexbar.sh" setup
                     bash "$PZ_ROOT/linux/ai/setup-ides.sh" configure
+                    [ "$setup_blocked" -eq 0 ] || return "$setup_blocked"
                     ;;
                 *) pz_error "unknown tool: $target"; return 1 ;;
             esac
@@ -685,14 +829,30 @@ cmd_ai() {
 cmd_doctor() {
     # Global watchdog: per-check timeouts bound every subcommand (doctor.sh),
     # this caps the whole run. Override with PZ_DOCTOR_TIMEOUT (seconds).
-    local scope="full"
-    if [ "${1:-}" = "--scope" ]; then
-        case "${2:-}" in
-            system|full) scope="$2"; shift 2 ;;
-            *) pz_error "usage: pz doctor [--scope system|full]"; return 1 ;;
+    local scope="full" json=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --scope)
+                case "${2:-}" in
+                    system|full) scope="$2"; shift 2 ;;
+                    *) pz_error "usage: pz doctor [--scope system|full] [--json]"; return 1 ;;
+                esac
+                ;;
+            --json) json=1; shift ;;
+            # Flag desconhecida era ignorada em silêncio: quem pedia --json
+            # recebia o relatório humano e nenhum aviso.
+            *) pz_error "usage: pz doctor [--scope system|full] [--json]"; return 1 ;;
         esac
+    done
+    if [ "$json" = 1 ]; then
+        # fd 3 = stdout de verdade (só o envelope); stdout do script = lixeira.
+        PZ_DOCTOR_SCOPE="$scope" PZ_DOCTOR_JSON=1 \
+            timeout "${PZ_DOCTOR_TIMEOUT:-300}" bash "$PZ_ROOT/linux/audit/doctor.sh" \
+            3>&1 1>/dev/null
+        return $?
     fi
-    PZ_DOCTOR_SCOPE="$scope" timeout "${PZ_DOCTOR_TIMEOUT:-300}" bash "$PZ_ROOT/linux/audit/doctor.sh"
+    PZ_DOCTOR_SCOPE="$scope" PZ_DOCTOR_JSON=0 \
+        timeout "${PZ_DOCTOR_TIMEOUT:-300}" bash "$PZ_ROOT/linux/audit/doctor.sh"
 }
 
 cmd_support_bundle() {
@@ -708,20 +868,27 @@ cmd_repair_plan() {
 }
 
 cmd_tune() {
-    local area="${1:-}"
-    local mode="${2:-apply}"
-    [ -z "$area" ] && { pz_error "usage: pz tune (browser|gaming|dev) [--dry-run]"; return 1; }
-    case "$mode" in
-        apply|"") mode="apply" ;;
-        --dry-run) ;;
-        *) pz_error "usage: pz tune (browser|gaming|dev) [--dry-run]"; return 1 ;;
-    esac
+    local area="${1:-}" usage="usage: pz tune (browser|gaming|dev) [apply|revert|status] [--dry-run]"
+    [ -z "$area" ] && { pz_error "$usage"; return 1; }
+    shift
+    local -a args=()
+    local token
+    for token in "$@"; do
+        case "$token" in
+            apply|revert|status|--dry-run) args+=("$token") ;;
+            "") ;;
+            *) pz_error "$usage"; return 1 ;;
+        esac
+    done
+    [ "${#args[@]}" -gt 0 ] || args=(apply)
+    local script
     case "$area" in
-        browser) bash "$PZ_ROOT/linux/tuning/browser-hardening.sh" "$mode" ;;
-        gaming)  bash "$PZ_ROOT/linux/tuning/gaming-tweaks.sh" "$mode" ;;
-        dev)     bash "$PZ_ROOT/linux/tuning/dev-tweaks.sh" "$mode" ;;
+        browser) script="browser-hardening.sh" ;;
+        gaming)  script="gaming-tweaks.sh" ;;
+        dev)     script="dev-tweaks.sh" ;;
         *)       pz_error "unknown tune area: $area"; return 1 ;;
     esac
+    bash "$PZ_ROOT/linux/tuning/$script" "${args[@]}"
 }
 
 cmd_ui() {

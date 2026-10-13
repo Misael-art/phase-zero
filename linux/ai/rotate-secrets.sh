@@ -38,8 +38,9 @@ rotate_entry() {
         return 0
     fi
 
-    # Prompt for new value
-    read -r -s -p "Enter new value for $key ($desc): " value
+    # Prompt for new value - do TTY, não do stdin do loop: sem o redirecionar,
+    # o read consumia a PRÓXIMA linha do esquema como valor do segredo.
+    read -r -s -p "Enter new value for $key ($desc): " value < /dev/tty
     echo
     if [ -n "$value" ]; then
         echo "$value" | pass insert -f "$pass_path" >/dev/null

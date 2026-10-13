@@ -1,0 +1,25 @@
+# Per-app compose module. Segredos nunca inline.
+services:
+  grafana:
+    image: ${PZ_IMAGE_GRAFANA:-grafana/grafana:12.0.2}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-grafana
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+    ports:
+      - "${HOMELAB_ADMIN_BIND_ADDR:-127.0.0.1}:3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  grafana_data:

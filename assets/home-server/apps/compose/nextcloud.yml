@@ -1,0 +1,61 @@
+# Per-app compose module. Segredos nunca inline.
+services:
+  nextcloud-db:
+    image: ${PZ_IMAGE_MARIADB:-mariadb:11.8.3}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-nextcloud-db
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    networks:
+      - pz-internal
+    environment:
+      - MARIADB_ROOT_PASSWORD=${NEXTCLOUD_DB_ROOT_PASSWORD}
+      - MARIADB_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+      - MARIADB_DATABASE=nextcloud
+      - MARIADB_USER=nextcloud
+    volumes:
+      - nextcloud_db:/var/lib/mysql
+
+  nextcloud:
+    image: ${PZ_IMAGE_NEXTCLOUD:-nextcloud:31.0.6}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-nextcloud
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1024m
+    cpus: 1.0
+    networks:
+      - pz-internal
+    depends_on:
+      - nextcloud-db
+    environment:
+      - MYSQL_HOST=nextcloud-db
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+    ports:
+      - "${HOMELAB_ADMIN_BIND_ADDR:-127.0.0.1}:8080:80"
+    volumes:
+      - nextcloud_data:/var/www/html
+
+networks:
+  pz-internal:
+    internal: true
+
+volumes:
+  nextcloud_db:
+  nextcloud_data:

@@ -1,0 +1,6 @@
+9router attach-only, stable units, PID and secret redaction ok
+WARN:  9Router environment is incomplete: /run/user/1000/codex-desktop/tmp/tmp.ZatBDoTScB/home/.config/phasezero/ai-proxies/9router.env
+WARN:  no usable 9Router environment backup; regenerating server secrets (issued API keys will stop working)
+WARN:  9Router environment is incomplete: /run/user/1000/codex-desktop/tmp/tmp.ZatBDoTScB/home/.config/phasezero/ai-proxies/9router.env
+
+AUDIT_EXIT=0

@@ -5,11 +5,11 @@
   "os": ["linux", "windows"],
   "packages": {
     "linux": {
+      "archRepos": ["multilib"],
       "pacman": [
         "steam",
         "steam-devices",
         "gamescope",
-        "gamescope-dbus",
         "mangohud",
         "gamemode",
         "lutris",
@@ -24,13 +24,16 @@
         "vulkan-radeon",
         "lib32-vulkan-radeon",
         "vulkan-tools",
-        "ryzenadj",
         "corectrl",
         "discord",
         "obs-studio",
         "goverlay"
       ],
+      "optionalPacman": [
+        "gamescope-dbus"
+      ],
       "yay": [
+        "ryzenadj",
         "heroic-games-launcher-bin",
         "proton-ge-custom-bin",
         "ananicy-git"

@@ -13,7 +13,21 @@ export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CACHE_HOME="$HOME/.cache"
 export XDG_STATE_HOME="$TMP_ROOT/state"
 export XDG_RUNTIME_DIR="$TMP_ROOT/run"
+# The share bind root defaults to a persistent, disk-backed path so the guest
+# reports real free space. Redirect it into the sandbox: these tests must never
+# touch /var/lib on the host.
+export PZ_WINDOWS_VM_SHARE_STATE_DIR="$TMP_ROOT/run/phasezero-windows-vm"
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR"
+
+# resolve_display_target reads /proc/cmdline and lets a boot token beat the
+# environment, which is correct in production and poison in a test: the whole
+# session suite then passes or fails according to which GRUB entry the machine
+# happened to boot from. A host booted through the "(Dock)" entry carries
+# phasezero.windowsvm-display=external and silently overrode the internal
+# override these cases set. Default every case to an empty cmdline; a case that
+# wants to exercise boot tokens sets this file itself.
+export PZ_WINDOWS_VM_CMDLINE_FILE="$TMP_ROOT/proc-cmdline"
+: >"$PZ_WINDOWS_VM_CMDLINE_FILE"
 
 # Hermetic privilege/mount stubs: every test below must run without real
 # mount/umount/mountpoint/findmnt calls and without real sudo/bigsudo/
@@ -106,6 +120,13 @@ bash -n "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
 bash -n "$REPO_ROOT/linux/windows-vm/windows-vm-boot-prepare.sh"
 bash -n "$REPO_ROOT/linux/windows-vm/windows-vm-session.sh"
 bash -n "$REPO_ROOT/linux/windows-vm/guest-login.sh"
+# QGA ausente (sem VM) é relatório válido rc0 com envelope acionável — WBR
+# "nenhum beco sem saída". Nunca pode virar erro seco na Central.
+gl_status="$("$REPO_ROOT/linux/pz" windows-vm guest-login status --json 2>/dev/null)"; gl_rc=$?
+[ "$gl_rc" -eq 0 ] || { echo "FAIL: guest-login status deve sair 0 com relatório (rc=$gl_rc)" >&2; exit 1; }
+jq -e '.qgaAvailable == false and .state == "needs-vm-running" and (.nextAction | type == "string")' \
+    <<< "$gl_status" >/dev/null || { echo "FAIL: envelope qga-unavailable acionável ausente" >&2; echo "$gl_status"; exit 1; }
+echo "  guest-login qga-unavailable envelope ok"
 jq empty "$REPO_ROOT/profiles/windows-vm-linux.json"
 weights=$(grep -oP 'CP_WEIGHTS=\(\K[^)]+' "$REPO_ROOT/linux/windows-vm/provision.sh")
 sum=0; for w in $weights; do sum=$((sum + w)); done
@@ -142,22 +163,23 @@ plan_output="$("$REPO_ROOT/linux/pz" windows-vm plan --iso "$iso")"
 grep -q 'PhaseZero Windows VM plan' <<< "$plan_output"
 grep -q 'smb_unc' <<< "$plan_output"
 grep -q 'disk_source' <<< "$plan_output"
-grep -q 'share_policy: minimal' <<< "$plan_output"
-grep -q 'share_policy: full' <<< "$(PZ_WINDOWS_VM_SHARE_POLICY=full "$REPO_ROOT/linux/pz" windows-vm plan --iso "$iso")"
+grep -q 'share_policy: full' <<< "$plan_output"
+grep -q 'share_policy: minimal' <<< "$(PZ_WINDOWS_VM_SHARE_POLICY=minimal "$REPO_ROOT/linux/pz" windows-vm plan --iso "$iso")"
 grep -Fq '"$NET_MODEL,netdev=net0' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
 grep -Fq 'socket,path=$RUNTIME_DIR/qga.sock' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
 grep -Fq 'if [ "$GRAPHICS_PROFILE" != "virtio-gl" ]; then' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
 shares_plan="$("$REPO_ROOT/linux/pz" windows-vm shares dry-run)"
-grep -q 'share policy: minimal' <<< "$shares_plan"
+grep -q 'share policy: full' <<< "$shares_plan"
 grep -q 'exchange/' <<< "$shares_plan"
+grep -q 'PZHome' <<< "$shares_plan"
+shares_plan_minimal="$(PZ_WINDOWS_VM_SHARE_POLICY=minimal "$REPO_ROOT/linux/pz" windows-vm shares dry-run)"
+grep -q 'share policy: minimal' <<< "$shares_plan_minimal"
+grep -q 'exchange/' <<< "$shares_plan_minimal"
 # shellcheck disable=SC2016 # 'SPICE WebDAV' is a literal informational line
-if grep -q 'PZHome\|home/' <<< "$(grep -v 'SPICE WebDAV' <<< "$shares_plan")"; then
+if grep -q 'PZHome\|home/' <<< "$(grep -v 'SPICE WebDAV' <<< "$shares_plan_minimal")"; then
     echo "minimal share plan must not expose PZHome/home" >&2
     exit 1
 fi
-shares_plan_full="$(PZ_WINDOWS_VM_SHARE_POLICY=full "$REPO_ROOT/linux/pz" windows-vm shares dry-run)"
-grep -q 'PZHome' <<< "$shares_plan_full"
-grep -q 'share policy: full' <<< "$shares_plan_full"
 grep -q 'USB auto filter: 0x08,-1,-1,-1,1' <<< "$shares_plan"
 usb_plan="$("$REPO_ROOT/linux/pz" windows-vm usb-access dry-run)"
 grep -q 'active-seat external devices and mass storage' <<< "$usb_plan"
@@ -225,11 +247,12 @@ source "$XDG_CONFIG_HOME/phasezero/windows-vm.conf"
 [ "$PZ_WINDOWS_VM_TPM_DIR" = "$adopt_dir/tpm" ]
 [ "$PZ_WINDOWS_VM_SMB_HOST" = "10.0.2.2" ]
 [ "$PZ_WINDOWS_VM_LIBVIRT_DOMAIN" = "" ]
-[ "$PZ_WINDOWS_VM_SHARE_POLICY" = "minimal" ]
+[ "$PZ_WINDOWS_VM_SHARE_POLICY" = "full" ]
 echo "  adopt keeps disk, NVRAM, shares and TPM self-contained"
 rm -f "$XDG_CONFIG_HOME/phasezero/windows-vm.conf"
 grep -Fq 'TARGET_RUNTIME_BASE="/run/user/$target_uid"' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
-grep -Fq '/run/media/$TARGET_USER' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
+grep -Fq '$REMOVABLE_ROOT/$TARGET_USER' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
+grep -Fq 'REMOVABLE_ROOT="${PZ_WINDOWS_VM_REMOVABLE_ROOT:-/run/media}"' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
 minimal_ready_root="$TMP_ROOT/minimal-ready"
 mkdir -p "$minimal_ready_root/exchange"
 printf '%s\n' "$minimal_ready_root/exchange" >> "$PZ_STUB_MOUNTS"
@@ -294,7 +317,59 @@ if grep -q '^mount .*shares/home\|^mount .*shares/mnt\|^mount .*shares/sdcard' "
     echo "minimal policy mounted an expanded share" >&2
     exit 1
 fi
-test "$(grep -c '^mount ' "$PZ_STUB_LOG")" -eq 1
+test "$(grep -c '^mount --rbind ' "$PZ_STUB_LOG")" -eq 1
+
+echo "=== shares: binds are recursive and slave (hot-plugged media reach the guest) ==="
+: > "$PZ_STUB_MOUNTS"
+: > "$PZ_STUB_MODES"
+: > "$PZ_STUB_LOG"
+export PZ_WINDOWS_VM_REMOVABLE_ROOT="$TMP_ROOT/run-media"
+export PZ_WINDOWS_VM_MEDIA_ROOT="$TMP_ROOT/media"
+full_bind="$(run_wv_unit '
+    EXCHANGE_DIR="$HOME/Shared/exchange"
+    mkdir -p "$HOME/Shared"
+    TARGET_USER="pzuser"
+    SHARE_POLICY=full DRY_RUN=0 ensure_share_links 0 || exit 90
+    printf "smb_dir=%s\n" "${EFFECTIVE_SMB_DIR:-}"
+')"
+grep -q "smb_dir=$TMP_ROOT/run/phasezero-windows-vm/shares" <<< "$full_bind"
+# A plain --bind would expose the directory without the filesystems mounted
+# under it: every pen drive under /run/media/$USER is its own mount, so the
+# guest would see an empty folder. --rbind carries them; --make-rslave lets the
+# ones plugged in later propagate in, and keeps guest-side umounts from
+# propagating back out to the operator's real media.
+if grep -qE '^mount --bind ' "$PZ_STUB_LOG"; then
+    echo "share binds must be recursive (--rbind), not plain --bind" >&2
+    exit 1
+fi
+grep -q '^mount --rbind .*shares/home' "$PZ_STUB_LOG"
+grep -q '^mount --rbind .*shares/removable' "$PZ_STUB_LOG"
+grep -q '^mount --make-rslave .*shares/removable' "$PZ_STUB_LOG"
+# Expanded shares stay read-only while exchange remains the single writable door.
+grep -q '^mount -o remount,ro,bind .*shares/home' "$PZ_STUB_LOG"
+if grep -q '^mount -o remount,ro,bind .*shares/exchange' "$PZ_STUB_LOG"; then
+    echo "exchange must stay writable under the default policy" >&2
+    exit 1
+fi
+echo "  full policy: recursive slave binds, read-only except exchange"
+
+echo "=== shares: removable root is created when udisks has not made it yet ==="
+: > "$PZ_STUB_MOUNTS"
+: > "$PZ_STUB_MODES"
+: > "$PZ_STUB_LOG"
+# udisks only creates /run/media/$USER once the first device is mounted. The
+# old code skipped a target that did not exist, so a pen drive inserted after
+# boot could never appear in the guest.
+rm -rf "$PZ_WINDOWS_VM_REMOVABLE_ROOT"
+created_out="$(run_wv_unit '
+    ensure_share_target "$REMOVABLE_ROOT/pzuser" >/dev/null 2>&1 || true
+    printf "created=%s\n" "$([ -d "$REMOVABLE_ROOT/pzuser" ] && echo yes || echo no)"
+    printf "guard=%s\n" "$(ensure_share_target "$HOME/not-media" >/dev/null 2>&1 && echo created || echo refused)"
+')"
+grep -q 'created=yes' <<< "$created_out"
+# The guard keeps this from turning into "mkdir anything the share list names".
+grep -q 'guard=refused' <<< "$created_out"
+echo "  ensure_share_target creates the removable root, and only that"
 
 echo "=== shares: prune success unmounts stale bind and revalidates ==="
 : > "$PZ_STUB_MOUNTS"
@@ -477,6 +552,42 @@ kill "$touch_socket_pid" 2>/dev/null || true
 wait "$touch_socket_pid" 2>/dev/null || true
 grep -Fq "touch-input --socket $touch_runtime/qga.sock --user phasezero --json" "$touch_capture"
 grep -Fq '"touchKeyboardAutoInvoke":"always"' "$touch_state/touch-input.log"
+# A helper that stalls must fit inside the whole boot budget, and a new boot
+# must not report the previous boot's success while it is still waiting.
+cat > "$touch_helper" <<'EOF'
+#!/usr/bin/env bash
+exec sleep 60
+EOF
+run_wv_unit '
+    RUNTIME_DIR="$WV_TOUCH_RUNTIME"
+    STATE_DIR="$WV_TOUCH_STATE"
+    GUEST_USER=phasezero
+    DRY_RUN=0
+    export PZ_WINDOWS_VM_BOOT_SESSION=1
+    export PZ_WINDOWS_VM_TOUCH_INPUT_TIMEOUT_SECONDS=10
+    export PZ_WINDOWS_VM_GUEST_LOGIN_HELPER="$WV_TOUCH_HELPER"
+    started=$SECONDS
+    start_guest_touch_input_setup
+    [ "$(boot_touch_input_state)" = pending ]
+    wait "${CLEANUP_PIDS[-1]}"
+    [ "$((SECONDS - started))" -le 14 ]
+    jq -e '\''.state == "timeout" and .waitedSeconds >= 10 and .attempts == 1 and .lastFailure == "guest-policy-unavailable"'\'' "$STATE_DIR/touch-input.log"
+'
+# Ending the session before QGA appears must replace pending with interrupted.
+run_wv_unit '
+    RUNTIME_DIR="$WV_TOUCH_RUNTIME/missing"
+    STATE_DIR="$WV_TOUCH_STATE"
+    GUEST_USER=phasezero
+    DRY_RUN=0
+    export PZ_WINDOWS_VM_BOOT_SESSION=1
+    export PZ_WINDOWS_VM_GUEST_LOGIN_HELPER="$WV_TOUCH_HELPER"
+    start_guest_touch_input_setup
+    worker=${CLEANUP_PIDS[-1]}
+    sleep 1
+    kill -TERM "$worker"
+    wait "$worker"
+    [ "$(boot_touch_input_state)" = interrupted ]
+'
 unset WV_TOUCH_RUNTIME WV_TOUCH_STATE WV_TOUCH_HELPER WV_TOUCH_CAPTURE
 echo "  touch keyboard policy scheduled through QGA"
 
@@ -529,13 +640,89 @@ jq -e 'has("bootReady") and has("artifactsCurrent") and has("helperInstalled") a
 echo "  boot status --json schema ok"
 
 echo "=== Boot: entrada GRUB dedicada para a dock ==="
-PZ_WINDOWS_VM_BOOT_DOCK_ENTRY=1 "$REPO_ROOT/linux/pz" windows-vm boot dry-run | \
-    grep -q 'dock entry: enabled (id: phasezero-windows-vm-dock, hotkey: d, always external output)'
-PZ_WINDOWS_VM_BOOT_DOCK_ENTRY=0 "$REPO_ROOT/linux/pz" windows-vm boot dry-run | \
-    grep -q 'dock entry: disabled'
+# Capture before matching: under `set -o pipefail` a `grep -q` that matches
+# early closes the pipe, the producer dies on SIGPIPE and the test fails for a
+# reason that has nothing to do with the assertion.
+dock_on="$(PZ_WINDOWS_VM_BOOT_DOCK_ENTRY=1 "$REPO_ROOT/linux/pz" windows-vm boot dry-run)"
+grep -q 'dock entry: enabled (id: phasezero-windows-vm-dock, hotkey: d, always external output)' <<< "$dock_on"
+dock_off="$(PZ_WINDOWS_VM_BOOT_DOCK_ENTRY=0 "$REPO_ROOT/linux/pz" windows-vm boot dry-run)"
+grep -q 'dock entry: disabled' <<< "$dock_off"
 grep -Fq -- 'phasezero.windowsvm-display=external' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
 grep -Fq -- "menuentry '\$BOOT_DOCK_ENTRY' --id='\$BOOT_DOCK_ID'" "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
 echo "  dock entry dry-run ok"
+
+echo "=== JSON: avisos de configuração nunca entram no envelope ==="
+# pz_log sends INFO to stdout, and effective_config runs for every subcommand,
+# including the --json ones. An advisory printed there lands inside the JSON
+# envelope and breaks every consumer - which is exactly what a note about a
+# minimal share policy did.
+json_cfg_home="$TMP_ROOT/json-clean"
+json_vm_dir="$json_cfg_home/VirtualMachines/PhaseZero-Windows"
+mkdir -p "$json_cfg_home/config/phasezero" "$json_vm_dir"
+cat > "$json_cfg_home/config/phasezero/windows-vm.conf" <<EOF
+PZ_WINDOWS_VM_DIR=$json_vm_dir
+PZ_WINDOWS_VM_SHARE_POLICY=minimal
+EOF
+: > "$json_vm_dir/phasezero-windows.qcow2"
+json_out="$(HOME="$json_cfg_home" XDG_CONFIG_HOME="$json_cfg_home/config" \
+    "$REPO_ROOT/linux/pz" windows-vm remove --dry-run --json 2>/dev/null)"
+jq -e '.schemaVersion == 1' <<< "$json_out" >/dev/null
+echo "  --json stdout stays parseable with a minimal-policy config present"
+
+echo "=== Boot: entrada GRUB dedicada para o painel interno ==="
+# The session has always honoured phasezero.windowsvm-display=internal, but no
+# menuentry emitted it: booting docked left no way back to the handheld panel.
+hh_on="$(PZ_WINDOWS_VM_BOOT_HANDHELD_ENTRY=1 "$REPO_ROOT/linux/pz" windows-vm boot dry-run)"
+grep -q 'handheld entry: enabled (id: phasezero-windows-vm-handheld, hotkey: h, always internal panel)' <<< "$hh_on"
+hh_off="$(PZ_WINDOWS_VM_BOOT_HANDHELD_ENTRY=0 "$REPO_ROOT/linux/pz" windows-vm boot dry-run)"
+grep -q 'handheld entry: disabled' <<< "$hh_off"
+grep -Fq -- 'phasezero.windowsvm-display=internal' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
+grep -Fq -- "menuentry '\$BOOT_HANDHELD_ENTRY' --id='\$BOOT_HANDHELD_ID'" "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
+# Both override entries are on unless explicitly disabled: with them off there
+# is no way to override auto-detection from the boot menu at all.
+: > "$TMP_ROOT/empty-root.env"
+unset_default="$(PZ_WINDOWS_VM_ROOT_ENV_FILE="$TMP_ROOT/empty-root.env" \
+    "$REPO_ROOT/linux/pz" windows-vm boot dry-run)"
+grep -q 'dock entry: enabled' <<< "$unset_default"
+grep -q 'handheld entry: enabled' <<< "$unset_default"
+echo "  handheld entry dry-run ok; both overrides default to enabled"
+
+echo "=== Boot: resultado da política de teclado touch fica visível ==="
+# Windows hides the touch keyboard while a USB keyboard is attached and QEMU
+# always attaches one, so this policy is the only way to type in a handheld
+# guest. Its result used to go to a log nothing read: it timed out and stayed
+# invisible until someone tried to use Windows with no keyboard.
+touch_states="$(run_wv_unit '
+    STATE_DIR="$HOME/touch-state"; mkdir -p "$STATE_DIR"
+    printf "%s\n" "{\"success\":true,\"action\":\"touch-input\"}" > "$STATE_DIR/touch-input.log"
+    printf "applied=%s\n" "$(boot_touch_input_state)"
+    printf "%s\n" "{\"success\":false,\"state\":\"timeout\",\"action\":\"touch-input\"}" > "$STATE_DIR/touch-input.log"
+    printf "timeout=%s\n" "$(boot_touch_input_state)"
+    rm -f "$STATE_DIR/touch-input.log"
+    printf "absent=%s\n" "$(boot_touch_input_state)"
+')"
+grep -q 'applied=applied' <<< "$touch_states"
+# The wait must outlast a cold Windows 11 boot on handheld hardware. At 180s
+# the waiter gave up before the guest reached the desktop and the touch
+# keyboard was never enabled, with nothing in the payload to tell a short
+# window apart from a guest that never answers.
+grep -Fq 'PZ_WINDOWS_VM_TOUCH_INPUT_TIMEOUT_SECONDS:-420' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
+grep -Fq 'waitedSeconds' "$REPO_ROOT/linux/windows-vm/windows-vm.sh"
+grep -q 'timeout=timeout' <<< "$touch_states"
+grep -q 'absent=unknown' <<< "$touch_states"
+echo "  touch-input state surfaces applied/timeout/unknown"
+
+echo "=== Boot: menuentry ilegível reporta permissão, não ausência ==="
+# /etc/grub.d is 0700 on most distributions. Reporting "missing" there would
+# claim the entry was never installed when the truth is we cannot look.
+perm_state="$(run_wv_unit '
+    GRUB_SCRIPT="/nonexistent/unreadable-grub-script"
+    printf "state=%s\n" "$(boot_menu_entry_state "PhaseZero Windows VM (Dock)" 1)"
+    printf "off=%s\n" "$(boot_menu_entry_state "PhaseZero Windows VM (Dock)" 0)"
+')"
+grep -q 'state=unknown-permission' <<< "$perm_state"
+grep -q 'off=disabled' <<< "$perm_state"
+echo "  unreadable grub script reports unknown-permission"
 
 launch_check_kvm="$TMP_ROOT/fixture-kvm"
 : > "$launch_check_kvm"
@@ -755,7 +942,12 @@ PZ_WINDOWS_VM_TEST_PLASMA_FILE="$plasma_marker" \
 gamescope_rc=$?
 set -e
 test "$gamescope_rc" -eq 77
-grep -q -- '--backend drm --expose-wayland -O eDP-1 -r 60 --force-orientation right -W 1280 -H 800 -w 1280 -h 800 --force-windows-fullscreen --' "$gamescope_args_file"
+grep -q -- '--backend drm -O eDP-1 -r 60 --force-orientation right -W 1280 -H 800 -w 1280 -h 800 --force-windows-fullscreen -- env GDK_BACKEND=x11' "$gamescope_args_file"
+if grep -q -- '--expose-wayland' "$gamescope_args_file"; then
+    echo "FAIL: native Wayland must not bypass Gamescope fullscreen" >&2
+    exit 1
+fi
+grep -q -- '-- env GDK_BACKEND=x11' <<< "$gamescope_validation"
 
 mkdir -p "$display_sys/class/drm/card1-DP-1"
 printf 'connected\n' > "$display_sys/class/drm/card1-DP-1/status"
@@ -1275,3 +1467,185 @@ printf '%s' "$inspect_json" | jq -e 'has("sha256") and has("arch") and has("uefi
 echo "  media inspect --json: schema stable (valid=false on non-Windows blob, all keys present)"
 
 echo "  media-inspect tests ok"
+
+echo "=== runtime dir do usuário nunca fica de root (regressão de host real) ==="
+# Um `boot install` pela ponte admin criava /run/user/<uid>/phasezero-windows-vm
+# como root:root. Depois disso, todo `windows-vm start` sem privilégio morria em
+# "install: não foi possível mudar permissões ... Operação não permitida".
+WVM="$REPO_ROOT/linux/windows-vm/windows-vm.sh"
+# 1. Nenhum ponto cria o runtime dir sem passar pelo helper que ajusta o dono.
+if grep -nE 'install -d[^\n]*"\$RUNTIME_DIR"' "$WVM"; then
+    echo "FAIL: RUNTIME_DIR criado sem ensure_runtime_dir (dono ficaria root)"; exit 1
+fi
+grep -q 'ensure_runtime_dir()' "$WVM" \
+    || { echo "FAIL: helper ensure_runtime_dir ausente"; exit 1; }
+# 2. O helper devolve o diretório ao usuário alvo quando roda elevado.
+awk '/^ensure_runtime_dir\(\)/,/^}/' "$WVM" | grep -q 'chown_target_user' \
+    || { echo "FAIL: ensure_runtime_dir não devolve o dono ao usuário alvo"; exit 1; }
+# 3. Sem privilégio o helper cria com 0700 e não falha.
+rt_probe="$(mktemp -d)/rt"
+( set -euo pipefail
+  chown_target_user() { :; }
+  ensure_runtime_dir() { install -d -m 0700 "$@" || return 1; chown_target_user "$@"; }
+  ensure_runtime_dir "$rt_probe"
+  ensure_runtime_dir "$rt_probe" ) || { echo "FAIL: ensure_runtime_dir não é idempotente"; exit 1; }
+test "$(stat -c '%a' "$rt_probe")" = "700" \
+    || { echo "FAIL: runtime dir deveria ser 0700, é $(stat -c '%a' "$rt_probe")"; exit 1; }
+rm -rf "$rt_probe"
+echo "  runtime dir ownership ok"
+
+echo "=== ajustes de host pulados viram um resumo com o que fazer ==="
+# Treze WARN "skipped" não davam ao usuário nenhuma ação; agora sai um resumo.
+awk '/^report_skipped_host_tuning\(\)/,/^}/' "$WVM" | grep -q 'windows-vm optimize' \
+    || { echo "FAIL: resumo não aponta o comando que aplica os ajustes"; exit 1; }
+grep -q 'pz_warn "\$label requires root; skipped non-interactive write"' "$WVM" \
+    && { echo "FAIL: ainda avisa item a item"; exit 1; }
+awk '/^apply_host_optimizations\(\)/,/^}/' "$WVM" | grep -q 'report_skipped_host_tuning' \
+    || { echo "FAIL: apply_host_optimizations não emite o resumo"; exit 1; }
+echo "  resumo de tuning ok"
+
+echo "=== upgrade ressincroniza o runtime de boot sozinho (atrito WINVM16) ==="
+# Depois de todo upgrade, /usr/local ficava com o runtime da versão anterior e
+# o usuário precisava rodar `boot install` elevado à mão. Agora o hook do
+# pacote ressincroniza só os arquivos — sem regenerar grub.cfg.
+SR_TMP="$(mktemp -d)"
+export PZ_BOOT_LOCAL_PREFIX="$SR_TMP/local"
+export PZ_BOOT_RUNTIME_PENDING="$SR_TMP/pending"
+sr_vm="$REPO_ROOT/linux/windows-vm/windows-vm.sh"
+
+# Sem integração instalada não há o que ressincronizar, e um upgrade não pode
+# instalar boot por conta própria.
+sr_out="$(bash "$sr_vm" boot sync-runtime 2>&1)" || { echo "FAIL: sync-runtime deveria sair 0 sem integração"; exit 1; }
+grep -qi "not installed" <<< "$sr_out" || { echo "FAIL: sync-runtime não explicou que não há integração: $sr_out"; exit 1; }
+test ! -d "$PZ_BOOT_LOCAL_PREFIX/lib/phasezero/windows-vm-runtime" \
+    || { echo "FAIL: sync-runtime criou runtime sem integração instalada"; exit 1; }
+
+# Com integração presente porém velha: um arquivo com conteúdo divergente.
+install -d "$PZ_BOOT_LOCAL_PREFIX/lib/phasezero/windows-vm-runtime/linux/windows-vm"
+printf 'versao-antiga\n' > "$PZ_BOOT_LOCAL_PREFIX/lib/phasezero/windows-vm-boot-prepare"
+chmod 0755 "$PZ_BOOT_LOCAL_PREFIX/lib/phasezero/windows-vm-boot-prepare"
+printf '%s\n' "$(date -Iseconds) stale" > "$PZ_BOOT_RUNTIME_PENDING"
+# runtime-check sai 1 quando a staleness é PROVADA — é contrato, não erro.
+# Sem o `|| true`, `set -e` mata a suíte antes de qualquer asserção.
+state_before="$(bash "$sr_vm" boot runtime-check --json 2>/dev/null | jq -r '.bootRuntimeState' || true)"
+test "$state_before" = "stale" || { echo "FAIL: cenário não começou stale, e sim $state_before"; exit 1; }
+
+bash "$sr_vm" boot sync-runtime >/dev/null 2>&1 \
+    || { echo "FAIL: sync-runtime falhou com integração instalada"; exit 1; }
+state_after="$(bash "$sr_vm" boot runtime-check --json 2>/dev/null | jq -r '.bootRuntimeState' || true)"
+test "$state_after" = "current" || { echo "FAIL: runtime continua $state_after depois do resync"; exit 1; }
+cmp -s "$REPO_ROOT/linux/windows-vm/windows-vm-boot-prepare.sh" \
+    "$PZ_BOOT_LOCAL_PREFIX/lib/phasezero/windows-vm-boot-prepare" \
+    || { echo "FAIL: helper de boot não foi atualizado"; exit 1; }
+test ! -e "$PZ_BOOT_RUNTIME_PENDING" || { echo "FAIL: marcador pendente sobreviveu ao resync"; exit 1; }
+test -r "$PZ_BOOT_LOCAL_PREFIX/lib/phasezero/windows-vm-runtime/provenance.json" \
+    || { echo "FAIL: proveniência não registrada"; exit 1; }
+echo "  sync-runtime ok"
+
+# O caminho do hook não pode regenerar bootloader nem mexer em serviços.
+sr_body="$(awk '/^sync_boot_runtime_files\(\)/,/^}/' "$sr_vm")"
+for forbidden in grub-mkconfig update-grub os-prober configure_windows_samba_shares optimize_libvirt_domain; do
+    # `grep -q X && falha` devolve 1 quando X está ausente — que é o caso bom —
+    # e sob `set -e` isso derruba a suíte. Condicional explícito, não encadeado.
+    if grep -q "$forbidden" <<< "$sr_body"; then
+        echo "FAIL: sync_boot_runtime_files toca em $forbidden"; exit 1
+    fi
+done
+grep -Fq 'boot sync-runtime' "$REPO_ROOT/linux/windows-vm/boot-runtime-notice.sh" \
+    || { echo "FAIL: hook de pacote não chama sync-runtime"; exit 1; }
+grep -Fq 'boot install' "$REPO_ROOT/linux/windows-vm/boot-runtime-notice.sh" \
+    || { echo "FAIL: hook perdeu o aviso para o que a cópia não resolve"; exit 1; }
+echo "  hook não regenera bootloader ok"
+unset PZ_BOOT_LOCAL_PREFIX PZ_BOOT_RUNTIME_PENDING
+rm -rf "$SR_TMP"
+
+echo '=== passthrough do controle do Deck no boot direto ==='
+# --- Steam Deck controller passthrough -------------------------------------
+# Regression: virtio-input hands Windows a generic HID gamepad, which Steam
+# Deck Tools cannot drive. A direct GRUB boot must pass the real 28de:1205.
+CTRL_SYSFS="$TMP_ROOT/sys/bus/usb/devices"
+mkdir -p "$CTRL_SYSFS/3-3" "$CTRL_SYSFS/1-1"
+printf '28de' > "$CTRL_SYSFS/3-3/idVendor"
+printf '1205' > "$CTRL_SYSFS/3-3/idProduct"
+printf '3'    > "$CTRL_SYSFS/3-3/busnum"
+printf '7'    > "$CTRL_SYSFS/3-3/devnum"
+printf '00'   > "$CTRL_SYSFS/3-3/bDeviceClass"
+printf '046d' > "$CTRL_SYSFS/1-1/idVendor"
+printf 'c52b' > "$CTRL_SYSFS/1-1/idProduct"
+printf '1'    > "$CTRL_SYSFS/1-1/busnum"
+printf '4'    > "$CTRL_SYSFS/1-1/devnum"
+printf '00'   > "$CTRL_SYSFS/1-1/bDeviceClass"
+export PZ_WINDOWS_VM_USB_SYSFS_DIR="$CTRL_SYSFS"
+
+ctrl_raw="$(run_wv_unit '
+    GRAPHICS_PROFILE=virtio-gl
+    PZ_WINDOWS_VM_BOOT_SESSION=1
+    QEMU_ARGS=()
+    add_steamdeck_inputs
+    printf "%s\n" "${QEMU_ARGS[@]}"
+' 2>/dev/null)"
+grep -q 'usb-host,bus=xhci.0,hostbus=3,hostaddr=7,id=pz-steamdeck-controller' <<< "$ctrl_raw" || {
+    echo "FAIL: boot session must pass the Deck controller raw" >&2; exit 40; }
+if grep -q 'virtio-input-host-pci' <<< "$ctrl_raw"; then
+    echo "FAIL: raw passthrough must not also attach virtio-input for the same device" >&2; exit 41
+fi
+
+# Outside a boot session the host keeps its controller: virtio-input only.
+ctrl_virtio="$(run_wv_unit '
+    GRAPHICS_PROFILE=virtio-gl
+    PZ_WINDOWS_VM_BOOT_SESSION=0
+    PZ_WINDOWS_VM_HOST_INPUT=1
+    PZ_WINDOWS_VM_INPUT_BY_ID_DIR="'"$TMP_ROOT"'/by-id"
+    QEMU_ARGS=()
+    add_steamdeck_inputs
+    printf "%s\n" "${QEMU_ARGS[@]}"
+' 2>/dev/null)"
+if grep -q 'pz-steamdeck-controller' <<< "$ctrl_virtio"; then
+    echo "FAIL: non-boot sessions must not steal the controller from the host" >&2; exit 42
+fi
+
+# A missing controller degrades to virtio-input instead of failing the launch.
+ctrl_missing="$(run_wv_unit '
+    GRAPHICS_PROFILE=virtio-gl
+    PZ_WINDOWS_VM_BOOT_SESSION=1
+    PZ_WINDOWS_VM_USB_SYSFS_DIR="'"$TMP_ROOT"'/sys/empty"
+    PZ_WINDOWS_VM_INPUT_BY_ID_DIR="'"$TMP_ROOT"'/by-id"
+    QEMU_ARGS=()
+    add_steamdeck_inputs
+    printf "rc=%s\n" "$?"
+' 2>/dev/null)"
+grep -q '^rc=0$' <<< "$ctrl_missing" || {
+    echo "FAIL: a missing controller must not abort the launch" >&2; exit 43; }
+
+# usb-mode peripherals must not attach the same device twice: QEMU refuses.
+ctrl_dedupe="$(run_wv_unit '
+    GRAPHICS_PROFILE=virtio-gl
+    PZ_WINDOWS_VM_BOOT_SESSION=1
+    QEMU_ARGS=()
+    add_steamdeck_inputs
+    add_raw_usb_devices peripherals
+    printf "%s\n" "${QEMU_ARGS[@]}"
+' 2>/dev/null)"
+test "$(grep -c 'hostbus=3,hostaddr=7' <<< "$ctrl_dedupe")" -eq 1 || {
+    echo "FAIL: the Deck controller must be attached exactly once" >&2; exit 44; }
+grep -q 'hostbus=1,hostaddr=4' <<< "$ctrl_dedupe" || {
+    echo "FAIL: dedupe must not drop other USB devices" >&2; exit 45; }
+unset PZ_WINDOWS_VM_USB_SYSFS_DIR
+echo '  steamdeck controller passthrough ok'
+
+echo "=== todo caminho que cria disco marca nodatacow antes ==="
+# A VM do host nasceu pelo provision, que criava o qcow2 sem marcar nodatacow.
+# O guard existia em windows-vm.sh e simplesmente não estava nesta estrada:
+# imagem CoW + checksum + compress-force, aberta com cache=none, falha o
+# próprio checksum na releitura e devolve EIO ao guest no meio da escrita.
+# Isso derrubou um Windows de verdade; o disco estava íntegro o tempo todo.
+for creator in linux/windows-vm/windows-vm.sh linux/windows-vm/provision.sh; do
+    grep -q 'qemu-img create -f qcow2' "$creator" || continue
+    grep -qE 'nodatacow' "$creator" ||
+        { echo "FAIL: $creator cria imagem sem marcar nodatacow" >&2; exit 71; }
+done
+# Marcar depois do create não adianta: o inherit só vale para arquivos novos.
+awk '/^run_disk\(\)/,/^}/' linux/windows-vm/provision.sh |
+    grep -B20 'qemu-img create' | grep -q 'provision_mark_nodatacow' ||
+    { echo "FAIL: provision marca nodatacow depois de criar o disco (tarde demais)" >&2; exit 72; }
+echo "  nodatacow em todo criador ok"

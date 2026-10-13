@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "hermes",
+  "auditedAt": "2026-08-24T14:37:28Z",
+  "source": {
+    "repository": "https://github.com/NousResearch/hermes-agent.git",
+    "releaseTag": "v2026.8.19",
+    "commit": "fcbd1076a93841fa88855acce810e342a5b78101",
+    "tree": "cc9f987a403a1d02b8b17cc527a57b54402e864b",
+    "commitSignatureVerified": false,
+    "tagSignatureVerified": false
+  },
+  "installer": {
+    "url": "https://raw.githubusercontent.com/NousResearch/hermes-agent/fcbd1076a93841fa88855acce810e342a5b78101/scripts/install.sh",
+    "sha256": "0582d9b1562efcb6e0ac62f4451021667830b830a72ce7d91eaea9fee8b6c09b",
+    "supportsCommitPin": true
+  },
+  "files": {
+    "uv.lock": "64a66f8a0ce1d23ea10c16ca89b7104f1828a8f21cf1dd95d7cb74e4bd3efa10",
+    "pyproject.toml": "f2d8625df7b015c52a7940ac9f6dd51cc89e70ca13548511fb4f293c90926d99",
+    "LICENSE": "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6"
+  },
+  "license": "MIT",
+  "semanticAudit": false,
+  "transitiveArtifactsPinned": false,
+  "approvedForInstall": false,
+  "findings": [
+    "release commit and installer are immutable and hashed",
+    "release commit and annotated tag are not cryptographically signed",
+    "installer resolves external uv and Node artifacts at execution time",
+    "semantic security audit is incomplete"
+  ]
+}

@@ -59,8 +59,10 @@ fi
 HELPER_SOURCE="$PZ_ROOT/linux/steamdeck/steamos-boot-prepare.sh"
 SESSION_SOURCE="$PZ_ROOT/linux/steamdeck/steamos-session.sh"
 SESSION_SELECT_SOURCE="$PZ_ROOT/linux/steamdeck/os-session-select.sh"
+CURSOR_SOURCE="$PZ_ROOT/linux/steamdeck/cursor-diagnose.sh"
 HELPER_TARGET="/usr/local/lib/phasezero/steamos-boot-prepare"
 SESSION_TARGET="/usr/local/lib/phasezero/steamos-session"
+CURSOR_TARGET="/usr/local/lib/phasezero/cursor-diagnose.sh"
 SESSION_SELECT_TARGET="/usr/lib/os-session-select"
 SERVICE_FILE="/etc/systemd/system/phasezero-steamos-boot-prepare.service"
 RESUME_SLEEP_UNIT="/etc/systemd/system/systemd-suspend.service.d/phasezero-clear-freeze.conf"
@@ -272,6 +274,7 @@ install_boot() {
     install -d /usr/local/lib/phasezero
     install -m 0755 "$HELPER_SOURCE" "$HELPER_TARGET"
     install -m 0755 "$SESSION_SOURCE" "$SESSION_TARGET"
+    install -m 0755 "$CURSOR_SOURCE" "$CURSOR_TARGET"
     install -m 0755 "$SESSION_SELECT_SOURCE" "$SESSION_SELECT_TARGET"
     install -d "$(dirname "$SESSION_FILE")"
     session_desktop_content > "$SESSION_FILE"
@@ -378,7 +381,7 @@ remove_boot() {
     pz_boot_backup_bundle "steamdeck-boot-remove"
     systemctl disable phasezero-steamos-boot-prepare.service >/dev/null 2>&1 || true
     rm -f "$SERVICE_FILE" "$GRUB_SCRIPT" "$SESSION_FILE" "$HELPER_TARGET" \
-        "$SESSION_TARGET" "$GRUB_HANDHELD_DROPIN" "$RESUME_SLEEP_UNIT"
+        "$SESSION_TARGET" "$CURSOR_TARGET" "$GRUB_HANDHELD_DROPIN" "$RESUME_SLEEP_UNIT"
     if [ -f "$SESSION_SELECT_TARGET" ] && grep -q 'PhaseZero managed' "$SESSION_SELECT_TARGET" 2>/dev/null; then
         rm -f "$SESSION_SELECT_TARGET"
     fi

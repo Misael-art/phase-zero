@@ -17,6 +17,10 @@ set -euo pipefail
 
 PZ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$PZ_ROOT/linux/lib/common.sh"
+# pz_ini_set/pz_ini_get vivem aqui; sem este source o apply do Azahar morria
+# com "command not found" no meio da mutação (depois do backup, antes das
+# regras KWin).
+source "$PZ_ROOT/linux/emulation/common.sh"
 source "$PZ_ROOT/linux/steamdeck/display-session.sh"
 
 ACTION="${1:-status}"
@@ -60,7 +64,11 @@ dualscreen_kwin_indices() {
     [ -n "$ext" ] && [ -n "$int" ] || return 0
     # kscreen-doctor -o prints "Output: <idx> <name>"; map names to indices.
     local out ext_idx int_idx
-    out="$(kscreen-doctor -o 2>/dev/null)"
+    # kscreen-doctor blocks forever when it cannot reach a KDE session (no
+    # DBus/Wayland handle — e.g. a service, a test runner, or a fresh HOME).
+    # A diagnostic must never hang: without indices, detect still reports
+    # connectors and marks the KWin indices unknown.
+    out="$(timeout 5 kscreen-doctor -o 2>/dev/null || true)"
     ext_idx="$(printf '%s\n' "$out" | sed -nE "s/.*Output:[[:space:]]*([0-9]+)[[:space:]]+$ext.*/\1/p" | head -n1)"
     int_idx="$(printf '%s\n' "$out" | sed -nE "s/.*Output:[[:space:]]*([0-9]+)[[:space:]]+$int.*/\1/p" | head -n1)"
     [ -n "$ext_idx" ] && [ -n "$int_idx" ] || return 0
@@ -373,7 +381,7 @@ dualscreen_status() {
     local cemu_pad=false azahar_sep=false rules_active=false
     [ -f "$(cemu_settings)" ] && grep -q '<open_pad>true</open_pad>' "$(cemu_settings)" 2>/dev/null && cemu_pad=true
     [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/azahar-emu/qt-config.ini" ] && \
-        grep -q '^layout_option=5' "${XDG_CONFIG_HOME:-$HOME/.config}/azahar-emu/qt-config.ini" 2>/dev/null && azahar_sep=true
+        grep -qE '^layout_option[[:space:]]*=[[:space:]]*5\b' "${XDG_CONFIG_HOME:-$HOME/.config}/azahar-emu/qt-config.ini" 2>/dev/null && azahar_sep=true
     [ -f "$KWINRULES" ] && grep -q "PhaseZero dualscreen" "$KWINRULES" 2>/dev/null && rules_active=true
     jq -n --argjson cemuPad "$cemu_pad" --argjson azaharSep "$azahar_sep" --argjson rulesActive "$rules_active" \
         '{cemu:{gamePadOpen:$cemuPad}, azahar:{separateWindows:$azaharSep}, kwinRulesActive:$rulesActive}'

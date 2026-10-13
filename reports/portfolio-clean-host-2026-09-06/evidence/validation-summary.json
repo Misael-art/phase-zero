@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "baseline": "2180c94fbfdf67c46050c1bbab9798adf66f3a91",
+  "date": "2026-09-06",
+  "python": {
+    "targetedCorePassed": 155,
+    "targetedPortfolioPassed": 209,
+    "totalPassed": 364,
+    "fullSuiteExecuted": false
+  },
+  "shellSuites": {
+    "linux-homelab": 0,
+    "linux-ai-proxies": 0,
+    "linux-9router": 0,
+    "linux-agent-workspaces": 0
+  },
+  "bashSyntax": {
+    "checked": 221,
+    "errors": []
+  },
+  "powershellSyntax": {
+    "errors": [],
+    "checked": 97
+  },
+  "nativePester": {
+    "localExecution": "blocked",
+    "reason": "Get-WmiObject unavailable on Linux; native Windows not exercised",
+    "historicalCi": "33136161096"
+  },
+  "reproductionRecords": 12,
+  "windowsFunctionFailurePaths": 2,
+  "composeFilesValid": 13,
+  "composeDeclaredHealthchecks": 0,
+  "archPackageChecksumVerified": true,
+  "productionChanges": false,
+  "nativeCleanArchTested": false,
+  "nativeCleanWindowsTested": false,
+  "authenticatedProviderInferenceTested": false,
+  "localGitleaksExecuted": false,
+  "diffSecretReview": "Manual review and targeted pattern scan of audit artifacts; no real credentials read or copied."
+}

@@ -26,6 +26,7 @@ from .engine import (
     verify_operation,
 )
 from .kde import KdeStateError
+from .state import ThemesLockTimeout
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -43,7 +44,7 @@ def _parser() -> argparse.ArgumentParser:
     plan = commands.add_parser("plan", help="Cria plano persistente com snapshot.")
     plan.add_argument("--profile", default="")
     plan.add_argument("--feature", default="")
-    plan.add_argument("--state", default="", dest="feature_state")
+    plan.add_argument("--state", default="", dest="feature_state", help="on ou off")
     plan.add_argument("--wallpaper", default="")
     plan.add_argument("--screen", default="")
     plan.add_argument("--target", default="desktop")
@@ -98,14 +99,18 @@ def _emit(payload: dict) -> int:
     # rolled it back.
     #
     # Only an operation that failed counts. A plan answering ok=false did its
-    # job: it is reporting that the feature cannot be applied here, which is the
-    # result, not a failure of the command.
+    # job: it is reporting that the feature cannot be applied here, which is
+    # the result, not a failure of the command. Payloads WITHOUT blockers -
+    # verify, rescue-wallpaper - carry ok as the verdict itself and used to
+    # exit 0 even when ok was false.
     if payload.get("status") == "failed":
         return 1
     results = payload.get("results")
     if isinstance(results, list) and any(
         isinstance(r, dict) and r.get("status") == "failed" for r in results
     ):
+        return 1
+    if payload.get("ok") is False and "blockers" not in payload:
         return 1
     return 0
 
@@ -148,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
             return _emit(history_payload(limit=args.limit))
         return _fail(SCHEMA, "comando desconhecido", 2)  # pragma: no cover
     except ThemesError as exc:
+        return _fail(SCHEMA, str(exc), 2)
+    except ThemesLockTimeout as exc:
         return _fail(SCHEMA, str(exc), 2)
     except KdeStateError as exc:
         return _fail(SCHEMA, str(exc), 3)

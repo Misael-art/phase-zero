@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..widgets import SectionHeader, SwitchControl, themed_icon
+from ..result_parser import guidance
 from .base import BasePage
 
 
@@ -50,6 +51,9 @@ class FriendlyServicePage(BasePage):
         body.setColumnStretch(1, 1)
         layout.addLayout(body)
         layout.addWidget(self._build_shortcuts())
+        extra = self.build_extra()
+        if extra is not None:
+            layout.addWidget(extra)
         layout.addStretch()
         scroll.setWidget(host)
         self._layout.addWidget(scroll, 1)
@@ -100,7 +104,7 @@ class FriendlyServicePage(BasePage):
         layout.setSpacing(10)
         layout.addWidget(SectionHeader("Resumo", "Informações essenciais"))
         self.fact_labels: list[QLabel] = []
-        for _ in range(3):
+        for _ in range(4):
             label = QLabel("—")
             label.setObjectName("settingValue")
             label.setWordWrap(True)
@@ -174,6 +178,9 @@ class FriendlyServicePage(BasePage):
 
     def feature_actions(self) -> tuple[tuple[str, str], ...]:
         return ()
+
+    def build_extra(self) -> QWidget | None:
+        return None
 
     def _feature_toggle_requested(self, index: int, checked: bool) -> None:
         toggle, _detail = self.feature_controls[index]
@@ -280,7 +287,20 @@ class FriendlyServicePage(BasePage):
             return
         self.refresh_button.setEnabled(True)
         self._payload = {}
-        self._set_service_state(False, False, "Configure o serviço para começar")
+        # Falha de LEITURA não vira "precisa configurar" (estado real desconhecido);
+        # e toggles pendentes são liberados para não prender a página.
+        for _aid, (toggle, applied, detail, previous_detail) in list(self._pending_features.items()):
+            with QSignalBlocker(toggle):
+                toggle.set_pending(False)
+                toggle.setChecked(applied)
+            detail.setText(previous_detail or "—")
+        self._pending_features.clear()
+        self.refresh_button.setText("Tentar de novo")
+        self.state_label.setText("● Indisponível agora")
+        self._set_state("warning")
+        self.state_detail.setText(
+            "Não foi possível ler o estado agora — nada foi alterado. Clique em Tentar de novo."
+        )
 
     def _power_action(self) -> None:
         target = self.stop_action_id if self._running else self.start_action_id if self._configured else self.setup_action_id
@@ -408,12 +428,23 @@ class ServerPage(FriendlyServicePage):
         configured = bool(payload.get("configured") or payload.get("profile") or apps)
         running = bool(payload.get("active") or payload.get("ready") or running_count)
         degraded = bool(payload.get("degraded"))
+        guide = guidance(payload)
+        if not configured and guide["next_action"]:
+            # Envelope v1.17.2: diagnóstico honesto com próximo passo embutido.
+            self.state_detail.setText(guide["summary"] or "Servidor ainda não preparado.")
+            self.fact_labels[3].setText(f"Próximo passo: {guide['next_action']}")
         self._set_service_state(
             running, configured,
             f"{running_count} serviço(s) rodando" if running else "Serviços desligados; dados preservados" if configured else "Escolha um perfil e prepare o servidor",
         )
         if degraded:
+            reasons = guide["reasons"]
+            detail = "; ".join(reasons[:2]) if reasons else (guide["summary"] or "")
             self.state_label.setText("● Atenção necessária")
+            if detail:
+                self.state_detail.setText(detail)
+            if guide["next_action"]:
+                self.fact_labels[3].setText(f"Próximo passo: {guide['next_action']}")
             self._set_state("warning")
         access = payload.get("accessMode") if isinstance(payload.get("accessMode"), dict) else {}
         backup = payload.get("backupState") if isinstance(payload.get("backupState"), dict) else {}
@@ -432,3 +463,75 @@ class ServerPage(FriendlyServicePage):
             backup_button.setToolTip(
                 "Backup verificado disponível" if backup.get("lastBackup") else "Nenhum backup recente"
             )
+        host_facts = payload.get("hostFacts") if isinstance(payload.get("hostFacts"), dict) else None
+        if host_facts:
+            self.apply_host_facts(host_facts)
+
+    def build_extra(self) -> QWidget | None:
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        card.setAccessibleName("Hardware do servidor")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        layout.addWidget(SectionHeader("Hardware", "Leitura local; dado ausente fica indisponível"))
+        self.hw_labels: dict[str, QLabel] = {}
+        for key, caption in (
+            ("smart", "SMART"),
+            ("network", "Rede"),
+            ("disk", "Disco"),
+            ("temperature", "Temperatura"),
+        ):
+            label = QLabel(f"{caption}: indisponível")
+            label.setObjectName("settingValue")
+            label.setWordWrap(True)
+            label.setAccessibleName(caption)
+            self.hw_labels[key] = label
+            layout.addWidget(label)
+        layout.addStretch()
+        return card
+
+    @staticmethod
+    def _fact_line(title: str, block: dict | None, present_text: str | None) -> str:
+        if not isinstance(block, dict) or not block.get("available"):
+            reason = ""
+            if isinstance(block, dict):
+                reason = str(block.get("reason") or "")
+            suffix = f" ({reason})" if reason else ""
+            return f"{title}: indisponível{suffix}"
+        if not present_text:
+            return f"{title}: indisponível"
+        return f"{title}: {present_text}"
+
+    def apply_host_facts(self, payload: dict) -> None:
+        if not getattr(self, "hw_labels", None):
+            return
+        smart = payload.get("smart") if isinstance(payload.get("smart"), dict) else {}
+        devices = smart.get("devices") if isinstance(smart.get("devices"), list) else []
+        smart_text = None
+        if smart.get("available") and devices:
+            bits = []
+            for item in devices:
+                if not isinstance(item, dict):
+                    continue
+                health = item.get("health")
+                if health:
+                    bits.append(f"{item.get('device')}: {health}")
+            smart_text = ", ".join(bits) if bits else None
+        net = payload.get("network") if isinstance(payload.get("network"), dict) else {}
+        net_text = net.get("hostname") if net.get("available") else None
+        disk = payload.get("disk") if isinstance(payload.get("disk"), dict) else {}
+        disk_text = None
+        volumes = disk.get("volumes") if isinstance(disk.get("volumes"), list) else []
+        if disk.get("available") and volumes:
+            first = volumes[0] if isinstance(volumes[0], dict) else {}
+            if "usedBytes" in first and "totalBytes" in first:
+                disk_text = f"{first.get('mount')} {first.get('usedBytes')}/{first.get('totalBytes')} B"
+        temp = payload.get("temperature") if isinstance(payload.get("temperature"), dict) else {}
+        temp_text = None
+        if temp.get("available") and temp.get("celsius") is not None:
+            temp_text = f"{temp.get('celsius')} °C"
+        self.hw_labels["smart"].setText(self._fact_line("SMART", smart, smart_text))
+        self.hw_labels["network"].setText(self._fact_line("Rede", net, str(net_text) if net_text else None))
+        self.hw_labels["disk"].setText(self._fact_line("Disco", disk, disk_text))
+        self.hw_labels["temperature"].setText(self._fact_line("Temperatura", temp, temp_text))

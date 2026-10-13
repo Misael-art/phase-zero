@@ -56,7 +56,7 @@ fi
 mkdir -p "$XDG_STATE_HOME/phasezero/windows-vm/provision" \
     "$XDG_STATE_HOME/phasezero/operations/op-running"
 printf '%s\n' 'op-running' > "$XDG_STATE_HOME/phasezero/windows-vm/provision/active.lock"
-printf '%s\n' '{"id":"op-running","state":"running"}' \
+printf '{"id":"op-running","state":"running","workerSpawnedEpoch":%s}\n' "$(date +%s)" \
     > "$XDG_STATE_HOME/phasezero/operations/op-running/operation.json"
 blocked_plan="$("$REPO_ROOT"/linux/pz windows-vm remove --dry-run --json || true)"
 jq -e '.ready == false and any(.blockers[]; contains("instalação Windows em andamento"))' \
@@ -157,7 +157,7 @@ fi
 [ -d "$STAGING/op-legacy-1" ]
 
 printf '%s\n' 'op-running' > "$XDG_STATE_HOME/phasezero/windows-vm/provision/active.lock"
-printf '%s\n' '{"id":"op-running","state":"running"}' \
+printf '{"id":"op-running","state":"running","workerSpawnedEpoch":%s}\n' "$(date +%s)" \
     > "$XDG_STATE_HOME/phasezero/operations/op-running/operation.json"
 if "$REPO_ROOT"/linux/pz windows-vm provision remove --operation-id op-legacy-1 \
     --purge --confirm-operation op-legacy-1 --yes --json >/dev/null 2>&1; then

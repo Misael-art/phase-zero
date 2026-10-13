@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "trustMode": "snapshot-pin",
+  "semanticAudit": false,
+  "reviewedAt": "2026-08-24",
+  "reviewNote": "Pins verify repository identity, exact Git snapshot, license file and dependency lockfiles. They do not assert semantic safety of upstream code.",
+  "sources": [
+    {
+      "id": "kimiproxy",
+      "repository": "https://github.com/pedrofariasx/kimiproxy.git",
+      "branch": "main",
+      "commit": "48e2d8b46c630dd032b97d70f736dffd97c92ee7",
+      "tree": "6df1dfb5b6c92e396f105af0741905952ba0057e",
+      "packageVersion": "1.0.0",
+      "approvedForInstall": true,
+      "license": {"path": "LICENSE", "spdx": "ISC", "sha256": "f6ec5b7f3284f148695237dba481bce051181fdd2c06b6ede174edc098f69d35"},
+      "dependencyLocks": [
+        {"path": "package-lock.json", "sha256": "2de721b2e503189e30db90bbd68ac710e81964b28a1ee18f4cdf3fb7e63d2acc"}
+      ]
+    },
+    {
+      "id": "qwenproxy",
+      "repository": "https://github.com/pedrofariasx/qwenproxy.git",
+      "branch": "main",
+      "commit": "776ca7e79a7a3267f3affc4cc5bb431dbcdfbc86",
+      "tree": "5641d68373caad60cb95c541fcf52a29ff6e0453",
+      "packageVersion": "1.20.1",
+      "approvedForInstall": true,
+      "license": {"path": "LICENSE", "spdx": "ISC", "sha256": "f6ec5b7f3284f148695237dba481bce051181fdd2c06b6ede174edc098f69d35"},
+      "dependencyLocks": [
+        {"path": "package-lock.json", "sha256": "f9cff087cf2ba8c02f47a38f4831820b6509392db4270e6009438844a902ac9b"},
+        {"path": "web/package-lock.json", "sha256": "b3eb839f5761dac05e9fd7c7855cc7a8f5f2e622e238d876030e149cdc85ac5b"}
+      ]
+    },
+    {
+      "id": "deepsproxy",
+      "repository": "https://github.com/pedrofariasx/deepsproxy.git",
+      "branch": "main",
+      "commit": "6b8cacc4587124a4f02a9e9334e0034a7ef7065d",
+      "tree": "ad02168e37456647ec7f76dc394f847c229c5975",
+      "packageVersion": "1.0.0",
+      "approvedForInstall": true,
+      "license": {"path": "LICENSE", "spdx": "ISC", "sha256": "f6ec5b7f3284f148695237dba481bce051181fdd2c06b6ede174edc098f69d35"},
+      "dependencyLocks": [
+        {"path": "package-lock.json", "sha256": "af8edf39a53b5aae7f9eb1d7e787c1aba98a8f39056040e36a376860365e2221"}
+      ]
+    },
+    {
+      "id": "mimo-ai-proxy",
+      "repository": "https://github.com/pedrofariasx/mimo-ai-proxy.git",
+      "branch": "main",
+      "commit": "1149d81ff07ed123ce9894d4f2eadbb81df0332b",
+      "tree": "b8a563757b07d2626c1e98cb7cfcca6e11a1d4ed",
+      "packageVersion": "mimoproxy",
+      "approvedForInstall": true,
+      "license": {"path": "LICENSE", "spdx": "MIT", "sha256": "0d93996f2338981b6a5e11eadf77c832f482c9523447d9e7952080e18db94cea"},
+      "dependencyLocks": [
+        {"path": "go.sum", "sha256": "659489c9a9b428f95b24fb8f764289b057028a8232620b1eab7ed0d725eada0c"}
+      ]
+    }
+  ]
+}

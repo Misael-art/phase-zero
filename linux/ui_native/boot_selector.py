@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import os
 import json
 import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QTimer
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -22,7 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from .widgets import themed_icon
+from .widgets import fit_to_screen, themed_icon
 from .platform import admin_bridge
 
 
@@ -87,7 +86,7 @@ class BootSelectorWindow(QDialog):
         self.choice_buttons: dict[int, str] = {}
         self.group = QButtonGroup(self)
         self.setWindowTitle("PhaseZero - Seletor de Boot")
-        self.setMinimumSize(560, 560)
+        fit_to_screen(self, 560, 560)
         self._build_ui()
         if smoke_test:
             self.setProperty("smokeTest", True)
@@ -132,6 +131,11 @@ class BootSelectorWindow(QDialog):
                 radio.setChecked(True)
 
         buttons = QDialogButtonBox()
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("pageSubtitle")
+        self.status_label.setWordWrap(True)
+        self.status_label.setAccessibleName("Estado do agendamento")
+        outer.addWidget(self.status_label)
         schedule = QPushButton("Agendar")
         schedule.setObjectName("primaryButton")
         schedule.clicked.connect(lambda: self.run_choice(reboot=False))
@@ -142,36 +146,122 @@ class BootSelectorWindow(QDialog):
         cancel.clicked.connect(self.reject)
         buttons.addButton(schedule, QDialogButtonBox.ActionRole)
         buttons.addButton(reboot, QDialogButtonBox.ActionRole)
+        self.action_buttons = (schedule, reboot)
+        self._process: QProcess | None = None
+        self._timeout_timer = QTimer(self)
+        self._timeout_timer.setSingleShot(True)
+        self._timeout_timer.timeout.connect(self._choice_timed_out)
+        self._timed_out = False
         outer.addWidget(buttons)
 
     def selected_choice(self) -> str:
         return self.choice_buttons.get(self.group.checkedId(), "normal")
 
+    RUN_TIMEOUT_MS = 120_000
+
+    def _choice_title(self, key: str) -> str:
+        return next((c.title for c in self.boot_choices if c.key == key), key)
+
+    def _report(self, icon, title: str, text: str, informative: str = "", detailed: str = "") -> None:
+        box = QMessageBox(self)
+        box.setIcon(icon)
+        box.setWindowTitle(title)
+        box.setText(text)
+        if informative:
+            box.setInformativeText(informative)
+        if detailed:
+            box.setDetailedText(detailed)
+        box.exec()
+
+    def reject(self) -> None:
+        # Não abandona um agendamento em curso (GRUB pela metade).
+        if self._process is not None:
+            self.status_label.setText("Aguarde: o agendamento ainda está em andamento.")
+            return
+        super().reject()
+
+    def _set_busy(self, busy: bool, message: str = "") -> None:
+        for button in self.action_buttons:
+            button.setEnabled(not busy)
+        self.status_label.setText(message)
+
     def run_choice(self, *, reboot: bool) -> None:
+        """LUX-015: agenda sem congelar a janela (pkexec pode esperar senha)."""
+        if self._process is not None:
+            return
         choice = self.selected_choice()
         try:
             program, args = build_boot_selector_program(self.root, choice, reboot=reboot)
         except RuntimeError as exc:
-            QMessageBox.critical(self, "Elevação indisponível", str(exc))
+            self._report(QMessageBox.Critical, "Elevação indisponível", str(exc))
             return
-        display = shlex.join([program, *args])
-        env = os.environ.copy()
-        env["PZ_UI"] = "native-boot-selector"
-        result = subprocess.run(
-            [program, *args],
-            cwd=self.root,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        if result.returncode == 0:
-            QMessageBox.information(self, "Boot agendado", result.stdout.strip() or display)
+        self._pending = (choice, shlex.join([program, *args]))
+        self._timed_out = False
+        process = QProcess(self)
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert("PZ_UI", "native-boot-selector")
+        process.setProcessEnvironment(env)
+        process.setWorkingDirectory(str(self.root))
+        process.finished.connect(self._choice_finished)
+        process.errorOccurred.connect(self._choice_error)
+        self._process = process
+        self._set_busy(True, "Aguardando autorização do administrador…")
+        process.start(program, args)
+        self._timeout_timer.start(self.RUN_TIMEOUT_MS)
+
+    def _choice_timed_out(self) -> None:
+        if self._process is not None and self._process.state() != QProcess.NotRunning:
+            self._timed_out = True
+            self._process.kill()
+
+    def _choice_error(self, error: QProcess.ProcessError) -> None:
+        if error == QProcess.FailedToStart and self._process is not None:
+            message = self._process.errorString()
+            self._finish_process()
+            self._fail(message)
+
+    def _finish_process(self) -> tuple[str, str]:
+        self._timeout_timer.stop()
+        process = self._process
+        self._process = None
+        self._set_busy(False)
+        if process is None:
+            return "", ""
+        out = bytes(process.readAllStandardOutput().data()).decode("utf-8", errors="replace").strip()
+        err = bytes(process.readAllStandardError().data()).decode("utf-8", errors="replace").strip()
+        process.deleteLater()
+        return out, err
+
+    def _choice_finished(self, code: int, _status=None) -> None:
+        if self._process is None:
+            return
+        stdout, stderr = self._finish_process()
+        choice, display = self._pending
+        if self._timed_out:
+            self._fail("tempo esgotado aguardando a autorização ou o GRUB", detailed=display)
+            return
+        if code == 0:
+            self._report(
+                QMessageBox.Information, "Boot agendado",
+                f"Próximo boot: {self._choice_title(choice)}.", detailed=stdout or display,
+            )
             self.accept()
             return
-        QMessageBox.critical(
-            self,
-            "Falha ao agendar boot",
-            "\n\n".join(part for part in (display, result.stdout.strip(), result.stderr.strip()) if part),
+        lines = [ln.strip() for ln in (stderr.splitlines() + stdout.splitlines()) if ln.strip()]
+        cause = lines[-1][:200] if lines else f"código {code}"
+        detailed = "\n".join(part for part in (display, stdout, stderr) if part)
+        self._fail(cause, detailed=detailed)
+
+    def _fail(self, cause: str, *, detailed: str = "") -> None:
+        choice = self._pending[0] if getattr(self, "_pending", None) else self.selected_choice()
+        title = self._choice_title(choice)
+        if choice == "windows":
+            hint = ("Confira se a entrada do Windows existe no GRUB e tente de novo; "
+                    "o reparo fica em Windows VM → Reparo.")
+        else:
+            hint = "Confira o estado em Boot Direto na Central e tente de novo."
+        self._report(
+            QMessageBox.Critical, "Falha ao agendar boot",
+            f"Não foi possível agendar “{title}” agora.",
+            f"Causa: {cause}\n\n{hint}", detailed,
         )

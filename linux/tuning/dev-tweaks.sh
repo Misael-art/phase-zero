@@ -1,31 +1,16 @@
 #!/usr/bin/env bash
-# dev-tweaks.sh - apply development environment optimizations
+# dev-tweaks.sh - development environment optimizations (apply | revert | status)
 set -euo pipefail
 PZ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$PZ_ROOT/linux/lib/common.sh"
+source "$PZ_ROOT/linux/tuning/tune-common.sh"
 
-PZ_TUNE_MODE="${1:-apply}"
-case "$PZ_TUNE_MODE" in
-    apply) ;;
-    --dry-run) ;;
-    *) pz_error "usage: ${0##*/} [--dry-run]"; exit 1 ;;
-esac
-if [ "$PZ_TUNE_MODE" = "--dry-run" ]; then
-    # Executa só o plano: imprime a mutação sem rodar git/npm/sudo.
-    pz_tune_exec() { pz_info "dry-run: $*"; }
-else
-    pz_tune_exec() { "$@"; }
-fi
+pz_tune_init dev "$@"
+
+PZ_DEV_SYSCTL="${PZ_DEV_SYSCTL:-/etc/sysctl.d/99-phasezero-dev.conf}"
 
 pz_apply_sysctl() {
-    local sysctl_conf="/etc/sysctl.d/99-phasezero-dev.conf"
-    if [ "$PZ_TUNE_MODE" = "--dry-run" ]; then
-        pz_info "dry-run: faria backup e escreveria sysctl de dev em: $sysctl_conf"
-        return 0
-    fi
-    pz_backup_file "$sysctl_conf" root >/dev/null
-
-    sudo tee "$sysctl_conf" >/dev/null <<'EOF'
+    pz_tune_file "$PZ_DEV_SYSCTL" root <<'EOF'
 # PhaseZero Dev Tweaks
 # Increase file watcher limit (Node.js, VS Code, watchers)
 fs.inotify.max_user_watches = 1048576
@@ -49,31 +34,48 @@ vm.vfs_cache_pressure = 50
 # Kernel same-page merging (KSM) for VMs
 kernel.nmi_watchdog = 0
 EOF
-    sudo sysctl --system >/dev/null
-    pz_info "sysctl dev tweaks applied: $sysctl_conf"
+    pz_reload_sysctl
+    pz_info "sysctl dev tweaks applied: $PZ_DEV_SYSCTL"
+}
+
+pz_reload_sysctl() {
+    [ -f "$PZ_DEV_SYSCTL" ] || [ "$PZ_TUNE_ACTION" = "revert" ] || return 0
+    if pz_tune_dry_run; then
+        pz_info "dry-run: recarregaria sysctl --system"
+        return 0
+    fi
+    pz_admin_run sysctl --system >/dev/null 2>&1 || pz_warn "sysctl --system não recarregado (sem privilégio)"
 }
 
 pz_configure_git() {
-    pz_tune_exec git config --global core.fsmonitor true
-    pz_tune_exec git config --global core.untrackedcache true
-    pz_tune_exec git config --global core.autocrlf input
-    pz_tune_exec git config --global pull.rebase true
-    pz_tune_exec git config --global fetch.prune true
-    pz_tune_exec git config --global diff.algorithm histogram
-    pz_tune_exec git config --global status.showUntrackedFiles normal
-    pz_tune_exec git config --global init.defaultBranch main
+    pz_tune_setting git core.fsmonitor true
+    pz_tune_setting git core.untrackedcache true
+    pz_tune_setting git core.autocrlf input
+    pz_tune_setting git pull.rebase true
+    pz_tune_setting git fetch.prune true
+    pz_tune_setting git diff.algorithm histogram
+    pz_tune_setting git status.showUntrackedFiles normal
+    pz_tune_setting git init.defaultBranch main
     pz_info "git config optimized"
 }
 
 pz_configure_npm() {
-    pz_tune_exec npm config set fund false
-    pz_tune_exec npm config set audit false
-    pz_tune_exec npm config set update-notifier false
-    pz_tune_exec npm config set cache "${HOME}/.cache/npm"
+    pz_tune_setting npm fund false
+    pz_tune_setting npm audit false
+    pz_tune_setting npm update-notifier false
+    pz_tune_setting npm cache "${HOME}/.cache/npm"
     pz_info "npm config optimized"
 }
 
-pz_apply_sysctl
-pz_configure_git
-pz_configure_npm
-pz_info "dev tweaks complete"
+pz_tune_apply() {
+    pz_apply_sysctl
+    pz_configure_git
+    pz_configure_npm
+    pz_info "dev tweaks complete"
+}
+
+# O arquivo já foi removido pelo revert genérico; falta o kernel voltar aos
+# valores da distro, o que só acontece recarregando o conjunto de sysctls.
+pz_tune_after_revert() { pz_reload_sysctl; }
+
+pz_tune_main

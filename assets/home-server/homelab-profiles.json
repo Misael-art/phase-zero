@@ -17,6 +17,7 @@
     "node-exporter": 128,
     "grafana": 512,
     "paperless": 1024,
+    "paperless-broker": 128,
     "portainer": 128,
     "hermes": 384,
     "9router": 256,
@@ -41,6 +42,8 @@
       "description": "Assistente local privado: Hermes, 9Router, Ollama, ai-memory, OpenWebUI opcional",
       "class": "local-inference",
       "maturity": "preview",
+      "installable": false,
+      "installNote": "Hermes/Ollama/ai-memory lack audited appliance distribution; use dev-ai + explicit proxy setup instead",
       "extras": true,
       "services": ["hermes", "9router", "ollama", "ai-memory"]
     },
@@ -50,6 +53,8 @@
       "description": "Canais externos supervisionados: Hermes, OpenClaw avancado com pairing e allowlist",
       "class": "automation",
       "maturity": "preview",
+      "installable": false,
+      "installNote": "Hermes/OpenClaw lack audited appliance distribution",
       "extras": true,
       "services": ["hermes", "9router", "openclaw"]
     },
@@ -59,6 +64,8 @@
       "description": "Coding assistido: Aider padrao, OpenHands sob demanda",
       "class": "coding-worker",
       "maturity": "preview",
+      "installable": false,
+      "installNote": "aider/openhands have no managed compose services",
       "extras": true,
       "services": ["aider", "openhands", "9router"]
     },
@@ -68,6 +75,8 @@
       "description": "Workflows auditaveis: n8n, PostgreSQL, LangGraph",
       "class": "automation",
       "maturity": "preview",
+      "installable": false,
+      "installNote": "n8n runs standalone; postgres/langgraph orchestration not implemented",
       "extras": true,
       "services": ["n8n", "postgres", "langgraph"]
     },
@@ -77,6 +86,8 @@
       "description": "Dify isolado: Dify, DB, Redis, vector store, 9Router/Ollama; pesado, permanece desligado",
       "class": "heavy-studio",
       "maturity": "blocked",
+      "installable": false,
+      "installNote": "Dify stack not implemented",
       "extras": true,
       "services": ["dify", "dify-db", "dify-redis", "dify-vector", "9router", "ollama"]
     },
@@ -86,6 +97,8 @@
       "description": "Gateway leve supervisionado: ZeroClaw, modelo remoto via 9Router",
       "class": "always-on-light",
       "maturity": "experimental",
+      "installable": false,
+      "installNote": "zeroclaw worker not implemented",
       "extras": false,
       "services": ["zeroclaw", "9router"]
     }

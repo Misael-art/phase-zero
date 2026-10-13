@@ -119,6 +119,17 @@ Adicionar IDs, nunca reutilizar. Estados: `pending`, `in_progress`, `verified`,
 
 ## Estado vivo
 
+### Incidente físico 1.20.8 — 2026-09-15
+
+Validação do usuário **falhou**: janela QEMU pequena em Handheld e Dock,
+atalhos e teclado touch indisponíveis. Diagnóstico e recuperação detalhados em
+[winvm-1208-handheld-incident.md](winvm-1208-handheld-incident.md).
+Runtime instalado é 1.20.8. Logs mostram cliente GTK Wayland nativo sob
+Gamescope, resultado touch antigo e erros Btrfs no inode do disco qcow2 ativo
+(root 257, inode 12372912), acompanhados de `qemu: aio failed`.
+WBR-005/006 continuam sem verificação física. Corrigir apresentação não fecha
+o bloqueio de armazenamento registrado em agosto.
+
 | Item | Estado atual | Verificado por | Data |
 |---|---|---|---|
 | Incidente originador | diagnosticado; sem mutação; correções ainda não aplicadas | diagnóstico read-only 2026-08-19 | 2026-08-19 |
@@ -127,6 +138,7 @@ Adicionar IDs, nunca reutilizar. Estados: `pending`, `in_progress`, `verified`,
 | Implementação Fases 1–3 | WBR-001..004/008 implementados com testes herméticos (`da373f8`, `5238f7d`, `8a92aab`, `c73f211`, `095d674`); runner 43/43; pytest 575+9; ShellCheck paridade CI | `bash tests/runner.sh`, `pytest tests/` | 2026-08-19 |
 | Pacote host | `1.16.6-1` reinstalado às 14:08 do HEAD `095d674`; hook criou `/var/lib/phasezero/windows-vm-runtime-sync.pending`; `status` instalado devolve `pending:true`, `stale:true` e bloco `session` | `pacman -Q`, `cat` marker, `pz windows-vm status --json` | 2026-08-19 |
 | CI | runs `32279172680`/`32279456440` (ci) em andamento no push; gitleaks verde; confirmar verde antes de marcar `verified` | `gh run list` | 2026-08-19 |
+| Remediação REV-009..013 | defeitos de contrato gráfico/runtime/dev registrados pela revisão de 2026-09-07; plano R3 e matriz da frente em `docs/roadmaps/rev-remediation-v1.md` (REV-009/010 herméticos antes de qualquer gate físico; REV-011/012/013 permanecem bloqueios de operador/hardware) | branch `codex/rev-remediation` sobre `9d6be9d`; ACHADOS.md em `codex/review-remediation-winvm-ux` | 2026-09-07 |
 
 ## Ledger de execução
 
@@ -138,6 +150,7 @@ Adicionar IDs, nunca reutilizar. Estados: `pending`, `in_progress`, `verified`,
 | 2026-08-20 | ZCode | `main` (worktree principal) | WBR-005: monitor na dock + fullscreen nativo | `fdc0361` (auto + probe virtio-gl), `bedcb8c` (evidência) | session lifecycle 7 cenários; `linux-windows-vm.sh` verde com contrato invertido (docked-auto primário, internal como override); ShellCheck; pacote rebuild + reinstalado; runtime `current` via bigsudo; resíduo root de `/run` limpo pós-boot-install | Prova no host dockado: `--validate` do runtime instalado resolve 2560×1080@74.991 no DP-1 e o probe responde `eligible:true` (boot usará `--graphics virtio-gl`, driver viogpudo já no convidado). Boot direto documentado como single-screen: monitor na dock, painel no handheld. **Próximo**: usuário valida no próximo boot GRUB (LCD e monitor); evidência visual fecha WBR-005/006 |
 | 2026-08-20 | ZCode | `main` (worktree principal) | Entrada GRUB dedicada "Windows (Dock)" | `960364a` (feature), `57835e2` (status unknown-permission) | runner 43/43; suíte windows-vm verde com dry-run dock; session suite pina external/internal via cmdline (fixture `PZ_WINDOWS_VM_CMDLINE_FILE`); UI 24 testes com botão rastreando `dockEntryInstalled`; pacote rebuild + reinstalado; entrada confirmada no `grub.cfg` (menuentry com hotkey `d` e `phasezero.windowsvm-display=external`); env root persiste o toggle; `/run` limpo; `grubenv` intacto | Primeiro `--dock-entry` gravou a entrada no cfg mas o env ficou `0` (o boot install seguinte sem flag a removeria); re-execução com `--dock-entry` ficou pendurada no diálogo do bigsudo sem autorização — usuário deve autorizar o diálogo ou usar o botão "GRUB: Windows (Dock)" da Central para fixar o toggle. Ícone depende do tema GRUB ativo (mesma `--class windows` das duas entradas). **Próximo**: autorizar `--dock-entry`; boot físico pela entrada Dock valida monitor exclusivo |
 | 2026-08-23 | ox-alpha (opencode) | `codex/ccs-surfaces-v1` (worktree `pz-ccs-surfaces`) | CCS-000 (ops, via roadmap Control Center Surfaces) | — (nenhum commit; item é do operador) | nenhum gate aplicável — sem código | **CCS-000 marcado `deferred`**: memtest86+, `btrfs scrub` e migração da VM para subvolume nocow/sem zstd exigem reboot ou I/O pesado no host em uso, proibidos no mandato da sessão. Bloqueio de produção de 2026-08-20 (csum failed + aio failed) permanece aberto: disco atual segue CoW+csum; WBR físico continua bloqueado até o operador executar memtest/scrub/nocow e registrar aqui. Nenhuma VM foi bootada nesta sessão. Fonte: `docs/roadmaps/control-center-surfaces-v1.md` |
+| 2026-09-23 | Codex | `codex/winvm-provision-recovery` (`/mnt/sdcard/Projects/pz-winvm-recovery`) | Supervisão de provisionamento, inventário, edição e pacote | `24b0bb9`; pacote `1.21.1-2` | `test_provision.sh` 259/0; recovery smoke; remoção smoke; UI Qt 32/32; bash syntax; ShellCheck com exclusões do CI; `install-root-smoke.sh`; pacote extraído/imports/inventário; instalado via `phasezero-admin`; `runtime-check=current`; inventário real pós-remoção count 0 | Corrigidos worker destacado e identidade de processo, reconciliação de `running` órfão, lock/QEMU filhos, inventário de parcial, remoção bloqueada com QEMU vivo, retomada e seleção de edição sem palpite. Operação `op-20260918-153055-5487` movida à lixeira recuperável (14,9 GB; permanece ocupando disco até esvaziar). Qcow2 configurado `/home/misael/VirtualMachines/PhaseZero-Windows/phasezero-windows.qcow2` permaneceu zero/inalterado. Scrub Btrfs completo, somente leitura, percorreu 831,67 GiB em 11m09s e não encontrou erros; contadores acumulados `corruption_errs=603`, contadores read/write/flush/generation em zero. RAM disponível pós-scrub 2,0 GiB, abaixo do mínimo guest de 4 GiB. `virtio-gl` elegível no host em modo experimental e QEMU tem `virtio-vga-gl`/virglrenderer, mas não houve inicialização do guest, driver 3D nem medição Windows. **Próximo**: liberar memória com margem acima de 4 GiB e rodar instalação/shutdown/remoção/reinstalação; depois snapshot + teste dentro do Windows com `virtio-gl`; CI remoto não executado. |
 
 ### Handoff — Fases 1–3 (2026-08-19)
 

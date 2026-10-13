@@ -231,3 +231,40 @@ def test_server_toggles_dispatch_service_access_and_backup_actions(qapp, catalog
     assert len(page.feature_controls) == 2
     page.shortcut_buttons["homelab.backup"].click()
     assert spy.at(2)[0].id == "homelab.backup"
+
+
+def test_server_page_host_facts_missing_sensors_are_unavailable(qapp, catalog):
+    page, _actions = _page(ServerPage, "Servidor", catalog)
+    assert "indisponível" in page.hw_labels["smart"].text()
+    assert "indisponível" in page.hw_labels["temperature"].text()
+    page.apply_host_facts(
+        {
+            "smart": {"available": False, "reason": "smartctl ausente", "devices": []},
+            "network": {"available": False, "reason": "ip ausente", "hostname": None},
+            "disk": {"available": False, "reason": "df ausente", "volumes": []},
+            "temperature": {"available": False, "reason": "sensors ausente", "celsius": None},
+        }
+    )
+    for key in ("smart", "network", "disk", "temperature"):
+        text = page.hw_labels[key].text().lower()
+        assert "indisponível" in text
+        assert "42" not in text
+        assert "passed" not in text
+    page.apply_host_facts(
+        {
+            "smart": {
+                "available": True,
+                "devices": [{"device": "/dev/sda", "health": "PASSED"}],
+            },
+            "network": {"available": True, "hostname": "garage"},
+            "disk": {
+                "available": True,
+                "volumes": [{"mount": "/", "usedBytes": 10, "totalBytes": 100}],
+            },
+            "temperature": {"available": True, "celsius": 42},
+        }
+    )
+    assert "PASSED" in page.hw_labels["smart"].text()
+    assert "garage" in page.hw_labels["network"].text()
+    assert "/ 10/100 B" in page.hw_labels["disk"].text()
+    assert "42" in page.hw_labels["temperature"].text()

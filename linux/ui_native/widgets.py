@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
@@ -49,6 +50,8 @@ from . import __version__
 
 from .models import ActionSpec, OperationResult
 from .platform import open_path
+from .preferences import reduced_motion
+from .result_parser import guidance, is_pending_report, restart_required
 
 
 _ICON_CACHE: dict[str, QIcon] = {}
@@ -89,6 +92,32 @@ def themed_icon(widget: QWidget, name: str, fallback: QStyle.StandardPixmap) -> 
     return icon
 
 
+def hub_item_icon(widget: QWidget, item, fallback: QStyle.StandardPixmap = QStyle.SP_FileIcon) -> QIcon:
+    """Ícone de um `HubItem`, preferindo o logo real do app instalado.
+
+    A cascata vive em `icons.resolve_icon` (sem Qt, testável); aqui só entra o
+    que depende do tema carregado: se o tema tem mesmo o ícone chutado a partir
+    do nome do pacote. Sem essa checagem a UI mostraria quadrado vazio em vez
+    de cair para o ícone da seção.
+    """
+    from .icons import resolve_icon
+
+    reference = resolve_icon(
+        item,
+        overlay_icon=item.icon if getattr(item, "icon_explicit", False) else "",
+        has_theme_icon=QIcon.hasThemeIcon,
+    )
+    cache_key = f"hub:{reference.kind}:{reference.value}"
+    cached = _ICON_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    icon = QIcon(reference.value) if reference.kind == "file" else QIcon.fromTheme(reference.value)
+    if icon.isNull():
+        icon = themed_icon(widget, getattr(item, "icon", "") or "package-x-generic", fallback)
+    _ICON_CACHE[cache_key] = icon
+    return icon
+
+
 def action_icon(widget: QWidget, action: ActionSpec, size: int = 24) -> QIcon:
     """Resolve a semantic system icon without shipping platform-specific assets."""
     text = f"{action.id} {action.title}".casefold()
@@ -108,6 +137,33 @@ def action_icon(widget: QWidget, action: ActionSpec, size: int = 24) -> QIcon:
             fallback = candidate
             break
     return themed_icon(widget, action.icon, fallback)
+
+
+def available_geometry(widget: QWidget):
+    """Usable screen area for ``widget`` (patched by tests to emulate a Deck)."""
+    screen = widget.screen() if widget is not None else None
+    screen = screen or QApplication.primaryScreen()
+    return screen.availableGeometry() if screen is not None else None
+
+
+def fit_to_screen(
+    widget: QWidget, width: int, height: int, *, minimum: tuple[int, int] = (320, 240), margin: int = 24
+) -> None:
+    """LUX-012: prefer ``width×height`` but never exceed the usable screen.
+
+    Steam Deck at 150% offers 853×533 logical pixels; fixed minimums of
+    760×540 pushed the action footer off-screen.
+    """
+    area = available_geometry(widget)
+    if area is None:
+        widget.setMinimumSize(*minimum)
+        widget.resize(width, height)
+        return
+    max_w = max(minimum[0], area.width() - margin)
+    max_h = max(minimum[1], area.height() - margin)
+    widget.setMinimumSize(min(minimum[0], max_w), min(minimum[1], max_h))
+    widget.setMaximumSize(max_w, max_h)
+    widget.resize(min(width, max_w), min(height, max_h))
 
 
 def _repolish(widget: QWidget) -> None:
@@ -196,6 +252,9 @@ class SectionHeader(QWidget):
         if caption:
             cap = QLabel(caption)
             cap.setObjectName("sectionCaption")
+            # UX-003/004: an unwrapped caption dictates the container's
+            # minimum width and forces horizontal overflow on narrow windows.
+            cap.setWordWrap(True)
             layout.addWidget(cap)
 
 
@@ -273,7 +332,9 @@ class ActionCard(QFrame):
             lock.setObjectName("cardLock")
             title_box.addWidget(lock)
         heading.addLayout(title_box, 1)
-        if action.badge:
+        # Badge "JSON" é ruído para leigo nos cards simples; o modo avançado
+        # tem painel próprio e continua mostrando tudo.
+        if action.badge and action.badge.upper() != "JSON":
             badge = QLabel(action.badge)
             badge.setObjectName("badge")
             badge.setProperty("state", action.state)
@@ -313,6 +374,219 @@ class ActionCard(QFrame):
         if event.button() == Qt.LeftButton and self.rect().contains(event.position().toPoint()):
             self.requested.emit(self.action)
         super().mouseReleaseEvent(event)
+
+
+MODE_LABELS = {
+    "recommended": ("Recomendado", "success"),
+    "opt-in": ("Opcional", "info"),
+    "advanced": ("Avançado", "warning"),
+}
+
+
+class HubChip(QLabel):
+    """Selo compacto de metadado (reversão, risco, reboot)."""
+
+    def __init__(self, text: str, state: str = "info", tooltip: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setObjectName("hubChip")
+        self.setProperty("state", state)
+        if tooltip:
+            self.setToolTip(tooltip)
+            self.setAccessibleDescription(tooltip)
+
+
+class HubAppCard(QFrame):
+    """Cartão de app/serviço/otimização da página Linux.
+
+    Um switch aparece só quando existe contrato para desligar. Estado nunca é
+    otimista: `set_state` é chamado com o que o host respondeu, e enquanto a
+    operação corre o switch fica em `pending` — a confirmação vem do refetch.
+    """
+
+    toggle_requested = Signal(object, str, bool)  # item, "install"|"tune", ligado
+    action_requested = Signal(object)             # ActionSpec
+
+    def __init__(self, item, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.item = item
+        self.setObjectName("hubCard")
+        self.setProperty("mode", item.mode)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAccessibleName(item.title)
+
+        # Linha densa, como as listas do resto do app: ícone à esquerda, texto
+        # no meio, controles à direita. Empilhar tudo verticalmente rendia três
+        # cartões por tela e obrigava a rolar para comparar itens.
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(12)
+
+        icon_label = QLabel()
+        icon_label.setObjectName("hubCardIcon")
+        icon_label.setPixmap(hub_item_icon(self, item).pixmap(QSize(32, 32)))
+        icon_label.setFixedSize(40, 40)
+        icon_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(icon_label, 0, Qt.AlignTop)
+
+        center = QVBoxLayout()
+        center.setSpacing(3)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        title = QLabel(item.title)
+        title.setObjectName("hubCardTitle")
+        head.addWidget(title, 0)
+        mode_text, mode_state = MODE_LABELS.get(item.mode, ("Opcional", "info"))
+        head.addWidget(HubChip(
+            mode_text,
+            mode_state,
+            {
+                "recommended": "Faz parte do conjunto recomendado do PhaseZero.",
+                "opt-in": "Instale só se quiser; nada depende disso.",
+                "advanced": "Mexe em áreas sensíveis do sistema. Revise antes.",
+            }.get(item.mode, ""),
+        ))
+        head.addStretch(1)
+        center.addLayout(head)
+
+        description = QLabel(item.description)
+        description.setObjectName("hubCardDescription")
+        description.setWordWrap(True)
+        center.addWidget(description)
+
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        for label in item.rollback_labels:
+            state = "success" if item.reversible else "warning"
+            chips.addWidget(HubChip(label, state, f"Como isto é desfeito: {label.lower()}."))
+        if item.reboot == "required":
+            chips.addWidget(HubChip("Requer reiniciar", "warning", "Só passa a valer após reiniciar."))
+        elif item.reboot == "recommended":
+            chips.addWidget(HubChip("Reinício recomendado", "info", "Funciona melhor após reiniciar."))
+        if item.risk in {"elevated", "high"}:
+            chips.addWidget(HubChip("Pede privilégio", "warning", "Precisa de elevação administrativa."))
+        chips.addStretch(1)
+        center.addLayout(chips)
+
+        self.reason_label = QLabel(item.reason)
+        self.reason_label.setObjectName("hubCardReason")
+        self.reason_label.setWordWrap(True)
+        self.reason_label.setVisible(bool(item.reason) and not item.available)
+        center.addWidget(self.reason_label)
+        layout.addLayout(center, 1)
+
+        controls = QHBoxLayout()
+        controls.setSpacing(14)
+        self.install_switch: SwitchControl | None = None
+        self.tune_switch: SwitchControl | None = None
+        if item.install is not None:
+            controls.addWidget(self._switch_block("Instalado", "install"), 0, Qt.AlignVCenter)
+        if item.tune is not None:
+            controls.addWidget(self._switch_block("Otimizado", "tune"), 0, Qt.AlignVCenter)
+        if item.actions:
+            more = QToolButton()
+            more.setObjectName("hubCardMore")
+            more.setText("Ações")
+            more.setPopupMode(QToolButton.InstantPopup)
+            more.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            more.setIcon(themed_icon(self, "open-menu", QStyle.SP_FileDialogDetailedView))
+            more.setAccessibleName(f"Ações de {item.title}")
+            menu = QMenu(more)
+            for action in item.actions:
+                entry = menu.addAction(action.title)
+                entry.setToolTip(action.description)
+                entry.triggered.connect(lambda _checked=False, target=action: self.action_requested.emit(target))
+            more.setMenu(menu)
+            controls.addWidget(more, 0, Qt.AlignVCenter)
+        layout.addLayout(controls, 0)
+
+        if not item.available:
+            self.set_available(False, item.reason)
+
+    def _switch_block(self, caption: str, kind: str) -> QWidget:
+        # Legenda ao lado do switch, não acima: o switch já escreve
+        # "Ligado/Desligado", e a legenda diz o QUE liga. Separados em linhas
+        # diferentes, os dois textos pareciam estados concorrentes.
+        block = QWidget()
+        row = QHBoxLayout(block)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        label = QLabel(caption)
+        label.setObjectName("hubSwitchCaption")
+        switch = SwitchControl()
+        switch.setAccessibleName(f"{caption}: {self.item.title}")
+        switch.setTristate(False)
+        switch.toggled.connect(lambda checked, which=kind: self._on_toggled(which, checked))
+        row.addWidget(label, 0, Qt.AlignVCenter)
+        row.addWidget(switch, 0, Qt.AlignVCenter)
+        if kind == "install":
+            self.install_switch = switch
+        else:
+            self.tune_switch = switch
+        return block
+
+    def _on_toggled(self, kind: str, checked: bool) -> None:
+        switch = self.install_switch if kind == "install" else self.tune_switch
+        if switch is None or switch.property("syncing"):
+            return
+        switch.set_pending(True)
+        self.toggle_requested.emit(self.item, kind, checked)
+
+    # ------------------------------------------------------------- estado
+    def _apply(self, switch: SwitchControl | None, value: bool | None) -> None:
+        """Escreve o estado vindo do host sem disparar o handler do usuário."""
+        if switch is None:
+            return
+        switch.setProperty("syncing", True)
+        switch.blockSignals(True)
+        switch.setChecked(bool(value))
+        switch.blockSignals(False)
+        switch.setProperty("syncing", False)
+        switch.set_pending(False)
+        # Estado desconhecido não pode parecer "desligado": o texto diz o que
+        # sabemos, e o switch fica inerte até o host responder.
+        unknown = value is None
+        switch.setEnabled(not unknown and self.property("available") is not False)
+        switch.setToolTip("Estado ainda não verificado" if unknown else "")
+
+    def set_state(self, *, installed: bool | None = None, applied: bool | None = None) -> None:
+        if self.install_switch is not None:
+            self._apply(self.install_switch, installed)
+        if self.tune_switch is not None:
+            self._apply(self.tune_switch, applied)
+
+    def set_pending(self, kind: str, pending: bool) -> None:
+        switch = self.install_switch if kind == "install" else self.tune_switch
+        if switch is not None:
+            switch.set_pending(pending)
+
+    def revert_pending(self) -> None:
+        """Desfaz o movimento otimista quando a operação não aconteceu."""
+        for switch in (self.install_switch, self.tune_switch):
+            if switch is None or not switch.property("pending"):
+                continue
+            switch.setProperty("syncing", True)
+            switch.blockSignals(True)
+            switch.setChecked(not switch.isChecked())
+            switch.blockSignals(False)
+            switch.setProperty("syncing", False)
+            switch.set_pending(False)
+
+    def set_available(self, available: bool, reason: str = "") -> None:
+        self.setProperty("available", available)
+        _repolish(self)
+        for switch in (self.install_switch, self.tune_switch):
+            if switch is not None:
+                switch.setEnabled(available)
+                switch.setToolTip(reason if not available else "")
+        if reason:
+            self.reason_label.setText(reason)
+        self.reason_label.setVisible(bool(reason) and not available)
+
+    def set_busy(self, busy: bool) -> None:
+        for switch in (self.install_switch, self.tune_switch):
+            if switch is not None:
+                switch.setEnabled(not busy and self.property("available") is not False)
 
 
 class StatusPill(QFrame):
@@ -365,10 +639,11 @@ class AdvancedActionsPanel(QFrame):
         rows.setContentsMargins(4, 4, 4, 4)
         rows.setSpacing(6)
         for action in actions:
-            button = QPushButton(f"{action.title}  —  {action.description}")
+            button = QPushButton(action.title)
             button.setObjectName("advancedAction")
             button.setProperty("actionId", action.id)
-            button.setToolTip(" ".join(action.args))
+            # Ajuda em linguagem humana; a sintaxe CLI fica no Inspector.
+            button.setToolTip(action.description)
             button.setAccessibleName(action.title)
             button.clicked.connect(lambda _checked=False, item=action: self.requested.emit(item))
             rows.addWidget(button)
@@ -640,6 +915,12 @@ class SwitchControl(QCheckBox):
     def sizeHint(self) -> QSize:
         return QSize(126, 30)
 
+    def hitButton(self, pos) -> bool:
+        # paintEvent desenha trilho e rótulo por toda a largura; o hit rect
+        # padrão do QCheckBox cobre só o indicador nativo (à esquerda, vazio),
+        # então clicar no switch visível não alternava nada.
+        return self.rect().contains(pos)
+
     def _state_changed(self, checked: bool) -> None:
         self.setAccessibleDescription("Ligado" if checked else "Desligado")
         self.update()
@@ -686,7 +967,7 @@ class ParameterDialog(QDialog):
         super().__init__(parent)
         self.action = action
         self.setWindowTitle(action.title)
-        self.setMinimumWidth(560)
+        fit_to_screen(self, 560, 420)
         layout = QVBoxLayout(self)
         description = QLabel(action.description)
         description.setWordWrap(True)
@@ -705,6 +986,7 @@ class ParameterDialog(QDialog):
                     custom_edit = QLineEdit()
                     custom_edit.setPlaceholderText("Perfil/args customizados")
                     custom_edit.setEnabled(False)
+                    custom_edit.setAccessibleName(f"{parameter.label} — valor customizado")
                     custom_label = QLabel("Custom:")
                     custom_label.setVisible(False)
                     custom_layout.addWidget(custom_label)
@@ -716,12 +998,22 @@ class ParameterDialog(QDialog):
                     )
             elif parameter.kind == "boolean":
                 field = QCheckBox(parameter.label)
+                field.setAccessibleName(parameter.label)
             elif parameter.kind == "secret":
                 # Masked on screen and routed to stdin by the runner, so the
                 # value never reaches argv or the echoed command line.
                 field = QLineEdit()
                 field.setEchoMode(QLineEdit.Password)
                 field.setPlaceholderText(parameter.placeholder)
+                if not getattr(self, "_secret_note_added", False):
+                    note = QLabel(
+                        "Vai direto para o comando por entrada segura: não aparece em logs, "
+                        "na linha de comando nem fica guardada na Central."
+                    )
+                    note.setObjectName("cardDescription")
+                    note.setWordWrap(True)
+                    form.addRow("", note)
+                    self._secret_note_added = True
             else:
                 field = QLineEdit()
                 field.setPlaceholderText(parameter.placeholder)
@@ -800,6 +1092,12 @@ def start_shimmer(widget: QWidget) -> None:
     """Start a shimmer opacity loop on a skeleton widget."""
     existing = getattr(widget, "_phasezero_shimmer", None)
     if existing is not None:
+        return
+    if reduced_motion():
+        # LUX-021: movimento reduzido — destaque estático, sem animação.
+        widget.setProperty("shimmer", "true")
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
         return
     effect = QGraphicsOpacityEffect(widget)
     widget.setGraphicsEffect(effect)
@@ -956,6 +1254,9 @@ _RESULT_KEYS = {
     "blockers": "Bloqueios",
     "error": "Problema",
     "message": "Mensagem",
+    "summary": "Resumo",
+    "next": "Próximo passo",
+    "needsUser": "Ação sua",
 }
 
 
@@ -1110,6 +1411,15 @@ def sanitized_command(command: list[str]) -> str:
     return shlex.join(output)
 
 
+STATE_NAMES_PT = {
+    "success": "concluído",
+    "warning": "aviso",
+    "error": "erro",
+    "running": "em andamento",
+    "info": "informação",
+}
+
+
 class StatefulDialog(QDialog):
     """Accessible dialog foundation with semantic state header and action footer."""
 
@@ -1118,21 +1428,32 @@ class StatefulDialog(QDialog):
         self.setObjectName("statefulDialog")
         self.setProperty("state", state)
         self.setWindowTitle(title)
-        self.setMinimumSize(760, 540)
+        fit_to_screen(self, 760, 540)
         outer = QVBoxLayout(self)
         header = QHBoxLayout()
         icon = QLabel(STATE_ICONS.get(state, "ℹ"))
         icon.setObjectName("dialogStateIcon")
         icon.setProperty("state", state)
-        icon.setAccessibleName(f"Estado: {state}")
+        # LUX-030: leitor de tela anuncia o estado em português.
+        icon.setAccessibleName(f"Estado: {STATE_NAMES_PT.get(state, state)}")
         heading = QLabel(title)
         heading.setObjectName("dialogTitle")
         heading.setProperty("state", state)
         header.addWidget(icon)
         header.addWidget(heading, 1)
         outer.addLayout(header)
-        self.body = QVBoxLayout()
-        outer.addLayout(self.body, 1)
+        # LUX-012: corpo rola; cabeçalho e rodapé de ações ficam sempre
+        # visíveis, mesmo numa tela pequena com escala alta.
+        body_host = QWidget()
+        body_host.setObjectName("dialogBody")
+        self.body = QVBoxLayout(body_host)
+        self.body.setContentsMargins(0, 0, 0, 0)
+        self.body_scroll = QScrollArea()
+        self.body_scroll.setWidgetResizable(True)
+        self.body_scroll.setFrameShape(QFrame.NoFrame)
+        self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.body_scroll.setWidget(body_host)
+        outer.addWidget(self.body_scroll, 1)
         self.footer = QDialogButtonBox()
         outer.addWidget(self.footer)
 
@@ -1148,8 +1469,56 @@ class StatefulDialog(QDialog):
         if variant:
             button.setObjectName(variant)
             _repolish(button)
+        if role == QDialogButtonBox.AcceptRole:
+            button.setDefault(True)
         button.setEnabled(enabled)
         return button
+
+
+def _format_space_bytes(value: object) -> str:
+    if not isinstance(value, int) or value < 0:
+        return "não informado"
+    if value < 1024:
+        return f"{value} B"
+    amount = float(value)
+    for unit in ("KiB", "MiB", "GiB", "TiB"):
+        amount /= 1024
+        if amount < 1024 or unit == "TiB":
+            return f"{amount:.1f} {unit}"
+    return "não informado"
+
+
+def _capability_space_lines(payload: object) -> list[str]:
+    if not isinstance(payload, dict) or payload.get("kind") != "plan":
+        return []
+    space = payload.get("space")
+    if not isinstance(space, dict):
+        return []
+    targets = space.get("targets")
+    if not isinstance(targets, dict) or not targets:
+        targets = {"total": space}
+    lines = ["Espaço estimado antes da alteração"]
+    scope_labels = {"system": "Sistema", "user": "Usuário", "total": "Total"}
+    for scope, target in targets.items():
+        if not isinstance(target, dict):
+            continue
+        label = scope_labels.get(str(scope), str(scope))
+        lines.append(
+            f"{label}: baixar {_format_space_bytes(target.get('downloadBytes'))} · "
+            f"instalação {_format_space_bytes(target.get('installedBytes'))} · "
+            f"livre {_format_space_bytes(target.get('availableBytes'))}"
+        )
+    completeness = str(space.get("estimateCompleteness") or "")
+    if completeness == "direct-packages-lower-bound":
+        note = "Estimativa parcial: dependências transitivas podem acrescentar espaço."
+    elif completeness == "resolved-local-package-indexes":
+        note = "Estimativa do gerenciador com índices locais; eles podem estar desatualizados."
+    elif completeness == "mixed":
+        note = "Estimativa parcial: mistura resolução de transação e metadados diretos."
+    else:
+        note = "Estimativa parcial; confirme espaço e metadados antes de aplicar."
+    lines.append(note)
+    return lines
 
 
 class PreviewDialog(StatefulDialog):
@@ -1162,15 +1531,82 @@ class PreviewDialog(StatefulDialog):
         advanced_mode: bool = False,
     ) -> None:
         blockers = result.parsed.get("blockers") if isinstance(result.parsed, dict) else None
-        preview_ok = result.ok and not blockers
-        super().__init__("Confirmar operação", "success" if preview_ok else "error", parent)
+        pending = is_pending_report(result.parsed)
+        preview_ok = (result.ok or pending) and not blockers
+        dialog_state = "success" if preview_ok and not pending else "warning" if preview_ok else "error"
+        state_only = bool(action and action.preview_kind == "state")
+        if not preview_ok:
+            dialog_title = "Não é seguro aplicar agora"
+        elif state_only:
+            dialog_title = "Revisar antes de aplicar"
+        else:
+            dialog_title = "Confirmar operação"
+        super().__init__(
+            dialog_title,
+            dialog_state,
+            parent,
+        )
         self.action = action
-        summary = QLabel("Preview concluído. Nenhuma mutação foi executada.")
+        guide = guidance(result.parsed)
+        if not preview_ok:
+            # LUX-023: prévia que falhou ou tem bloqueios diz por quê.
+            headline = guide["summary"] or (
+                "A verificação encontrou bloqueios." if blockers
+                else "A verificação prévia falhou; nada foi alterado."
+            )
+        elif state_only:
+            # LUX-001: a leitura de estado não simula a mudança; nunca
+            # chamá-la de preview concluído.
+            headline = guide["summary"] or "Estado atual — isto não simula a mudança."
+        else:
+            headline = guide["summary"] or "Preview concluído. Nenhuma mutação foi executada."
+        next_step = guide["next_action"]
+        summary = QLabel(headline)
         summary.setWordWrap(True)
         summary.setObjectName("cardDescription")
         self.body.addWidget(summary)
+        for index, line in enumerate(_capability_space_lines(result.parsed)):
+            space_label = QLabel(line)
+            space_label.setObjectName("capabilitySpaceSummary" if index == 0 else "capabilitySpaceDetail")
+            space_label.setAccessibleName(line)
+            space_label.setWordWrap(True)
+            self.body.addWidget(space_label)
+        if not preview_ok:
+            items = [str(item) for item in blockers] if isinstance(blockers, list) else []
+            for item in items[:8]:
+                blocker = QLabel(f"• {item}")
+                blocker.setObjectName("errorText")
+                blocker.setWordWrap(True)
+                self.body.addWidget(blocker)
+            unlock = QLabel(
+                "Resolva os bloqueios acima e tente de novo." if items
+                else "Veja os detalhes técnicos para a causa e tente de novo."
+            )
+            unlock.setObjectName("cardDescription")
+            unlock.setWordWrap(True)
+            self.body.addWidget(unlock)
+            self.blocked_reason = unlock
+        if state_only and action is not None:
+            impact = QLabel(f"O que vai acontecer: {action.impact or action.description}")
+            impact.setObjectName("impactText")
+            impact.setWordWrap(True)
+            self.body.addWidget(impact)
+            self.impact_label = impact
+        for reason in guide["reasons"]:
+            reason_label = QLabel(f"• {reason}")
+            reason_label.setWordWrap(True)
+            reason_label.setObjectName("cardDescription")
+            self.body.addWidget(reason_label)
+        if next_step:
+            follow = QLabel(f"Próximo passo: {next_step}")
+            follow.setWordWrap(True)
+            follow.setObjectName("cardDescription")
+            self.body.addWidget(follow)
         chips = QHBoxLayout()
-        chips.addWidget(StatusPill("Preview", "success" if preview_ok else "error"))
+        chips.addWidget(StatusPill(
+            "Pendente" if pending else "Preview",
+            "success" if preview_ok and not pending else "warning" if pending else "error",
+        ))
         chips.addWidget(StatusPill("Admin", "warning" if action and action.elevated else "info", "necessário" if action and action.elevated else "não"))
         chips.addStretch()
         self.body.addLayout(chips)
@@ -1218,7 +1654,8 @@ class PreviewDialog(StatefulDialog):
         self.details_toggle.toggled.connect(
             lambda checked: self.details_toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
         )
-        copy = self.add_action("Copiar saída", QDialogButtonBox.ActionRole)
+        # LUX-031: o que é copiado é o detalhe técnico, visível ou não.
+        copy = self.add_action("Copiar detalhes técnicos", QDialogButtonBox.ActionRole)
         copy.clicked.connect(lambda: QApplication.clipboard().setText(self.output.toPlainText()))
         cancel = self.add_action("Voltar", QDialogButtonBox.RejectRole)
         self.confirm = self.add_action(
@@ -1236,14 +1673,20 @@ class PreviewDialog(StatefulDialog):
             self.confirmation.textChanged.connect(
                 lambda text: self.confirm.setEnabled(preview_ok and text.strip() == "CONFIRMAR")
             )
-            self.body.insertWidget(1, warning)
-            self.body.insertWidget(2, self.confirmation)
+            anchor = getattr(self, "impact_label", None) or summary
+            position = self.body.indexOf(anchor) + 1
+            self.body.insertWidget(position, warning)
+            self.body.insertWidget(position + 1, self.confirmation)
+            # LUX-025: Tab do campo vai direto ao botão que ele libera.
+            QWidget.setTabOrder(self.confirmation, self.confirm)
+            self.confirmation.setFocus()
         cancel.clicked.connect(self.reject)
         self.confirm.clicked.connect(self.accept)
 
 
 class ProgressDialog(StatefulDialog):
     cancel_requested = Signal()
+    hidden_while_running = Signal()
 
     def __init__(
         self,
@@ -1317,8 +1760,11 @@ class ProgressDialog(StatefulDialog):
         self.accept()
 
     def reject(self) -> None:
+        # LUX-002: Esc/fechar só esconde; a operação continua e o botão
+        # "Mostrar progresso" da barra de status reabre esta janela.
         if self._running:
-            self.cancel_requested.emit()
+            self.hide()
+            self.hidden_while_running.emit()
             return
         super().reject()
 
@@ -1326,6 +1772,7 @@ class ProgressDialog(StatefulDialog):
 class ResultDialog(StatefulDialog):
     history_requested = Signal()
     resolution_requested = Signal(str)
+    retry_requested = Signal(object)
 
     def __init__(
         self,
@@ -1339,16 +1786,31 @@ class ResultDialog(StatefulDialog):
         sev = severity or ("success" if result.ok else "error")
         title_map = {"success": "Operação concluída", "warning": "Concluído com avisos", "error": "Operação falhou"}
         title = title_map.get(sev, "Operação falhou")
+        if restart_required(result.parsed):
+            title = "Reinício necessário"
         super().__init__(title, sev, parent)
-        self.setMinimumSize(660, 380)
-        self.resize(760, 480)
+        fit_to_screen(self, 760, 480)
         self.formatted = formatted
         message = {
             "success": "Tudo pronto. A operação terminou como esperado.",
             "warning": "A operação terminou, mas alguns itens precisam de revisão.",
             "error": "Não foi possível concluir. Revise a solução recomendada abaixo.",
         }.get(sev, "Revise o resultado.")
-        if sev == "error":
+        if isinstance(result.parsed, dict):
+            guide = guidance(result.parsed)
+            human = guide["summary"]
+            nxt = guide["next_action"]
+            parts = [part for part in (human, f"Próximo passo: {nxt}" if nxt else "") if part]
+            if parts:
+                message = "\n".join(parts)
+        if getattr(result, "timed_out", False):
+            message = (
+                "A operação passou do tempo limite e foi interrompida.\n"
+                "Nada além do que apareceu na saída foi feito. Você pode tentar de novo."
+            )
+        if sev == "error" and message in {
+            "Não foi possível concluir. Revise a solução recomendada abaixo.",
+        }:
             detail = ""
             if isinstance(result.parsed, dict):
                 detail = str(result.parsed.get("error") or result.parsed.get("message") or "")
@@ -1376,7 +1838,20 @@ class ResultDialog(StatefulDialog):
         history = self.add_action("Histórico", QDialogButtonBox.ActionRole)
         history.clicked.connect(self.history_requested.emit)
         if sev in {"warning", "error"}:
-            label = "Revisar Windows VM" if result.action_id.startswith("windows.") else "Ver solução"
+            if getattr(result, "timed_out", False):
+                retry = self.add_action("Tentar novamente", QDialogButtonBox.AcceptRole, variant="primaryButton")
+                # OperationResult expõe action_id; result.action levantava
+                # AttributeError dentro do slot e o botão morria.
+                retry.clicked.connect(lambda: self.retry_requested.emit(result.action_id))
+                retry.clicked.connect(self.accept)
+            if result.action_id.startswith("windows."):
+                label = "Revisar Windows VM"
+            elif result.action_id.startswith("ai.proxies") or result.action_id.startswith("ai.9router"):
+                label = "Revisar Proxies IA"
+            elif result.action_id.startswith("ai."):
+                label = "Revisar IA & Dev"
+            else:
+                label = "Ver solução"
             resolution = self.add_action(label, QDialogButtonBox.AcceptRole, variant="primaryButton")
             resolution.clicked.connect(lambda: self.resolution_requested.emit(result.action_id))
             resolution.clicked.connect(self.accept)

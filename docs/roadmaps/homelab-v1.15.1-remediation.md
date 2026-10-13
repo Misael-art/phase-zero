@@ -502,6 +502,7 @@ sem evidência.
 
 | Item | Estado atual | Verificado por | Data |
 |---|---|---|---|
+| Verificação70d959f | QA dark confirma UX-001..004 nos cenários locais; próxima UX-005/007/009 | `reports/verify-ux-70d959f/README.md` e validation.json | 2026-09-08 |
 | `main` | `31642be`, alinhada com `origin/main` | `git status`, `ls-remote` | 2026-08-07 |
 | `main` | `c11155b`, alinhada com `origin/main` | `git status`, `ls-remote` | 2026-08-08 |
 | PR #38 | mergeada via squash (`fc7ede8`); branch local/remota apagadas; worktree `pz-homelab-f9` preservado | `gh pr view 38`, `git ls-remote`, `git worktree list` | 2026-08-08 |
@@ -560,6 +561,15 @@ sem evidência.
 | Pacote host | permanece `phasezero-control-center 1.16.5-1`; instalação 1.16.6 não iniciou porque Polkit não foi autorizado; tentativa cancelada limpa, `grubenv` mtime `1785849543`, 0 QEMU | `pacman -Q`, `pgrep`, `stat`; nenhum lock `pacman` criado | 2026-08-17 |
 | Pacote host | `phasezero-control-center 1.16.6-1` instalado via `phasezero-admin pacman -U` (rebuild do `main` `fe76f0f`, não o asset da release); prévia de remoção da VM atual retorna `ready:true` com 0 blockers e aviso de VM adotada; `grubenv` mtime `1785849543` e 0 QEMU preservados; runtime GRUB segue `OUTDATED` (sincronização deliberadamente adiada) | `pacman -Q`, `pz --version`, `pz windows-vm remove --json`, `stat`, `pgrep` | 2026-08-19 |
 | VMs legadas | as 2 VMs concluídas de 2026-08-16 foram removidas em 2026-08-19 05:42 local com `vmRemovedAt` registrado (`op-20260805-152412-5248`, `op-20260811-120613-9550`); `provision inventory --json` devolve `count:0`; resta `PhaseZero-Windows-Primary-final-20260816` como VM atual | `provision inventory --json`, `operation.json` de cada operação | 2026-08-19 |
+| IA, proxies e workspaces | jornada auditada; autenticação/ledger centrais; quatro proxies com snapshots fixos; três imagens Odysseus fixadas por digest; deploy Odysseus continua bloqueado sem commit aprovado | pytest 640 + 9; testes shell IA/Homelab/UI; testes adversariais de commit/digest; ShellCheck; QA offscreen; diff-check | 2026-08-24 |
+| Auditoria host limpo 2026-09-06 | main `2180c94`, v1.19.0; 31 itens abertos (1 P0 restore). Bootstrap incompleto, sucesso falso e divergências IA/proxies documentados; nenhum workload implantado | [relatório e provas](../../reports/portfolio-clean-host-2026-09-06/README.md); 364 pytest direcionados, 4 suítes shell, 13 Compose cliente, asset Arch verificado | 2026-09-06 |
+| Fase 0 auditoria host limpo | PZ-AUD-005,006,009,010,011,012 verified em `codex/aud-fase0`; lifecycle honesto, isolamento por projeto, reconcile, backup consistente, restore transacional, prontidão estrita | `tests/linux-homelab.sh` + `linux-ai-proxies` + `linux-9router` + `linux-agent-workspaces` exit 0; pytest Homelab 76; fixtures /tmp (nenhum workload real) | 2026-09-07 |
+| Fase 1 auditoria host limpo | PZ-AUD-001,002,003,004,026,027 verified em `codex/aud-fase1`; pz no PATH, prepare com deps, perfis ordenados, compose declarado, providers AUR, manifests validados | `tests/linux-homelab.sh` exit 0; pytest 153 (capabilities, deps, cohesion, profile-packages, homelab); daemon real intocado | 2026-09-07 |
+| Fase 2 auditoria host limpo | PZ-AUD-007,008,015,025,030,031 verified em `codex/aud-fase2`; broker Paperless, receitas por app, lifecycle agente/dashboard, boot Hermes, pins/valores Compose, governor unificado | `tests/linux-homelab.sh` + 3 suítes shell exit 0; pytest 157; daemon real intocado | 2026-09-07 |
+| Fase 3 auditoria host limpo | PZ-AUD-016–024 verified em `codex/aud-fase3`; runtimes/build transacional, conjuntos, manifesto cross-OS, MiMo inferência, Hermes opcional, appliance preview, broker delimitado, LLM com prova | `tests/linux-ai-proxies.sh` + agent-workspaces + homelab + 9router exit 0; pytest 158; daemon intocado | 2026-09-07 |
+| Fase 4 auditoria host limpo | PZ-AUD-013,014,029 verified em `codex/aud-fase4`; wizard real, pair via registro, objetivos no Início | `tests/linux-homelab.sh` exit 0; pytest player/navigation; viewport preservado | 2026-09-07 |
+| Remediação REV-001/002/003/018 | `codex/rev-remediation` (sobre `9d6be9d`): maturidade antes de Docker no `up` (rc 69 honesto sem daemon), volume registrado antes da primeira mutação no restore + `recoveryRequired` verdadeiro, `cmd_down` antes do snapshot pré-restore e PROPAGANDO falha do compose down (R01-001), sqlite `.backup` na origem viva com reason estruturado e TSDB real fail-closed | `tests/linux-homelab.sh` exit 0 com daemon presente E com docker indisponível; matriz de mutação falha por posição; pytest player 44; contratos agent/web 38; `git diff --check` | 2026-09-07 |
+| Fase 5 auditoria host limpo | PZ-AUD-028 verified em `codex/aud-fase5`; job arch-clean-host, gates de manifesto/exatidão, matriz de evidência | Arch descartável real (15 perfis, asset, entrypoints); CI estendido; sem mutação no host | 2026-09-07 |
 
 ## Ledger de execução
 
@@ -567,6 +577,14 @@ Adicionar uma linha por sessão material. Não apagar histórico.
 
 | Data | Agente | Branch/worktree | Fase | Commit/PR | Gates | Resultado/próximo passo |
 |---|---|---|---|---|---|---|
+| 2026-09-08 | Codex | codex/verify-ux-70d959f, dedicada | verificação UX | base70d959f; docs via git log | QA dark800→1280→800; pytest-final/validation.json | aceite local; nenhum host mutado; próxima jornada simples |
+| 2026-09-06 | Codex | `codex/portfolio-clean-host-audit` / `pz-portfolio-clean-host-audit` | diagnóstico transversal | docs sobre `2180c94` | 364 pytest; 4 shell; 12 registros reproduzidos; 2 contratos PS; 13 Compose; asset Arch verificado | PZ-AUD-001..031 pending; [plano/handoff](../../reports/portfolio-clean-host-2026-09-06/PLANO.md); P0 restore aberto. Sem mutação de runtime |
+| 2026-09-07 | opencode | `codex/aud-fase0` / `pz-aud-fase0` | Fase 0 (005,006,009,010,011,012) | `076b4ba`, `1a47c15`, `98b75a1`, `7fc3564` | linux-homelab/ai-proxies/9router/agent-workspaces exit 0; pytest Homelab 76; diff-check | 6 itens verified no backlog; P0 restore fechado em fixture. Sem workload/container/servidor tocado. Próximo: Fase 1 (001,002,003,004,026,027) em worktree novo |
+| 2026-09-07 | opencode | `codex/aud-fase1` / `pz-aud-fase1` | Fase 1 (001,002,003,004,026,027) | `b9523da`, `134a3a3`, `c13a304`, `7e7435c`, `209524d`, `ba3a12a`, `b23c0a9`, `1a48cda` | linux-homelab exit 0; pytest 153; diff-check | 6 itens verified no backlog. Daemon real intocado. Próximo: Fase 2 (007,008,015,025,030,031) em worktree novo |
+| 2026-09-07 | opencode | `codex/aud-fase2` / `pz-aud-fase2` | Fase 2 (007,008,015,025,030,031) | `8b024f8`, `4060b55`, `7fed458`, `49bb844`, `e8a1b1e` + fechamento | linux-homelab + ai-proxies + 9router + agent-workspaces exit 0; pytest 157; diff-check | 6 itens verified no backlog. Daemon real intocado. Próximo: Fase 3 (016-024) em worktree novo |
+| 2026-09-07 | opencode | `codex/aud-fase3` / `pz-aud-fase3` | Fase 3 (016-024) | commits fase3 + fechamento | linux-ai-proxies + agent-workspaces + homelab + 9router exit 0; pytest 158; diff-check | 9 itens verified no backlog. Daemon real intocado. Próximo: Fase 4 (013,014,029) em worktree novo |
+| 2026-09-07 | opencode | `codex/aud-fase4` / `pz-aud-fase4` | Fase 4 (013,014,029) | commits fase4 + fechamento | linux-homelab exit 0; pytest 55 (player/navigation/cohesion); diff-check | 3 itens verified no backlog. 30/31. Próximo: Fase 5 (028) em worktree novo |
+| 2026-09-07 | opencode | `codex/aud-fase5` / `pz-aud-fase5` | Fase 5 (028) | commits fase5 + fechamento | arch-clean-host provado em container descartável; suites herméticas; diff-check | 31/31 verified no backlog. Auditoria host-limpo remediada em fixture+CI; E2E físico segue gates próprios |
 | 2026-08-07 | Codex | `main` | Roadmap | não commitado | `git diff --check` passou | Roadmap canônico criado; iniciar Fase 0 em worktree novo |
 | 2026-08-07 | opencode | `codex/homelab-v1151-remediation` / `pz-homelab-v1151` | Fase 0 (baseline) | `22298d3`..`92d576b` (8 commits) | suíte hermética exit 0; pytest 437; shellcheck; `git diff --check` | Port validado em commits por fase; Player reescrito (async QProcess) + 12 testes verdes |
 | 2026-08-07 | opencode | idem | Fase 4 (perfis) | `4458ff3` | suíte hermética exit 0 | 6 perfis públicos implementados: assistant-private, assistant-multichannel, automation, ai-studio (blocked), developer, edge (default) |
@@ -604,6 +622,16 @@ Prova release: workflow `31258447568` success; assets em `gh release view v1.15.
 | 2026-08-16 | Codex | `codex/winvm-legacy-removal` (`/mnt/sdcard/Projects/pz-winvm-legacy-removal`) + `main` | HL-IMG-001: inventário e remoção segura de VMs concluídas legadas | `2be2b2a`, `b205668`, `913c702`, `2f2e937`; PR #58 → `d202139`; release `2d721b7`, tag `v1.16.5` | pytest 573 + 9; UI 27; remoção e provisionamento herméticos; CI PR 30/30; CI main `31947914357` e release-commit `31949400280` success; release `31949402337` success; 7 assets e checksums 6/6 | Host atualizado para `1.16.5-1`. Inventário instalado encontra 2 VMs desligadas/removíveis, 43.133.304.832 bytes; ambas prévias permanentes retornam `ready:true`, 0 blockers. Nenhuma VM removida. `grubenv` mtime `1785849543`, 46 mounts e 0 QEMU preservados. UI instalada mostra `VMs instaladas · 2`, `40.2 GB` e ação separada para VM atual. Runtime GRUB segue `stale`; atualização deliberadamente adiada para validação física da próxima release. |
 | 2026-08-17 | Codex | `codex/winvm-direct-input` (`/mnt/sdcard/Projects/pz-winvm-direct-input`) + `main` | Boot GRUB WinVM: display, frequência, touchscreen, controles e teclado virtual | `25344d0`, `9e06323`, `39c7e35`, `6af07f6`; PR #60 → `2f5f262`; release `da86960`, tag `v1.16.6` | PR CI duplicada success; main `31988802642`; release-commit `31990545037`; gitleaks `31990545071`; release `31990545769`; checksums 6/6; provision 252/0; Windows VM/graphics/UI verdes | Release oficial pronta. Auditoria detectou e removeu passthrough cru do touchscreen 800×1280, substituído por `virtio-multitouch` via GTK/Gamescope para respeitar rotação. Host ainda `1.16.5-1`: diálogo Polkit não autorizado, processo cancelado antes de `pacman`; `grubenv` e VM intactos. **Próximo**: autorizar `phasezero-admin pacman -U` do pacote validado, executar `pz windows-vm boot install`, validar runtime `current`, depois boot físico e evidência dentro do Windows. |
 | 2026-08-19 | ZCode | `main` (worktree principal) | Pós-v1.16.6: instalar 1.16.6 no host; terceiro defeito de remoção (lock vazio) achado e corrigido | fix `d6b6285` (sessão anterior) + `fe76f0f` (lock vazio); docs roadmap | TDD: teste do lock vazio falhou antes e passou depois; `tests/test_windows_vm_remove.sh` ok; `tests/test_provision.sh` 257/0; `tests/linux-windows-vm.sh` ok; `bash -n`; shellcheck com excludes do CI; `git diff --check`; rebuild + reinstalação `1.16.6-1` exit 0 | Host em `1.16.6-1`. Prévia de remoção da VM atual: `ready:true`, 0 blockers, aviso de adotada. Causa raiz: `provision_lock_clear` trunca `active.lock` e nunca apaga (design), mas `provision_removal_blocker` chamava lock vazio de inconsistente — todo host liberado ficava `ready:false` para sempre. Não-mutação: `grubenv` mtime `1785849543`, 0 QEMU, VM intacta, inventário `count:0` coerente com as 2 remoções legadas de 05:42. **Próximo**: CI verde no push de `fe76f0f`; runtime GRUB `OUTDATED` segue adiado até o boot físico planejado. |
+| 2026-08-24 | Codex | `feat/ai-proxies-runtime` / worktree principal | AI-UX-001: diagnóstico, UX, proxies, roteamento e gates de workspaces | não commitado | pytest 634 + 9; `linux-ai`, `linux-ai-proxies`, `linux-agent-workspaces`, `linux-homelab`, `linux-ui`; ShellCheck; `bash -n`; QA offscreen; diff-check | Corrigidos falso sucesso, continuação Mimo, falhas assíncronas e divergência de política. Catálogo essencial/opcional e seção Hermes/9Router/Odysseus adicionados. Odysseus e perfis incompletos falham antes de mutação. Nenhum workload aplicado. Próximo: aprovar allowlists/digests, decidir “Nova Router” e criar AuthRegistry/OperationLedger. |
+| 2026-08-24 | Codex | `feat/ai-proxies-runtime` / worktree principal | AI-UX-002: AuthRegistry, OperationLedger e latência do status | não commitado | pytest 640 + 9; linux-ai/proxies/workspaces/UI; ShellCheck; `bash -n`; QA 1280×1080; diff-check | `pz ai auth` agrega 20 integrações/16 contas sem identidade ou segredo. Ledger registra ciclo, recupera interrupção e oferece retry com nova confirmação. `pz ai status` caiu de ~6,7 s para ~4,6 s por paralelismo. Próximo: expiração/revogação por adapter, checkpoints internos e allowlists/digests. |
+| 2026-08-24 | Codex | `feat/ai-proxies-runtime` / worktree principal | AI-UX-003: procedência dos proxies | não commitado | pytest focado 64; `linux-ai-proxies`; ShellCheck; `bash -n`; diff-check; quatro checkouts reais validados | Kimi, Qwen, DeepSeek e Mimo fixados por repo/commit/tree/licença/lockfiles. Clone usa staging; start/restart/login/Mimo/IDE falham antes de executar snapshot divergente. Legados sem revisão bloqueados. `semanticAudit:false`; próximo: SBOM/diff/rollback e digests Odysseus. |
+| 2026-08-24 | Codex | `feat/ai-proxies-runtime` / worktree principal | AI-UX-004: imagens Odysseus por digest | não commitado | `linux-agent-workspaces`; ShellCheck; `bash -n`; diff-check; Registry v2 header/body SHA iguais | Chroma 1.5.9, SearXNG 2026.5.31 e ntfy v2.26.3 fixados por manifest-list digest. `latest`/pull removidos do deploy. Instalação bloqueia antes de escrita; start/restart antes de systemd se lock divergir. Commit Odysseus segue sem allowlist; nenhum workload iniciado. |
+| 2026-08-24 | Codex | `feat/ai-proxies-runtime` / worktree principal | AI-UX-005: auditoria de distribuição Hermes e release Odysseus | não commitado | `linux-agent-workspaces`, `linux-ai`; ShellCheck; `bash -n`; hashes raw; npm audit; Registry v2 header/body SHA iguais | Checksum arbitrário não promove mais instalador Hermes. Release `v2026.8.19` ficou pinada, porém bloqueada por cadeia transitiva e auditoria incompletas. Odysseus `b4d1293` assinado ficou catalogado, não aprovado; base Python fixada por digest, grafo Python e superfície shell mantêm deploy bloqueado. Plano sem allowlist voltou a retornar JSON estruturado. Nenhum workload iniciado. |
+| 2026-08-24 | Codex | `feat/ai-proxies-runtime` / worktree principal | AI-UX-006: instalação Hermes ponta a ponta autorizada | não commitado | commit/árvore exatos; config/doctor; chat real `HERMES_OK`; Browser live; MCP ai-memory; OSV 107/0; gateway ativo e isolado | Hermes `v0.20.5` instalado do release `v2026.8.19` por aceite de risco preso ao commit `fcbd1076`; integrado ao 9Router canônico em loopback, gateway user habilitado com linger, desktop/CLI/ACP, 77 skills e Playwright. Fallback destravado do instalador e assinatura ausente permanecem avisos explícitos. |
+| 2026-09-07 | ZCode | `codex/rev-remediation` (`pz-rev-remediation`) | R0+R1 do plano REV: REV-018; REV-004..007; REV-001/002/003 | `52da4d3`, `8686279`, `87c31a1`, `765e791`, `53d5314` | `tests/linux-homelab.sh` exit 0 (com daemon e com docker indisponível); pytest player 40 passed; agent/web 38 passed; `bash -n`; `git diff --check`; ShellCheck sem achado novo vs baseline | P0 de restore fechado em fixture: swap falho em qualquer posição retorna ao estado pré-restore; rollback incompleto reporta `recoveryRequired`. Onboarding: parser de documento, pair gate por host, plano amarrado a host capturado, perfil transmitido ao backend. Matriz canônica: `docs/roadmaps/rev-remediation-v1.md`. Nenhum workload/boot/pacote alterado. **Próximo**: REV-008 (SSH de primeiro acesso na UI) e R3 (contrato gráfico WinVM hermético) antes dos gates físicos. |
+| 2026-09-07 (2) | ZCode | `codex/rev-remediation` (`pz-rev-remediation`) | Contrarrevisão R01: R01-001..005 do retorno R0/R1 | `174a233`, `b447312`, `6d8cf39` | suíte exit 0 2× (daemon presente e sombreado); pytest player 44; agent/web 38; bash -n; diff-check | P0 de stop fechado: `cmd_down` propaga falha do compose down e restore recusa mutação (cmd_down real + stub exit 42). Matriz REV-001 por posição (cp/wipe). Reason de backup sobrevive à subshell (R01-004); TSDB real nunca consistente (R01-005); pareamento tardio descartado para host trocado (R01-002); plano declara verdade budget-only do perfil (R01-003). Roadmap REV com tiers planned/unproven e estados fixture vs física. **Próximo**: R2 (REV-008). |
+| 2026-09-07 (3) | ZCode | `codex/rev-remediation` (`pz-rev-remediation`) | UX-001..004 da revisão r01-ux | `408d7e9`, `85bedf1` | pytest player 47 + windows_vm 30 (todos verdes); pytest completo 635 passed + 1 falha pré-existente em `a82e2cc` (`emulation.dualscreen.status`, fora do escopo); QA offscreen com capturas 800×600/1280×800 | UX-001: confirmação de revisão por clique real (E2E por input público). UX-002: hash do plano cobre a intenção e ignora telemetria de RAM/disco; verdict fail bloqueia. UX-003: Homelab com scroll vertical global, zero scroll horizontal, geometria de cada botão provada em 800×600. UX-004: Windows VM reflow <1000px (1 coluna + hero empilhado), CTA intacto. UX-005..011 registrados planned no roadmap REV. Falha pré-existente `emulation.dualscreen.status` reproduzida em `a82e2cc` — não é regressão. **Próximo**: UX-005/007/009 (jornadas do modo simples), depois R2 (REV-008/UX-008). |
+| 2026-09-07 (4) | ZCode | `codex/rev-remediation` (`pz-rev-remediation`) | Retorno da revisão ux004: UX-001 reaberto + tema real | `c784373` | pytest player 49 (E2E com hit-test real + aceite temático MainWindow 800→1280→800) + windows_vm 30 + agent/web 38; capturas temáticas conferidas | Causa-raiz UX-001: segunda definição de `_refresh_onboard_label` sobrescrevia a lógica do botão — removida; teste endurecido (visível E habilitado, retângulo inteiro, clique via `widgetAt`) e scan de duplicatas. UX-003: header/perfil/ações refluem (linhas únicas ditavam mínimo de 797px). UX-004: hero num grid único e card de manutenção refluído (mínimo de 785px eliminado); captions com wrap. Aceite com tema real: zero overflow horizontal nas duas páginas na alternância. **Próximo**: UX-005/007/009, depois R2. |
 
 ### Escopo obrigatório da próxima release WinVM
 
@@ -738,6 +766,150 @@ Bloqueios reais: nenhum. Polkit autorizado nesta sessão.
 Próximo passo exato: confirmar CI verde no push; quando planejar o boot físico,
   sincronizar o runtime GRUB (`phasezero-admin /usr/lib/phasezero/linux/pz
   windows-vm boot install`) e validar `runtime-check` `current`.
+```
+
+### Handoff — auditoria IA/UX, autenticação, ledger e procedência (2026-08-24)
+
+```text
+Objetivo da sessão: diagnosticar e corrigir jornadas IA/proxies/autenticação,
+  integrar Hermes/9Router/Odysseus, remover falso sucesso e adicionar continuidade,
+  recuperação e procedência fail-closed.
+Fase/IDs assumidos: AI-UX-001, AI-UX-002, AI-UX-003, AI-UX-004 e AI-UX-005.
+Branch e worktree: `feat/ai-proxies-runtime`, worktree principal
+  `/mnt/sdcard/Projects/PhaseZero` já sujo; WIP pré-existente preservado.
+HEAD inicial: `c09dd4d0cdbaf86bf047c957d1fc36e9cdcada25`.
+HEAD final: `c09dd4d0cdbaf86bf047c957d1fc36e9cdcada25` (sem commit).
+Arquivos alterados: backend IA/proxy/Hermes/Odysseus/Homelab, CLI `linux/pz`,
+  catálogo/UI nativa/resultados/roteamento, testes IA/UI/workspaces, ações geradas,
+  `assets/ai/*.json`, documentação e relatório de auditoria. `.mimosa/` e
+  `uber-defesa-privada/` eram WIP alheio e não foram tocados.
+Commits criados: nenhum. Sem stage, push, PR ou release.
+Testes executados e resultados: pytest completo 640 passed + 9 subtests;
+  `tests/linux-ai.sh`, `tests/linux-ai-proxies.sh`,
+  `tests/linux-agent-workspaces.sh`, `tests/linux-ui.sh` verdes; ShellCheck com
+  exclusões documentadas SC1091/SC2016, `bash -n`, `py_compile`, JSON e
+  `git diff --check` verdes. QA offscreen 1280x800 e 1280x1080 aprovada.
+CI/PR: não executados; trabalho não commitado.
+Estado do host antes/depois: Homelab configurado, inativo e não saudável porque
+  nenhum container está rodando; zero containers com label PhaseZero Homelab.
+  Nenhum pacote, proxy, serviço, container ou workload iniciado/alterado.
+Segredos verificados como ausentes: saídas AuthRegistry/proxies e ledger têm
+  testes de redação; sentinelas não vazaram; novos manifests contêm somente
+  URLs, versões, commits, árvores e hashes públicos, sem credencial.
+Limitações e riscos restantes: snapshots/digests declaram `semanticAudit:false`;
+  faltam SBOM, assinatura e rollback de atualização. Odysseus candidato tem commit
+  assinado e base por digest, mas dependências Python e superfícies shell não foram
+  aprovadas. Hermes tem instalador/commit fixos, mas cadeia transitiva mutável e
+  release sem assinatura. Ambos continuam bloqueados. Login Mimo ainda depende de DevTools.
+  “Nova Router” continua ambíguo e não foi inventado. Worktree contém WIP amplo.
+Bloqueios reais: deploy Odysseus bloqueado por allowlist, lock Python, auditoria
+  semântica e gate de workload; Hermes bloqueado por dependências transitivas,
+  auditoria semântica, assinatura ausente e gate de workload.
+Próximo passo exato: gerar SBOMs, tornar grafos transitivos reproduzíveis e revisar
+  superfícies de execução; somente depois mudar `approvedForInstall/Deploy` e criar
+  allowlist. Não aplicar workloads no host nesta etapa.
+```
+
+### Handoff — Hermes ponta a ponta no host (2026-08-24)
+
+```text
+Objetivo da sessão: instalar a versão estável mais recente do Hermes Agent e
+  comprovar integração funcional com o host e o 9Router.
+Fase/IDs assumidos: AI-UX-006; implantação posterior ao fechamento publicado do
+  roadmap, autorizada explicitamente pelo usuário.
+Branch e worktree: `feat/ai-proxies-runtime`, worktree principal
+  `/mnt/sdcard/Projects/PhaseZero`, já sujo; WIP pré-existente preservado.
+HEAD inicial: `c09dd4d0cdbaf86bf047c957d1fc36e9cdcada25`.
+HEAD final: `c09dd4d0cdbaf86bf047c957d1fc36e9cdcada25` (sem commit).
+Arquivos alterados nesta continuação: `linux/ai/setup-hermes.sh`, relatório de
+  auditoria IA/UX e este roadmap. Demais arquivos sujos pertencem ao WIP anterior.
+Commits criados: nenhum. Sem stage, push, PR ou release.
+Testes executados e resultados: commit `fcbd1076a93841fa88855acce810e342a5b78101`
+  e árvore `cc9f987a403a1d02b8b17cc527a57b54402e864b` conferem; `hermes config check`
+  e status/doctor PhaseZero prontos; chat real via 9Router retornou `HERMES_OK`;
+  Chromium headless abriu uma página; doctor live validou Browser e MCP ai-memory;
+  auditoria OSV examinou 107 componentes e encontrou zero achados; testes do
+  repositório: pytest 640 passed + 9 subtests; `linux-agent-workspaces`,
+  `linux-ai` e `linux-ai-proxies` verdes; ShellCheck, `bash -n` e diff-check verdes.
+CI/PR: não executados; trabalho não commitado.
+Estado do host antes/depois: antes Hermes ausente e 9Router ativo; depois Hermes
+  Agent `v0.20.5` do release `v2026.8.19` instalado em `~/.hermes`, launchers e
+  desktop entry locais criados, gateway systemd de usuário habilitado/ativo com
+  drop-in PhaseZero persistente e linger habilitado. Nenhum pacote de sistema,
+  container, serviço root, GRUB,
+  WinVM ou perfil Homelab alterado.
+Segredos verificados como ausentes: configuração contém somente referência
+  `${PHASEZERO_9ROUTER_API_KEY}`; launcher lê apenas a chave cliente do ambiente
+  canônico modo 0600. Processo gateway não herda JWT, service secret ou variáveis
+  administrativas; evidências registram nomes/estado, nunca valores.
+Limitações e riscos restantes: release/commit/tag sem assinatura verificada;
+  auditoria semântica e pinagem transitiva incompletas. `uv sync --locked` do
+  upstream falhou e o instalador oficial caiu para resolução destravada. Doctor
+  reporta 4 avisos high no workspace web e 3 no ui-tui, todos em tooling de build;
+  snapshot upstream permaneceu limpo e não recebeu `npm audit fix`.
+Bloqueios reais: nenhum para chat, gateway, Browser, MCP, Skills Hub, CLI ou ACP.
+  Canais Telegram/Discord e acesso remoto Tailscale permanecem opcionais e não
+  configurados porque exigem credenciais/escolha próprias.
+Próximo passo exato: não atualizar automaticamente para `main`; auditar novo
+  release, atualizar manifesto/commit e repetir provas antes de qualquer upgrade.
+```
+
+### Handoff — release v1.17.0 e validação IA/Hermes no host (2026-08-24)
+
+```text
+Objetivo da sessão: concluir implementação IA/UX, publicar release estável,
+  atualizar pacote oficial no host e provar Hermes/9Router/proxies ponta a ponta.
+Fase/IDs assumidos: AI-UX-001 a AI-UX-006; pós-Fase 10 para instalação oficial.
+Branches e worktrees: `feat/ai-proxies-runtime` no worktree principal sujo;
+  `codex/release-v1.17.0` e `codex/handoff-v1.17.0` no worktree limpo
+  `/tmp/phasezero-release-v1.17.0`. WIP `.mimosa/` e
+  `uber-defesa-privada/` permaneceu excluído e intocado.
+HEAD inicial: `c09dd4d0cdbaf86bf047c957d1fc36e9cdcada25`.
+HEADs finais: feature `9d9a722`, merge PR #64 `f0554d8`, release
+  `f18079a`, merge PR #65 `2a15da7` e tag `v1.17.0`.
+Arquivos alterados: UI nativa IA, ações/tarefas, CLI e backends de proxy,
+  autenticação, ledger, Hermes/Odysseus/9Router, manifests de procedência,
+  testes, documentação, changelog e metadados de pacote/release.
+Commits criados: `d035c7b` (feature), `59b1572` e `9d9a722` (CI),
+  `f18079a` (release), além deste handoff.
+Testes executados e resultados: pytest 640 passed + 9 subtests;
+  `tests/runner.sh` 44/44; UI smoke 28; package smoke e install-root verdes;
+  ShellCheck 0.9/0.11, `bash -n`, diff-check e gitleaks verdes. CI do SHA exato
+  de release run `32750364264` success, gitleaks `32750364129` success e
+  release workflow `32753660173` success. Pester: 797 passed, 0 failed,
+  2 skipped. Artefatos publicados: source, AppImage, Flatpak, Arch, RPM, DEB
+  e SHA256SUMS; 6/6 artefatos conferiram com o manifesto e o digest GitHub.
+CI/PR/release: PR #64 e PR #65 mergeados; release pública
+  `https://github.com/Misael-art/PhaseZero/releases/tag/v1.17.0`.
+Estado do host antes/depois: pacote `1.16.6-1` -> `1.17.0-1` pelo asset Arch
+  oficial. UI instalada abriu em offscreen. Hermes Agent v0.20.5 segue
+  habilitado/ativo, zero restarts/erros recentes, linger habilitado e chat real
+  pós-upgrade retornou `HERMES_HOST_OK`. 9Router está saudável com 108 modelos,
+  16 provedores e chat HTTP 200; DeepSeek proxy passou modelos+chat. Kimi e Qwen
+  exigem renovar login; Mimo exige credenciais próprias. Registro de autenticação:
+  20 entradas, 8 prontas, 0 essencial ausente; 9Router, OpenCode e Hermes prontos.
+  Nenhum processo QEMU. `grubenv` manteve mtime 2026-08-04 10:19:03; runtime
+  WinVM continua stale e não foi sincronizado por estar fora do escopo IA.
+Conflitos/recuperação: arquivo manual antigo, sem dono e modo 777 em
+  `/usr/lib/phasezero/linux/ui_native/pages/ai_dev.py` bloqueou pacman. Cópia
+  modo 0600 salva em
+  `~/.local/state/phasezero/backups/v1.17.0-preinstall-20260824T1706Z/ai_dev.py`;
+  somente esse caminho foi sobrescrito pelo pacote. `pacman -Qkk` reporta apenas
+  o launcher desktop modificado pelo hook global BigLinux com ação
+  `SoftwareRender`, comportamento esperado e registrado no ai-memory.
+Segredos verificados como ausentes: gitleaks e security-secret-scan verdes;
+  AuthRegistry, status e logs redigem valores. Hermes referencia somente a chave
+  cliente canônica 9Router; nenhum valor foi exposto ou commitado.
+Limitações e riscos restantes: Hermes upstream mantém release sem assinatura,
+  auditoria semântica e pinagem transitiva incompletas; risco aceito pelo operador
+  e exibido como aviso. Kimi/Qwen/Mimo dependem de login humano. Odysseus permanece
+  bloqueado corretamente: commit/dependências/imagens/auditoria e política de
+  workload ainda não aprovados. Não instalar até fechar esses gates.
+Bloqueios reais: nenhum para PhaseZero 1.17.0, Hermes, 9Router, UI, MCP,
+  autenticação essencial ou inferência. Logins opcionais e Odysseus são deferred.
+Próximo passo exato: renovar sessões Kimi/Qwen e fornecer credenciais Mimo apenas
+  se o usuário quiser esses backends; manter Hermes no commit auditado. Não
+  sincronizar GRUB nem implantar Odysseus sem autorização e gates próprios.
 ```
 
 ## Definição de concluído

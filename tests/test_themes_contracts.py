@@ -341,3 +341,20 @@ def test_state_unreadable_exit_code_3(fake_state, fake_config, tmp_path):
     finally:
         os.environ.pop("PZ_THEMES_FAKE_JSON", None)
         os.environ.pop("PZ_THEMES_DBUS_CMD", None)
+
+
+def test_plan_noop_requires_requested_params_to_match(fake_plasma, fake_state, fake_config):
+    """Estado binário igual não torna o plano noop quando o modo pedido difere:
+    system -> dark precisa aplicar, não virar no-op."""
+    result = run_cli("plan", "--feature", "theme.phasezero", "--state", "on", "--param", "mode=dark")
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    assert plan["ok"] is True, plan.get("blockers")
+    action = plan["actions"][0]
+    assert action["current"]["params"]["mode"] == "system"
+    assert action["noop"] is False, "troca de modo foi engolida como noop"
+
+    result = run_cli("plan", "--feature", "theme.phasezero", "--state", "on", "--param", "mode=system")
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    assert plan["actions"][0]["noop"] is True

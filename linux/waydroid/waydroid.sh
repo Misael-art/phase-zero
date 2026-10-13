@@ -23,11 +23,11 @@ SYSTEMD_USER_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 BOOT_HELPER_SOURCE="$PZ_ROOT/linux/waydroid/waydroid-boot-prepare.sh"
 SESSION_SOURCE="$PZ_ROOT/linux/waydroid/waydroid-session.sh"
-SHARES_SOURCE="$PZ_ROOT/linux/waydroid/waydroid-shares-prepare.sh"
+SHARES_SOURCE="${PZ_WAYDROID_SHARES_SOURCE:-$PZ_ROOT/linux/waydroid/waydroid-shares-prepare.sh}"
 DISPLAY_SESSION_SOURCE="$PZ_ROOT/linux/steamdeck/display-session.sh"
 BOOT_HELPER_TARGET="/usr/local/lib/phasezero/waydroid-boot-prepare"
 SESSION_TARGET="/usr/local/lib/phasezero/waydroid-session"
-SHARES_TARGET="/usr/local/lib/phasezero/waydroid-shares-prepare"
+SHARES_TARGET="${PZ_WAYDROID_SHARES_TARGET:-/usr/local/lib/phasezero/waydroid-shares-prepare}"
 DISPLAY_SESSION_TARGET="/usr/local/lib/phasezero/display-session"
 ROOT_ENV_FILE="/etc/phasezero/waydroid.env"
 SERVICE_FILE="/etc/systemd/system/phasezero-waydroid-boot-prepare.service"
@@ -363,7 +363,15 @@ ensure_waydroid_service() {
 waydroid_shares_status() {
     local helper="$SHARES_TARGET"
     [ -x "$helper" ] || helper="$SHARES_SOURCE"
-    [ -f "$helper" ] || return 1
+    if [ ! -f "$helper" ]; then
+        # Valid report: shares tooling not installed yet is a state, not a
+        # failure. Callers (plan_command previews included) stay actionable.
+        jq -nc '{state:"needs-install",
+                 summary:"O suporte de pastas compartilhadas do Waydroid ainda nao foi instalado.",
+                 nextAction:"linux/pz waydroid shares install"}' 2>/dev/null || \
+            printf 'installed=false\n'
+        return 0
+    fi
     PZ_WAYDROID_BOOT_USER="$TARGET_USER" \
         PZ_WAYDROID_SHARE_EXTRA="$SHARE_EXTRA" \
         bash "$helper" status

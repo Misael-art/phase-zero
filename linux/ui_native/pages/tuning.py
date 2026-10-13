@@ -48,6 +48,7 @@ class TuningPage(BasePage):
 
         layout.addWidget(SectionHeader("Ajustes do sistema", "Marque as áreas e aplique."))
 
+        added = False
         for area in TUNE_AREAS:
             action = self.find(f"tune.{area}")
             if action is None:
@@ -57,6 +58,12 @@ class TuningPage(BasePage):
             cb.setToolTip(TUNE_DESCRIPTIONS.get(area, ""))
             self.checkboxes[area] = cb
             layout.addWidget(cb)
+            added = True
+        if not added:
+            empty = QLabel("Nenhuma área de ajuste disponível nesta instalação.")
+            empty.setObjectName("cardDescription")
+            empty.setWordWrap(True)
+            layout.addWidget(empty)
 
         btn_row = QHBoxLayout()
         apply_btn = QPushButton("Aplicar selecionados")

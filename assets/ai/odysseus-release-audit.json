@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "odysseus",
+  "auditedAt": "2026-08-24T14:37:28Z",
+  "source": {
+    "repository": "https://github.com/odysseus-dev/odysseus.git",
+    "branch": "dev",
+    "commit": "b4d12932a953b3cdfc745b3525c7ecd5dffd8b3c",
+    "tree": "b8306f0afaacfb3776df10796fef2c2f14024d3f",
+    "commitSignatureVerified": true
+  },
+  "files": {
+    "LICENSE": "d8a6cc31abc16b6748c7a21f21611f5a1ec33f67d22ca23d7da1c19b95496bee",
+    "Dockerfile": "3e3eba7c4dc3de6579284b4f21e8070fff5ea1314b6238e297f40f531dd20d64",
+    "docker-compose.yml": "dcd78c6989b9ea63568d86617651654c58f4511911c3ae72fe87b4d303a8fb69",
+    "pyproject.toml": "dbc47dabc53f16fd384a661020cd532179e987f639246ba05e4a2451eb9ff39d",
+    "package-lock.json": "bfaa75c4fca1a90e6d711250573fd1b4d025f65e5c0305778b13c868eccfa299"
+  },
+  "license": "AGPL-3.0-only",
+  "baseImagesPinned": true,
+  "pythonDependenciesLocked": false,
+  "shellExecutionSurface": true,
+  "dockerSocketMountedByPhaseZero": false,
+  "semanticAudit": false,
+  "approvedForDeploy": false,
+  "findings": [
+    "upstream commit signature is verified",
+    "upstream Dockerfile uses mutable python:3.14-slim twice; PhaseZero rewrites both to an approved OCI index digest before build",
+    "requirements.txt leaves most Python dependencies unpinned",
+    "application intentionally exposes authenticated shell and subprocess execution surfaces",
+    "PhaseZero base compose path does not mount the host Docker socket",
+    "semantic security audit is incomplete"
+  ]
+}

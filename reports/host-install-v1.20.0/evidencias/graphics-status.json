@@ -1,0 +1,93 @@
+{
+  "host": {
+    "gpus": [
+      {
+        "card": "card1",
+        "vendor": "amd",
+        "vendorId": "0x1002",
+        "deviceId": "0x163f",
+        "pci": "0000:04:00.0"
+      }
+    ],
+    "renderNodes": [
+      "/dev/dri/renderD128"
+    ],
+    "selectedRenderNode": "/dev/dri/renderD128",
+    "kvm": true,
+    "iommuGroups": 0
+  },
+  "qemu": {
+    "binary": "/usr/sbin/qemu-system-x86_64",
+    "virtioVgaGl": true,
+    "virtioGpuGlPci": true,
+    "venus": true,
+    "rutabaga": true,
+    "displays": {
+      "gtk": true,
+      "sdl": true,
+      "dbus": true,
+      "spiceApp": true
+    }
+  },
+  "libvirt": {
+    "domain": "",
+    "state": "missing",
+    "videoModel": "",
+    "graphicsType": ""
+  },
+  "lookingGlass": {
+    "client": ""
+  },
+  "vfio": {
+    "viability": "blocked",
+    "pciDevices": "",
+    "normalizedPciDevices": "",
+    "devices": [],
+    "blockers": [
+      "IOMMU groups ausentes neste boot (VFIO indisponivel)",
+      "PZ_WINDOWS_VM_PCI_DEVICES nao configurado",
+      "looking-glass-client ausente no host"
+    ]
+  },
+  "config": {
+    "profile": "compat"
+  },
+  "recommended": {
+    "profile": "compat",
+    "experimentalCandidate": "virtio-gl",
+    "note": "v1: compat permanece estavel; VirtIO GL valida caminho host, sem garantir 3D no Windows; VFIO permanece plan-only"
+  },
+  "profiles": {
+    "compat": {
+      "eligible": true,
+      "mode": "stable",
+      "blockers": []
+    },
+    "virtio-gl": {
+      "eligible": true,
+      "mode": "experimental",
+      "blockers": []
+    },
+    "virtio-venus": {
+      "eligible": true,
+      "mode": "experimental",
+      "blockers": []
+    },
+    "rutabaga": {
+      "eligible": false,
+      "mode": "experimental-blocked",
+      "blockers": [
+        "driver guest Windows para rutabaga/gfxstream nao validado (apply bloqueado na v1)"
+      ]
+    },
+    "vfio-looking-glass": {
+      "eligible": false,
+      "mode": "plan-only",
+      "blockers": [
+        "IOMMU groups ausentes neste boot (VFIO indisponivel)",
+        "PZ_WINDOWS_VM_PCI_DEVICES nao configurado",
+        "looking-glass-client ausente no host"
+      ]
+    }
+  }
+}

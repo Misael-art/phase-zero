@@ -14,19 +14,21 @@ source "$DIR/osd.sh"
 PZ_BIN="$PZ_ROOT/linux/pz"
 
 keyboard_visible_now() {
+    # A leftover onboard/wvkbd process is not an open keyboard on Wayland.
     bash "$DIR/input-actions.sh" status 2>/dev/null |
-        jq -e '.kde.visible == true' >/dev/null 2>&1 && return 0
-    pgrep -x wvkbd-mobintl >/dev/null 2>&1 || pgrep -x wvkbd >/dev/null 2>&1 ||
-        pgrep -x onboard >/dev/null 2>&1
+        jq -e '.open.effective == true or .kde.visible == true' >/dev/null 2>&1
 }
 
 run_keyboard_toggle() {
+    local was_open=false
+    keyboard_visible_now && was_open=true
     bash "$DIR/input-actions.sh" keyboard || true
-    sleep 0.4
     if keyboard_visible_now; then
-        pz_osd_show "input-keyboard-virtual-on" "Meta+Shift+F4 — Teclado virtual ativado"
+        pz_osd_show "input-keyboard-virtual-on" "Teclado virtual aberto"
+    elif [ "$was_open" = true ]; then
+        pz_osd_show "input-keyboard-virtual-off" "Teclado virtual fechado"
     else
-        pz_osd_show "input-keyboard-virtual-off" "Meta+Shift+F4 — Teclado virtual desativado"
+        pz_osd_show "input-keyboard-virtual-off" "Teclado virtual não abriu"
     fi
 }
 
@@ -63,8 +65,24 @@ case "$ACTION" in
     voice)
         exec bash "$DIR/voice-typing.sh" toggle
         ;;
+    overview)
+        # KWin already owns Meta+W for the Overview effect; going through its
+        # D-Bus entry means the controller binding and the keyboard shortcut
+        # trigger the same thing even if the user rebinds the key.
+        pz_osd_show "view-presentation" "Meta+Shift+F9 — Visão geral das atividades"
+        if command -v qdbus6 >/dev/null 2>&1; then
+            exec qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.toggleEffect overview
+        fi
+        pz_error "qdbus6 ausente; não consegui alternar a visão geral"
+        exit 1
+        ;;
+    controller-reverted)
+        # The revert timer calls this. Without it the daemon just vanishes and
+        # the map looks broken rather than withdrawn.
+        pz_osd_show "input-gamepad" "Mapa do controle revertido (não confirmado). Rode: pz steamdeck controller start"
+        ;;
     *)
-        pz_error "usage: hotkey-actions.sh (handheld|docked-monitor|docked-tv|keyboard|console|dev|cheatsheet|voice)"
+        pz_error "usage: hotkey-actions.sh (handheld|docked-monitor|docked-tv|keyboard|console|dev|cheatsheet|voice|overview|controller-reverted)"
         exit 1
         ;;
 esac

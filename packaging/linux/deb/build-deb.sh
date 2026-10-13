@@ -37,6 +37,8 @@ chmod 0755 "$PKG/DEBIAN/postinst"
 cp -a "$SOURCE/linux" "$SOURCE/profiles" "$SOURCE/assets" "$SOURCE/version.json" "$PKG/usr/lib/phasezero/"
 find "$PKG/usr/lib/phasezero" -type d -name __pycache__ -exec rm -rf {} +
 install -m755 "$SOURCE/packaging/linux/phasezero-control-center" "$PKG/usr/bin/"
+# PZ-AUD-001: ship `pz` on PATH (SSH bridge calls it remotely).
+install -m755 "$SOURCE/packaging/linux/pz" "$PKG/usr/bin/"
 install -m644 "$SOURCE/packaging/linux/io.phasezero.ControlCenter.desktop" "$PKG/usr/share/applications/"
 install -m644 "$SOURCE/packaging/linux/io.phasezero.ControlCenter.metainfo.xml" "$PKG/usr/share/metainfo/"
 install -m644 "$SOURCE/packaging/linux/io.phasezero.ControlCenter.svg" "$PKG/usr/share/icons/hicolor/scalable/apps/"

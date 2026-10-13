@@ -22,20 +22,21 @@ pz_server_apply() {
 
     if [ "$llm" = 1 ]; then
         pz_info "server: setting up local LLM (Ollama)"
-        bash "$PZ_SERVER_ROOT/linux/server/llm-server.sh" install || pz_warn "llm-server setup reported issues"
+        # PZ-AUD-003: workload failures are essential; never WARN-and-continue.
+        bash "$PZ_SERVER_ROOT/linux/server/llm-server.sh" install || return 1
         flags+=(--llm)
     fi
     if [ "$homelab" = 1 ]; then
         pz_info "server: bringing up homelab stack"
         local -a homelab_args=(up)
         [ "$with_extras" = 1 ] && homelab_args+=(--extras)
-        bash "$PZ_SERVER_ROOT/linux/server/homelab-stack.sh" "${homelab_args[@]}" || pz_warn "homelab stack reported issues"
+        bash "$PZ_SERVER_ROOT/linux/server/homelab-stack.sh" "${homelab_args[@]}" || return 1
         flags+=(--homelab)
         [ "$with_extras" = 1 ] && flags+=(--extras)
     fi
     if [ "$hermes" = 1 ]; then
         pz_info "server: configuring Hermes remote actuation"
-        bash "$PZ_SERVER_ROOT/linux/server/hermes-remote.sh" setup || pz_warn "hermes setup reported issues"
+        bash "$PZ_SERVER_ROOT/linux/server/hermes-remote.sh" setup || return 1
         flags+=(--hermes)
     fi
 

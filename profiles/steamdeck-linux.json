@@ -5,6 +5,7 @@
   "os": ["linux"],
   "packages": {
     "linux": {
+      "archRepos": ["multilib"],
       "pacman": [
         "steam",
         "steam-devices",
@@ -19,7 +20,6 @@
         "power-profiles-daemon",
         "bluez",
         "bluez-utils",
-        "maliit-keyboard",
         "onboard",
         "sxhkd",
         "xorg-xrandr",
@@ -30,10 +30,11 @@
         "github-cli",
         "jq",
         "unzip",
-        "bc",
-        "ryzenadj"
+        "bc"
       ],
       "yay": [
+        "maliit-keyboard",
+        "ryzenadj",
         "wvkbd",
         "swhkd"
       ],

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "tool": "phasezero-proxy-manifest",
+  "note": "Canonical cross-OS contract for AI proxies. Linux enforces repo+pin+port from this file (see proxy-suite.sh manifest check); the Windows catalog must match repo/port/model or carry an explicit migration flag. Tier: supported = batch-installable; experimental = explicit id only; external = separate manager.",
+  "proxies": [
+    {
+      "id": "kimiproxy",
+      "tier": "supported",
+      "repository": "https://github.com/pedrofariasx/kimiproxy.git",
+      "pin": {"commit": "48e2d8b46c630dd032b97d70f736dffd97c92ee7"},
+      "runtime": "node",
+      "port": 3010,
+      "auth": {"linux": "browser-session", "windows": "browser-session"},
+      "defaultModel": "k2d6-thinking",
+      "models": ["k2d6-thinking", "k2d6"]
+    },
+    {
+      "id": "qwenproxy",
+      "tier": "supported",
+      "repository": "https://github.com/pedrofariasx/qwenproxy.git",
+      "pin": {"commit": "776ca7e79a7a3267f3affc4cc5bb431dbcdfbc86"},
+      "runtime": "node",
+      "port": 3011,
+      "auth": {"linux": "browser-session", "windows": "browser-session"},
+      "defaultModel": "qwen3.6-plus",
+      "models": ["qwen3.6-plus", "qwen3.6-plus-no-thinking"]
+    },
+    {
+      "id": "deepsproxy",
+      "tier": "supported",
+      "repository": "https://github.com/pedrofariasx/deepsproxy.git",
+      "pin": {"commit": "6b8cacc4587124a4f02a9e9334e0034a7ef7065d"},
+      "runtime": "node",
+      "port": 3012,
+      "auth": {"linux": "browser-session", "windows": "browser-session"},
+      "defaultModel": "deepseek-v4-flash",
+      "models": ["deepseek-v4-flash", "deepseek-v4-flash-thinking", "deepseek-v4-pro", "deepseek-v4-pro-thinking"],
+      "migration": {
+        "windowsDefaultModel": "deepseek-v4-pro differs from canonical deepseek-v4-flash; converge on manifest default (PZ-AUD-019)"
+      }
+    },
+    {
+      "id": "mimo-ai-proxy",
+      "tier": "supported",
+      "repository": "https://github.com/pedrofariasx/mimo-ai-proxy.git",
+      "pin": {"commit": "1149d81ff07ed123ce9894d4f2eadbb81df0332b"},
+      "runtime": "official-api",
+      "port": 3013,
+      "auth": {"linux": "official-api-key", "windows": "env-session"},
+      "defaultModel": "mimo-v2.5-pro",
+      "models": ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-no-thinking"],
+      "migration": {
+        "windowsAuth": "Windows still runs the Go env-session scraper; migrate to the official API contract (PZ-AUD-019/020)"
+      }
+    },
+    {
+      "id": "9router",
+      "tier": "external-manager",
+      "repository": "https://github.com/decolua/9router.git",
+      "runtime": "npm",
+      "port": 20128,
+      "auth": {"linux": "api-key-env", "windows": "api-key-env"},
+      "defaultModel": null,
+      "models": []
+    }
+  ]
+}

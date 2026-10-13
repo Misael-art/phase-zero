@@ -46,6 +46,54 @@ def test_status_reports_channel_and_root_conflicts(tmp_path, monkeypatch):
     assert payload["command"] == ""
 
 
+def test_status_ignores_caller_xdg_data_home_when_elevated(tmp_path, monkeypatch):
+    """Elevated runs must inspect the target account, not the caller's.
+
+    sudo/pkexec keep XDG_DATA_HOME pointing at the invoking account, so
+    honouring it blindly hides a user install that is really there.
+    """
+    home = tmp_path / "home"
+    current = home / ".local/share/phasezero/current"
+    current.mkdir(parents=True)
+    (current / "version.json").write_text('{"version":"2.0.0"}', encoding="utf-8")
+    monkeypatch.setenv("HOME", "/root")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "root-data"))
+    monkeypatch.setattr(manager, "_target_account", lambda: account(home))
+    monkeypatch.setattr(manager, "SYSTEM_ROOTS", ())
+    monkeypatch.setattr(manager, "_native_package", lambda: {
+        "installed": False, "manager": "", "version": "", "alteredFiles": 0,
+    })
+    monkeypatch.setattr(manager, "_flatpak", lambda scope: {
+        "installed": False, "scope": scope, "version": "",
+    })
+    monkeypatch.setattr(manager.shutil, "which", lambda _command: None)
+    payload = manager.status()
+    assert payload["activeChannels"] == ["user"]
+    assert payload["user"] == {
+        "installed": True, "version": "2.0.0", "root": str(current.resolve()),
+    }
+
+
+def test_status_honours_xdg_data_home_of_the_running_account(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    data_home = tmp_path / "custom-data"
+    current = data_home / "phasezero/current"
+    current.mkdir(parents=True)
+    (current / "version.json").write_text('{"version":"3.1.0"}', encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
+    monkeypatch.setattr(manager, "_target_account", lambda: account(home))
+    monkeypatch.setattr(manager, "SYSTEM_ROOTS", ())
+    monkeypatch.setattr(manager, "_native_package", lambda: {
+        "installed": False, "manager": "", "version": "", "alteredFiles": 0,
+    })
+    monkeypatch.setattr(manager, "_flatpak", lambda scope: {
+        "installed": False, "scope": scope, "version": "",
+    })
+    monkeypatch.setattr(manager.shutil, "which", lambda _command: None)
+    assert manager.status()["user"]["version"] == "3.1.0"
+
+
 def test_status_prefers_target_user_launcher_when_root_path_cannot_see_it(tmp_path, monkeypatch):
     home = tmp_path / "home"
     current = home / ".local/share/phasezero/current"

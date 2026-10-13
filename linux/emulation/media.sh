@@ -742,7 +742,12 @@ cmd_status() {
     echo "  RetroDECK downloaded_media: [$retrodeck_media_status] $retrodeck_media -> $PZ_MEDIA_ROOT"
     [ "$retrodeck_media_status" != "linked" ] && ret=1
 
-    return "$ret"
+    # Drift is a reported state, not a tool failure (text mode now matches the
+    # --json envelope, which already returns 0). The plan command heals it.
+    if [ "$ret" -ne 0 ]; then
+        echo "  next: run 'pz emulation media apply --plan' to converge divergent paths"
+    fi
+    return 0
 }
 
 cmd_index() {

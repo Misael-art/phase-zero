@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -52,6 +53,49 @@ DEFAULT_WEIGHTS = {
     "latency": 5,
 }
 MAX_CHAIN = 5
+
+
+def _contract_connection_id(provider: str, source_id: object) -> str:
+    """Match opaque IDs emitted by account_adapters.router_provider_accounts."""
+    if not isinstance(source_id, (str, int)) or not str(source_id).strip():
+        source_id = "default"
+    digest = hashlib.sha256(f"{provider}:{source_id}".encode("utf-8")).hexdigest()[:24]
+    return f"connection:acct:{provider}:{digest}"
+
+
+def _grant_value(grant: object, attribute: str, key: str, default: object = None) -> object:
+    if isinstance(grant, dict):
+        return grant.get(key, default)
+    return getattr(grant, attribute, default)
+
+
+def _granted_connection_for_scope(
+    grant: object, consumer_id: str, required_scope: str,
+) -> str:
+    """Return only a structurally valid, explicitly consented active grant."""
+    connection_id = _grant_value(grant, "connection_id", "connectionId", "")
+    enabled = _grant_value(grant, "enabled", "enabled", False)
+    scopes = _grant_value(grant, "scopes", "scopes", ())
+    consented_at = _grant_value(grant, "consented_at", "consentedAt", "")
+    revoked_at = _grant_value(grant, "revoked_at", "revokedAt", "")
+    if (
+        _grant_value(grant, "consumer_id", "consumerId", "") != consumer_id
+        or type(enabled) is not bool or not enabled
+        or not isinstance(connection_id, str) or not connection_id.strip()
+        or not isinstance(scopes, (list, tuple))
+        or any(not isinstance(scope, str) or not scope.strip() for scope in scopes)
+        or required_scope not in scopes
+        or not isinstance(consented_at, str) or not consented_at
+        or not isinstance(revoked_at, str) or revoked_at
+    ):
+        return ""
+    try:
+        consent_timestamp = datetime.fromisoformat(consented_at.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if consent_timestamp.tzinfo is None:
+        return ""
+    return connection_id
 
 # Curated per-task priorities. Real inventory, health, quota, cooldown and
 # capabilities always win over these lists.
@@ -121,11 +165,14 @@ ERROR_WEIGHT = {401: 0.15, 403: 0.15, 429: 0.4, 400: 0.6}
 ERROR_ACTIVE_WINDOW = 6 * 3600  # seconds
 COOLDOWN_FIELDS = {"backoffLevel", "cooldownUntil", "cooldownEndsAt"}
 
+# Compared against key.lower(): keep every entry lowercase (camelCase entries
+# here never matched, so lastError/errorMessage leaked raw upstream bodies).
 REDACT_KEYS = {
     "apikey", "key", "secret", "token", "email", "password", "passwd",
-    "authorization", "headers", "lastError", "lastErrorAt", "errorMessage",
-    "apiKey", "accessKey", "refreshToken",
+    "authorization", "headers", "lasterror", "lasterrorat", "errormessage",
+    "accesskey", "refreshtoken",
 }
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 TASKS = ("code", "analysis", "plan")
 CLIENTS = ("claude", "opencode")
@@ -161,6 +208,9 @@ def _redact(value, depth: int = 0):
         return out
     if isinstance(value, list):
         return [_redact(v, depth + 1) for v in value]
+    if isinstance(value, str) and EMAIL_RE.search(value):
+        # Connection names are often the account e-mail.
+        value = EMAIL_RE.sub("<email>", value)
     if isinstance(value, str) and len(value) > 256:
         return value[:128] + "...<truncated>"
     return value
@@ -272,12 +322,11 @@ def _load_opencode_manager():
 
 
 def refresh_opencode_catalog(client: R9Client, backup_dir: Path | None = None) -> dict:
-    """Refresh provider.9router.models in opencode.json so every 9Router combo
-    (incl. phasezero-*) is selectable. No-op when opencode is absent.
+    """Ask the OpenCode manager to sync; preserve config if grant binding blocks it.
 
-    When ``backup_dir`` is given and the catalog actually changes, the previous
-    opencode.json bytes are written there for byte-level rollback; the path is
-    returned as ``beforeBackup`` (JSON-serializable). Failure is non-fatal.
+    When the manager updates a catalog, ``backup_dir`` stores prior bytes for
+    rollback. Grant enforcement failures remain explicit and non-fatal to the
+    independent 9Router combo operation.
     """
     path = opencode_config_path()
     result: dict = {
@@ -313,7 +362,11 @@ def refresh_opencode_catalog(client: R9Client, backup_dir: Path | None = None) -
             result["beforeBackup"] = str(backup)
     except Exception as exc:  # catalog sync must never abort an apply
         result["skipped"] = True
-        result["reason"] = "sync failed"
+        if "connection-grant-not-enforceable" in str(exc):
+            result["reason"] = "OpenCode sync blocked until account-bound grants are enforceable"
+            result["blockedReason"] = "connection-grant-not-enforceable"
+        else:
+            result["reason"] = "sync failed"
         result["error"] = str(exc) if not str(exc) else "sync error"
     return result
 
@@ -552,46 +605,102 @@ def ready_statuses() -> set:
     return {"active", "ok", "ready", "healthy", "9router"}
 
 
-def parse_quota(payload: dict) -> tuple[str, dict, float]:
-    """Return (state, redacted quota, confidence)."""
+def parse_quota(payload: dict, *, observed_at: str | None = None) -> tuple[str, dict, float]:
+    """Return redacted quota plus explicit provenance and local observation time.
+
+    Values inferred from used/total stay in separate estimate fields and never
+    become observed quota or routing-filter input.
+    """
+    observed_at = _quota_timestamp(observed_at) or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    provenance = {"source": "9router_usage_api", "observedAt": observed_at}
     if payload.get("_unavailable"):
-        return "unavailable", {}, QUOTA_CONFIDENCE["unavailable"]
+        return "unavailable", {**provenance, "error": "unavailable"}, QUOTA_CONFIDENCE["unavailable"]
     if isinstance(payload.get("quotas"), dict) and payload["quotas"]:
         buckets = []
+        observed_values = False
         for name, bucket in payload["quotas"].items():
             if not isinstance(bucket, dict):
                 continue
-            used = bucket.get("used")
-            total = bucket.get("total")
-            remaining = bucket.get("remaining")
-            pct = bucket.get("remainingPercentage")
-            if pct is None and isinstance(total, (int, float)) and isinstance(used, (int, float)) and total:
-                pct = round((1 - used / total) * 100, 1)
+            used = _quota_number(bucket.get("used"))
+            total = _quota_number(bucket.get("total"))
+            remaining = _quota_number(bucket.get("remaining"))
+            pct = _quota_number(bucket.get("remainingPercentage"), percentage=True)
+            observed_values = observed_values or remaining is not None or pct is not None
+            estimate_pct = None
+            if pct is None and total is not None and total > 0 and used is not None and used <= total:
+                estimate_pct = round((1 - used / total) * 100, 1)
+            dimension = bucket.get("dimension")
+            if not isinstance(dimension, str) or not dimension.strip():
+                dimension = name if isinstance(name, str) and name.strip() else "unknown"
+            unit = bucket.get("unit")
+            if not isinstance(unit, str) or not unit.strip():
+                unit = "unknown"
+            reset_at = _quota_timestamp(bucket.get("resetAt"))
             buckets.append({
                 "name": str(name),
+                "dimension": dimension,
+                "unit": unit,
                 "used": used,
                 "total": total,
-                "remaining": remaining if remaining is not None else (total - used if total else None),
+                "remaining": remaining,
                 "remainingPercentage": pct,
-                "resetAt": bucket.get("resetAt"),
-                "unlimited": bool(bucket.get("unlimited", False)),
+                "estimatedRemainingPercentage": estimate_pct,
+                "resetAt": reset_at,
+                "unlimited": bucket.get("unlimited") is True,
             })
-        return "known", {"plan": payload.get("plan"), "buckets": buckets}, QUOTA_CONFIDENCE["known"]
+        if buckets:
+            state = "known" if observed_values else "unknown"
+            return state, {**provenance, "plan": payload.get("plan"), "buckets": buckets}, QUOTA_CONFIDENCE[state]
     message = str(payload.get("message") or "")
     if "not implemented" in message.lower() or "not available" in message.lower():
-        return "unknown", {"note": "usage api not implemented"}, QUOTA_CONFIDENCE["unknown"]
-    return "unavailable", {"note": "usage api unavailable"}, QUOTA_CONFIDENCE["unavailable"]
+        return "unknown", {**provenance, "error": "not_implemented"}, QUOTA_CONFIDENCE["unknown"]
+    return "unavailable", {**provenance, "error": "unavailable"}, QUOTA_CONFIDENCE["unavailable"]
+
+
+def _quota_number(value: object, *, percentage: bool = False) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        if not math.isfinite(value):
+            return None
+    except (OverflowError, TypeError):
+        return None
+    if value < 0 or (percentage and value > 100):
+        return None
+    return value
+
+
+def _quota_timestamp(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return value if parsed.tzinfo is not None else None
 
 
 def quota_remaining_pct(quota: dict) -> float | None:
-    buckets = [b for b in quota.get("buckets", []) if b.get("remainingPercentage") is not None]
-    if not buckets:
+    buckets = quota.get("buckets") if isinstance(quota, dict) else None
+    if not isinstance(buckets, list):
         return None
-    return min(float(b["remainingPercentage"]) for b in buckets)
+    values = [
+        float(value)
+        for bucket in buckets if isinstance(bucket, dict)
+        if (value := _quota_number(bucket.get("remainingPercentage"), percentage=True)) is not None
+    ]
+    return min(values) if values else None
 
 
 def quota_reset_at(quota: dict) -> str | None:
-    resets = [b.get("resetAt") for b in quota.get("buckets", []) if b.get("resetAt")]
+    buckets = quota.get("buckets") if isinstance(quota, dict) else None
+    if not isinstance(buckets, list):
+        return None
+    resets = [
+        reset
+        for bucket in buckets if isinstance(bucket, dict)
+        if (reset := _quota_timestamp(bucket.get("resetAt"))) is not None
+    ]
     return min(resets) if resets else None
 
 
@@ -606,7 +715,12 @@ def build_inventory(client: R9Client, refresh_quota: bool = False) -> dict:
     for conn in providers:
         c = classify_connection(conn)
         if refresh_quota:
-            payload = client.usage_connection(c.id)
+            try:
+                payload = client.usage_connection(c.id)
+            except Exception:
+                # Quota is optional evidence. A partial probe failure must not
+                # remove the provider/account row from the inventory.
+                payload = {"_unavailable": True}
             c.quota_state, c.quota, c.quota_confidence = parse_quota(payload)
         conns.append(c)
 
@@ -697,9 +811,26 @@ def build_inventory(client: R9Client, refresh_quota: bool = False) -> dict:
             for c in conns
         ],
         "availability": redact(availability),
+        "providerAvailability": provider_availability(statuses),
         "usage": {"totalRequests": usage.get("totalRequests"), "totalCost": usage.get("totalCost")},
         "secretsRedacted": True,
     }
+
+
+def provider_availability(statuses: dict) -> dict:
+    """`health` only says the gateway answers; this says whether anything
+    behind it can serve (it stayed true with 12 of 15 connections down)."""
+    states = [entry.get("state") for entry in statuses.values()]
+    total = len(states)
+    ready = sum(1 for state in states if state in ("ready", "cooldown"))
+    unavailable = sum(1 for state in states if state == "unavailable")
+    if total == 0 or ready == 0:
+        state = "down"
+    elif unavailable:
+        state = "degraded"
+    else:
+        state = "ok"
+    return {"state": state, "ready": ready, "unavailable": unavailable, "total": total}
 
 
 # ---------------------------------------------------------------------------
@@ -744,7 +875,9 @@ def _cost_score(stats: dict, provider: str) -> float:
     return max(0.0, min(1.0, 1.0 - (per_req - 0.005) / 0.045))
 
 
-def recommend(client: R9Client, config: Config, inventory: dict, task: str, policy: str) -> dict:
+def recommend(client: R9Client, config: Config, inventory: dict, task: str, policy: str,
+              *, consumer_id: str | None = None, grants: list | tuple = (),
+              required_scope: str = "inference") -> dict:
     """Score every eligible model and return an ordered recommendation chain."""
     if task not in TASKS:
         raise RedactionError(f"unknown task '{task}' (expected {', '.join(TASKS)})")
@@ -760,12 +893,32 @@ def recommend(client: R9Client, config: Config, inventory: dict, task: str, poli
     local_boost = config.policy_extra(policy, "localBoost", 1.0)
     oauth_penalty = config.policy_extra(policy, "oauthPenalty", 1.0)
 
-    conns = {c["id"]: c for c in inventory["connections"]}
+    grant_exclusions: list[dict] = []
+    inventory_connections = inventory["connections"]
+    if consumer_id is not None:
+        granted_ids = {
+            connection_id for grant in grants
+            if (connection_id := _granted_connection_for_scope(
+                grant, consumer_id, required_scope,
+            ))
+        }
+        eligible_connections = []
+        for connection in inventory_connections:
+            connection_id = _contract_connection_id(
+                str(connection.get("provider") or ""), connection.get("id"))
+            if connection_id in granted_ids:
+                eligible_connections.append(connection)
+            else:
+                grant_exclusions.append({"connection": "<redacted>",
+                                         "reason": f"no active grant for consumer {consumer_id}"})
+        inventory_connections = eligible_connections
+
+    conns = {c["id"]: c for c in inventory_connections}
     models = {m["id"]: m for m in inventory["models"]}
     usage = inventory.get("usage", {})
     now = time.time()
 
-    excluded: list[dict] = []
+    excluded: list[dict] = grant_exclusions
     candidates: list[Candidate] = []
 
     for mid, m in models.items():
@@ -998,9 +1151,40 @@ def combo_models_match(combo: dict | None, models: list[str]) -> bool:
     return list(combo.get("models", [])) == list(models)
 
 
+def request_scoped_grants_enforced() -> bool:
+    """Return whether 9Router can bind every inference request to one grant.
+
+    Current combo/model routes cannot pin an account and may fail over to
+    sibling connections. Mutations stay blocked until a supported API and an
+    integration test prove request-scoped account enforcement.
+    """
+    return False
+
+
+def blocked_apply_result(task: str, policy: str) -> dict:
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "status": "blocked",
+        "blockedReason": "connection-grant-not-enforceable",
+        "message": (
+            "Aplicação bloqueada: 9Router não vincula cada requisição a uma conexão "
+            "autorizada e pode usar outra conta ou fallback pago. Nenhum combo foi alterado."
+        ),
+        "task": task,
+        "policy": policy,
+        "dryRun": False,
+        "applied": False,
+        "changes": {},
+        "secretsRedacted": True,
+    }
+
+
 def apply_plan(client: R9Client, config: Config, task: str, policy: str,
                dry_run: bool = False, assume_yes: bool = False, override: dict | None = None) -> dict:
-    """Materialize managed combos for the recommendation chain (transactional)."""
+    """Preview route combos; block mutation until request grants can be enforced."""
+    if not dry_run and not request_scoped_grants_enforced():
+        return blocked_apply_result(task, policy)
+
     manager = ComboManager(client)
     inventory = build_inventory(client, refresh_quota=True)
     reco = recommend(client, config, inventory, task, policy)
@@ -1211,22 +1395,15 @@ def child_env(client: R9Client) -> dict:
 def run_client(client: R9Client, config: Config, task: str, client_name: str, args: list[str]) -> int:
     if client_name not in CLIENTS:
         raise RedactionError(f"unknown client '{client_name}' (expected {', '.join(CLIENTS)})")
-    inventory = build_inventory(client, refresh_quota=True)
-    reco = recommend(client, config, inventory, task, "balanced")
-    chain = recommendation_chain(reco)
-    if not chain:
-        raise RedactionError("no eligible model; cannot start session")
-    top = chain[0]
-    # Recompute route before session: ensure phasezero-<task> combo matches plan.
-    apply_plan(client, config, task, "balanced", dry_run=False, assume_yes=True)
-
-    env = child_env(client)
-    if client_name == "claude":
-        cmd = [shutil.which("claude") or "claude", "--model", top]
-    else:
-        cmd = [shutil.which("opencode") or "opencode", "run", "--model", top]
-    cmd += list(args)
-    return subprocess.call(cmd, env=env)
+    # 9Router combos and model IDs cannot pin one consumer to one connection.
+    # Launching a client here could therefore use another account or fall back
+    # to a paid provider even when a grant exists. Keep generic route management
+    # available, but fail closed for consumer session launch until upstream
+    # exposes an enforceable account-bound selection mechanism.
+    raise RedactionError(
+        "consumer session launch is disabled: 9Router cannot enforce a connection grant; "
+        "no client process was started"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1291,6 +1468,22 @@ def _print_json(obj) -> None:
 
 
 def cmd_status(args) -> int:
+    try:
+        return _cmd_status_impl(args)
+    except RedactionError as exc:
+        # 9Router ausente/sem chave é estado acionável, não falha de leitura.
+        _print_json({
+            "schemaVersion": SCHEMA_VERSION,
+            "state": "needs-config",
+            "summary": "9Router ainda não foi configurado.",
+            "detail": str(exc),
+            "nextAction": "linux/pz ai routing inventory",
+            "secretsRedacted": True,
+        })
+        return 0
+
+
+def _cmd_status_impl(args) -> int:
     cached = args.cached
     client = R9Client()
     if cached:
@@ -1411,6 +1604,10 @@ def cmd_plan(args) -> int:
 
 
 def cmd_apply(args) -> int:
+    if not args.dry_run and not request_scoped_grants_enforced():
+        _print_json(blocked_apply_result(args.task, args.policy))
+        return 2
+
     config = Config.load(create=not args.dry_run)
     client = R9Client()
     override = None
@@ -1426,7 +1623,7 @@ def cmd_apply(args) -> int:
     result = apply_plan(client, config, args.task, args.policy,
                         dry_run=args.dry_run, assume_yes=args.yes, override=override)
     _print_json(result)
-    return 0
+    return 2 if result.get("status") == "blocked" else 0
 
 
 def cmd_run(args) -> int:
@@ -1493,7 +1690,10 @@ def main(argv: list[str] | None = None) -> int:
     p_plan.add_argument("--json", action="store_true", help="accepted for catalog compatibility")
     p_plan.set_defaults(func=cmd_plan)
 
-    p_apply = sub.add_parser("apply", help="Materialize PhaseZero-managed combos transactionally")
+    p_apply = sub.add_parser(
+        "apply",
+        help="Blocked until each request enforces one granted connection; --dry-run previews only",
+    )
     p_apply.add_argument("--task", choices=TASKS, required=True)
     p_apply.add_argument("--policy", choices=POLICY_NAMES, default="balanced")
     p_apply.add_argument("--dry-run", action="store_true", help="no files, no combos, no state")
@@ -1501,7 +1701,7 @@ def main(argv: list[str] | None = None) -> int:
     p_apply.add_argument("--chain", help="comma-separated model ids overriding the recommendation order")
     p_apply.set_defaults(func=cmd_apply)
 
-    p_run = sub.add_parser("run", help="Recompute route, materialize combo, launch client")
+    p_run = sub.add_parser("run", help="Blocked until consumer-scoped connection grants are enforceable")
     p_run.add_argument("task", choices=TASKS)
     p_run.add_argument("--client", choices=CLIENTS, required=True)
     p_run.add_argument("--", dest="args", nargs=argparse.REMAINDER, default=[])

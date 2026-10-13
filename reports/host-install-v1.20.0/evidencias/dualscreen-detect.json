@@ -1,0 +1,10 @@
+{
+  "available": true,
+  "mode": "desktop-kwin",
+  "externalConnector": "DP-1",
+  "internalConnector": "card1-eDP-1",
+  "externalResolution": "2560x1080",
+  "externalKwinIndex": "unknown",
+  "internalKwinIndex": "unknown",
+  "note": "Desktop Mode (KWin) only; Game Mode (gamescope) is single-output"
+}

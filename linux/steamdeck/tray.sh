@@ -95,7 +95,8 @@ cheatsheet_toggle() {
         "Meta+Shift+F5" "Steam Gamepad UI" \
         "Meta+Shift+F6" "Sessão desktop/dev" \
         "Meta+Shift+F7" "Esta tabela de atalhos" \
-        "Meta+Shift+F8" "Ditado por voz (falar para digitar)" >/dev/null 2>&1 &
+        "Meta+Shift+F8" "Ditado por voz (falar para digitar)" \
+        "Meta+Shift+F9" "Visão geral das atividades" >/dev/null 2>&1 &
     echo "$!" > "$SHEET_PIDFILE"
     disown 2>/dev/null || true
 }

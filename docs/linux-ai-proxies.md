@@ -7,7 +7,9 @@ Implementada por `linux/ai/proxy-suite.sh`. Instalação é por usuário e não 
 ```bash
 linux/pz ai proxies status all
 linux/pz ai proxies plan all
-linux/pz ai proxies install all
+linux/pz ai proxies ensure kimiproxy
+linux/pz ai proxies ensure qwenproxy --dry-run
+linux/pz ai proxies ensure all
 linux/pz ai proxies install kimiproxy
 linux/pz ai proxies auth all
 linux/pz ai proxies login kimiproxy
@@ -15,14 +17,37 @@ linux/pz ai proxies login qwenproxy
 linux/pz ai proxies login deepsproxy
 linux/pz ai proxies test deepsproxy
 linux/pz ai proxies test all
-linux/pz ai proxies start ollieproxy
-linux/pz ai proxies stop ollieproxy
 linux/pz ai proxies restart kimiproxy
 linux/pz ai proxies login all
 linux/pz ai proxies detailed-status
+linux/pz ai proxies provenance all
 ```
 
-`detailed-status` devolve em um único JSON redigido o estado de instalação, serviço, autenticação (`webValidation`) e os contadores de integração com IDEs (OpenCode, Continue, ZCode e `ide-defaults.env`). É o contrato consumido pela página **Proxies IA** da UI nativa, que também usa `start/stop/restart <id>` nos cards por proxy e `login all` para abrir o fluxo de navegador somente dos proxies browser-session ainda não autenticados.
+`ensure` é o fluxo de um clique da Central: instala se faltar, sobe o serviço e abre o Chromium só quando o proxy ainda precisa de login. Stdout é um JSON com `summary`/`next` para o modo simples; npm/git ficam no log. `ensure all` cobre Kimi, Qwen, DeepSeek e Mimo.
+
+`detailed-status` devolve em um único JSON redigido instalação, serviço,
+autenticação (`webValidation`), procedência e integração com IDEs. É o contrato
+consumido pela página **Proxies IA**. O botão **Usar** dispara `ensure`;
+`start`/`login`/`install` isolados ficam no modo avançado.
+
+## Procedência fail-closed
+
+Kimi, Qwen, DeepSeek e Mimo usam
+`assets/ai/proxy-suite-trusted-sources.json`. Cada registro fixa repositório,
+commit, árvore Git, licença e hashes dos lockfiles. Instalação busca o commit
+exato em staging e valida antes de publicar o checkout. Atualização nunca segue
+automaticamente a ponta da branch.
+
+Antes de iniciar, reiniciar, autenticar, gravar credencial Mimo ou abrir uma IDE,
+o backend revalida snapshot e alterações locais. Só o patch PhaseZero de bind em
+loopback, acompanhado pelo próprio estado e backup, é aceito. Divergência bloqueia
+a execução; `stop` permanece permitido.
+
+`semanticAudit: false` é intencional: o manifesto prova identidade e integridade
+do snapshot, não segurança semântica do código upstream. Os seis proxies legados
+sem snapshot aprovado permanecem catalogados para diagnóstico, mas instalação e
+execução novas são bloqueadas. 9Router mantém seu gerenciador de integridade
+separado.
 
 ## Catálogo
 
@@ -53,7 +78,8 @@ IDEs: `pz ai proxies configure-ides` conecta kimi/qwen/deeps/mimo ao OpenCode/Op
 - Node: runtime 24 isolado em `.runtime/node24`; não depende da versão Node global.
 - Playwright: Chromium de usuário é instalado para KimiProxy, QwenProxy e DeepsProxy.
 - Go: build nativo em `.phasezero-bin`.
-- Atualização: fast-forward. Checkout com mudanças locais/geradas é preservado e não sobrescrito.
+- Atualização: somente por mudança revisada do manifesto. Branch móvel e
+  fast-forward automático não são aceitos.
 - Paridade Windows: portas 3010-3013, `webValidation.required/kind/status`, provider OpenAI-compatible e ausência de segredos no resultado JSON seguem o contrato do `ai-proxy-suite` em PowerShell.
 
 Node com `start` baseado em `dist/` recebe build TypeScript. Worker e biblioteca recebem dependências, sem serviço local inventado. Serviços locais são instalados desativados.
@@ -87,17 +113,10 @@ linux/pz ai proxies start mimo-ai-proxy
 
 Mimo não usa browser login. Ele exige grupos de sessão Mimo/Xiaomi no `.env` local do usuário. O JSON de `auth` mostra apenas grupos genéricos faltantes (`service-token-group`, `user-id-group`, `chatbot-ph-group`), nunca nomes exatos de variáveis nem valores.
 
-### Serviços sem web-login
+### Integrações legadas
 
-Exemplo:
-
-```bash
-install -d -m 700 ~/.config/phasezero/ai-proxies
-$EDITOR ~/.config/phasezero/ai-proxies/ollieproxy.env
-linux/pz ai proxies start ollieproxy
-systemctl --user status phasezero-ollieproxy.service
-```
-
-`qwen-worker-proxy` exige conta Cloudflare para deploy. `airlock` é biblioteca. Ambos são instalados localmente, mas não recebem unit systemd.
+`qwen-worker-proxy`, Antigravity, Ollie, Airlock e Unlimited permanecem visíveis
+no inventário histórico. Sem snapshot aprovado, `plan` mostra `blocked` e o
+backend não baixa nem executa esses códigos.
 
 Teste de catálogo e dry-run: `tests/linux-ai-proxies.sh`.

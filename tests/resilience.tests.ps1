@@ -1749,28 +1749,24 @@ Python 3.13       Python.Python.3.13   3.13.13  winget
         }
     }
 
-    Context 'OpenClaw npm install resiliente' {
-        It 'aceita timeout quando npm cria o binario funcional antes do postinstall travar' {
-            $root = Join-Path $env:TEMP ("openclaw-timeout-{0}" -f ([Guid]::NewGuid().ToString('N')))
-            $prefix = Join-Path $root 'npm-prefix'
-            $npm = Join-Path $root 'npm.cmd'
-            $cmd = Join-Path $prefix 'openclaw.cmd'
-            try {
-                New-Item -Path $prefix -ItemType Directory -Force | Out-Null
-                [System.IO.File]::WriteAllText($npm, "@echo off`r`nif ""%1""==""prefix"" if ""%2""==""-g"" echo $prefix`r`nexit /b 0`r`n", [System.Text.ASCIIEncoding]::new())
-                Mock Invoke-NpmWithLog {
-                    New-Item -Path (Split-Path -Parent $cmd) -ItemType Directory -Force | Out-Null
-                    [System.IO.File]::WriteAllText($cmd, '@echo off', [System.Text.ASCIIEncoding]::new())
-                    return 124
-                }
-                Mock Invoke-NativeFirstLine { return 'OpenClaw 2026.5.7' }
-                Mock Write-Log {}
+    Context 'OpenClaw request grant gate' {
+        It 'blocks explicit install before npm probes or mutation' {
+            $npm = Join-Path $TestDrive 'npm.cmd'
+            Mock Invoke-NpmWithLog { throw 'npm must not run' }
+            Mock Invoke-NativeFirstLine { throw 'OpenClaw must not run' }
+            Mock Ensure-BootstrapNodeCore { throw 'Node setup must not run' }
 
-                { Ensure-OpenClaw -NpmCmd $npm } | Should Not Throw
-                Assert-MockCalled Invoke-NpmWithLog -Times 1 -Exactly
-            } finally {
-                if (Test-Path $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
-            }
+            $ensureMessage = ''
+            try { Ensure-OpenClaw -NpmCmd $npm } catch { $ensureMessage = [string]$_.Exception.Message }
+            $ensureMessage | Should Match 'connection-grant-not-enforceable'
+
+            $componentMessage = ''
+            try { Invoke-BootstrapComponent -Name 'openclaw' -State @{ Completed = @{} } } catch { $componentMessage = [string]$_.Exception.Message }
+            $componentMessage | Should Match 'connection-grant-not-enforceable'
+
+            Assert-MockCalled Invoke-NpmWithLog -Times 0 -Exactly
+            Assert-MockCalled Invoke-NativeFirstLine -Times 0 -Exactly
+            Assert-MockCalled Ensure-BootstrapNodeCore -Times 0 -Exactly
         }
     }
 }

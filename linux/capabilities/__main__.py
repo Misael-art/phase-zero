@@ -3,16 +3,20 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from . import SCHEMA
 from .engine import (
     CapabilityError,
     apply_plan,
+    apply_removal,
     catalog_payload,
     create_plan,
+    create_removal_plan,
     profiles_payload,
     rollback_operation,
     verify_operation,
+    verify_removal,
 )
 from .platform import detect
 
@@ -37,12 +41,27 @@ def _parser() -> argparse.ArgumentParser:
     apply.add_argument("--plan-id", required=True)
     apply.add_argument("--confirm", default="")
     apply.add_argument("--dry-run", action="store_true")
+    apply.add_argument("--cancel-file", type=Path)
     verify = commands.add_parser("verify", help="Verifica uma operação.")
     verify.add_argument("--operation-id", required=True)
     rollback = commands.add_parser("rollback", help="Reverte somente itens instalados pela operação.")
     rollback.add_argument("--operation-id", required=True)
     rollback.add_argument("--confirm", default="")
     rollback.add_argument("--dry-run", action="store_true")
+    # Remoção por capability: a UI tem o id do item, não o id da operação que o
+    # instalou. `remove-plan` faz a ponte e continua exigindo preview + token.
+    remove_plan = commands.add_parser(
+        "remove-plan", help="Preview de remoção do que o PhaseZero instalou.",
+    )
+    remove_plan.add_argument("--capability", action="append", default=[], required=True)
+    remove = commands.add_parser("remove", help="Executa um plano de remoção confirmado.")
+    remove.add_argument("--plan-id", required=True)
+    remove.add_argument("--confirm", default="")
+    remove.add_argument("--dry-run", action="store_true")
+    verify_removed = commands.add_parser(
+        "verify-removal", help="Confere que as capabilities saíram do host.",
+    )
+    verify_removed.add_argument("--capability", action="append", default=[], required=True)
     return parser
 
 
@@ -66,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "apply":
             payload = apply_plan(
                 args.plan_id, confirmation=args.confirm, dry_run=args.dry_run,
+                cancel_file=args.cancel_file,
             )
         elif args.command == "verify":
             payload = verify_operation(args.operation_id)
@@ -73,9 +93,19 @@ def main(argv: list[str] | None = None) -> int:
             payload = rollback_operation(
                 args.operation_id, confirmation=args.confirm, dry_run=args.dry_run,
             )
+        elif args.command == "remove-plan":
+            payload = create_removal_plan(args.capability)
+        elif args.command == "remove":
+            payload = apply_removal(
+                args.plan_id, confirmation=args.confirm, dry_run=args.dry_run,
+            )
+        elif args.command == "verify-removal":
+            payload = verify_removal(args.capability)
         else:  # pragma: no cover - argparse protects this branch
             raise CapabilityError("comando desconhecido")
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+        if args.command == "apply" and payload.get("status") == "cancelled":
+            return 130
         return 0
     except (CapabilityError, FileNotFoundError, PermissionError, ValueError) as exc:
         print(json.dumps({

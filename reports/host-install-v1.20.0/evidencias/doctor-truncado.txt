@@ -1,0 +1,74 @@
+
+=== System Info ===
+Host:       Jupiter
+Kernel:     6.18.45-1-MANJARO
+OS:         BigLinux based on Manjaro Linux
+Uptime:     up 12 hours, 43 minutes
+Shell:      /bin/bash
+CPU:        AMD Custom APU 0405
+
+=== Memory ===
+[PASS] MEM01: Total RAM >= 4GB
+[PASS] MEM02: Available RAM >= 1GB
+[PASS] MEM03: Swap >= 2GB
+
+=== Disk ===
+[FAIL] DISK__mnt_sdcard: /mnt/sdcard usage
+[PASS] DISK_ROOT: root partition usage
+[PASS] FS01: Root filesystem type
+[PASS] FS02: Btrfs available
+
+=== CPU / Temperature ===
+[FAIL] CPU01: CPU temperature < 85°C
+[WARN] CPU02: CPU load (1m) < cores
+
+=== GPU (AMD) ===
+[PASS] GPU01: AMD GPU detected
+[PASS] GPU02: GPU device in sysfs
+
+=== Network ===
+[PASS] NET01: Internet connectivity
+[INFO] NET02: Tailscale connected
+
+=== Services ===
+[PASS] SVC_docker: docker running
+[WARN] SVC_sshd: sshd running
+[PASS] SVC_NetworkManager: NetworkManager running
+[PASS] SVC_bluetooth: bluetooth running
+
+=== Steam Deck ===
+[PASS] SD01: Steam Deck hardware
+[PASS] SD02: Gamescope installed
+[PASS] SD03: Steam installed
+
+=== SteamOS UX ===
+[PASS] UX01: Steam client available
+[PASS] UX02: Gamescope available
+[PASS] UX03: MangoHud available
+[PASS] UX04: GameMode launcher available
+[WARN] UX05: Virtual keyboard available
+[PASS] UX06: Steam Deck hotkey config installed
+[PASS] UX07: Steam Deck hotkeys active
+[WARN] UX08: Steam Deck mode watcher installed
+[WARN] UX09: Steam Deck mode watcher active
+[PASS] UX10: TDP control available
+[WARN] UX11: Privileged TDP/GPU bridge installed
+[INFO] UX12: Steam Big Picture Plus OpenGamepadUI
+[WARN] UX13: Decky Loader Big Picture integration
+[WARN] UX14: Decky PowerTools TDP plugin
+[WARN] UX15: Decky CSS Loader themes
+[PASS] UX16: Decky plugin package health
+[WARN] UX17: SteamOS desktop handoff without login
+
+=== Windows VM ===
+[PASS] WINVM01: QEMU available
+[PASS] WINVM02: KVM device available
+[PASS] WINVM03: Windows 11 firmware/TPM ready
+[PASS] WINVM04: Windows VM configured
+[INFO] WINVM08: Existing libvirt Windows domain selected
+[PASS] WINVM07: Existing Windows VM install usable
+[PASS] WINVM05: Host folder sharing available
+[INFO] WINVM06: Windows VM direct GRUB boot installed
+[FAIL] WINVM16: Windows VM boot runtime matches this install
+[PASS] WINVM09: Windows host storage shares ready
+[WARN] WINVM10: Windows USB redirection ready

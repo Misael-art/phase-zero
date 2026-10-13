@@ -45,7 +45,13 @@ def catalog():
 
 def test_catalog_covers_every_control_center_category(catalog):
     categories = {item.category for item in catalog}
-    expected = {row[0] for row in CATEGORIES if row[0] != "Resultados"}
+    # "Resultados" (histórico) e "Linux" (hub) não consomem o catálogo de
+    # ações: a primeira lê o ledger, a segunda deriva os itens de
+    # `capabilities`/`tune` e reusa ações de outras categorias. Receitas de
+    # desenvolvimento e probes de conta usam adaptadores existentes.
+    expected = {row[0] for row in CATEGORIES if row[0] not in {
+        "Resultados", "Linux", "Desenvolvimento", "Contas e conexões",
+    }}
     assert categories == expected
     assert len(catalog) >= 100
 
@@ -259,7 +265,7 @@ def test_proxy_models_parse_detailed_status_and_gateways():
     assert {row[0] for row in PROXY_CARDS} <= {"kimiproxy", "qwenproxy", "deepsproxy", "mimo-ai-proxy"}
 
     router = parse_gateway_status("9router", {"installed": True, "healthy": True, "providers": {"active": 3}, "combos": {"total": 5}})
-    assert router.label == "ativo" and "3 providers" in router.detail
+    assert router.label == "ativo" and "3 contas conectadas" in router.detail
     odysseus = parse_gateway_status("odysseus", {"installed": True, "healthy": False, "endpoint": "http://127.0.0.1:4000"})
     assert odysseus.label == "parado" and odysseus.state == "warning"
     assert parse_gateway_status("9router", None).label == "não instalado"
@@ -303,8 +309,12 @@ def test_manifest_serializes_catalog(catalog):
     json.dumps(manifest)
 
 
-def test_native_version_comes_from_project_manifest():
-    assert __version__ == json.loads((ROOT / "version.json").read_text())["version"]
+def test_native_version_comes_from_project_manifest_and_channel():
+    manifest = json.loads((ROOT / "version.json").read_text())
+    expected = manifest["version"]
+    if manifest.get("channel") in {"beta", "nightly"}:
+        expected = f"{expected} ({manifest['channel']})"
+    assert __version__ == expected
 
 
 def test_simplified_mode_is_default_and_env_can_enable_advanced(monkeypatch):
@@ -441,6 +451,7 @@ def test_profile_preview_runs_without_mutation(tmp_path):
 def test_qprocess_runner_writes_result_envelope(tmp_path):
     script = r"""
 import json
+import os
 from pathlib import Path
 from PySide6.QtCore import QCoreApplication, QTimer
 from linux.ui_native.catalog import build_catalog
@@ -465,6 +476,12 @@ assert result.result_path.exists()
 saved = json.loads(result.result_path.read_text())
 assert saved["action"] == "system.version"
 assert saved["exitCode"] == 0
+assert saved["operationId"]
+ledger_path = Path(os.environ["XDG_STATE_HOME"]) / "phasezero" / "control-center" / "operations" / saved["operationId"] / "operation.json"
+ledger = json.loads(ledger_path.read_text())
+assert ledger["status"] == "succeeded"
+assert ledger["resultPath"] == str(result.result_path)
+assert ledger["secretsRedacted"] is True
 """
     env = os.environ.copy()
     env["XDG_STATE_HOME"] = str(tmp_path / "state")

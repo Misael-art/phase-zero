@@ -126,7 +126,25 @@ def test_extensionless_entry_points_are_shell_and_tracked():
     tracked = subprocess.run(
         ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
     ).stdout.split()
-    for path in ("linux/pz", "packaging/linux/phasezero-control-center"):
+    for path in ("linux/pz", "packaging/linux/phasezero-control-center", "packaging/linux/pz"):
         assert path in tracked, f"{path} deixou de ser versionado"
         first = (ROOT / path).read_text(encoding="utf-8", errors="replace").splitlines()[0]
         assert first.startswith("#!") and "sh" in first, f"{path} não tem shebang de shell"
+
+
+def test_pz_entrypoint_shipped_on_path():
+    """PZ-AUD-001: a bridge SSH chama `pz`; todo empacotador instala o wrapper."""
+    wrapper = ROOT / "packaging/linux/pz"
+    assert wrapper.is_file(), "wrapper packaging/linux/pz sumiu"
+    body = wrapper.read_text(encoding="utf-8")
+    assert "linux/pz" in body, "wrapper não resolve para linux/pz"
+    for path, marker in (
+        ("packaging/linux/aur/PKGBUILD", "packaging/linux/pz"),
+        ("packaging/linux/deb/build-deb.sh", "packaging/linux/pz"),
+        ("packaging/linux/rpm/phasezero-control-center.spec", "packaging/linux/pz"),
+        ("packaging/linux/install-user.sh", "packaging/linux/pz"),
+    ):
+        content = (ROOT / path).read_text(encoding="utf-8")
+        assert marker in content, f"{path} não instala o wrapper pz"
+    hosts = (ROOT / "linux/server/homelab-hosts.sh").read_text(encoding="utf-8")
+    assert "/usr/lib/phasezero/linux/pz" in hosts, "bridge perdeu fallback do pz remoto"

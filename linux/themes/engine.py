@@ -15,6 +15,8 @@ reaplicar.
 
 from __future__ import annotations
 
+import os
+import shutil
 import time
 from pathlib import Path
 
@@ -51,6 +53,14 @@ def adapter_for(_spec: FeatureSpec):
     from . import features as _features  # import tardio para evitar ciclo
 
     return _features.adapter_for(_spec)
+
+
+def _params_match(current_params: dict | None, wanted_params: dict | None) -> bool:
+    """Todos os params explicitamente pedidos precisam bater com o estado atual."""
+    for key, value in (wanted_params or {}).items():
+        if str((current_params or {}).get(key, "")) != str(value):
+            return False
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -124,6 +134,7 @@ def status_payload(facts: HostFacts | None = None, session: KdeSession | None = 
     facts = facts or detect()
     session = session or KdeSession(facts)
     compatible, reason = facts.plasma_compatible(6)
+    _expire_due_previews()
     profile = _profile_effective(facts, session)
     return {
         "schema": SCHEMA,
@@ -302,12 +313,6 @@ def _resolve_targets(
         spec = feature_by_id(feature)
         if spec is None:
             raise ThemesError(f"feature desconhecida: {feature}")
-        if feature == "video.smart-wallpaper":
-            blockers.append(
-                "vídeo de fundo nunca é ativado automaticamente; use o perfil Gamer ou ambiente explícito"
-                if not feature_state_target
-                else ""
-            )
         if feature_state_target not in ("on", "off"):
             raise ThemesError("--state deve ser on ou off")
         supplied = dict(feature_params or {})
@@ -363,6 +368,9 @@ def create_plan(
     facts = facts or detect()
     session = session or KdeSession(facts)
     compatible, platform_reason = facts.plasma_compatible(6)
+    # O snapshot do plano precisa capturar o estado já revertido de previews
+    # vencidos, senão o rollback do plano consolida o preview expirado.
+    _expire_due_previews()
     requested, blockers = _resolve_targets(
         profile=profile,
         feature=feature,
@@ -403,7 +411,13 @@ def create_plan(
             elif current.get("state") == "degradado" and wanted == "ligado":
                 entry["repairs"] = current.get("reason", "")
             entry["current"] = current
-            entry["noop"] = current.get("state") == wanted
+            # A noop must also require the requested params to match. The
+            # state alone is binary while adapters carry modes (system/dark/
+            # light): comparing only the state turned every mode switch into
+            # a no-op plan whose apply did nothing.
+            entry["noop"] = current.get("state") == wanted and _params_match(
+                current.get("params"), action.get("params")
+            )
             entry["risk"] = spec.risk if spec else "normal"
         elif action["kind"] == "wallpaper":
             if not compatible:
@@ -427,8 +441,10 @@ def create_plan(
             entry["risk"] = "normal"
         plan_actions.append(entry)
 
-    # snapshot antes de qualquer alteração
-    snapshot_id = _create_snapshot(facts, session, plan_actions) if plan_actions else ""
+    # snapshot antes de qualquer alteração - plano bloqueado nunca executa,
+    # e criar snapshot dele só churnava o pool de retenção que previews e
+    # operações referenciam.
+    snapshot_id = _create_snapshot(facts, session, plan_actions) if plan_actions and not blockers else ""
     plan_id = state.new_id("plan")
     confirmation = state.token()
     risk = "high" if any(action.get("risk") == "high" for action in plan_actions) else (
@@ -485,6 +501,7 @@ def _create_snapshot(facts: HostFacts, session: KdeSession, actions: list[dict])
         record["wallpapers"] = [
             {
                 "screen": item.get("screen"),
+                "desktopIndex": item.get("desktopIndex"),
                 "plugin": item.get("wallpaperPlugin"),
                 "mode": item.get("wallpaperMode"),
                 "config": item.get("config", {}),
@@ -517,7 +534,7 @@ def preview_plan(
         raise ThemesError("preview suporta somente planos de wallpaper")
     if plan.get("blockers"):
         raise ThemesError("plano contém bloqueios; revise a seleção")
-    _auto_expire_preview(plan.get("id", ""))
+    _expire_due_previews()
     applied = _apply_wallpaper_actions(session, wallpaper_actions)
     preview_id = state.new_id("preview")
     record = {
@@ -539,7 +556,8 @@ def preview_plan(
         "expiresAt": record["expiresAt"],
         "ttlSeconds": PREVIEW_TTL_SECONDS,
         "applied": applied,
-        "hint": "confirme com `pz themes apply` dentro do prazo ou o rollback automático restaura o anterior",
+        "hint": "confirme com `pz themes apply` dentro do prazo; passado o prazo, "
+        "o próximo comando pz themes reverte o preview automaticamente",
     }
 
 
@@ -561,6 +579,48 @@ def _auto_expire_preview(plan_id: str) -> bool:
         state.save("previews", record["id"], record)
         return True
     return False
+
+
+def _expire_due_previews() -> list[dict]:
+    """Reverte TODO preview vencido ainda pendente, de qualquer plano.
+
+    A expiração era checada apenas ao reentrar no mesmo plano: um preview
+    expirado sem novo comando daquele plano nunca era revertido e o wallpaper
+    ficava preso no preview. Cada ponto de entrada do CLI chama esta varredura
+    para cumprir a promessa do TTL.
+    """
+    rolled_back: list[dict] = []
+    directory = state.root() / "previews"
+    if not directory.is_dir():
+        return rolled_back
+    for preview_path in sorted(directory.glob("*.json")):
+        try:
+            record = state.load("previews", preview_path.stem)
+        except ValueError:
+            continue
+        if not record.get("applied"):
+            continue
+        # A confirmed apply owns the wallpaper change from then on; the
+        # preview that preceded it must never revert it. Only an expired
+        # preview without a complete operation reverts.
+        operation = _operation_for_plan(record.get("planId", ""))
+        if operation is not None and operation.get("status") == "complete":
+            record["applied"] = False
+            record["consumedByApply"] = operation.get("id", "")
+            state.save("previews", record["id"], record)
+            continue
+        if int(time.time()) <= int(record.get("expiresAt", 0)):
+            continue
+        snapshot_id = record.get("snapshotId", "")
+        try:
+            _restore_snapshot(snapshot_id, expired=True)
+        except (ThemesError, KdeStateError, ValueError):
+            continue
+        record["applied"] = False
+        record["expiredRolledBack"] = True
+        state.save("previews", record["id"], record)
+        rolled_back.append(record)
+    return rolled_back
 
 
 # --------------------------------------------------------------------------
@@ -590,7 +650,8 @@ def apply_plan(
             "idempotent": True,
             "results": existing.get("results", []),
         }
-    if _auto_expire_preview(plan_id):
+    expired_previews = _expire_due_previews()
+    if any(record.get("planId") == plan_id for record in expired_previews):
         raise ThemesError(
             "preview deste plano expirou e foi revertido automaticamente; gere um novo preview"
         )
@@ -630,9 +691,30 @@ def apply_plan(
         operation_status = "failed" if failed else "complete"
         snapshot_id = plan.get("snapshotId", "")
         restored = False
+        restore_error = ""
         if failed:
-            _restore_snapshot(snapshot_id, expired=False)
-            restored = True
+            # The compensating transaction must never mask the operation
+            # record: a pruned/corrupt snapshot used to raise before
+            # state.save, leaving the desktop half-applied with no operation
+            # on disk and a retry that would re-apply from scratch.
+            try:
+                _restore_snapshot(snapshot_id, expired=False)
+                restored = True
+            except (ThemesError, KdeStateError, ValueError) as exc:
+                restore_error = str(exc)
+            # Adapters own compensations beyond config bytes - the screen
+            # reader, for one, starts a live process. Best effort only.
+            for index, action in enumerate(plan.get("actions", ())):
+                if action["kind"] != "feature" or action.get("noop"):
+                    continue
+                spec = feature_by_id(action.get("featureId", ""))
+                adapter = adapter_for(spec) if spec else None
+                if adapter is None:
+                    continue
+                try:
+                    adapter.rollback(facts, session, action)
+                except Exception:  # noqa: BLE001 - compensação nunca máscara o veredito
+                    pass
         operation_id = state.new_id("operation")
         record = {
             "schema": SCHEMA,
@@ -646,6 +728,8 @@ def apply_plan(
             "failedIndex": failed_index,
             "restored": restored,
         }
+        if restore_error:
+            record["restoreError"] = restore_error
         state.save("operations", operation_id, record)
     return {
         "schema": SCHEMA,
@@ -735,14 +819,24 @@ def verify_operation(
     checks: list[dict] = []
     ok = True
     for result in operation.get("results", ()):
-        if result.get("status") in ("noop",):
+        status = result.get("status")
+        if status == "noop":
             checks.append({"item": result.get("featureId"), "status": "noop", "ok": True})
             continue
         feature_id = result.get("featureId")
         if feature_id:
             spec = feature_by_id(feature_id)
             current = feature_state(spec, facts, session) if spec else {"state": "indisponivel"}
-            passed = current.get("state") in ("ligado", "pausado-bateria", "pausado-jogo")
+            # Verify has to ask for the direction the operation went: a
+            # successful "off" lands on desligado and used to be reported as
+            # failed verification, while a failed wallpaper result fell into
+            # the feature-less branch and was reported as applied.
+            if status == "failed":
+                passed = False
+            elif status == "desligado":
+                passed = current.get("state") == "desligado"
+            else:
+                passed = current.get("state") in ("ligado", "pausado-bateria", "pausado-jogo")
             checks.append({
                 "item": feature_id,
                 "status": current.get("state"),
@@ -751,7 +845,9 @@ def verify_operation(
             })
             ok = ok and passed
         else:
-            checks.append({"item": result.get("wallpaperId"), "status": "applied", "ok": True})
+            applied = status in ("ok", "ligado")
+            checks.append({"item": result.get("wallpaperId"), "status": "applied" if applied else "failed", "ok": applied})
+            ok = ok and applied
     return {"schema": SCHEMA, "operationId": operation_id, "ok": ok, "checks": checks}
 
 
@@ -767,6 +863,8 @@ def rollback_snapshot(
 ) -> dict:
     facts = facts or detect()
     session = session or KdeSession(facts)
+    # Vencidos revertem também no rollback por id explícito, não só em latest.
+    _expire_due_previews()
     if snapshot_id == "latest":
         snapshot_id = _latest_snapshot_id()
         if not snapshot_id:
@@ -839,17 +937,40 @@ def _restore_snapshot(snapshot_id: str, *, expired: bool) -> bool:
         if not backup.exists():
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(backup.read_bytes())
+        # Escrever bytes direto no arquivo vivo (write_bytes trunca) disputa
+        # o cache dos daemons e pode truncar o arquivo num ENOSPC. Temp no
+        # mesmo diretório + replace preserva atomicidade e permissões.
+        data = backup.read_bytes()
+        temporary = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+        try:
+            temporary.write_bytes(data)
+            if target.exists():
+                shutil.copymode(target, temporary)
+            os.replace(temporary, target)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
         restored_files = True
     if snapshot.get("wallpapers"):
         session = KdeSession(detect())
         for item in snapshot.get("wallpapers", ()):
+            # Several containments report the same screen (-1 when unbound);
+            # matching by screen collapsed all of them onto the first. New
+            # snapshots carry the desktop array index, which addresses the
+            # exact containment; old snapshots fall back to the screen match.
+            desktop_index = item.get("desktopIndex")
+            has_index = isinstance(desktop_index, int) and desktop_index >= 0
             if item.get("plugin") == "org.kde.slideshow":
+                # O recorte captura SlidePaths; descartá-los devolvia um
+                # slideshow vazio (fundo preto) ao usuário de slideshow.
+                params = {key: str(value) for key, value in item.get("config", {}).items()}
+                params.setdefault("SlideInterval", "3600")
                 session.write_wallpaper(
                     int(item.get("screen", 0)),
                     item["plugin"],
-                    {"SlideInterval": "3600"},
+                    params,
                     mode="MultipleImages",
+                    desktop_index=desktop_index if has_index else None,
                 )
             else:
                 params = {key: str(value) for key, value in item.get("config", {}).items()}
@@ -858,12 +979,16 @@ def _restore_snapshot(snapshot_id: str, *, expired: bool) -> bool:
                     item.get("plugin", "org.kde.image"),
                     params or {"Image": ""},
                     mode=item.get("mode", "SingleImage"),
+                    desktop_index=desktop_index if has_index else None,
                 )
-    lock_image = snapshot.get("lockScreen", {}).get("image", "")
-    if lock_image:
-        session = KdeSession(detect())
-        session.lock_screen_params({"Image": lock_image})
-    return restored_files or bool(snapshot.get("wallpapers") or lock_image)
+    # Snapshot sempre registra a tela de bloqueio; host stock grava "" e o
+    # gate antigo (`if lock_image:`) deixava o preview de lock permanente.
+    session = KdeSession(detect())
+    session.lock_screen_params({
+        "Image": str(snapshot.get("lockScreen", {}).get("image", "")),
+    })
+    session.notify()
+    return restored_files or bool(snapshot.get("wallpapers") or snapshot.get("lockScreen"))
 
 
 # --------------------------------------------------------------------------
@@ -886,14 +1011,22 @@ def rescue_wallpaper(
         screens = []
         errors.append(str(exc))
     for item in screens:
+        screen = int(item.get("screen", 0))
+        if screen < 0:
+            # Containment sem tela real: várias entradas compartilham -1 e
+            # escrever por screen colapsaria todas na primeira (e apagaria
+            # wallpaper que nenhum monitor mostra).
+            continue
+        desktop_index = item.get("desktopIndex")
         try:
             session.write_wallpaper(
-                int(item.get("screen", 0)),
+                screen,
                 "org.kde.image",
                 {"Image": "", "FillMode": "6", "Blur": "0"},
                 mode="SingleImage",
+                desktop_index=desktop_index if isinstance(desktop_index, int) else None,
             )
-            restored_screens.append(int(item.get("screen", 0)))
+            restored_screens.append(screen)
         except KdeStateError as exc:
             errors.append(str(exc))
     video_disabled = False
@@ -923,6 +1056,7 @@ def _load_plan(plan_id: str) -> dict:
 
 def history_payload(limit: int = 15) -> dict:
     """Últimas operações e rollbacks, da mais recente para a mais antiga."""
+    _expire_due_previews()
     directory = state.root() / "operations"
     if not directory.is_dir():
         return {"schema": SCHEMA, "operations": []}

@@ -437,7 +437,7 @@
     },
     {
       "name": "steamdeck.watcher",
-      "label": "Instalar watcher",
+      "label": "Assistente de dock",
       "command": "linux/pz steamdeck watcher install",
       "mutable": true,
       "require_plan": true,
@@ -1382,6 +1382,17 @@
       "name": "homelab.policy",
       "label": "Política AI",
       "command": "linux/pz ai policy status",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Homelab",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "homelab.hosts",
+      "label": "Hosts pareados",
+      "command": "linux/pz server homelab hosts list --json",
       "mutable": false,
       "require_plan": false,
       "module": "Homelab",
@@ -2375,7 +2386,7 @@
     },
     {
       "name": "flatpak.audit",
-      "label": "Auditar Flatpak",
+      "label": "Auditar permissões e fontes",
       "command": "linux/pz flatpak audit",
       "mutable": false,
       "require_plan": false,
@@ -2398,7 +2409,7 @@
     },
     {
       "name": "flatpak.remotes",
-      "label": "Listar remotes",
+      "label": "Fontes de aplicativos (remotes)",
       "command": "linux/pz flatpak remotes",
       "mutable": false,
       "require_plan": false,
@@ -2444,7 +2455,7 @@
     },
     {
       "name": "ai.doctor",
-      "label": "Diagnóstico MCP",
+      "label": "Diagnóstico dos conectores",
       "command": "linux/pz ai doctor",
       "mutable": false,
       "require_plan": false,
@@ -2479,7 +2490,7 @@
     },
     {
       "name": "ai.compat",
-      "label": "Agent compatibility",
+      "label": "Preparar agentes de IA",
       "command": "linux/pz ai compat setup",
       "mutable": true,
       "require_plan": true,
@@ -2609,7 +2620,7 @@
     },
     {
       "name": "ai.webui",
-      "label": "Instalar Open WebUI",
+      "label": "Uso bloqueado — Open WebUI",
       "command": "linux/pz ai setup webui",
       "mutable": true,
       "require_plan": true,
@@ -2617,7 +2628,29 @@
       "elevated": false,
       "input_kind": "",
       "input_label": "",
-      "plan_command": "linux/pz ai status"
+      "plan_command": "linux/pz ai webui status"
+    },
+    {
+      "name": "ai.webui-status",
+      "label": "Status Open WebUI",
+      "command": "linux/pz ai webui status",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.webui-open",
+      "label": "Uso bloqueado — Open WebUI",
+      "command": "linux/pz ai webui open",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
     },
     {
       "name": "ai.usagebar",
@@ -2772,7 +2805,7 @@
     },
     {
       "name": "ai.9router-tui",
-      "label": "Abrir TUI 9Router",
+      "label": "Abrir painel técnico do 9Router",
       "command": "linux/pz ai 9router tui",
       "mutable": false,
       "require_plan": false,
@@ -2807,7 +2840,7 @@
     },
     {
       "name": "ai.9router-dashboard",
-      "label": "Abrir dashboard 9Router",
+      "label": "Dashboard 9Router bloqueado",
       "command": "linux/pz ai 9router dashboard",
       "mutable": false,
       "require_plan": false,
@@ -2829,7 +2862,7 @@
     },
     {
       "name": "ai.9router-secrets",
-      "label": "Sincronizar providers",
+      "label": "Importação de credenciais bloqueada",
       "command": "linux/pz ai 9router provider sync-secrets",
       "mutable": true,
       "require_plan": true,
@@ -2841,7 +2874,7 @@
     },
     {
       "name": "ai.9router-combos",
-      "label": "Gerar combos inteligentes",
+      "label": "Combos com fallback bloqueados",
       "command": "linux/pz ai 9router combo sync",
       "mutable": true,
       "require_plan": true,
@@ -2864,7 +2897,7 @@
     },
     {
       "name": "ai.9router-client",
-      "label": "Integrar clientes 9Router",
+      "label": "Uso de clientes 9Router bloqueado",
       "command": "linux/pz ai 9router client status",
       "mutable": false,
       "require_plan": false,
@@ -2920,7 +2953,7 @@
     },
     {
       "name": "ai.odysseus-install",
-      "label": "Provisionar Odysseus",
+      "label": "Implantação Odysseus bloqueada",
       "command": "linux/pz ai odysseus install",
       "mutable": true,
       "require_plan": true,
@@ -2928,11 +2961,11 @@
       "elevated": false,
       "input_kind": "",
       "input_label": "",
-      "plan_command": "linux/pz ai odysseus status"
+      "plan_command": "linux/pz ai odysseus plan"
     },
     {
       "name": "ai.odysseus-open",
-      "label": "Abrir Odysseus",
+      "label": "Uso Odysseus bloqueado",
       "command": "linux/pz ai odysseus open",
       "mutable": false,
       "require_plan": false,
@@ -2954,7 +2987,7 @@
     },
     {
       "name": "ai.odysseus-update",
-      "label": "Atualizar Odysseus",
+      "label": "Update Odysseus bloqueado",
       "command": "linux/pz ai odysseus update",
       "mutable": true,
       "require_plan": true,
@@ -2980,6 +3013,95 @@
       "name": "ai.odysseus-doctor",
       "label": "Doctor Odysseus",
       "command": "linux/pz ai odysseus doctor",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.hermes-status",
+      "label": "Status Hermes",
+      "command": "linux/pz ai hermes status",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.hermes-doctor",
+      "label": "Doctor Hermes",
+      "command": "linux/pz ai hermes doctor",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.workspaces-doctor",
+      "label": "Diagnóstico Hermes + Odysseus",
+      "command": "linux/pz ai workspaces doctor",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.workspaces-plan",
+      "label": "Plano Hermes + Odysseus",
+      "command": "linux/pz ai workspaces plan",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.operations-status",
+      "label": "Operações persistentes",
+      "command": "linux/pz ai operations status",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.drift-status",
+      "label": "Cópias instaladas × repositório",
+      "command": "linux/pz ai drift status",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.drift-sync",
+      "label": "Atualizar cópias instaladas",
+      "command": "linux/pz ai drift sync",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai drift sync --dry-run"
+    },
+    {
+      "name": "ai.operations-resume",
+      "label": "Retomada segura",
+      "command": "linux/pz ai operations resume-info",
       "mutable": false,
       "require_plan": false,
       "module": "IA & Dev",
@@ -3058,20 +3180,123 @@
       "plan_command": "linux/pz ai claude preflight bonsai --cwd {input}"
     },
     {
-      "name": "ai.proxies",
-      "label": "Instalar proxies IA",
-      "command": "linux/pz ai proxies install all",
+      "name": "ai.proxies-ensure-kimi",
+      "label": "Uso bloqueado — Kimi",
+      "command": "linux/pz ai proxies ensure kimiproxy",
       "mutable": true,
       "require_plan": true,
       "module": "Proxies IA",
       "elevated": false,
       "input_kind": "",
       "input_label": "",
-      "plan_command": "linux/pz ai proxies status"
+      "plan_command": "linux/pz ai proxies ensure kimiproxy --dry-run"
+    },
+    {
+      "name": "ai.proxies-ensure-qwen",
+      "label": "Uso bloqueado — Qwen",
+      "command": "linux/pz ai proxies ensure qwenproxy",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai proxies ensure qwenproxy --dry-run"
+    },
+    {
+      "name": "ai.proxies-ensure-deeps",
+      "label": "Uso bloqueado — DeepSeek",
+      "command": "linux/pz ai proxies ensure deepsproxy",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai proxies ensure deepsproxy --dry-run"
+    },
+    {
+      "name": "ai.proxies-ensure-mimo",
+      "label": "Uso bloqueado — MiMo",
+      "command": "linux/pz ai proxies ensure mimo-ai-proxy",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai proxies ensure mimo-ai-proxy --dry-run"
+    },
+    {
+      "name": "ai.proxies-ensure-all",
+      "label": "Uso bloqueado — todos os proxies",
+      "command": "linux/pz ai proxies ensure all",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai proxies ensure all --dry-run"
+    },
+    {
+      "name": "ai.proxies-open-kimi",
+      "label": "Uso no OpenCode bloqueado — Kimi",
+      "command": "linux/pz ai proxies open kimiproxy",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.proxies-open-qwen",
+      "label": "Uso no OpenCode bloqueado — Qwen",
+      "command": "linux/pz ai proxies open qwenproxy",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.proxies-open-deeps",
+      "label": "Uso no OpenCode bloqueado — DeepSeek",
+      "command": "linux/pz ai proxies open deepsproxy",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.proxies-open-mimo",
+      "label": "Uso no OpenCode bloqueado — MiMo",
+      "command": "linux/pz ai proxies open mimo-ai-proxy",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.proxies-open-studio-mimo",
+      "label": "Abrir API Service Xiaomi",
+      "command": "linux/pz ai proxies open-studio",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
     },
     {
       "name": "ai.proxies-ides",
-      "label": "Configurar proxies nas IDEs",
+      "label": "Uso por IDE bloqueado",
       "command": "linux/pz ai proxies configure-ides",
       "mutable": true,
       "require_plan": true,
@@ -3082,9 +3307,113 @@
       "plan_command": "linux/pz ai proxies status"
     },
     {
+      "name": "ai.proxies-stop-kimi",
+      "label": "Parar Kimi",
+      "command": "linux/pz ai proxies stop kimiproxy",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai proxies status"
+    },
+    {
+      "name": "ai.proxies-stop-qwen",
+      "label": "Parar Qwen",
+      "command": "linux/pz ai proxies stop qwenproxy",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai proxies status"
+    },
+    {
+      "name": "ai.proxies-stop-deeps",
+      "label": "Parar DeepSeek",
+      "command": "linux/pz ai proxies stop deepsproxy",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai proxies status"
+    },
+    {
+      "name": "ai.proxies-stop-mimo",
+      "label": "Parar Mimo",
+      "command": "linux/pz ai proxies stop mimo-ai-proxy",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai proxies status"
+    },
+    {
+      "name": "ai.proxies-stop-all",
+      "label": "Parar todos os proxies",
+      "command": "linux/pz ai proxies stop all",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai proxies status"
+    },
+    {
+      "name": "ai.proxies",
+      "label": "Plano do catálogo legado",
+      "command": "linux/pz ai proxies plan all",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
       "name": "ai.proxies-auth",
       "label": "Auth proxies IA",
       "command": "linux/pz ai proxies auth all",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.proxies-provenance",
+      "label": "Procedência dos proxies",
+      "command": "linux/pz ai proxies provenance all",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.auth-registry",
+      "label": "Autenticação central",
+      "command": "linux/pz ai auth status",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.auth-doctor",
+      "label": "Diagnosticar autenticação",
+      "command": "linux/pz ai auth doctor",
       "mutable": false,
       "require_plan": false,
       "module": "Proxies IA",
@@ -3142,7 +3471,7 @@
     },
     {
       "name": "ai.proxies-test",
-      "label": "Testar proxies IA",
+      "label": "Teste de inferência bloqueado",
       "command": "linux/pz ai proxies test",
       "mutable": false,
       "require_plan": false,
@@ -3153,7 +3482,7 @@
     },
     {
       "name": "ai.proxies-start-all",
-      "label": "Iniciar todos os proxies",
+      "label": "Inicialização bloqueada",
       "command": "linux/pz ai proxies start all",
       "mutable": true,
       "require_plan": true,
@@ -3164,20 +3493,8 @@
       "plan_command": "linux/pz ai proxies status"
     },
     {
-      "name": "ai.proxies-stop-all",
-      "label": "Parar todos os proxies",
-      "command": "linux/pz ai proxies stop all",
-      "mutable": true,
-      "require_plan": true,
-      "module": "Proxies IA",
-      "elevated": false,
-      "input_kind": "",
-      "input_label": "",
-      "plan_command": "linux/pz ai proxies status"
-    },
-    {
       "name": "ai.proxies-start-kimi",
-      "label": "Iniciar Kimi",
+      "label": "Inicialização bloqueada — Kimi",
       "command": "linux/pz ai proxies start kimiproxy",
       "mutable": true,
       "require_plan": true,
@@ -3188,20 +3505,8 @@
       "plan_command": "linux/pz ai proxies status"
     },
     {
-      "name": "ai.proxies-stop-kimi",
-      "label": "Parar Kimi",
-      "command": "linux/pz ai proxies stop kimiproxy",
-      "mutable": true,
-      "require_plan": true,
-      "module": "Proxies IA",
-      "elevated": false,
-      "input_kind": "",
-      "input_label": "",
-      "plan_command": "linux/pz ai proxies status"
-    },
-    {
       "name": "ai.proxies-start-qwen",
-      "label": "Iniciar Qwen",
+      "label": "Inicialização bloqueada — Qwen",
       "command": "linux/pz ai proxies start qwenproxy",
       "mutable": true,
       "require_plan": true,
@@ -3212,20 +3517,8 @@
       "plan_command": "linux/pz ai proxies status"
     },
     {
-      "name": "ai.proxies-stop-qwen",
-      "label": "Parar Qwen",
-      "command": "linux/pz ai proxies stop qwenproxy",
-      "mutable": true,
-      "require_plan": true,
-      "module": "Proxies IA",
-      "elevated": false,
-      "input_kind": "",
-      "input_label": "",
-      "plan_command": "linux/pz ai proxies status"
-    },
-    {
       "name": "ai.proxies-start-deeps",
-      "label": "Iniciar DeepSeek",
+      "label": "Inicialização bloqueada — DeepSeek",
       "command": "linux/pz ai proxies start deepsproxy",
       "mutable": true,
       "require_plan": true,
@@ -3236,20 +3529,8 @@
       "plan_command": "linux/pz ai proxies status"
     },
     {
-      "name": "ai.proxies-stop-deeps",
-      "label": "Parar DeepSeek",
-      "command": "linux/pz ai proxies stop deepsproxy",
-      "mutable": true,
-      "require_plan": true,
-      "module": "Proxies IA",
-      "elevated": false,
-      "input_kind": "",
-      "input_label": "",
-      "plan_command": "linux/pz ai proxies status"
-    },
-    {
       "name": "ai.proxies-start-mimo",
-      "label": "Iniciar Mimo",
+      "label": "Inicialização bloqueada — MiMo",
       "command": "linux/pz ai proxies start mimo-ai-proxy",
       "mutable": true,
       "require_plan": true,
@@ -3260,16 +3541,115 @@
       "plan_command": "linux/pz ai proxies status"
     },
     {
-      "name": "ai.proxies-stop-mimo",
-      "label": "Parar Mimo",
-      "command": "linux/pz ai proxies stop mimo-ai-proxy",
+      "name": "ai.proxies-kimi-status",
+      "label": "Status Kimi",
+      "command": "linux/pz ai proxies product-status kimiproxy",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.proxies-qwen-status",
+      "label": "Status Qwen",
+      "command": "linux/pz ai proxies product-status qwenproxy",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.proxies-deeps-status",
+      "label": "Status DeepSeek",
+      "command": "linux/pz ai proxies product-status deepsproxy",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.proxies-mimo-status",
+      "label": "Status MiMo",
+      "command": "linux/pz ai proxies product-status mimo-ai-proxy",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Proxies IA",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.memory-status",
+      "label": "Status ai-memory",
+      "command": "linux/pz ai product-status ai-memory",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.usagebar-status",
+      "label": "Status UsageBar",
+      "command": "linux/pz ai product-status usagebar",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.desktop.claude.status",
+      "label": "Status Claude Desktop",
+      "command": "linux/pz ai product-status claude-desktop",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.desktop.codex.status",
+      "label": "Status Codex Desktop",
+      "command": "linux/pz ai product-status codex-desktop",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.desktop.qwen.status",
+      "label": "Status Qwen Code Desktop",
+      "command": "linux/pz ai product-status qwen-code-desktop",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.proxies-credentials-mimo",
+      "label": "Salvar chave MiMo bloqueado",
+      "command": "linux/pz ai proxies set-credentials mimo-ai-proxy",
       "mutable": true,
       "require_plan": true,
       "module": "Proxies IA",
       "elevated": false,
       "input_kind": "",
       "input_label": "",
-      "plan_command": "linux/pz ai proxies status"
+      "plan_command": "linux/pz ai proxies auth mimo-ai-proxy"
     },
     {
       "name": "tune.browser",
@@ -3570,7 +3950,7 @@
     },
     {
       "name": "server.hermes.start",
-      "label": "Iniciar Hermes",
+      "label": "Uso Hermes remoto bloqueado",
       "command": "linux/pz server hermes start",
       "mutable": true,
       "require_plan": true,
@@ -4236,6 +4616,41 @@
       "plan_command": "linux/pz ai status"
     },
     {
+      "name": "ai.backup.export",
+      "label": "Exportar memória e acessos",
+      "command": "linux/pz ai backup create --include-credentials --passphrase-stdin",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai backup plan --include-credentials"
+    },
+    {
+      "name": "ai.backup.verify",
+      "label": "Verificar backup de IA",
+      "command": "linux/pz ai backup verify --bundle {bundle} --passphrase-stdin",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.backup.restore",
+      "label": "Restaurar memória e acessos",
+      "command": "linux/pz ai backup restore --bundle {bundle} --passphrase-stdin --confirm RESTORE",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai backup restore --plan --bundle {bundle} --passphrase-stdin"
+    },
+    {
       "name": "ai.mcp.status",
       "label": "Status MCP",
       "command": "linux/pz ai mcp status",
@@ -4305,7 +4720,7 @@
     },
     {
       "name": "ai.proxies.restart-one",
-      "label": "Reiniciar proxy",
+      "label": "Reinício bloqueado",
       "command": "linux/pz ai proxies restart {proxy}",
       "mutable": true,
       "require_plan": true,
@@ -4317,7 +4732,7 @@
     },
     {
       "name": "ai.proxies.test-one",
-      "label": "Testar proxy específico",
+      "label": "Probe bloqueado",
       "command": "linux/pz ai proxies test {proxy}",
       "mutable": false,
       "require_plan": false,
@@ -4625,6 +5040,78 @@
       "input_kind": "",
       "input_label": "",
       "plan_command": "linux/pz capabilities rollback --operation-id {operation_id} --confirm {confirm} --dry-run"
+    },
+    {
+      "name": "capability.profile.development-web-js",
+      "label": "Development Web Js",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --profile development-web-js"
+    },
+    {
+      "name": "capability.profile.development-python",
+      "label": "Development Python",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --profile development-python"
+    },
+    {
+      "name": "capability.profile.development-rust",
+      "label": "Development Rust",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --profile development-rust"
+    },
+    {
+      "name": "capability.profile.development-c-cpp",
+      "label": "Development C Cpp",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --profile development-c-cpp"
+    },
+    {
+      "name": "capability.profile.development-java",
+      "label": "Development Java",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --profile development-java"
+    },
+    {
+      "name": "capability.profile.development-dotnet",
+      "label": "Development Dotnet",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --profile development-dotnet"
     },
     {
       "name": "capability.profile.gaming-core",
@@ -5143,6 +5630,18 @@
       "plan_command": "linux/pz capabilities plan --capability health.iwd"
     },
     {
+      "name": "capability.plan.health.wpa-supplicant",
+      "label": "wpa_supplicant",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --capability health.wpa-supplicant"
+    },
+    {
       "name": "capability.plan.security.apparmor",
       "label": "AppArmor",
       "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
@@ -5299,6 +5798,18 @@
       "plan_command": "linux/pz capabilities plan --capability development.docker"
     },
     {
+      "name": "capability.plan.development.docker-compose",
+      "label": "Docker Compose",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --capability development.docker-compose"
+    },
+    {
       "name": "capability.plan.development.virt-manager",
       "label": "Virt-Manager",
       "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
@@ -5321,6 +5832,42 @@
       "input_kind": "",
       "input_label": "",
       "plan_command": "linux/pz capabilities plan --capability development.kind"
+    },
+    {
+      "name": "capability.plan.development.nodejs",
+      "label": "Node.js",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --capability development.nodejs"
+    },
+    {
+      "name": "capability.plan.development.rust",
+      "label": "Rust",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --capability development.rust"
+    },
+    {
+      "name": "capability.plan.development.cpp",
+      "label": "Compilador C/C++",
+      "command": "linux/pz capabilities apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Recursos",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz capabilities plan --capability development.cpp"
     },
     {
       "name": "capability.plan.development.dotnet",
@@ -5763,7 +6310,7 @@
     },
     {
       "name": "ai.routing-plan",
-      "label": "Plano da rota (diff)",
+      "label": "Plano Código · Equilibrado (diff)",
       "command": "linux/pz ai routing plan --task code --client claude",
       "mutable": false,
       "require_plan": false,
@@ -5774,15 +6321,15 @@
     },
     {
       "name": "ai.routing-apply-all",
-      "label": "Aplicar plano",
-      "command": "linux/pz ai routing apply --task code --yes",
+      "label": "Aplicar 3 rotas · Equilibrado",
+      "command": "linux/pz ai routing apply --task code --policy balanced --yes",
       "mutable": true,
       "require_plan": true,
       "module": "Roteamento IA",
       "elevated": false,
       "input_kind": "",
       "input_label": "",
-      "plan_command": "linux/pz ai routing apply --task code --dry-run"
+      "plan_command": "linux/pz ai routing apply --task code --policy balanced --dry-run"
     },
     {
       "name": "ai.routing-verify",

@@ -50,7 +50,7 @@ test -f "$XDG_CONFIG_HOME/Cursor/User/mcp.json"
 test -f "$XDG_CONFIG_HOME/zed/settings.json"
 test -f "$XDG_CONFIG_HOME/ai.z.zcode/store.json"
 test -f "$HOME/.hermes/config.yaml"
-test -f "$HOME/.openclaw/config.json"
+test ! -e "$HOME/.openclaw/config.json"
 jq -e 'has("mcpServers") | not' "$XDG_CONFIG_HOME/opencode/opencode.json" >/dev/null
 jq -e '.mcp."ai-memory".url | test("^http://127.0.0.1:49374/mcp$")' "$XDG_CONFIG_HOME/opencode/opencode.json" >/dev/null
 jq -e '.servers."ai-memory".url | test("^http://127.0.0.1:49374/mcp$")' "$PZ_WORKSPACE_ROOT/.vscode/mcp.json" >/dev/null
@@ -59,14 +59,12 @@ jq -e '.mcpServers."ai-memory".command == "npx"' "$XDG_CONFIG_HOME/Cursor/User/m
 jq -e '.context_servers."ai-memory".url | test("^http://127.0.0.1:49374/mcp$")' "$XDG_CONFIG_HOME/zed/settings.json" >/dev/null
 jq -e '."mcp-storage" | fromjson | .state.config.mcp.mcpServers."ai-memory".url | test("^http://127.0.0.1:49374/mcp$")' "$XDG_CONFIG_HOME/ai.z.zcode/store.json" >/dev/null
 grep -q 'BEGIN PHASEZERO MCP ai-memory' "$HOME/.hermes/config.yaml"
-jq -e '.mcp.servers."ai-memory".url | test("^http://127.0.0.1:49374/mcp$")' "$HOME/.openclaw/config.json" >/dev/null
 grep -q 'BEGIN PHASEZERO MCP ai-memory' "$HOME/.codex/config.toml"
 
 "$REPO_ROOT/linux/pz" ai mcp install context7 >/dev/null
 jq -e '.mcp.context7.url == "https://mcp.context7.com/mcp"' "$XDG_CONFIG_HOME/opencode/opencode.json" >/dev/null
 jq -e '.servers.context7.url == "https://mcp.context7.com/mcp"' "$PZ_WORKSPACE_ROOT/.vscode/mcp.json" >/dev/null
 grep -q 'BEGIN PHASEZERO MCP context7' "$HOME/.hermes/config.yaml"
-jq -e '.mcp.servers.context7.url == "https://mcp.context7.com/mcp"' "$HOME/.openclaw/config.json" >/dev/null
 grep -q 'BEGIN PHASEZERO MCP context7' "$HOME/.codex/config.toml"
 
 "$REPO_ROOT/linux/pz" ai mcp remove context7 >/dev/null
@@ -82,16 +80,17 @@ if grep -q 'BEGIN PHASEZERO MCP context7' "$HOME/.hermes/config.yaml"; then
     echo "context7 should have been removed from hermes" >&2
     exit 1
 fi
-if jq -e '.mcp.servers.context7' "$HOME/.openclaw/config.json" >/dev/null; then
-    echo "context7 should have been removed from openclaw" >&2
-    exit 1
-fi
+test ! -e "$HOME/.openclaw/config.json"
 
 "$REPO_ROOT/linux/ai/setup-ides.sh" dry-run | jq -e '.tool == "ides"' >/dev/null
 
 # Auto-accept permissions: replace bash "*": ask and flip desktop autoApprove.
 mkdir -p "$XDG_CONFIG_HOME/opencode" "$XDG_CONFIG_HOME/ai.opencode.desktop"
-printf '%s\n' '{"permission":{"bash":{"*":"ask"}}}' > "$XDG_CONFIG_HOME/opencode/opencode.json"
+# Seed the restrictive value on top of the existing config: later assertions
+# still read the MCP entries the earlier setup wrote to this file.
+opencode_cfg="$XDG_CONFIG_HOME/opencode/opencode.json"
+[[ -s "$opencode_cfg" ]] || printf '%s\n' '{}' > "$opencode_cfg"
+jq '.permission = {"bash":{"*":"ask"}}' "$opencode_cfg" > "$opencode_cfg.tmp" && mv "$opencode_cfg.tmp" "$opencode_cfg"
 printf '%s\n' '{"settings.v3":"{\"permissions\":{\"autoApprove\":false}}"}' > "$XDG_CONFIG_HOME/ai.opencode.desktop/default.dat"
 "$REPO_ROOT/linux/ai/setup-opencode.sh" permissions-auto >/dev/null
 jq -e '.permission["*"] == "allow" and .permission.bash == "allow" and .permission.edit == "allow"' \
@@ -138,11 +137,19 @@ PZ_DRY_RUN=1 "$REPO_ROOT/linux/ai/setup-opencode.sh" install-hook >/dev/null
 PZ_DRY_RUN=1 PZ_OLLAMA_URL="http://127.0.0.1:1" "$REPO_ROOT/linux/ai/setup-opencode.sh" local-model >/dev/null
 "$REPO_ROOT/linux/pz" ai opencode version-status | jq -e '.tool == "opencode-version"' >/dev/null
 
-"$REPO_ROOT/linux/ai/setup-memory.sh" dry-run | jq -e '.tool == "ai-memory"' >/dev/null
+"$REPO_ROOT/linux/ai/setup-memory.sh" dry-run \
+    | jq -e '.tool == "ai-memory" and .version == "1.31.1" and (.sha256 | length) == 64 and (.planned | index("install verified native release") != null)' >/dev/null
 "$REPO_ROOT/linux/ai/setup-usagebar.sh" dry-run | jq -e '.tool == "ai-usagebar"' >/dev/null
 "$REPO_ROOT/linux/ai/setup-hermes.sh" dry-run | jq -e '.tool == "hermes"' >/dev/null
-"$REPO_ROOT/linux/ai/setup-openclaw.sh" dry-run | jq -e '.tool == "openclaw"' >/dev/null
-"$REPO_ROOT/linux/pz" ai status | jq -e '(.clis.hermes.available | type == "boolean") and (.clis.openclaw.available | type == "boolean")' >/dev/null
+"$REPO_ROOT/linux/ai/setup-openclaw.sh" dry-run | jq -e '.tool == "openclaw" and .usageBlocked == true and .planned == []' >/dev/null
+"$REPO_ROOT/linux/pz" ai status | jq -e '
+  (.clis.hermes.available | type == "boolean")
+  and (.clis.openclaw.available | type == "boolean")
+  and (.setupCatalog.essentials | map(.id) | index("9router") != null)
+  and (.setupCatalog.optional | map(.id) | index("hermes") != null)
+  and ([.setupCatalog.optional[] | select(.id == "openclaw") | .usageBlocked] == [true])
+  and (.setupCatalog.optional | map(.id) | index("odysseus") != null)
+' >/dev/null
 "$REPO_ROOT/linux/pz" install dev-ai --dry-run >/dev/null
 
 # Smoke: AI managers gracefully report "not installed"
@@ -154,6 +161,22 @@ done
 
 # Smoke: headroom-agent dry-run
 timeout 10 "$REPO_ROOT/linux/ai/headroom-agent.sh" status 2>/dev/null || true
+
+# headroom ausente é envelope rc0 acionável (PATH restrito garante ausência).
+hr_env="$(PATH="/usr/bin:/bin" "$REPO_ROOT/linux/ai/headroom-agent.sh" status 2>/dev/null)"; hr_rc=$?
+[ "$hr_rc" -eq 0 ] || { echo "FAIL: headroom status sem binário deve sair 0 (rc=$hr_rc)" >&2; exit 1; }
+jq -e '.state == "not-installed" and (.nextAction | type == "string")' <<< "$hr_env" >/dev/null \
+    || { echo "FAIL: envelope not-installed do headroom ausente" >&2; echo "$hr_env"; exit 1; }
+echo "  headroom not-installed envelope ok"
+
+# omniroute GET sem chave/serviço é envelope needs-config rc0.
+OMNI_HOME="$(mktemp -d)"
+omni_out="$(HOME="$OMNI_HOME" "$REPO_ROOT/linux/ai/omniroute-manager.sh" combo list 2>/dev/null)"; omni_rc=$?
+rm -rf "$OMNI_HOME"
+[ "$omni_rc" -eq 0 ] || { echo "FAIL: omniroute combo list sem config deve sair 0 (rc=$omni_rc)" >&2; exit 1; }
+jq -e '(.state == "needs-config") or (.combos.state == "needs-config")' <<< "$omni_out" >/dev/null \
+    || { echo "FAIL: envelope needs-config do omniroute ausente" >&2; echo "$omni_out"; exit 1; }
+echo "  omniroute unconfigured envelope ok"
 
 # Smoke: setup scripts with dry-run
 timeout 10 "$REPO_ROOT/linux/ai/setup-ides.sh" dry-run >/dev/null 2>&1 || true
@@ -170,5 +193,19 @@ jq -e '.schemaVersion == 1' <<< "$routing_inv" >/dev/null 2>&1 || \
     echo "  WARN: ai routing inventory did not answer — router may be absent"
 "$REPO_ROOT/linux/pz" ai routing apply --task code --dry-run >/dev/null 2>&1 || \
     echo "  WARN: ai routing apply --dry-run failed — router may be absent"
+
+# Central auth registry: identities and secrets never leave source managers.
+auth_out="$(timeout 30 "$REPO_ROOT/linux/pz" ai auth status)"
+jq -e '
+  .schemaVersion == 1 and .secretsRedacted == true
+  and (.entries | type == "array")
+  and ([.entries[] | has("name") or has("email") or has("apiKey") or has("token")] | any | not)
+' <<< "$auth_out" >/dev/null
+if grep -Eq '[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}' <<< "$auth_out"; then
+    echo "auth registry leaked an account identity" >&2
+    exit 1
+fi
+"$REPO_ROOT/linux/pz" ai auth doctor | jq -e '.secretsRedacted == true and (.issues | type == "array")' >/dev/null
+"$REPO_ROOT/linux/pz" ai operations status | jq -e '.schemaVersion == 1 and .secretsRedacted == true' >/dev/null
 
 echo "linux-ai smoke ok"

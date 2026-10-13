@@ -43,7 +43,7 @@ jq -e '.recommendations | length >= 5' "$PROJECT/.vscode/extensions.json" >/dev/
 
 step "registered in projects.json"
 "$ROOT/linux/pz" ai init --list \
-    | jq -e --arg p "$PROJECT" '.projects[] | select(.path == $p) | .lastStatus == "ready" and (.agents | index("cline") != null) and (.agents | index("zcode") == null)' >/dev/null
+    | jq -e --arg p "$PROJECT" '.projects[] | select(.path == $p) | .lastStatus == "ready" and (.agents | index("cline") != null) and (.agents | index("grok-build") != null) and (.agents | index("kimi-code") != null) and (.agents | index("zcode") != null) and .zcodeDedicatedRules == false' >/dev/null
 
 step "re-init without --force exits 3"
 rc=0
@@ -62,7 +62,16 @@ step "zcode opt-in"
 [ -f "$PROJECT/.zcode/rules/caveman.md" ]
 [ -f "$PROJECT/.zcode/rules/phasezero-tools.md" ]
 "$ROOT/linux/pz" ai init --list \
-    | jq -e --arg p "$PROJECT" '.projects[] | select(.path == $p) | .agents | index("zcode") != null' >/dev/null
+    | jq -e --arg p "$PROJECT" '.projects[] | select(.path == $p) | (.agents | index("zcode") != null) and .zcodeDedicatedRules == true' >/dev/null
+
+step "register existing without project mutation"
+before_hash="$(sha256sum "$PROJECT/AGENTS.md" | awk '{print $1}')"
+"$ROOT/linux/pz" ai init --register-existing "$PROJECT" \
+    | jq -e '.status == "ready" and .modifiedProjectFiles == false' >/dev/null
+after_hash="$(sha256sum "$PROJECT/AGENTS.md" | awk '{print $1}')"
+[ "$before_hash" = "$after_hash" ]
+"$ROOT/linux/pz" ai compat status \
+    | jq -e --arg p "$PROJECT" '.workspaceRoot == $p and .workspaceSource == "registered" and .rules.ok == true and (.integrations.clients | map(.id) | index("zcode") != null)' >/dev/null
 
 step "undo"
 "$ROOT/linux/pz" ai init --undo "$PROJECT" >/dev/null

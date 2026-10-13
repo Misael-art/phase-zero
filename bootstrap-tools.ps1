@@ -3881,12 +3881,12 @@ function Get-BootstrapNotepadPlusPlusInstallInfo {
     $programW6432 = [Environment]::GetEnvironmentVariable('ProgramW6432')
     $publicProfile = [Environment]::GetEnvironmentVariable('PUBLIC')
     $candidates = @(
-        (Join-Path $env:ProgramFiles 'Notepad++')
+        (Join-BootstrapKnownFolderPath -Base $env:ProgramFiles -ChildPath 'Notepad++')
         $(if ($programW6432 -and ($env:ProgramFiles -ne $programW6432)) { Join-Path $programW6432 'Notepad++' } else { $null })
         $(if ($programFilesX86 -and ($env:ProgramFiles -ne $programFilesX86)) { Join-Path $programFilesX86 'Notepad++' } else { $null })
-        (Join-Path $env:LOCALAPPDATA 'Programs\Notepad++')
+        (Join-BootstrapKnownFolderPath -Base $env:LOCALAPPDATA -ChildPath 'Programs\Notepad++')
         $(if ($publicProfile) { Join-Path $publicProfile 'Notepad++' } else { $null })
-    ) | Where-Object { $_ } | Select-Object -Unique
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique
 
     $installRoot = $null
     foreach ($path in @($candidates)) {
@@ -7258,19 +7258,38 @@ function Ensure-CodexInstaller {
     }
 }
 
+function Get-BootstrapUserProfileRoot {
+    # $env:USERPROFILE pode vir vazio (perfil incompleto, host nao-Windows). Join-Path lanca com
+    # base nula, entao resolvemos por fallback em vez de propagar o erro.
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) { return [string]$env:USERPROFILE }
+    $profileFolder = ''
+    try { $profileFolder = [Environment]::GetFolderPath('UserProfile') } catch { $profileFolder = '' }
+    if (-not [string]::IsNullOrWhiteSpace($profileFolder)) { return $profileFolder }
+    if (-not [string]::IsNullOrWhiteSpace($env:HOME)) { return [string]$env:HOME }
+    return (Get-Location).Path
+}
+
+function Get-BootstrapLocalAppDataRoot {
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { return [string]$env:LOCALAPPDATA }
+    $folder = ''
+    try { $folder = [Environment]::GetFolderPath('LocalApplicationData') } catch { $folder = '' }
+    if (-not [string]::IsNullOrWhiteSpace($folder)) { return $folder }
+    return (Join-Path (Get-BootstrapUserProfileRoot) '.local')
+}
+
 function Get-BootstrapCodexHome {
     $codexHome = [Environment]::GetEnvironmentVariable('CODEX_HOME', 'Process')
     if ([string]::IsNullOrWhiteSpace($codexHome)) {
         $codexHome = [Environment]::GetEnvironmentVariable('CODEX_HOME', 'User')
     }
     if ([string]::IsNullOrWhiteSpace($codexHome)) {
-        $codexHome = Join-Path $env:USERPROFILE '.codex'
+        $codexHome = Join-Path (Get-BootstrapUserProfileRoot) '.codex'
     }
     return $codexHome
 }
 
 function Get-BootstrapCodexDesktopPackageDataRoot {
-    return (Join-Path $env:LOCALAPPDATA 'Packages\OpenAI.Codex_2p2nqsd0c76g0')
+    return (Join-Path (Get-BootstrapLocalAppDataRoot) 'Packages\OpenAI.Codex_2p2nqsd0c76g0')
 }
 
 function Get-BootstrapCodexDesktopStatePaths {
@@ -7411,8 +7430,22 @@ function Get-BootstrapCodexDesktopLatestLog {
 }
 
 function Get-BootstrapVcppRuntimeStatus {
-    $system32 = Join-Path $env:WINDIR 'System32'
     $required = @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll')
+    $system32 = Join-BootstrapKnownFolderPath -Base $env:WINDIR -ChildPath 'System32'
+    if ([string]::IsNullOrWhiteSpace($system32) -or -not (Test-Path -LiteralPath $system32)) {
+        # Sem System32 nao ha o que sondar. Reportar 'present' evita que um probe impossivel vire
+        # "runtime ausente" e dispare reinstalacao do VCRedist sem motivo.
+        return [ordered]@{
+            present = $true
+            missing = @()
+            found = @()
+            probeRoot = $system32
+            probeSkipped = $true
+            reason = 'system32-unavailable'
+            wingetId = 'Microsoft.VCRedist.2015+.x64'
+        }
+    }
+
     $missing = @()
     $present = @()
     foreach ($dll in @($required)) {
@@ -7429,6 +7462,7 @@ function Get-BootstrapVcppRuntimeStatus {
         missing = @($missing)
         found = @($present)
         probeRoot = $system32
+        probeSkipped = $false
         wingetId = 'Microsoft.VCRedist.2015+.x64'
     }
 }
@@ -7658,6 +7692,18 @@ function Repair-BootstrapCodexDesktopProcesses {
 
 function Repair-BootstrapCodexDesktop {
     $before = Get-BootstrapCodexDesktopDiagnostics
+    $beforePkg = ConvertTo-BootstrapHashtable -InputObject $before['package']
+    if (-not [bool]$beforePkg['installed'] -and -not [bool]$beforePkg['dataRootExists']) {
+        # Sem Codex Desktop instalado nao ha reparo possivel. 'audited' aqui daria a impressao de
+        # que o item mutante rodou; 'skipped' com motivo e o que de fato aconteceu.
+        return [ordered]@{
+            status = 'skipped'
+            reason = 'codex-desktop-absent'
+            note = 'Codex Desktop nao instalado; nada a reparar.'
+            before = $before
+            after = $before
+        }
+    }
     $runtimeResult = [ordered]@{ status = 'skipped'; reason = 'vcpp-runtime-present-or-not-needed' }
     if (@($before['issues']) -contains 'vcpp-redist-missing-for-codex-desktop') {
         $runtimeResult = Ensure-BootstrapCodexDesktopVcppRuntime
@@ -7921,75 +7967,14 @@ bash "$tmp"
     Ensure-PathUserContains -Dir $binDir
 }
 
+function Assert-BootstrapOpenClawRequestGrant {
+    throw 'OpenClaw usage blocked: connection-grant-not-enforceable. PhaseZero cannot bind an account grant to each request.'
+}
+
 function Ensure-OpenClaw {
     param([Parameter(Mandatory = $true)][string]$NpmCmd)
 
-    $npmPrefix = & $NpmCmd prefix -g
-    if (-not $npmPrefix) { throw 'Não foi possível determinar o prefixo global do npm.' }
-
-    $openclawCmd = Join-Path $npmPrefix 'openclaw.cmd'
-    $openclawModuleDir = Join-Path (Join-Path $npmPrefix 'node_modules') 'openclaw'
-
-    if (Test-Path $openclawCmd) {
-        $ver = Invoke-NativeFirstLine -Exe $openclawCmd -Args @('--version')
-        Write-Log "openclaw já instalado: $ver ($openclawCmd)"
-        return
-    }
-
-    if (Test-Path $openclawModuleDir) {
-        Write-Log "Encontrada instalação parcial do OpenClaw, removendo: $openclawModuleDir" 'WARN'
-        for ($i = 0; $i -lt 5; $i++) {
-            try {
-                Remove-Item -LiteralPath $openclawModuleDir -Recurse -Force -ErrorAction Stop
-                break
-            } catch {
-                Start-Sleep -Milliseconds 500
-            }
-        }
-    }
-
-    Write-Log 'Instalando OpenClaw (openclaw) via npm -g...'
-    $exitCode = Invoke-NpmWithLog -NpmCmd $NpmCmd -Args @('install', '-g', 'openclaw@latest')
-    if ($exitCode -ne 0) {
-        if (Test-Path $openclawCmd) {
-            $ver = Invoke-NativeFirstLine -Exe $openclawCmd -Args @('--version')
-            if (-not [string]::IsNullOrWhiteSpace([string]$ver)) {
-                Write-Log ("OpenClaw npm retornou exit={0}, mas o binario responde: {1} ({2}). Continuando." -f $exitCode, $ver, $openclawCmd) 'WARN'
-                return
-            }
-        }
-
-        Write-Log 'Falha ao instalar OpenClaw. Tentando limpeza e retry...' 'WARN'
-
-        foreach ($p in @($openclawModuleDir, $openclawCmd, (Join-Path $npmPrefix 'openclaw.ps1'), (Join-Path $npmPrefix 'openclaw'))) {
-            for ($i = 0; $i -lt 3; $i++) {
-                try {
-                    if (Test-Path $p) {
-                        Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop
-                    }
-                    break
-                } catch {
-                    Start-Sleep -Milliseconds 300
-                }
-            }
-        }
-
-        $exitCode2 = Invoke-NpmWithLog -NpmCmd $NpmCmd -Args @('install', '-g', 'openclaw@latest', '--force')
-        if ($exitCode2 -ne 0) {
-            if (Test-Path $openclawCmd) {
-                $ver = Invoke-NativeFirstLine -Exe $openclawCmd -Args @('--version')
-                if (-not [string]::IsNullOrWhiteSpace([string]$ver)) {
-                    Write-Log ("OpenClaw npm retry retornou exit={0}, mas o binario responde: {1} ({2}). Continuando." -f $exitCode2, $ver, $openclawCmd) 'WARN'
-                    return
-                }
-            }
-            throw "Falha ao instalar OpenClaw via npm (mesmo apos retry) (exit=$exitCode2)."
-        }
-    }
-
-    if (-not (Test-Path $openclawCmd)) { throw "Instalação do OpenClaw concluída, mas nao encontrei: $openclawCmd" }
-    $ver = Invoke-NativeFirstLine -Exe $openclawCmd -Args @('--version')
-    Write-Log "openclaw instalado: $ver ($openclawCmd)"
+    Assert-BootstrapOpenClawRequestGrant
 }
 
 function Ensure-HermesProjectOpenCloudConfig {
@@ -10849,23 +10834,28 @@ function ConvertTo-BootstrapHashtable {
 
     if ($null -eq $InputObject) { return $null }
 
-    if ($InputObject -is [System.Collections.IDictionary]) {
+    $value = $InputObject
+
+    if ($value -is [System.Collections.IDictionary]) {
         $result = @{}
-        foreach ($key in $InputObject.Keys) {
-            $result[[string]$key] = ConvertTo-BootstrapHashtable -InputObject $InputObject[$key]
+        foreach ($key in $value.Keys) {
+            $result[[string]$key] = ConvertTo-BootstrapHashtable -InputObject $value[$key]
         }
         return $result
     }
 
-    if (($InputObject -is [System.Collections.IEnumerable]) -and -not ($InputObject -is [string])) {
+    if (($value -is [System.Collections.IEnumerable]) -and -not ($value -is [string])) {
         $items = New-Object System.Collections.Generic.List[object]
-        foreach ($item in $InputObject) {
+        foreach ($item in $value) {
             $items.Add((ConvertTo-BootstrapHashtable -InputObject $item))
         }
         return ,@($items.ToArray())
     }
 
-    if ($InputObject -is [pscustomobject]) {
+    # Precisa ser PSCustomObject de verdade. O acelerador [pscustomobject] casa com qualquer valor
+    # embrulhado em PSObject - o que cmdlets como Test-Path e Join-Path devolvem - e fazia bool e
+    # string cairem neste ramo, virando hashtable VAZIA e apagando o dado em silencio.
+    if ($value -is [System.Management.Automation.PSCustomObject]) {
         $result = @{}
         foreach ($property in $InputObject.PSObject.Properties) {
             $result[$property.Name] = ConvertTo-BootstrapHashtable -InputObject $property.Value
@@ -10873,7 +10863,7 @@ function ConvertTo-BootstrapHashtable {
         return $result
     }
 
-    return $InputObject
+    return $value
 }
 
 function Test-BootstrapMapContainsKey {
@@ -11448,11 +11438,11 @@ function Get-BootstrapAppTuningCatalog {
         [ordered]@{ id = 'soundswitch-audio-profile'; category = 'steamdeck-control'; displayName = 'SoundSwitch audio'; description = 'Prepara troca de audio Deck/HDMI/DP por modo.'; targetApps = @('soundswitch'); probePaths = @('$env:APPDATA\SoundSwitch'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('game-handheld','game-docked','desktop'); actions = @('config-file','session'); rollback = @('backup-file') }
         [ordered]@{ id = 'displayfusion-layouts'; category = 'steamdeck-control'; displayName = 'DisplayFusion layouts'; description = 'Perfis de monitor/dock; pode exigir elevacao para hooks globais.'; targetApps = @('displayfusion'); probePaths = @('$env:ProgramFiles\DisplayFusion\DisplayFusion.exe','$env:ProgramFiles(x86)\DisplayFusion\DisplayFusion.exe'); requiresAdmin = $true; defaultMode = 'recommended'; profiles = @('desktop','dev'); actions = @('config-file','task'); rollback = @('backup-file','registry-snapshot') }
 
-        [ordered]@{ id = 'vscode-family-settings'; category = 'dev-ai'; displayName = 'VS Code family settings'; description = 'Aplica settings/extensoes/MCPs para VS Code, Insiders, Cursor, Windsurf, Trae e Zed.'; targetApps = @('visual studio code','cursor','windsurf','trae','zed'); probePaths = @('$env:APPDATA\Code\User\settings.json','$env:APPDATA\Code - Insiders\User\settings.json','$env:APPDATA\Cursor\User','$env:APPDATA\Windsurf\User','$env:APPDATA\Zed\settings.json'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('config-file'); rollback = @('backup-file') }
+        [ordered]@{ id = 'vscode-family-settings'; category = 'dev-ai'; displayName = 'VS Code family settings'; description = 'Aplica settings/extensoes/MCPs para VS Code, Insiders, Cursor, Windsurf, Trae e Zed.'; targetApps = @('visual studio code','cursor','windsurf','trae','zed'); probePaths = @('$env:APPDATA\Code\User\settings.json','$env:APPDATA\Code - Insiders\User\settings.json','$env:APPDATA\Cursor\User','$env:APPDATA\Windsurf\User','$env:APPDATA\Zed\settings.json'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('install','audit'); rollback = @('winget-uninstall-manual') }
         [ordered]@{ id = 'notepadpp-defaults'; category = 'dev-ai'; displayName = 'Notepad++ defaults'; description = 'Instala plugins oficiais curados, UDLs oficiais/custom, NppOpenAI.ini seguro e deixa LSP alpha fora do default.'; targetApps = @('notepad++'); probePaths = @('$env:ProgramFiles\Notepad++\notepad++.exe','$env:ProgramFiles(x86)\Notepad++\notepad++.exe','$env:LOCALAPPDATA\Programs\Notepad++\notepad++.exe','$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Notepad++.Notepad++_*\notepad++.exe','$env:ProgramFiles\WinGet\Packages\Notepad++.Notepad++_*\notepad++.exe'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('config-file','audit'); rollback = @('backup-file','manual') }
         [ordered]@{ id = 'claude-code-defaults'; category = 'dev-ai'; displayName = 'Claude Code defaults'; description = 'Mantem settings, plugins e rules de Claude Code.'; targetApps = @('claude code'); probePaths = @('$env:USERPROFILE\.claude\settings.json'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('config-file'); rollback = @('backup-file') }
         [ordered]@{ id = 'opencode-auth-config'; category = 'dev-ai'; displayName = 'OpenCode auth/config'; description = 'Usa manifesto de chaves para auth/config do OpenCode.'; targetApps = @('opencode'); probePaths = @('$env:USERPROFILE\.config\opencode\opencode.json','$env:USERPROFILE\.local\share\opencode\auth.json'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('config-file'); rollback = @('backup-file') }
-        [ordered]@{ id = 'ai-agent-byok-config'; category = 'dev-ai'; displayName = 'AI agent BYOK config'; description = 'Sincroniza manifesto de APIs para OpenCode, OpenClaw, Hermes, Kilo, Cline e Roo.'; targetApps = @('opencode','openclaw','hermes','kilo','kilocode','cline','roo code'); probePaths = @('$env:USERPROFILE\.local\share\opencode\auth.json','$env:USERPROFILE\.openclaw\openclaw.json','$env:USERPROFILE\.local\share\kilo\auth.json','$env:APPDATA\Code\User\globalStorage'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('config-file','audit'); rollback = @('backup-file') }
+        [ordered]@{ id = 'ai-agent-byok-config'; category = 'dev-ai'; displayName = 'AI agent BYOK config'; description = 'Sincroniza manifesto de APIs para OpenCode, Hermes, Kilo, Cline e Roo; OpenClaw aguarda grants por requisição.'; targetApps = @('opencode','hermes','kilo','kilocode','cline','roo code'); probePaths = @('$env:USERPROFILE\.local\share\opencode\auth.json','$env:USERPROFILE\.local\share\kilo\auth.json','$env:APPDATA\Code\User\globalStorage'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('config-file','audit'); rollback = @('backup-file') }
         [ordered]@{ id = 'ai-agent-workflow-context-pack'; category = 'dev-ai'; displayName = 'AI workflow context pack'; description = 'Gera regras seguras sobre task splitting, hygiene de contexto, QA e modelos locais sem acao destrutiva.'; targetApps = @('opencode','openclaw','hermes','kilo','cline','roo code','continue'); probePaths = @('AGENTS.md','.clinerules','.continue'); requiresAdmin = $false; defaultMode = 'recommended'; riskTier = 'conservative'; securityImpact = $false; rollbackScope = 'backup-file'; safetyNotes = @('Config/rules apenas', 'Nao executa comandos de sistema', 'Nao roteia Gemini fora do Antigravity'); profiles = @('dev','desktop'); actions = @('config-file','audit'); rollback = @('backup-file'); installComponents = @('agent-skills') }
         [ordered]@{ id = 'codex-cli-env'; category = 'dev-ai'; displayName = 'Codex CLI env'; description = 'Audita variaveis/chaves para Codex CLI e apps de agente.'; targetApps = @('codex cli','codex'); probePaths = @('$env:APPDATA\npm\codex.cmd','$env:LOCALAPPDATA\Microsoft\WindowsApps\codex.exe'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('audit'); rollback = @('manual') }
         [ordered]@{ id = 'github-cli-agent-auth'; category = 'dev-ai'; displayName = 'GitHub CLI agent auth'; description = 'Propaga token GitHub validado para configs de agentes como env de contexto, sem gravar GH_TOKEN global do Windows.'; targetApps = @('github cli','gh','codex','claude code','opencode','continue','vscode'); probePaths = @('$env:ProgramFiles\GitHub CLI\gh.exe','$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe','$env:LOCALAPPDATA\Microsoft\WinGet\Packages\GitHub.cli_*\gh.exe'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('config-file','audit'); rollback = @('backup-file','manual'); installComponents = @('github-cli','bootstrap-secrets') }
@@ -11469,14 +11459,14 @@ function Get-BootstrapAppTuningCatalog {
         [ordered]@{ id = 'agent-config-claude-rtk-template'; category = 'agent-config'; displayName = 'Claude/RTK agent config template'; description = 'Template local para documentar uso de RTK, Claude e providers BYOK sem gravar chaves.'; targetApps = @('claude code','rtk','codex','opencode'); probePaths = @('$env:USERPROFILE\.claude\settings.json','$env:USERPROFILE\.codex\config.toml'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','audit'); rollback = @('manual'); riskTier = 'manual'; rollbackScope = 'file-template'; safetyNotes = @('Nao grava segredos', 'Template manual', 'Revisar antes de aplicar'); installComponents = @('bootstrap-secrets','agent-skills') }
         [ordered]@{ id = 'headroom-agent-context-compression'; category = 'agent-config'; displayName = 'Headroom agent context compression'; description = 'Gera helper local para Headroom em Claude Code, Codex, Aider, Cursor, Copilot, Gemini, OpenClaw, n8n e MCP sem gravar chaves.'; targetApps = @('headroom','claude code','codex','aider','cursor','copilot','gemini','openclaw','n8n','mcp','opencode'); probePaths = @('$env:USERPROFILE\.local\bin\headroom.exe','$env:APPDATA\Python\Scripts\headroom.exe','.codex\context-packs\headroom-agent-integration.md'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','wrapper-template','audit'); rollback = @('backup-file','manual'); riskTier = 'manual'; rollbackScope = 'file-template'; safetyNotes = @('Nao grava segredos', 'Nao executa wrap automaticamente', 'OpenCode fica proxy/manual ate wrapper upstream maduro'); requiresInteractiveLogin = $false; installComponents = @('headroom-ai') }
         [ordered]@{ id = 'ai-context-frugality-pack'; category = 'agent-config'; displayName = 'AI context frugality pack'; description = 'Gera regras seguras de higiene de contexto, .aiderignore conservador e skeleton map local para CLIs/IDEs de IA.'; targetApps = @('codex','claude code','aider','headroom','cursor','windsurf','zed','opencode'); probePaths = @('AGENTS.md','.aiderignore','.codex\context-packs\ai-context-frugality.md','.codex\ai-context\repo-skeleton.json'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','skeleton-map','audit'); rollback = @('backup-file','manual'); riskTier = 'conservative'; rollbackScope = 'backup-file'; safetyNotes = @('Nao grava segredos', 'Nao executa reset de sessao', 'Nao ignora lockfiles', 'Skeleton sem corpos de funcao'); requiresInteractiveLogin = $false; installComponents = @() }
-        [ordered]@{ id = 'knowledge-vault-obsidian-template'; category = 'knowledge-vault'; displayName = 'Obsidian transcript vault template'; description = 'Template manual de vault Obsidian para transcricoes tecnicas e memoria de projeto.'; targetApps = @('obsidian'); probePaths = @('$env:LOCALAPPDATA\Programs\Obsidian\Obsidian.exe','$env:USERPROFILE\Documents\Obsidian'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('config-template','audit'); rollback = @('manual'); riskTier = 'manual'; rollbackScope = 'manual'; safetyNotes = @('Nao cria sync remoto', 'Nao instala plugins automaticamente', 'Vault fica sob controle do usuario'); installComponents = @('obsidian') }
-        [ordered]@{ id = 'n8n-youtube-workflow-template'; category = 'workflow-automation'; displayName = 'n8n YouTube transcript workflow template'; description = 'Template manual para fluxo n8n de coleta/transcricao, sem credenciais ou execucao automatica.'; targetApps = @('n8n','youtube'); probePaths = @('$env:APPDATA\npm\n8n.cmd','$env:APPDATA\npm\n8n.ps1'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('workflow-template','manual-action','audit'); rollback = @('manual'); riskTier = 'manual'; rollbackScope = 'manual'; safetyNotes = @('Requer login/API keys do usuario', 'Nao agenda jobs automaticamente', 'Validar fontes e direitos antes de baixar audio'); requiresInteractiveLogin = $true; installComponents = @('n8n') }
+        [ordered]@{ id = 'knowledge-vault-obsidian-template'; category = 'knowledge-vault'; displayName = 'Obsidian transcript vault template'; description = 'Template manual de vault Obsidian para transcricoes tecnicas e memoria de projeto.'; targetApps = @('obsidian'); probePaths = @('$env:LOCALAPPDATA\Programs\Obsidian\Obsidian.exe','$env:USERPROFILE\Documents\Obsidian'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('config-template','audit'); rollback = @('file-template'); riskTier = 'manual'; rollbackScope = 'manual'; safetyNotes = @('Nao cria sync remoto', 'Nao instala plugins automaticamente', 'Vault fica sob controle do usuario'); installComponents = @('obsidian') }
+        [ordered]@{ id = 'n8n-youtube-workflow-template'; category = 'workflow-automation'; displayName = 'n8n YouTube transcript workflow template'; description = 'Template manual para fluxo n8n de coleta/transcricao, sem credenciais ou execucao automatica.'; targetApps = @('n8n','youtube'); probePaths = @('$env:APPDATA\npm\n8n.cmd','$env:APPDATA\npm\n8n.ps1'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('workflow-template','manual-action','audit'); rollback = @('file-template','manual'); riskTier = 'manual'; rollbackScope = 'manual'; safetyNotes = @('Requer login/API keys do usuario', 'Nao agenda jobs automaticamente', 'Validar fontes e direitos antes de baixar audio'); requiresInteractiveLogin = $true; installComponents = @('n8n') }
         [ordered]@{ id = 'reverse-proxy-traefik-pack'; category = 'container-hosting'; displayName = 'Traefik reverse proxy pack'; description = 'Gera stack Traefik local com rede proxy-net, dashboard local, volumes persistentes e TLS-ready.'; targetApps = @('docker','traefik','reverse proxy'); probePaths = @('$env:APPDATA\Docker','.phasezero\container-hosting\traefik\docker-compose.yml'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('config-template','docker-network','doctor','audit'); rollback = @('backup-file','manual'); riskTier = 'conservative'; rollbackScope = 'file-template'; safetyNotes = @('Docker local apenas', 'Cria somente rede Docker proxy-net quando engine estiver disponivel', 'Nao abre portas de apps gerados'); aliases = @('traefik','reverse-proxy','proxy-net'); badges = @('Docker','Seguro'); installComponents = @('docker') }
         [ordered]@{ id = 'compose-app-template'; category = 'container-hosting'; displayName = 'Compose app template'; description = 'Gera template Compose de app atras do Traefik com rede interna, healthcheck, restart policy e log rotation.'; targetApps = @('docker','compose','traefik'); probePaths = @('.phasezero\container-hosting\templates\compose-app.yml'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('config-template','audit'); rollback = @('backup-file','manual'); riskTier = 'conservative'; rollbackScope = 'file-template'; safetyNotes = @('Template sem credenciais', 'Nao expoe ports no app', 'Usuario define dominio antes do deploy'); aliases = @('compose-template','compose-app','docker-compose-template'); badges = @('Docker','Seguro'); installComponents = @('docker') }
         [ordered]@{ id = 'docker-hosting-doctor'; category = 'container-hosting'; displayName = 'Docker hosting doctor'; description = 'Audita Docker Desktop, compose plugin, portas 80/443, rede proxy-net, containers e volumes sem alterar host.'; targetApps = @('docker','traefik','compose'); probePaths = @('$env:APPDATA\Docker'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('doctor','audit'); rollback = @('manual'); riskTier = 'conservative'; rollbackScope = 'audit-only'; safetyNotes = @('Somente leitura', 'Nao para containers', 'Nao altera firewall'); aliases = @('docker-doctor','hosting-doctor','container-doctor'); badges = @('Docker','Seguro'); installComponents = @('docker') }
         [ordered]@{ id = 'n8n-hosting-workflow-template'; category = 'container-hosting'; displayName = 'n8n hosting workflow template'; description = 'Gera workflow/template n8n para checklist de deploy Traefik/Compose sem credenciais ou agendamento.'; targetApps = @('n8n','docker','traefik'); probePaths = @('.phasezero\container-hosting\n8n\hosting-workflow.json'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('workflow-template','manual-action','audit'); rollback = @('backup-file','manual'); riskTier = 'manual'; rollbackScope = 'file-template'; safetyNotes = @('Nao grava credenciais', 'Nao agenda jobs', 'Importacao manual no n8n'); requiresInteractiveLogin = $true; aliases = @('n8n-hosting','hosting-workflow'); badges = @('Docker','Manual'); installComponents = @('n8n','docker') }
-        [ordered]@{ id = 'ai-edge-openai-compatible-template'; category = 'ai-edge-safe'; displayName = 'AI edge OpenAI-compatible template'; description = 'Gera gateway Hono/Node local com /v1/models, /v1/chat/completions, SSE e health para provedores BYOK/owned.'; targetApps = @('node','openai-compatible','opencode','openclaw','hermes','kilo'); probePaths = @('.phasezero\ai-edge-safe\server.js','.phasezero\ai-edge-safe\package.json'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('config-template','audit'); rollback = @('backup-file','manual'); riskTier = 'conservative'; rollbackScope = 'file-template'; safetyNotes = @('BYOK/owned-only', 'Sem scraping/cookies/bypass', 'Chaves ficam no ambiente do usuario'); aliases = @('ai-edge','openai-gateway','safe-ai-proxy'); badges = @('BYOK','Seguro'); installComponents = @('node-core','bootstrap-secrets') }
-        [ordered]@{ id = 'ai-provider-gateway-config'; category = 'ai-edge-safe'; displayName = 'AI provider gateway config'; description = 'Propaga provider OpenAI-compatible/BYOK para OpenCode, Kilo, OpenClaw, Hermes, Cline e Roo usando merges conservadores.'; targetApps = @('opencode','kilo','openclaw','hermes','cline','roo code'); probePaths = @('$env:USERPROFILE\.config\opencode\opencode.json','$env:USERPROFILE\.openclaw\openclaw.json','$env:USERPROFILE\.local\share\kilo\auth.json','.hermes\opencloud.json'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('config-file','audit'); rollback = @('backup-file','manual'); riskTier = 'conservative'; rollbackScope = 'backup-file'; safetyNotes = @('Backup antes de escrever', 'Parse JSON real e preserva campos desconhecidos', 'Aborta se JSON invalido'); aliases = @('byok-gateway','ai-provider-gateway','gateway-config'); badges = @('BYOK','Seguro'); installComponents = @('bootstrap-secrets','opencode','openclaw','hermes','kilo-cli') }
+        [ordered]@{ id = 'ai-edge-openai-compatible-template'; category = 'ai-edge-safe'; displayName = 'AI edge OpenAI-compatible template'; description = 'Gera gateway Hono/Node local com /v1/models, /v1/chat/completions, SSE e health para provedores BYOK/owned.'; targetApps = @('node','openai-compatible','opencode','hermes','kilo'); probePaths = @('.phasezero\ai-edge-safe\server.js','.phasezero\ai-edge-safe\package.json'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('config-template','audit'); rollback = @('backup-file','manual'); riskTier = 'conservative'; rollbackScope = 'file-template'; safetyNotes = @('BYOK/owned-only', 'Sem scraping/cookies/bypass', 'Chaves ficam no ambiente do usuario'); aliases = @('ai-edge','openai-gateway','safe-ai-proxy'); badges = @('BYOK','Seguro'); installComponents = @('node-core','bootstrap-secrets') }
+        [ordered]@{ id = 'ai-provider-gateway-config'; category = 'ai-edge-safe'; displayName = 'AI provider gateway config'; description = 'Propaga provider OpenAI-compatible/BYOK para OpenCode, Kilo, Hermes, Cline e Roo. OpenClaw aguarda grants por requisição.'; targetApps = @('opencode','kilo','hermes','cline','roo code'); probePaths = @('$env:USERPROFILE\.config\opencode\opencode.json','$env:USERPROFILE\.local\share\kilo\auth.json','.hermes\opencloud.json'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('config-file','audit'); rollback = @('backup-file','manual'); riskTier = 'conservative'; rollbackScope = 'backup-file'; safetyNotes = @('Backup antes de escrever', 'Parse JSON real e preserva campos desconhecidos', 'Aborta se JSON invalido'); aliases = @('byok-gateway','ai-provider-gateway','gateway-config'); badges = @('BYOK','Seguro'); installComponents = @('bootstrap-secrets','opencode','hermes','kilo-cli') }
         [ordered]@{ id = 'ai-gateway-doctor'; category = 'ai-edge-safe'; displayName = 'AI gateway doctor'; description = 'Valida base URL, chave presente, /v1/models e streaming simples sem registrar valor de segredo.'; targetApps = @('openai-compatible','gateway','opencode','hermes'); probePaths = @(); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('doctor','audit'); rollback = @('manual'); riskTier = 'conservative'; rollbackScope = 'audit-only'; safetyNotes = @('Nao imprime chave', 'Nao usa cookies/sessoes', 'Somente endpoints autorizados pelo usuario'); aliases = @('ai-gateway-doctor','safe-ai-doctor','openai-gateway-doctor'); badges = @('BYOK','Seguro'); installComponents = @('bootstrap-secrets') }
         [ordered]@{ id = 'zen-browser-privacy-prefs'; category = 'browser-startup'; displayName = 'Zen Browser privacy prefs'; description = 'Checklist opt-in para prefs de privacidade do Zen sem sobrescrever perfil do usuario.'; targetApps = @('zen browser','zen'); probePaths = @('$env:APPDATA\zen','$env:LOCALAPPDATA\Zen Browser'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('desktop','dev'); actions = @('manual-action','audit'); rollback = @('manual'); riskTier = 'conservative'; rollbackScope = 'manual'; safetyNotes = @('Checklist manual', 'Nao altera prefs.js automaticamente', 'Preserva perfil existente'); installComponents = @('zen-browser') }
 
@@ -11491,10 +11481,10 @@ function Get-BootstrapAppTuningCatalog {
         [ordered]@{ id = 'edge-background-off'; category = 'browser-startup'; displayName = 'Edge background off'; description = 'Desliga startup boost/background do Edge via HKCU.'; targetApps = @('microsoft edge','edge'); probePaths = @('$env:LOCALAPPDATA\Microsoft\Edge\User Data'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop','game-handheld','game-docked'); actions = @('registry','startup'); rollback = @('registry-snapshot') }
         [ordered]@{ id = 'chrome-background-off'; category = 'browser-startup'; displayName = 'Chrome background off'; description = 'Desliga apps em background do Chrome via policy HKCU.'; targetApps = @('google chrome','chrome'); probePaths = @('$env:LOCALAPPDATA\Google\Chrome\User Data'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop','game-handheld','game-docked'); actions = @('registry','startup'); rollback = @('registry-snapshot') }
 
-        [ordered]@{ id = 'sunshine-allowlist'; category = 'connectivity'; displayName = 'Sunshine allowlist'; description = 'Mantem Sunshine ativo para streaming remoto.'; targetApps = @('sunshine'); probePaths = @('$env:ProgramFiles\Sunshine\sunshine.exe'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('game-docked','desktop'); actions = @('session','audit'); rollback = @('manual') }
-        [ordered]@{ id = 'tailscale-allowlist'; category = 'connectivity'; displayName = 'Tailscale allowlist'; description = 'Mantem VPN mesh preservada em modos jogo e dev.'; targetApps = @('tailscale'); probePaths = @('$env:ProgramFiles\Tailscale\tailscale.exe'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('game-handheld','game-docked','desktop'); actions = @('session','audit'); rollback = @('manual') }
-        [ordered]@{ id = 'syncthing-allowlist'; category = 'connectivity'; displayName = 'Syncthing allowlist'; description = 'Preserva sync de saves/configs quando instalado.'; targetApps = @('syncthing'); probePaths = @('$env:LOCALAPPDATA\Syncthing'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop'); actions = @('session','audit'); rollback = @('manual') }
-        [ordered]@{ id = 'rustdesk-allowlist'; category = 'connectivity'; displayName = 'RustDesk allowlist'; description = 'Preserva remote desktop quando instalado.'; targetApps = @('rustdesk'); probePaths = @('$env:ProgramFiles\RustDesk\rustdesk.exe'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop'); actions = @('session','audit'); rollback = @('manual') }
+        [ordered]@{ id = 'sunshine-allowlist'; category = 'connectivity'; displayName = 'Sunshine allowlist'; description = 'Mantem Sunshine ativo para streaming remoto.'; targetApps = @('sunshine'); probePaths = @('$env:ProgramFiles\Sunshine\sunshine.exe'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('game-docked','desktop'); actions = @('session','audit'); rollback = @('service-state','manual') }
+        [ordered]@{ id = 'tailscale-allowlist'; category = 'connectivity'; displayName = 'Tailscale allowlist'; description = 'Mantem VPN mesh preservada em modos jogo e dev.'; targetApps = @('tailscale'); probePaths = @('$env:ProgramFiles\Tailscale\tailscale.exe'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('game-handheld','game-docked','desktop'); actions = @('session','audit'); rollback = @('service-state','manual') }
+        [ordered]@{ id = 'syncthing-allowlist'; category = 'connectivity'; displayName = 'Syncthing allowlist'; description = 'Preserva sync de saves/configs quando instalado.'; targetApps = @('syncthing'); probePaths = @('$env:LOCALAPPDATA\Syncthing'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop'); actions = @('session','audit'); rollback = @('service-state','manual') }
+        [ordered]@{ id = 'rustdesk-allowlist'; category = 'connectivity'; displayName = 'RustDesk allowlist'; description = 'Preserva remote desktop quando instalado.'; targetApps = @('rustdesk'); probePaths = @('$env:ProgramFiles\RustDesk\rustdesk.exe'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop'); actions = @('session','audit'); rollback = @('service-state','manual') }
 
         [ordered]@{ id = 'obs-replay-buffer'; category = 'capture-creator'; displayName = 'OBS replay buffer'; description = 'Audita/guarda ponto para replay buffer e source record.'; targetApps = @('obs studio','obs'); probePaths = @('$env:APPDATA\obs-studio'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('game-docked','desktop'); actions = @('config-file','audit'); rollback = @('backup-file') }
         [ordered]@{ id = 'sharex-hotkeys'; category = 'capture-creator'; displayName = 'ShareX hotkeys'; description = 'Prepara captura rapida sem interferir no jogo.'; targetApps = @('sharex'); probePaths = @('$env:APPDATA\ShareX'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop','game-docked'); actions = @('config-file'); rollback = @('backup-file') }
@@ -11504,8 +11494,8 @@ function Get-BootstrapAppTuningCatalog {
         [ordered]@{ id = 'storage-tools-audit'; category = 'storage-backup'; displayName = 'Storage tools audit'; description = 'Audita CompactGUI, TreeSize e WinDirStat sem compactar nada automaticamente.'; targetApps = @('compactgui','treesize','windirstat'); probePaths = @('$env:ProgramFiles\WinDirStat\windirstat.exe'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop'); actions = @('audit'); rollback = @('manual') }
         [ordered]@{ id = 'driver-backup-manual'; category = 'storage-backup'; displayName = 'Driver backup manual'; description = 'Marca backup de drivers/imagem golden como manual.'; targetApps = @('driver store explorer','macrium'); probePaths = @(); requiresAdmin = $true; defaultMode = 'opt-in'; profiles = @('desktop'); actions = @('audit'); rollback = @('manual') }
 
-        [ordered]@{ id = 'quicklook-defaults'; category = 'windows-qol'; displayName = 'QuickLook defaults'; description = 'Prepara preview rapido quando QuickLook existir.'; targetApps = @('quicklook'); probePaths = @('$env:LOCALAPPDATA\Programs\QuickLook'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop'); actions = @('session','audit'); rollback = @('manual') }
-        [ordered]@{ id = 'explorerpatcher-optin'; category = 'windows-qol'; displayName = 'ExplorerPatcher opt-in'; description = 'Shell tweak profundo; opt-in para reduzir risco.'; targetApps = @('explorerpatcher'); probePaths = @('$env:ProgramFiles\ExplorerPatcher'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('desktop'); actions = @('config-file','registry'); rollback = @('backup-file','registry-snapshot') }
+        [ordered]@{ id = 'quicklook-defaults'; category = 'windows-qol'; displayName = 'QuickLook defaults'; description = 'Prepara preview rapido quando QuickLook existir.'; targetApps = @('quicklook'); probePaths = @('$env:LOCALAPPDATA\Programs\QuickLook'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop'); actions = @('session','audit'); rollback = @('session-only') }
+        [ordered]@{ id = 'explorerpatcher-optin'; category = 'windows-qol'; displayName = 'ExplorerPatcher opt-in'; description = 'Shell tweak profundo; opt-in para reduzir risco.'; targetApps = @('explorerpatcher'); probePaths = @('$env:ProgramFiles\ExplorerPatcher'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('desktop'); actions = @('registry'); rollback = @('registry-snapshot') }
         [ordered]@{ id = 'mica-optin'; category = 'windows-qol'; displayName = 'Mica opt-in'; description = 'Visual tweak opcional para Mica For Everyone.'; targetApps = @('mica for everyone'); probePaths = @('$env:APPDATA\Mica For Everyone'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('desktop'); actions = @('config-file'); rollback = @('backup-file') }
         [ordered]@{ id = 'powertoys-qol'; category = 'windows-qol'; displayName = 'PowerToys QoL'; description = 'Mantem PowerToys nos modulos uteis e evita ruído no jogo.'; targetApps = @('powertoys'); probePaths = @('$env:LOCALAPPDATA\Microsoft\PowerToys'); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('desktop','dev'); actions = @('config-file','session'); rollback = @('backup-file') }
     )
@@ -11879,7 +11869,7 @@ function Get-BootstrapAppTuningInstallComponents {
         'notepadpp-defaults' = @('notepadpp')
         'claude-code-defaults' = @('claude-code')
         'opencode-auth-config' = @('opencode')
-        'ai-agent-byok-config' = @('bootstrap-secrets','vscode-extensions','opencode','openclaw','hermes','kilo-cli')
+        'ai-agent-byok-config' = @('bootstrap-secrets','vscode-extensions','opencode','hermes','kilo-cli')
         'codex-cli-env' = @('codex-cli')
         'github-cli-agent-auth' = @('github-cli','bootstrap-secrets')
         'codex-desktop-repair' = @('codex-installer','codex-cli','vcpp-redist')
@@ -13111,12 +13101,12 @@ function Get-BootstrapAppCapabilityCatalog {
         }
         openClaw = [ordered]@{
             displayName = 'OpenClaw'
-            autoInstall = $true
+            autoInstall = $false
             alwaysOnRules = $true
-            authByFile = $true
-            authByEnv = $true
-            manualOnly = $false
-            notes = 'Recebe env/MCP por arquivo local preservado.'
+            authByFile = $false
+            authByEnv = $false
+            manualOnly = $true
+            notes = 'Uso bloqueado até grants de conta por requisição; instalação e propagação automática desativadas.'
         }
         hermes = [ordered]@{
             displayName = 'Hermes'
@@ -13387,6 +13377,18 @@ function Get-BootstrapAppChannelCoverageSummary {
     }
 
     foreach ($targetName in $supportedTargets) {
+        if ($targetName -eq 'openClaw') {
+            $coverageEntries += @([ordered]@{
+                id = $targetName
+                displayName = [string]$labelMap[$targetName]
+                status = 'blocked'
+                reason = 'Account grants are not bound to each OpenClaw request.'
+                byokApplied = $false
+                mcpApplied = $false
+            })
+            continue
+        }
+
         $target = @{}
         if (($ResolvedTargets -is [hashtable]) -and $ResolvedTargets.ContainsKey($targetName) -and ($ResolvedTargets[$targetName] -is [hashtable])) {
             $target = ConvertTo-BootstrapHashtable -InputObject $ResolvedTargets[$targetName]
@@ -16063,7 +16065,7 @@ function Get-BootstrapComponentCatalog {
     $catalog['codex-cli'] = New-BootstrapComponentDefinition -Name 'codex-cli' -Description 'OpenAI Codex CLI via npm -g.' -DependsOn @('node-core') -Kind 'npm' -Data @{ Package = '@openai/codex'; DisplayName = 'OpenAI Codex CLI (@openai/codex)'; CommandNames = @('codex') }
     $catalog['openclaude-cli'] = New-BootstrapComponentDefinition -Name 'openclaude-cli' -Description 'OpenClaude CLI via npm -g.' -DependsOn @('node-core') -Kind 'npm' -Data @{ Package = '@gitlawb/openclaude'; DisplayName = 'OpenClaude CLI (@gitlawb/openclaude)'; CommandNames = @('openclaude') }
     $catalog['mimo-code'] = New-BootstrapComponentDefinition -Name 'mimo-code' -Description 'MiMo Code CLI (fork agentico do OpenCode, Xiaomi MiMo) via npm -g. Configura provider OpenAI-compatible validado quando disponivel; senao usa MiMo Auto (gratis).' -DependsOn @('node-core') -Kind 'npm' -Data @{ Package = '@mimo-ai/cli'; DisplayName = 'MiMo Code (@mimo-ai/cli)'; CommandNames = @('mimo') } -RequiresNetwork $true
-    $catalog['openclaw'] = New-BootstrapComponentDefinition -Name 'openclaw' -Description 'OpenClaw via npm.' -DependsOn @('node-core') -Kind 'openclaw'
+    $catalog['openclaw'] = New-BootstrapComponentDefinition -Name 'openclaw' -Description 'OpenClaw blocked until account grants can bind to each request.' -DependsOn @() -Kind 'openclaw'
     $catalog['hermes'] = New-BootstrapComponentDefinition -Name 'hermes' -Description 'Hermes Agent via WSL2 + OpenCloud config no projeto.' -DependsOn @('wsl-core') -Kind 'hermes'
     # Otimizadores de terceiros (opt-in, guiados/manual-required, experimentais). NAO entram em perfis
     # seguros nem fazem mudancas opacas pelo bootstrap: o PhaseZero apenas valida presenca e orienta o
@@ -16253,7 +16255,7 @@ function Get-BootstrapComponentCatalog {
 function Get-BootstrapProfileCatalog {
     $catalog = [ordered]@{}
 
-    $catalog['legacy'] = New-BootstrapProfileDefinition -Name 'legacy' -Description 'Replica o fluxo atual do script.' -Items @('git-core', 'node-core', 'java-core', 'dotnet-core', 'imagemagick', 'sevenzip', 'python-core', 'opencode', 'claude-code', 'github-cli', 'chrome', 'google-app-desktop', 'notepadpp', 'claude-desktop', 'cursor', 'windsurf', 'warp', 'trae', 'opencode-desktop', 'vscode', 'vscode-insiders', 'wsl-ui', 'antigravity', 'autoclaw', 'perplexity', 'codex-installer', 'gemini-cli', 'kilo-cli', 'bonsai-cli', 'grok-cli', 'qwen-code', 'copilot-cli', 'codex-cli', 'openclaude-cli', 'openclaw', 'kimiproxy', 'qwenproxy', 'deepsproxy', 'mimo-ai-proxy', 'antigravity-openai-adapter', 'dockernativemanager', 'ai-proxy-suite', 'promptfoo', 'bootstrap-secrets', 'bootstrap-mcps', 'vscode-extensions', 'claude-config', 'claude-plugins', 'agent-skills', 'aider', 'goose', 'repo-gemini-cli')
+    $catalog['legacy'] = New-BootstrapProfileDefinition -Name 'legacy' -Description 'Replica o fluxo atual do script.' -Items @('git-core', 'node-core', 'java-core', 'dotnet-core', 'imagemagick', 'sevenzip', 'python-core', 'opencode', 'claude-code', 'github-cli', 'chrome', 'google-app-desktop', 'notepadpp', 'claude-desktop', 'cursor', 'windsurf', 'warp', 'trae', 'opencode-desktop', 'vscode', 'vscode-insiders', 'wsl-ui', 'antigravity', 'autoclaw', 'perplexity', 'codex-installer', 'gemini-cli', 'kilo-cli', 'bonsai-cli', 'grok-cli', 'qwen-code', 'copilot-cli', 'codex-cli', 'openclaude-cli', 'kimiproxy', 'qwenproxy', 'deepsproxy', 'mimo-ai-proxy', 'antigravity-openai-adapter', 'dockernativemanager', 'ai-proxy-suite', 'promptfoo', 'bootstrap-secrets', 'bootstrap-mcps', 'vscode-extensions', 'claude-config', 'claude-plugins', 'agent-skills', 'aider', 'goose', 'repo-gemini-cli')
     $catalog['safe-base'] = New-BootstrapProfileDefinition -Name 'safe-base' -Description 'Base segura e pequena para maquina limpa; sem desktops de IA, containers, jogos ou tuning.' -Items @('git-core', 'git-lfs', 'node-core', 'python-core', 'java-core', 'dotnet-core', 'sevenzip', 'terminal', 'github-cli', 'notepadpp')
     $catalog['public-beta'] = New-BootstrapProfileDefinition -Name 'public-beta' -Description 'Primeira instalacao confiavel para beta publico; maior que safe-base, sem WSL/Docker/IA pesada/gaming.' -Items @('safe-base', 'powershell', 'powertoys', 'brave', 'bootstrap-secrets', 'vscode', 'vscode-extensions', 'bootstrap-mcps')
     $catalog['base'] = New-BootstrapProfileDefinition -Name 'base' -Description 'Base universal para maquina nova com navegadores, utilitarios e atalhos web.' -Items @('git-core', 'git-lfs', 'node-core', 'python-core', 'java-core', 'dotnet-core', 'imagemagick', 'sevenzip', 'powershell', 'terminal', 'powertoys', 'github-cli', 'chrome', 'brave', 'notepadpp', 'webapps')
@@ -16266,7 +16268,7 @@ function Get-BootstrapProfileCatalog {
     $catalog['server-llm-hermes'] = New-BootstrapProfileDefinition -Name 'server-llm-hermes' -Description 'LLM local + Hermes remoto, com Windows enxugado para menor RAM.' -Items @('ollama', 'hermes-remote', 'os-slim-server')
     $catalog['server-llm-homelab'] = New-BootstrapProfileDefinition -Name 'server-llm-homelab' -Description 'LLM local + servidor caseiro, com Windows enxugado para menor RAM.' -Items @('ollama', 'homelab-stack', 'tailscale', 'os-slim-server')
     $catalog['server-llm-homelab-hermes'] = New-BootstrapProfileDefinition -Name 'server-llm-homelab-hermes' -Description 'Tudo: LLM local + servidor caseiro + Hermes remoto, com Windows enxugado.' -Items @('ollama', 'homelab-stack', 'tailscale', 'hermes-remote', 'os-slim-server')
-    $catalog['ai'] = New-BootstrapProfileDefinition -Name 'ai' -Description 'Desktops, CLIs e proxies locais de IA.' -Items @('claude-desktop', 'claude-code', 'cursor', 'windsurf', 'warp', 'trae', 'opencode-desktop', 'vscode', 'vscode-insiders', 'antigravity', 'autoclaw', 'perplexity', 'codex-installer', 'ollama', 'cherry-studio', 'lm-studio', 'pinokio', 'zed', 'opencode', 'gemini-cli', 'kilo-cli', 'bonsai-cli', 'grok-cli', 'qwen-code', 'copilot-cli', 'codex-cli', 'openclaude-cli', 'mimo-code', 'openclaw', 'hermes', 'kimiproxy', 'qwenproxy', 'deepsproxy', 'mimo-ai-proxy', 'antigravity-openai-adapter', 'dockernativemanager', 'ai-proxy-suite', 'ai-usagebar', 'ai-memory', 'aionui', 'headroom-ai', 'promptfoo', 'bootstrap-secrets', 'bootstrap-mcps', 'vscode-extensions', 'claude-config', 'claude-plugins', 'agent-skills', 'agent-compat-runtime', 'aider', 'goose', 'repo-gemini-cli', 'supermaven-vscode')
+    $catalog['ai'] = New-BootstrapProfileDefinition -Name 'ai' -Description 'Desktops, CLIs e proxies locais de IA.' -Items @('claude-desktop', 'claude-code', 'cursor', 'windsurf', 'warp', 'trae', 'opencode-desktop', 'vscode', 'vscode-insiders', 'antigravity', 'autoclaw', 'perplexity', 'codex-installer', 'ollama', 'cherry-studio', 'lm-studio', 'pinokio', 'zed', 'opencode', 'gemini-cli', 'kilo-cli', 'bonsai-cli', 'grok-cli', 'qwen-code', 'copilot-cli', 'codex-cli', 'openclaude-cli', 'mimo-code', 'hermes', 'kimiproxy', 'qwenproxy', 'deepsproxy', 'mimo-ai-proxy', 'antigravity-openai-adapter', 'dockernativemanager', 'ai-proxy-suite', 'ai-usagebar', 'ai-memory', 'aionui', 'headroom-ai', 'promptfoo', 'bootstrap-secrets', 'bootstrap-mcps', 'vscode-extensions', 'claude-config', 'claude-plugins', 'agent-skills', 'agent-compat-runtime', 'aider', 'goose', 'repo-gemini-cli', 'supermaven-vscode')
     $catalog['dev-ai'] = New-BootstrapProfileDefinition -Name 'dev-ai' -Description 'Alias explicito para pilha de IA pesada; opt-in.' -Items @('ai')
     $catalog['automation'] = New-BootstrapProfileDefinition -Name 'automation' -Description 'Automação local.' -Items @('n8n')
     $catalog['security'] = New-BootstrapProfileDefinition -Name 'security' -Description 'Gestores de senha e nuvem.' -Items @('1password', 'proton-drive', 'proton-pass')
@@ -17828,6 +17830,34 @@ function Get-BootstrapAiProxyCatalog {
     return $catalog
 }
 
+function Get-PhaseZeroProxyManifest {
+    # PZ-AUD-019: canonical cross-OS proxy contract (assets/ai/proxy-manifest.json).
+    $manifestPath = Join-Path $PSScriptRoot 'assets/ai/proxy-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath)) { return $null }
+    return (Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+}
+
+function Test-PhaseZeroProxyManifestParity {
+    # Compares the Windows catalog against the manifest. Returns mismatches;
+    # known migrations stay visible via the manifest `migration` notes.
+    $manifest = Get-PhaseZeroProxyManifest
+    $catalog = Get-BootstrapAiProxyCatalog
+    $issues = @()
+    if ($null -eq $manifest) { return @('proxy manifest missing') }
+    foreach ($entry in $manifest.proxies) {
+        if ($entry.tier -ne 'supported') { continue }
+        $id = [string]$entry.id
+        if (-not $catalog.Contains($id)) { $issues += ("{0}: missing from Windows catalog" -f $id); continue }
+        if ([string]$catalog[$id].RepoUrl -ne [string]$entry.repository) {
+            $issues += ("{0}: RepoUrl drift (catalog={1} manifest={2})" -f $id, $catalog[$id].RepoUrl, $entry.repository)
+        }
+        if ([int]$catalog[$id].Port -ne [int]$entry.port) {
+            $issues += ("{0}: Port drift (catalog={1} manifest={2})" -f $id, $catalog[$id].Port, $entry.port)
+        }
+    }
+    return $issues
+}
+
 function Get-BootstrapAiToolCatalog {
     $catalog = [ordered]@{}
     $catalog['rtk'] = [ordered]@{
@@ -17919,7 +17949,7 @@ function Get-BootstrapAiToolCatalog {
         InstallSupport = 'npm-prefix'
         MinimumNodeMajor = 22
         Aliases        = @('codeclaw')
-        Notes          = 'Instala via npm quando solicitado; Node >= 22 requerido. Onboarding, daemon/gateway e chaves ficam manuais.'
+        Notes          = 'Instalação e uso bloqueados até grants de conta por requisição serem aplicados; preserve instalações externas.'
     }
     $catalog['aionui'] = [ordered]@{
         ToolName       = 'aionui'
@@ -19004,6 +19034,9 @@ function Get-BootstrapAiToolStatusRows {
                 }
                 $version = [string]$proxy['repo']
             }
+        } elseif ($toolName -eq 'openclaw') {
+            $configured = Test-BootstrapAiToolConfigured -ToolName $toolName -ProjectRoot $ProjectRoot
+            $status = 'blocked'
         } elseif (-not [string]::IsNullOrWhiteSpace($commandPath)) {
             $version = Get-BootstrapAiToolVersion -CatalogEntry $entry -CommandPath $commandPath
             $configured = Test-BootstrapAiToolConfigured -ToolName $toolName -ProjectRoot $ProjectRoot
@@ -19011,6 +19044,9 @@ function Get-BootstrapAiToolStatusRows {
         } elseif ([string]$entry['InstallSupport'] -match '^manual') {
             $status = 'manual'
         }
+        $usageBlocked = ($toolName -eq 'openclaw')
+        $blockedReason = if ($usageBlocked) { 'connection-grant-not-enforceable' } else { '' }
+        if ($usageBlocked) { $status = 'blocked' }
         $rows.Add([ordered]@{
             tool        = [string]$toolName
             name        = [string]$entry['DisplayName']
@@ -19021,6 +19057,8 @@ function Get-BootstrapAiToolStatusRows {
             docs        = [string]$entry['DocsUrl']
             support     = [string]$entry['InstallSupport']
             message     = [string]$entry['Notes']
+            usageBlocked = [bool]$usageBlocked
+            blockedReason = [string]$blockedReason
         }) | Out-Null
     }
     return @($rows.ToArray())
@@ -19261,7 +19299,7 @@ function New-BootstrapAiProxyManifest {
         defaultBaseUrl = [string]$catalog['kimiproxy']['BaseUrl']
         defaultModel = [string]$catalog['kimiproxy']['DefaultModel']
         providers = @($providers.ToArray())
-        targets = @('vsCode','cursor','windsurf','trae','roo','cline','zed','zCode','openCode','openClaw','hermes','kilo','continue')
+        targets = @('vsCode','cursor','windsurf','trae','roo','cline','zed','zCode','openCode','hermes','kilo','continue')
         note = 'API keys live only in each proxy .env; this manifest is safe to include in support bundles.'
     }
 }
@@ -19421,7 +19459,7 @@ function New-BootstrapAiProxyResolvedTarget {
 
     $envMap = New-BootstrapAiProxyIdeEnvironment -Records $Records
     $targets = [ordered]@{}
-    foreach ($targetName in @('claudeCode','cursor','windsurf','trae','vsCode','roo','cline','zed','zCode','openClaw','hermes')) {
+    foreach ($targetName in @('claudeCode','cursor','windsurf','trae','vsCode','roo','cline','zed','zCode','hermes')) {
         $targets[$targetName] = [ordered]@{
             env = ConvertTo-BootstrapHashtable -InputObject $envMap
             mcpServers = [ordered]@{}
@@ -19625,121 +19663,8 @@ function Ensure-BootstrapOpenClawCompatibleConfigFile {
         [Parameter(Mandatory = $true)][hashtable]$Target,
         [Parameter(Mandatory = $true)][string]$Label
     )
-
-    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
-    $settings = @{}
-    if (Test-Path -LiteralPath $Path) {
-        try {
-            $settings = Read-BootstrapJsonFile -Path $Path
-            if (-not ($settings -is [hashtable])) { $settings = @{} }
-        } catch {
-            $backupPath = Backup-BootstrapFile -Path $Path
-            if ($backupPath) {
-                Write-Log ("{0} invalido; backup criado: {1}" -f $Label, $backupPath) 'WARN'
-            }
-            $settings = @{}
-        }
-    }
-
-    $before = ((ConvertTo-BootstrapObjectGraph -InputObject $settings) | ConvertTo-Json -Depth 60 -Compress)
-
-    $mcpRoot = Ensure-BootstrapNamedMap -Parent $settings -Name 'mcp'
-    $mcpServers = Ensure-BootstrapNamedMap -Parent $mcpRoot -Name 'servers'
-    if ($settings.ContainsKey('mcpServers') -and ($settings['mcpServers'] -is [hashtable])) {
-        $legacyMcp = ConvertTo-BootstrapHashtable -InputObject $settings['mcpServers']
-        foreach ($serverName in @($legacyMcp.Keys)) {
-            $mcpServers[[string]$serverName] = $legacyMcp[$serverName]
-        }
-        $null = $settings.Remove('mcpServers')
-    }
-    if ($Target.ContainsKey('mcpServers') -and ($Target['mcpServers'] -is [hashtable])) {
-        $mcpChanges = @{}
-        $appliedMcpServers = Merge-BootstrapMcpServers -TargetMap $mcpChanges -SourceMap $Target['mcpServers'] -Format 'standard'
-        if ($appliedMcpServers -gt 0) {
-            foreach ($serverName in @($mcpChanges.Keys)) {
-                $mcpServers[[string]$serverName] = $mcpChanges[$serverName]
-            }
-        }
-    }
-    if ($mcpServers.Count -eq 0) {
-        Remove-BootstrapEmptyNamedMap -Parent $mcpRoot -Name 'servers' | Out-Null
-        Remove-BootstrapEmptyNamedMap -Parent $settings -Name 'mcp' | Out-Null
-    }
-
-    $envRoot = Ensure-BootstrapNamedMap -Parent $settings -Name 'env'
-    $envVars = Ensure-BootstrapNamedMap -Parent $envRoot -Name 'vars'
-    foreach ($name in @($envRoot.Keys)) {
-        if ($name -in @('vars','shellEnv')) { continue }
-        $value = $envRoot[$name]
-        if ($value -is [string] -and -not [string]::IsNullOrWhiteSpace($value)) {
-            $envVars[[string]$name] = [string]$value
-        }
-        $null = $envRoot.Remove($name)
-    }
-    if ($Target.ContainsKey('env') -and ($Target['env'] -is [hashtable])) {
-        Set-BootstrapNonEmptyStringValues -Target $envVars -Values $Target['env']
-    }
-    if ($envVars.Count -eq 0) {
-        Remove-BootstrapEmptyNamedMap -Parent $envRoot -Name 'vars' | Out-Null
-        Remove-BootstrapEmptyNamedMap -Parent $settings -Name 'env' | Out-Null
-    }
-
-    $records = @(Get-BootstrapAiProxyRecordsFromResolvedEnv -Env $envVars)
-    if ($records.Count -gt 0) {
-        $modelsRoot = Ensure-BootstrapNamedMap -Parent $settings -Name 'models'
-        $modelsRoot['mode'] = 'merge'
-        $providersMap = Ensure-BootstrapNamedMap -Parent $modelsRoot -Name 'providers'
-        foreach ($record in @($records)) {
-            $providerId = [string]$record['providerId']
-            if ([string]::IsNullOrWhiteSpace($providerId)) { continue }
-            $modelList = New-Object System.Collections.Generic.List[object]
-            foreach ($modelId in @($record['models'])) {
-                $modelText = [string]$modelId
-                if ([string]::IsNullOrWhiteSpace($modelText)) { continue }
-                $modelList.Add([ordered]@{
-                    id = $modelText
-                    name = $modelText
-                    api = 'openai-completions'
-                    baseUrl = [string]$record['baseUrl']
-                    input = @('text')
-                }) | Out-Null
-            }
-            $providersMap[$providerId] = [ordered]@{
-                baseUrl = [string]$record['baseUrl']
-                api = 'openai-completions'
-                apiKey = ('${' + [string]$record['apiKeyEnvName'] + '}')
-                models = @($modelList.ToArray())
-            }
-        }
-
-        $default = Get-BootstrapAiProxyDefaultRecord -Records $records
-        if ($null -ne $default) {
-            $agentsRoot = Ensure-BootstrapNamedMap -Parent $settings -Name 'agents'
-            $defaults = Ensure-BootstrapNamedMap -Parent $agentsRoot -Name 'defaults'
-            $defaultModel = ('{0}/{1}' -f [string]$default['providerId'], [string]$default['defaultModel'])
-            $defaults['model'] = $defaultModel
-            $defaultModels = Ensure-BootstrapNamedMap -Parent $defaults -Name 'models'
-            foreach ($record in @($records)) {
-                foreach ($modelId in @($record['models'])) {
-                    $fullModel = ('{0}/{1}' -f [string]$record['providerId'], [string]$modelId)
-                    $defaultModels[$fullModel] = [ordered]@{
-                        alias = ('PhaseZero {0}' -f [string]$record['name'])
-                    }
-                }
-            }
-        }
-    }
-
-    $after = ((ConvertTo-BootstrapObjectGraph -InputObject $settings) | ConvertTo-Json -Depth 60 -Compress)
-    if ($before -eq $after) {
-        return $false
-    }
-    if (Test-Path -LiteralPath $Path) {
-        Backup-BootstrapFile -Path $Path | Out-Null
-    }
-    Write-BootstrapJsonFile -Path $Path -Value $settings
-    Write-Log ("{0} configurado com PhaseZero AI Proxy Suite: {1}" -f $Label, $Path)
-    return $true
+    Write-Log ("{0} mantido intacto: grants por requisição para OpenClaw ainda não são aplicáveis." -f $Label) 'WARN'
+    return $false
 }
 
 function Convert-BootstrapHermesYamlValue {
@@ -19840,7 +19765,7 @@ function Set-BootstrapAiProxyIdeDefault {
 
     $root = Get-BootstrapAiInstallRoot -InstallRoot $InstallRoot
     $project = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { (Get-Location).Path } else { [System.IO.Path]::GetFullPath($ProjectRoot) }
-    $plannedTargets = @('claudeCode','cursor','windsurf','trae','vsCode','roo','cline','zed','zCode','openCode','openClaw','hermes','kilo','continue')
+    $plannedTargets = @('claudeCode','cursor','windsurf','trae','vsCode','roo','cline','zed','zCode','openCode','hermes','kilo','continue')
     if ($DryRun) {
         return [ordered]@{
             status = 'planned'
@@ -21430,6 +21355,9 @@ function Install-BootstrapAiNpmTool {
         [Parameter(Mandatory = $true)][string]$InstallRoot,
         [switch]$DryRun
     )
+    if ((Normalize-BootstrapAiToolName -ToolName $ToolName) -eq 'openclaw') {
+        Assert-BootstrapOpenClawRequestGrant
+    }
     $root = Get-BootstrapAiInstallRoot -InstallRoot $InstallRoot
     $prefix = Get-BootstrapAiNpmPrefix -InstallRoot $root
     $packageName = [string]$CatalogEntry['PackageName']
@@ -22966,12 +22894,26 @@ function Invoke-BootstrapAiToolAction {
     $root = Get-BootstrapAiInstallRoot -InstallRoot $InstallRoot
     $project = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { (Get-Location).Path } else { [System.IO.Path]::GetFullPath($ProjectRoot) }
 
+    if ($name -eq 'openclaw' -and $Action -notin @('validate','docs','uninstall')) {
+        $result = New-BootstrapAiToolResult -ToolName $name -Action $Action -Status 'blocked' -InstallRoot $root -ProjectRoot $project -Message 'OpenClaw blocked: account grants are not bound to each request.' -Docs ([string]$entry['DocsUrl'])
+        $result['ready'] = $false
+        $result['usageBlocked'] = $true
+        $result['blockedReason'] = 'connection-grant-not-enforceable'
+        return $result
+    }
+
     if ($Action -eq 'validate') {
         $row = @(Get-BootstrapAiToolStatusRows -InstallRoot $root -ProjectRoot $project | Where-Object { [string]$_['tool'] -eq $name } | Select-Object -First 1)
         if ($row.Count -eq 0) {
             return (New-BootstrapAiToolResult -ToolName $name -Action $Action -Status 'error' -InstallRoot $root -ProjectRoot $project -Message 'Status nao encontrado.' -Docs ([string]$entry['DocsUrl']))
         }
-        return (New-BootstrapAiToolResult -ToolName $name -Action $Action -Status ([string]$row[0]['status']) -InstallRoot $root -ProjectRoot $project -Message ([string]$row[0]['message']) -Docs ([string]$row[0]['docs']) -CommandPath ([string]$row[0]['commandPath']) -Version ([string]$row[0]['version']))
+        $result = New-BootstrapAiToolResult -ToolName $name -Action $Action -Status ([string]$row[0]['status']) -InstallRoot $root -ProjectRoot $project -Message ([string]$row[0]['message']) -Docs ([string]$row[0]['docs']) -CommandPath ([string]$row[0]['commandPath']) -Version ([string]$row[0]['version'])
+        if ($name -eq 'openclaw') {
+            $result['ready'] = $false
+            $result['usageBlocked'] = $true
+            $result['blockedReason'] = 'connection-grant-not-enforceable'
+        }
+        return $result
     }
 
     if ($Action -eq 'docs') {
@@ -25518,13 +25460,8 @@ function Ensure-BootstrapOpenClawSecrets {
         return $false
     }
 
-    $updated = $false
-    foreach ($path in @(Get-BootstrapOpenClawConfigPaths)) {
-        $label = if ($path -match '(?i)clawdbot') { 'Clawbot config' } else { 'OpenClaw config' }
-        if ($path -match '(?i)clawdecode') { $label = 'ClawDecode config' }
-        $updated = ((Ensure-BootstrapOpenClawCompatibleConfigFile -Path $path -Target $ResolvedTargets['openClaw'] -Label $label) -or $updated)
-    }
-    return $updated
+    Write-Log 'OpenClaw/Clawbot credential and provider propagation skipped: connection-grant-not-enforceable.' 'WARN'
+    return $false
 }
 
 function Ensure-BootstrapHermesSecrets {
@@ -29118,8 +29055,8 @@ function Apply-BrowserStartupTuning {
 }
 
 function Ensure-BootstrapPlayniteFullscreenConfig {
-    $configPath = Join-Path $env:APPDATA 'Playnite\config.json'
-    if (-not (Test-Path $configPath)) {
+    $configPath = Join-BootstrapKnownFolderPath -Base $env:APPDATA -ChildPath 'Playnite\config.json'
+    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path $configPath)) {
         return [ordered]@{ status = 'skipped'; note = "Playnite config ausente: $configPath" }
     }
 
@@ -29526,7 +29463,7 @@ function Ensure-BootstrapHeadroomAgentIntegration {
         '- Cursor: `headroom wrap cursor`',
         '- GitHub Copilot CLI: `headroom wrap copilot`',
         '- Gemini CLI: `headroom wrap gemini`',
-        '- OpenClaw: `headroom wrap openclaw`',
+        '- OpenClaw: blocked until each request can enforce an explicit account grant (exit 69).',
         '- OpenCode: manual proxy only; no stable Headroom wrapper is confirmed upstream yet.',
         '',
         'Proxy and automation:',
@@ -29596,7 +29533,11 @@ switch ($Action) {
     'wrap-cursor' { Invoke-Headroom -Args @('wrap','cursor') }
     'wrap-copilot' { Invoke-Headroom -Args @('wrap','copilot') }
     'wrap-gemini' { Invoke-Headroom -Args @('wrap','gemini') }
-    'wrap-openclaw' { Invoke-Headroom -Args @('wrap','openclaw') }
+    'wrap-openclaw' {
+        Write-Output '{"blocked":true,"usageBlocked":true,"reason":"connection-grant-not-enforceable"}'
+        [Console]::Error.WriteLine('OpenClaw blocked: account grants are not bound to each request.')
+        exit 69
+    }
     'mcp-install' { Invoke-Headroom -Args @('mcp','install') }
     'stats' { Invoke-Headroom -Args @('stats') }
 }
@@ -30838,6 +30779,18 @@ function Apply-DevAiTuning {
                 envShim = $envShim
             }
         }
+        'llamacpp-mtp-template' {
+            $template = Ensure-BootstrapLlamacppMtpTemplate -WorkspaceRoot (Get-BootstrapAppTuningWorkspaceRoot -State $State)
+            return [ordered]@{
+                id = [string]$Item.id
+                status = [string]$template.status
+                changed = [bool]$template.changed
+                note = 'Template de diagnostico MTP gerado; nenhum modelo foi baixado.'
+                paths = @($template.paths)
+                nextSteps = @($template.nextSteps)
+                rollback = 'file-template'
+            }
+        }
         default {
             return [ordered]@{ id = [string]$Item.id; status = 'audited'; note = 'Dev/AI integration audited; secrets remain managed by bootstrap-secrets.' }
         }
@@ -30869,6 +30822,19 @@ function Apply-AgentConfigTuning {
                 status = [string]$result.status
                 note = 'AI context frugality pack generated with conservative ignores and skeleton map.'
                 manifest = $result
+            }
+        }
+        'agent-config-claude-rtk-template' {
+            $template = Ensure-BootstrapClaudeRtkTemplate -WorkspaceRoot (Get-BootstrapAppTuningWorkspaceRoot -State $State)
+            return [ordered]@{
+                id = [string]$Item.id
+                category = [string]$Item.category
+                status = [string]$template.status
+                changed = [bool]$template.changed
+                note = 'Template Claude/RTK gerado; nenhuma chave foi gravada.'
+                paths = @($template.paths)
+                nextSteps = @($template.nextSteps)
+                rollback = 'file-template'
             }
         }
         default {
@@ -30976,12 +30942,53 @@ function Apply-LocalAiContainerTuning {
 }
 
 function Apply-CaptureTuning {
-    param([Parameter(Mandatory = $true)]$Item)
-    return [ordered]@{ id = [string]$Item.id; status = 'audited'; note = 'Capture settings kept audit-only unless explicit app config is safe.' }
+    param(
+        [Parameter(Mandatory = $true)]$Item,
+        [AllowNull()][hashtable]$State = $null
+    )
+
+    $itemId = [string]$Item.id
+    if ($null -eq $State) {
+        return [ordered]@{ id = $itemId; category = [string]$Item.category; status = 'skipped'; reason = 'state-required'; note = 'Tuning de captura exige State para registrar rollback.' }
+    }
+
+    $result = switch ($itemId) {
+        'obs-replay-buffer'    { Ensure-BootstrapObsReplayBuffer -State $State }
+        'sharex-hotkeys'       { Ensure-BootstrapShareXHotkeys -State $State }
+        'blender-no-autostart' { Ensure-BootstrapBlenderNoAutostart -State $State }
+        default                { [ordered]@{ status = 'skipped'; reason = 'no-handler'; note = "Item capture-creator sem handler dedicado: $itemId." } }
+    }
+
+    $map = ConvertTo-BootstrapHashtable -InputObject $result
+    if (-not ($map -is [hashtable])) { $map = @{ status = 'skipped'; reason = 'invalid-result' } }
+    $map['id'] = $itemId
+    $map['category'] = [string]$Item.category
+    return $map
 }
 
 function Apply-SteamDeckControlTuning {
-    param([Parameter(Mandatory = $true)]$Item)
+    param(
+        [Parameter(Mandatory = $true)]$Item,
+        [AllowNull()][hashtable]$State = $null
+    )
+
+    if ([string]$Item.id -ne 'steam-input-desktop-layout-audit') {
+        $declared = @()
+        if (($Item -is [System.Collections.IDictionary]) -and $Item.Contains('actions')) { $declared = @($Item['actions']) }
+        elseif ($Item.PSObject.Properties['actions']) { $declared = @($Item.actions) }
+        $mutating = @($declared | Where-Object { @('audit', 'install') -notcontains [string]$_ })
+        if ($mutating.Count -gt 0) {
+            if ($null -eq $State) {
+                return [ordered]@{ id = [string]$Item.id; category = [string]$Item.category; status = 'skipped'; reason = 'state-required'; note = 'Tuning steamdeck-control exige State para registrar rollback.' }
+            }
+            $result = Apply-SteamDeckControlItemTuning -State $State -Item $Item
+            $map = ConvertTo-BootstrapHashtable -InputObject $result
+            if (-not ($map -is [hashtable])) { $map = @{ status = 'skipped'; reason = 'invalid-result' } }
+            $map['id'] = [string]$Item.id
+            $map['category'] = [string]$Item.category
+            return $map
+        }
+    }
 
     if ([string]$Item.id -eq 'steam-input-desktop-layout-audit') {
         $settings = (Get-BootstrapSteamDeckSettingsData).Data
@@ -31005,6 +31012,886 @@ function Apply-SteamDeckControlTuning {
     return [ordered]@{ id = [string]$Item.id; category = [string]$Item.category; status = 'audited'; note = 'Steam Deck control policy audited; no unsafe mutation applied.' }
 }
 
+function Join-BootstrapKnownFolderPath {
+    # Join-Path lanca quando a base e nula. Em host nao-Windows (ou perfil sem a variavel) as
+    # known folders vem vazias, entao devolvemos '' e deixamos o chamador tratar como ausente.
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Base,
+        [Parameter(Mandatory = $true)][string]$ChildPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Base)) { return '' }
+    return (Join-Path -Path $Base -ChildPath $ChildPath)
+}
+
+function Get-BootstrapQuickLookExecutable {
+    $candidates = @(
+        (Join-BootstrapKnownFolderPath -Base $env:LOCALAPPDATA -ChildPath 'Programs\QuickLook\QuickLook.exe'),
+        (Join-BootstrapKnownFolderPath -Base $env:ProgramFiles -ChildPath 'QuickLook\QuickLook.exe')
+    )
+    foreach ($candidate in $candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+    }
+    return ''
+}
+
+function Ensure-BootstrapQuickLookSession {
+    # Acao de sessao: garante QuickLook em execucao. Nao grava config nem autostart, entao
+    # nao ha o que registrar no manifesto de rollback - encerrar o processo desfaz.
+    $exePath = Get-BootstrapQuickLookExecutable
+    if ([string]::IsNullOrWhiteSpace($exePath)) {
+        return [ordered]@{ status = 'skipped'; reason = 'quicklook-absent'; note = 'QuickLook.exe nao encontrado em LOCALAPPDATA nem em Program Files.' }
+    }
+
+    $running = @(Get-Process -Name 'QuickLook' -ErrorAction SilentlyContinue)
+    if ($running.Count -gt 0) {
+        return [ordered]@{ status = 'unchanged'; note = 'QuickLook ja estava em execucao.'; path = $exePath; rollback = 'session-only' }
+    }
+
+    try {
+        Start-Process -FilePath $exePath -ErrorAction Stop | Out-Null
+    } catch {
+        return [ordered]@{ status = 'failed'; error = $_.Exception.Message; note = 'Falha ao iniciar QuickLook.'; path = $exePath }
+    }
+    return [ordered]@{ status = 'applied'; note = 'QuickLook iniciado nesta sessao.'; path = $exePath; rollback = 'session-only' }
+}
+
+function Ensure-BootstrapExplorerPatcherOptIn {
+    # ExplorerPatcher e dirigido por registro (HKCU:\Software\ExplorerPatcher), nao por arquivo de
+    # config. Aplicamos apenas OldTaskbar=1, que e o motivo declarado do opt-in, via helper que
+    # registra o valor anterior no manifesto para o -Rollback reverter.
+    param([Parameter(Mandatory = $true)][hashtable]$State)
+
+    $installRoot = Join-BootstrapKnownFolderPath -Base $env:ProgramFiles -ChildPath 'ExplorerPatcher'
+    if ([string]::IsNullOrWhiteSpace($installRoot) -or -not (Test-Path -LiteralPath $installRoot)) {
+        return [ordered]@{ status = 'skipped'; reason = 'explorerpatcher-absent'; note = "ExplorerPatcher nao encontrado em $installRoot." }
+    }
+
+    $change = Apply-BootstrapRegistryDword -State $State -Path 'HKCU:\Software\ExplorerPatcher' -Name 'OldTaskbar' -Value 1
+    if ([string]$change.status -eq 'failed') {
+        return [ordered]@{ status = 'failed'; error = [string]$change.error; note = 'Falha ao aplicar OldTaskbar do ExplorerPatcher.'; changes = @($change) }
+    }
+    return [ordered]@{
+        status = 'applied'
+        note = 'ExplorerPatcher: OldTaskbar=1 aplicado com snapshot de registro.'
+        changes = @($change)
+        rollback = 'registry-snapshot'
+    }
+}
+
+function Ensure-BootstrapMicaOptIn {
+    # Mica For Everyone guarda um .conf estilo INI. So editamos quando a secao [Global] existir;
+    # schema desconhecido vira skipped em vez de escrita as cegas.
+    param([Parameter(Mandatory = $true)][hashtable]$State)
+
+    $configPath = Join-BootstrapKnownFolderPath -Base $env:APPDATA -ChildPath 'Mica For Everyone\MicaForEveryone.conf'
+    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath)) {
+        return [ordered]@{ status = 'skipped'; reason = 'mica-config-absent'; note = "Config do Mica For Everyone ausente: $configPath." }
+    }
+
+    $lines = @(Get-Content -LiteralPath $configPath -Encoding utf8)
+    if (-not (@($lines | Where-Object { $_ -match '^\s*\[Global\]\s*$' }).Count -gt 0)) {
+        return [ordered]@{ status = 'skipped'; reason = 'mica-schema-unexpected'; note = "Secao [Global] nao encontrada em $configPath; nada foi alterado." }
+    }
+
+    $alreadySet = @($lines | Where-Object { $_ -match '^\s*BackdropPreference\s*=\s*Mica\s*$' }).Count -gt 0
+    if ($alreadySet) {
+        return [ordered]@{ status = 'unchanged'; note = 'Mica ja configurado como BackdropPreference.'; path = $configPath }
+    }
+
+    $updated = New-Object System.Collections.Generic.List[string]
+    $replaced = $false
+    foreach ($line in $lines) {
+        if ($line -match '^\s*BackdropPreference\s*=') {
+            $updated.Add('BackdropPreference=Mica') | Out-Null
+            $replaced = $true
+        } else {
+            $updated.Add([string]$line) | Out-Null
+            if (-not $replaced -and $line -match '^\s*\[Global\]\s*$') {
+                $updated.Add('BackdropPreference=Mica') | Out-Null
+                $replaced = $true
+            }
+        }
+    }
+
+    Register-BootstrapFileChange -State $State -Target $configPath -Operation 'mica-optin' -Component 'mica-for-everyone'
+    try {
+        [System.IO.File]::WriteAllLines($configPath, $updated.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+    } catch {
+        return [ordered]@{ status = 'failed'; error = $_.Exception.Message; note = 'Falha ao escrever config do Mica.'; path = $configPath }
+    }
+    return [ordered]@{ status = 'applied'; note = 'Mica: BackdropPreference=Mica aplicado com backup registrado.'; path = $configPath; rollback = 'backup-file' }
+}
+
+function Get-BootstrapPowerToysNoisyModules {
+    # Modulos que desenham overlay por cima de jogo em tela cheia.
+    return @('ShortcutGuide', 'AlwaysOnTop', 'ColorPicker')
+}
+
+function Ensure-BootstrapPowerToysQol {
+    param([Parameter(Mandatory = $true)][hashtable]$State)
+
+    $modules = @{}
+    foreach ($moduleName in @(Get-BootstrapPowerToysNoisyModules)) { $modules[$moduleName] = $false }
+    return (Set-BootstrapPowerToysModulesEnabled -State $State -Modules $modules -Operation 'powertoys-qol')
+}
+
+function Set-BootstrapIniValue {
+    # Define Key=Value dentro de Section. Só altera se a secao existir: nao criamos secao nova em
+    # arquivo de terceiro. Devolve as linhas resultantes e se houve mudanca.
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Lines,
+        [Parameter(Mandatory = $true)][string]$Section,
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+
+    $out = New-Object System.Collections.Generic.List[string]
+    $inSection = $false
+    $sectionFound = $false
+    $keyWritten = $false
+    $changed = $false
+
+    foreach ($line in @($Lines)) {
+        $text = [string]$line
+        if ($text -match '^\s*\[(.+)\]\s*$') {
+            # Ao sair da secao alvo sem ter achado a chave, insere antes do proximo cabecalho.
+            if ($inSection -and -not $keyWritten) {
+                $out.Add(('{0}={1}' -f $Key, $Value)) | Out-Null
+                $keyWritten = $true
+                $changed = $true
+            }
+            $inSection = ([string]$Matches[1] -eq $Section)
+            if ($inSection) { $sectionFound = $true }
+            $out.Add($text) | Out-Null
+            continue
+        }
+        if ($inSection -and $text -match ('^\s*' + [regex]::Escape($Key) + '\s*=')) {
+            if ($text -match ('^\s*' + [regex]::Escape($Key) + '\s*=\s*' + [regex]::Escape($Value) + '\s*$')) {
+                $out.Add($text) | Out-Null
+            } else {
+                $out.Add(('{0}={1}' -f $Key, $Value)) | Out-Null
+                $changed = $true
+            }
+            $keyWritten = $true
+            continue
+        }
+        $out.Add($text) | Out-Null
+    }
+
+    if ($inSection -and -not $keyWritten) {
+        $out.Add(('{0}={1}' -f $Key, $Value)) | Out-Null
+        $changed = $true
+    }
+
+    return [ordered]@{ lines = @($out.ToArray()); changed = $changed; sectionFound = $sectionFound }
+}
+
+function Ensure-BootstrapObsReplayBuffer {
+    # OBS guarda um basic.ini por profile. Ligamos RecRB apenas nas secoes de saida que ja
+    # existirem no arquivo; ausencia das duas significa schema inesperado e nao escrevemos nada.
+    param([Parameter(Mandatory = $true)][hashtable]$State)
+
+    $profilesRoot = Join-BootstrapKnownFolderPath -Base $env:APPDATA -ChildPath 'obs-studio\basic\profiles'
+    if ([string]::IsNullOrWhiteSpace($profilesRoot) -or -not (Test-Path -LiteralPath $profilesRoot)) {
+        return [ordered]@{ status = 'skipped'; reason = 'obs-profiles-absent'; note = "Profiles do OBS nao encontrados: $profilesRoot." }
+    }
+
+    $iniFiles = @(Get-ChildItem -LiteralPath $profilesRoot -Filter 'basic.ini' -Recurse -File -ErrorAction SilentlyContinue)
+    if ($iniFiles.Count -eq 0) {
+        return [ordered]@{ status = 'skipped'; reason = 'obs-profiles-absent'; note = "Nenhum basic.ini sob $profilesRoot." }
+    }
+
+    $touched = @()
+    $skipped = @()
+    foreach ($ini in $iniFiles) {
+        $lines = @(Get-Content -LiteralPath $ini.FullName -Encoding utf8)
+        $changed = $false
+        $anySection = $false
+        foreach ($section in @('SimpleOutput', 'AdvOut')) {
+            $res = Set-BootstrapIniValue -Lines $lines -Section $section -Key 'RecRB' -Value 'true'
+            if ([bool]$res.sectionFound) {
+                $anySection = $true
+                $lines = @($res.lines)
+                if ([bool]$res.changed) { $changed = $true }
+            }
+        }
+        if (-not $anySection) {
+            $skipped += @([string]$ini.FullName)
+            continue
+        }
+        if (-not $changed) { continue }
+
+        Register-BootstrapFileChange -State $State -Target $ini.FullName -Operation 'obs-replay-buffer' -Component 'obs-studio'
+        try {
+            [System.IO.File]::WriteAllLines($ini.FullName, $lines, (New-Object System.Text.UTF8Encoding($false)))
+        } catch {
+            return [ordered]@{ status = 'failed'; error = $_.Exception.Message; note = "Falha ao escrever $($ini.FullName)."; path = [string]$ini.FullName }
+        }
+        $touched += @([string]$ini.FullName)
+    }
+
+    if ($touched.Count -eq 0) {
+        if ($skipped.Count -eq $iniFiles.Count) {
+            return [ordered]@{ status = 'skipped'; reason = 'obs-schema-unexpected'; note = 'Nenhum basic.ini com secao [SimpleOutput] ou [AdvOut]; nada alterado.' }
+        }
+        return [ordered]@{ status = 'unchanged'; note = 'Replay buffer do OBS ja estava ligado nos profiles.' }
+    }
+    return [ordered]@{
+        status = 'applied'
+        note = ('Replay buffer ligado em {0} profile(s) do OBS.' -f $touched.Count)
+        paths = @($touched)
+        rollback = 'backup-file'
+    }
+}
+
+function Ensure-BootstrapShareXHotkeys {
+    # ApplicationConfig.json do ShareX expoe DisableHotkeys na raiz. Só mexemos nesse campo, e
+    # apenas se ele ja existir no arquivo.
+    param([Parameter(Mandatory = $true)][hashtable]$State)
+
+    $configPath = Join-BootstrapKnownFolderPath -Base $env:APPDATA -ChildPath 'ShareX\ApplicationConfig.json'
+    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath)) {
+        return [ordered]@{ status = 'skipped'; reason = 'sharex-config-absent'; note = "ApplicationConfig.json do ShareX ausente: $configPath." }
+    }
+
+    try {
+        $raw = Get-Content -LiteralPath $configPath -Raw -Encoding utf8
+        $config = ConvertTo-BootstrapHashtable -InputObject ($raw | ConvertFrom-Json -ErrorAction Stop)
+    } catch {
+        return [ordered]@{ status = 'failed'; error = $_.Exception.Message; note = "Falha ao ler $configPath."; path = $configPath }
+    }
+
+    if (-not ($config -is [hashtable]) -or -not (Test-BootstrapMapContainsKey -Map $config -Key 'DisableHotkeys')) {
+        return [ordered]@{ status = 'skipped'; reason = 'sharex-schema-unexpected'; note = "Campo DisableHotkeys nao encontrado em $configPath; nada alterado." }
+    }
+    if (-not [bool]$config['DisableHotkeys']) {
+        return [ordered]@{ status = 'unchanged'; note = 'Hotkeys do ShareX ja estavam habilitadas.'; path = $configPath }
+    }
+
+    $config['DisableHotkeys'] = $false
+    Register-BootstrapFileChange -State $State -Target $configPath -Operation 'sharex-hotkeys' -Component 'sharex'
+    try {
+        Write-BootstrapJsonFile -Path $configPath -Value $config
+    } catch {
+        return [ordered]@{ status = 'failed'; error = $_.Exception.Message; note = 'Falha ao escrever ApplicationConfig.json do ShareX.'; path = $configPath }
+    }
+    return [ordered]@{ status = 'applied'; note = 'Hotkeys do ShareX reabilitadas.'; path = $configPath; rollback = 'backup-file' }
+}
+
+function Ensure-BootstrapBlenderNoAutostart {
+    # Remove entradas de autostart do Blender em HKCU:\...\Run e na pasta Startup. Cada remocao e
+    # registrada antes de acontecer para o -Rollback recriar o valor/atalho original.
+    param([Parameter(Mandatory = $true)][hashtable]$State)
+
+    $removed = @()
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    if (Test-Path -LiteralPath $runKey) {
+        $props = $null
+        try { $props = Get-ItemProperty -Path $runKey -ErrorAction Stop } catch { $props = $null }
+        if ($null -ne $props) {
+            foreach ($prop in @($props.PSObject.Properties)) {
+                $name = [string]$prop.Name
+                if ($name.StartsWith('PS')) { continue }
+                $data = [string]$prop.Value
+                if ($name -notmatch 'blender' -and $data -notmatch 'blender') { continue }
+                try {
+                    Register-BootstrapChange -State $State -Type 'Registry' -Target $runKey -Name $name -OldValue $data -NewValue '' -Operation 'blender-no-autostart' -Component 'blender'
+                    Remove-ItemProperty -Path $runKey -Name $name -ErrorAction Stop
+                    $removed += @("registry:$name")
+                } catch {
+                    return [ordered]@{ status = 'failed'; error = $_.Exception.Message; note = "Falha ao remover autostart de registro '$name'." }
+                }
+            }
+        }
+    }
+
+    $startupDir = ''
+    try { $startupDir = [Environment]::GetFolderPath('Startup') } catch { $startupDir = '' }
+    if (-not [string]::IsNullOrWhiteSpace($startupDir) -and (Test-Path -LiteralPath $startupDir)) {
+        foreach ($link in @(Get-ChildItem -LiteralPath $startupDir -Filter '*.lnk' -File -ErrorAction SilentlyContinue)) {
+            if ([string]$link.Name -notmatch 'blender') { continue }
+            try {
+                Register-BootstrapFileChange -State $State -Target $link.FullName -Operation 'blender-no-autostart' -Component 'blender'
+                Remove-Item -LiteralPath $link.FullName -Force -ErrorAction Stop
+                $removed += @("startup:$($link.Name)")
+            } catch {
+                return [ordered]@{ status = 'failed'; error = $_.Exception.Message; note = "Falha ao remover atalho de startup '$($link.Name)'." }
+            }
+        }
+    }
+
+    if ($removed.Count -eq 0) {
+        return [ordered]@{ status = 'unchanged'; note = 'Blender ja estava fora do autostart.' }
+    }
+    return [ordered]@{
+        status = 'applied'
+        note = ('Autostart do Blender removido: {0}.' -f ($removed -join ', '))
+        removed = @($removed)
+        rollback = 'registry-snapshot'
+    }
+}
+
+function Get-BootstrapLlamacppMtpTemplateText {
+    return @'
+# llama.cpp - diagnostico MTP / speculative decoding
+
+Template local do PhaseZero. Nenhum modelo e baixado por este arquivo: os caminhos
+abaixo sao placeholders que voce preenche com modelos que ja possui.
+
+## Contexto
+
+Speculative decoding usa um modelo "draft" pequeno para propor tokens que o modelo
+principal valida em lote. Ganho real depende de o draft concordar com o principal;
+taxa de aceitacao baixa deixa o conjunto mais lento que o modelo sozinho.
+
+## Baseline (sempre meça antes)
+
+    llama-server -m <modelo-principal.gguf> --host 127.0.0.1 --port 8080
+
+## Com draft
+
+    llama-server -m <modelo-principal.gguf> \
+      -md <modelo-draft.gguf> \
+      --draft-max 16 --draft-min 4 \
+      --host 127.0.0.1 --port 8080
+
+## O que observar
+
+| metrica | onde | leitura |
+| ------- | ---- | ------- |
+| tokens/s | log do servidor | comparar com baseline |
+| taxa de aceitacao do draft | log do servidor | abaixo de ~60% costuma nao compensar |
+| VRAM total | nvidia-smi / Task Manager | draft + principal precisam caber juntos |
+
+## Criterio de decisao
+
+Mantenha o draft apenas se tokens/s subir com a mesma qualidade de saida. Se a VRAM
+estourar e forcar offload para CPU, o resultado piora — volte ao baseline.
+'@
+}
+
+function Ensure-BootstrapLlamacppMtpTemplate {
+    param([AllowNull()][string]$WorkspaceRoot = '')
+
+    $root = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { (Get-Location).Path } else { [System.IO.Path]::GetFullPath($WorkspaceRoot) }
+    $path = Join-Path $root '.phasezero\llamacpp\mtp-diagnostic.md'
+    $row = Write-BootstrapManagedTemplateFile -Path $path -Content (Get-BootstrapLlamacppMtpTemplateText)
+    return [ordered]@{
+        status = [string]$row['status']
+        changed = ([string]$row['status'] -eq 'applied')
+        paths = @([string]$row['path'])
+        nextSteps = @('Meça o baseline antes de ativar o draft.', 'Nenhum modelo foi baixado.')
+    }
+}
+
+function Get-BootstrapClaudeRtkTemplateText {
+    return @'
+# Agentes, RTK e providers BYOK
+
+Template local do PhaseZero. Este arquivo e documentacao: nao coloque chaves aqui.
+As credenciais vivem no manifesto gerenciado (`bootstrap-secrets`), que aplica um
+provider somente quando a validacao dele passa.
+
+## Providers
+
+| provider | onde a chave vive | usado por |
+| -------- | ----------------- | --------- |
+| anthropic | bootstrap-secrets | Claude Code, Claude Desktop |
+| openai | bootstrap-secrets | Codex CLI, OpenCode |
+| openrouter | bootstrap-secrets | fallback OpenAI-compatible |
+
+Rotacao e ativacao passam por `bootstrap-secrets`; nao edite configs de agente a mao
+para injetar chave.
+
+## RTK
+
+RTK e proxy de CLI que reduz tokens em operacoes de desenvolvimento. Use apenas
+quando `rtk` resolver no PATH; se faltar, rode o comando direto e registre
+`rtk missing` — a ausencia dele nao deve falhar uma tarefa.
+
+## Higiene de contexto
+
+- prefira diff e trecho a arquivo inteiro;
+- feche o loop com teste ou execucao real, nao so leitura;
+- nao cole segredo em prompt: referencie o provider gerenciado.
+'@
+}
+
+function Ensure-BootstrapClaudeRtkTemplate {
+    param([AllowNull()][string]$WorkspaceRoot = '')
+
+    $root = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { (Get-Location).Path } else { [System.IO.Path]::GetFullPath($WorkspaceRoot) }
+    $path = Join-Path $root '.phasezero\agent-config\claude-rtk.md'
+    $row = Write-BootstrapManagedTemplateFile -Path $path -Content (Get-BootstrapClaudeRtkTemplateText)
+    return [ordered]@{
+        status = [string]$row['status']
+        changed = ([string]$row['status'] -eq 'applied')
+        paths = @([string]$row['path'])
+        nextSteps = @('Nenhuma chave foi gravada; use bootstrap-secrets.')
+    }
+}
+
+function Set-BootstrapPowerToysModulesEnabled {
+    # Liga/desliga modulos no mapa "enabled" do settings.json do PowerToys, validando o schema
+    # antes de escrever. Compartilhado por powertoys-qol e powertoys-deck-layout.
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$State,
+        [Parameter(Mandatory = $true)][hashtable]$Modules,
+        [Parameter(Mandatory = $true)][string]$Operation
+    )
+
+    $configPath = Join-BootstrapKnownFolderPath -Base $env:LOCALAPPDATA -ChildPath 'Microsoft\PowerToys\settings.json'
+    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath)) {
+        return [ordered]@{ status = 'skipped'; reason = 'powertoys-settings-absent'; note = "settings.json do PowerToys ausente: $configPath." }
+    }
+
+    try {
+        $raw = Get-Content -LiteralPath $configPath -Raw -Encoding utf8
+        $config = ConvertTo-BootstrapHashtable -InputObject ($raw | ConvertFrom-Json -ErrorAction Stop)
+    } catch {
+        return [ordered]@{ status = 'failed'; error = $_.Exception.Message; note = "Falha ao ler $configPath."; path = $configPath }
+    }
+
+    if (-not ($config -is [hashtable]) -or -not (Test-BootstrapMapContainsKey -Map $config -Key 'enabled')) {
+        return [ordered]@{ status = 'skipped'; reason = 'powertoys-schema-unexpected'; note = "Mapa 'enabled' nao encontrado em $configPath; nada alterado." }
+    }
+    $enabled = ConvertTo-BootstrapHashtable -InputObject $config['enabled']
+    if (-not ($enabled -is [hashtable])) {
+        return [ordered]@{ status = 'skipped'; reason = 'powertoys-schema-unexpected'; note = "Mapa 'enabled' com formato inesperado em $configPath." }
+    }
+
+    $touched = @()
+    foreach ($moduleName in @($Modules.Keys)) {
+        $desired = [bool]$Modules[$moduleName]
+        if (-not (Test-BootstrapMapContainsKey -Map $enabled -Key $moduleName)) { continue }
+        if ([bool]$enabled[$moduleName] -eq $desired) { continue }
+        $enabled[$moduleName] = $desired
+        $touched += @(('{0}={1}' -f $moduleName, $desired))
+    }
+    if ($touched.Count -eq 0) {
+        return [ordered]@{ status = 'unchanged'; note = 'Modulos do PowerToys ja estavam no estado desejado.'; path = $configPath }
+    }
+
+    $config['enabled'] = $enabled
+    Register-BootstrapFileChange -State $State -Target $configPath -Operation $Operation -Component 'powertoys'
+    try {
+        Write-BootstrapJsonFile -Path $configPath -Value $config
+    } catch {
+        return [ordered]@{ status = 'failed'; error = $_.Exception.Message; note = 'Falha ao escrever settings.json do PowerToys.'; path = $configPath }
+    }
+    return [ordered]@{ status = 'applied'; note = ('PowerToys atualizado: {0}.' -f ($touched -join ', ')); path = $configPath; modules = @($touched); rollback = 'backup-file' }
+}
+
+function Get-BootstrapSteamDeckControlManualGuidance {
+    # Configs destes apps nao tem schema estavel e documentado o suficiente para escrita cega.
+    # Em vez de reportar sucesso sem mutar, devolvemos a acao concreta para o operador.
+    return @{
+        'autohotkey-recovery-hotkeys' = 'Crie/valide o script AutoHotkey de retorno ao Desktop e registre-o no atalho desejado; PhaseZero nao gera script de hotkey automaticamente.'
+        'soundswitch-audio-profile'   = 'Abra SoundSwitch > Settings e defina os dispositivos Deck/HDMI/DP por perfil; a troca por modo depende dessa escolha manual.'
+        'displayfusion-layouts'       = 'Configure os perfis de monitor no DisplayFusion; hooks globais podem exigir elevacao e nao sao aplicados sem consentimento.'
+    }
+}
+
+function Apply-SteamDeckControlItemTuning {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$State,
+        [Parameter(Mandatory = $true)]$Item
+    )
+
+    $itemId = [string]$Item.id
+    switch ($itemId) {
+        'steamdeck-tools-allowlist' {
+            $installRoot = Join-BootstrapKnownFolderPath -Base $env:LOCALAPPDATA -ChildPath 'Programs\SteamDeckTools'
+            if ([string]::IsNullOrWhiteSpace($installRoot) -or -not (Test-Path -LiteralPath $installRoot)) {
+                return [ordered]@{ status = 'skipped'; reason = 'steamdeck-tools-absent'; note = "Steam Deck Tools nao encontrado em $installRoot." }
+            }
+            $running = @(Get-Process -Name 'SteamDeckTools' -ErrorAction SilentlyContinue)
+            if ($running.Count -gt 0) {
+                return [ordered]@{ status = 'unchanged'; note = 'Steam Deck Tools em execucao; nada a preservar.' }
+            }
+            return [ordered]@{
+                status = 'manual-review'
+                note = 'Steam Deck Tools instalado mas parado.'
+                recommendedAction = 'Inicie Steam Deck Tools se quiser os overlays de bateria/TDP neste modo.'
+                rollback = 'manual'
+            }
+        }
+        'powertoys-deck-layout' {
+            return (Set-BootstrapPowerToysModulesEnabled -State $State -Modules @{ Awake = $true; FancyZones = $true } -Operation 'powertoys-deck-layout')
+        }
+        default {
+            $guidance = Get-BootstrapSteamDeckControlManualGuidance
+            if ($guidance.ContainsKey($itemId)) {
+                return [ordered]@{
+                    status = 'manual-review'
+                    note = 'Config de terceiro sem schema estavel; PhaseZero nao escreve as cegas.'
+                    recommendedAction = [string]$guidance[$itemId]
+                    rollback = 'manual'
+                }
+            }
+            return [ordered]@{ status = 'skipped'; reason = 'no-handler'; note = "Item steamdeck-control sem handler dedicado: $itemId." }
+        }
+    }
+}
+
+function Get-BootstrapConnectivityTargets {
+    # ExePath vazio significa "checar apenas o diretorio". ServiceName vazio significa que o app
+    # roda em modo usuario, sem servico.
+    return @{
+        'sunshine-allowlist'  = [ordered]@{ label = 'Sunshine'; probe = (Join-BootstrapKnownFolderPath -Base $env:ProgramFiles -ChildPath 'Sunshine\sunshine.exe'); service = 'SunshineService'; process = 'sunshine' }
+        'tailscale-allowlist' = [ordered]@{ label = 'Tailscale'; probe = (Join-BootstrapKnownFolderPath -Base $env:ProgramFiles -ChildPath 'Tailscale\tailscale.exe'); service = 'Tailscale'; process = 'tailscale-ipn' }
+        'syncthing-allowlist' = [ordered]@{ label = 'Syncthing'; probe = (Join-BootstrapKnownFolderPath -Base $env:LOCALAPPDATA -ChildPath 'Syncthing'); service = ''; process = 'syncthing' }
+        'rustdesk-allowlist'  = [ordered]@{ label = 'RustDesk'; probe = (Join-BootstrapKnownFolderPath -Base $env:ProgramFiles -ChildPath 'RustDesk\rustdesk.exe'); service = 'RustDesk'; process = 'rustdesk' }
+    }
+}
+
+function Ensure-BootstrapConnectivityPresence {
+    # Politica: preservar a intencao ja expressa pelo usuario, nunca ampliar exposicao de rede.
+    # - servico Automatic parado  -> desvio da intencao; religamos (requer admin) e registramos.
+    # - servico Manual/Disabled   -> escolha deliberada do usuario; apenas reportamos.
+    # - sem servico e sem processo-> reportamos acao manual; nao subimos daemon de acesso remoto
+    #                               por conta propria.
+    # Nenhuma regra de firewall e criada ou alterada: os itens declaram requiresAdmin = $false.
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$State,
+        [Parameter(Mandatory = $true)]$Target
+    )
+
+    $label = [string]$Target.label
+    $probe = [string]$Target.probe
+    if ([string]::IsNullOrWhiteSpace($probe) -or -not (Test-Path -LiteralPath $probe)) {
+        return [ordered]@{ status = 'skipped'; reason = 'app-absent'; note = "$label nao encontrado em $probe." }
+    }
+
+    $serviceName = [string]$Target.service
+    if (-not [string]::IsNullOrWhiteSpace($serviceName)) {
+        $snapshot = Get-BootstrapServiceSnapshot -Name $serviceName
+        if ([bool]$snapshot.Exists) {
+            if ([string]$snapshot.Status -eq 'Running') {
+                return [ordered]@{ status = 'unchanged'; note = "$label ativo (servico $serviceName em execucao)."; service = $serviceName }
+            }
+            if ([string]$snapshot.StartType -ne 'Automatic') {
+                return [ordered]@{
+                    status = 'manual-review'
+                    note = "$label com servico $serviceName em StartType=$($snapshot.StartType); escolha do usuario preservada."
+                    service = $serviceName
+                    recommendedAction = "Se quiser $label sempre ativo, defina o servico $serviceName como Automatic."
+                    rollback = 'manual'
+                }
+            }
+            if (-not (Test-IsAdmin)) {
+                return [ordered]@{
+                    status = 'manual-review'
+                    note = "${label}: servico $serviceName e Automatic mas esta parado; religar exige admin."
+                    service = $serviceName
+                    recommendedAction = "Execute como administrador ou rode: Start-Service $serviceName"
+                    rollback = 'manual'
+                }
+            }
+            try {
+                Register-BootstrapChange -State $State -Type 'Service' -Target $serviceName -Name 'Status' -OldValue $snapshot -NewValue 'Running' -Operation 'connectivity-preserve' -Component 'connectivity'
+                Start-Service -Name $serviceName -ErrorAction Stop
+            } catch {
+                return [ordered]@{ status = 'failed'; error = $_.Exception.Message; note = "Falha ao religar servico $serviceName."; service = $serviceName }
+            }
+            return [ordered]@{ status = 'applied'; note = "$label religado: servico $serviceName voltou ao estado Automatic pretendido."; service = $serviceName; rollback = 'service-state' }
+        }
+    }
+
+    $processName = [string]$Target.process
+    $running = @()
+    if (-not [string]::IsNullOrWhiteSpace($processName)) {
+        $running = @(Get-Process -Name $processName -ErrorAction SilentlyContinue)
+    }
+    if ($running.Count -gt 0) {
+        return [ordered]@{ status = 'unchanged'; note = "$label ativo (processo $processName em execucao)."; process = $processName }
+    }
+    return [ordered]@{
+        status = 'manual-review'
+        note = "$label instalado mas parado; nao iniciamos daemon de rede automaticamente."
+        recommendedAction = "Inicie $label manualmente se quiser preservar a conectividade neste modo."
+        rollback = 'manual'
+    }
+}
+
+function Apply-ConnectivityTuning {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$State,
+        [Parameter(Mandatory = $true)]$Item
+    )
+
+    $itemId = [string]$Item.id
+    $targets = Get-BootstrapConnectivityTargets
+    if (-not $targets.ContainsKey($itemId)) {
+        $result = [ordered]@{ status = 'skipped'; reason = 'no-handler'; note = "Item connectivity sem alvo mapeado: $itemId." }
+    } else {
+        $result = Ensure-BootstrapConnectivityPresence -State $State -Target $targets[$itemId]
+    }
+
+    $map = ConvertTo-BootstrapHashtable -InputObject $result
+    if (-not ($map -is [hashtable])) { $map = @{ status = 'skipped'; reason = 'invalid-result' } }
+    $map['id'] = $itemId
+    $map['category'] = [string]$Item.category
+    return $map
+}
+
+function Get-BootstrapObsidianVaultReadmeText {
+    return @'
+# Vault de transcricoes tecnicas
+
+Template local do PhaseZero. Nada aqui sincroniza sozinho: nenhuma conta, nenhum plugin
+de sync e nenhuma credencial e configurada por este template.
+
+## Estrutura
+
+- `00-inbox/`      captura crua, ainda nao revisada
+- `10-transcricoes/` transcricoes limpas, uma nota por fonte
+- `20-projetos/`   memoria por projeto
+- `90-templates/`  modelos de nota
+
+## Uso
+
+Abra esta pasta no Obsidian como vault ("Open folder as vault"). Revise antes de
+ativar qualquer plugin de sincronizacao.
+'@
+}
+
+function Get-BootstrapObsidianTranscriptNoteText {
+    return @'
+---
+fonte:
+url:
+data:
+duracao:
+tags: [transcricao]
+---
+
+# {{titulo}}
+
+## Resumo
+
+## Pontos-chave
+
+## Transcricao
+
+## Acoes
+'@
+}
+
+function Get-BootstrapObsidianProjectNoteText {
+    return @'
+---
+projeto:
+status: ativo
+atualizado:
+tags: [projeto, memoria]
+---
+
+# {{projeto}}
+
+## Objetivo
+
+## Decisoes
+
+| data | decisao | motivo |
+| ---- | ------- | ------ |
+
+## Pendencias
+
+## Referencias
+'@
+}
+
+function Ensure-BootstrapKnowledgeVaultTemplate {
+    param([AllowNull()][string]$WorkspaceRoot = '')
+
+    $root = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { (Get-Location).Path } else { [System.IO.Path]::GetFullPath($WorkspaceRoot) }
+    $base = Join-Path $root '.phasezero\knowledge-vault'
+    $files = @(
+        [ordered]@{ path = (Join-Path $base 'README.md'); content = (Get-BootstrapObsidianVaultReadmeText) },
+        [ordered]@{ path = (Join-Path $base '90-templates\transcricao.md'); content = (Get-BootstrapObsidianTranscriptNoteText) },
+        [ordered]@{ path = (Join-Path $base '90-templates\projeto.md'); content = (Get-BootstrapObsidianProjectNoteText) }
+    )
+
+    $results = New-Object System.Collections.Generic.List[object]
+    $changed = $false
+    foreach ($file in @($files)) {
+        $row = Write-BootstrapManagedTemplateFile -Path ([string]$file.path) -Content ([string]$file.content)
+        if ([string]$row['status'] -eq 'applied') { $changed = $true }
+        $results.Add($row) | Out-Null
+    }
+    foreach ($folder in @('00-inbox', '10-transcricoes', '20-projetos')) {
+        $null = New-Item -Path (Join-Path $base $folder) -ItemType Directory -Force
+    }
+
+    return [ordered]@{
+        status = if ($changed) { 'applied' } else { 'configured' }
+        changed = $changed
+        root = $base
+        paths = @($results.ToArray() | ForEach-Object { [string]$_['path'] })
+        nextSteps = @('Abra a pasta no Obsidian como vault.', 'Nenhuma sincronizacao foi configurada; ative manualmente se desejar.')
+    }
+}
+
+function Get-BootstrapN8nYoutubeWorkflowTemplateText {
+    $workflow = [ordered]@{
+        name = 'PhaseZero - YouTube transcript (template)'
+        active = $false
+        nodes = @(
+            [ordered]@{
+                parameters = [ordered]@{}
+                id = 'manual-trigger'
+                name = 'Executar manualmente'
+                type = 'n8n-nodes-base.manualTrigger'
+                typeVersion = 1
+                position = @(-260, 0)
+            },
+            [ordered]@{
+                parameters = [ordered]@{
+                    values = [ordered]@{
+                        string = @(
+                            [ordered]@{ name = 'videoUrl'; value = '' }
+                        )
+                    }
+                }
+                id = 'set-input'
+                name = 'Entrada'
+                type = 'n8n-nodes-base.set'
+                typeVersion = 2
+                position = @(-40, 0)
+            },
+            [ordered]@{
+                parameters = [ordered]@{
+                    content = 'Preencha videoUrl e conecte aqui o node de transcricao que voce usa. Este template nao embute credenciais nem executa nada sozinho (active=false).'
+                }
+                id = 'nota'
+                name = 'Nota'
+                type = 'n8n-nodes-base.stickyNote'
+                typeVersion = 1
+                position = @(-40, 180)
+            }
+        )
+        connections = [ordered]@{
+            'Executar manualmente' = [ordered]@{
+                main = @(, @([ordered]@{ node = 'Entrada'; type = 'main'; index = 0 }))
+            }
+        }
+        settings = [ordered]@{}
+    }
+    return ($workflow | ConvertTo-Json -Depth 12)
+}
+
+function Get-BootstrapN8nWorkflowReadmeText {
+    return @'
+# n8n - template de transcricao YouTube
+
+Template local do PhaseZero. Importe manualmente em n8n:
+Workflows > Import from File > `youtube-transcript.workflow.json`.
+
+O workflow vem com `active: false` e sem credenciais. Nada roda ate voce
+conectar seu proprio node de transcricao e ativar o fluxo.
+
+Nao adicione chaves de API neste arquivo: use o gerenciador de credenciais do n8n.
+'@
+}
+
+function Ensure-BootstrapWorkflowAutomationTemplate {
+    param([AllowNull()][string]$WorkspaceRoot = '')
+
+    $root = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { (Get-Location).Path } else { [System.IO.Path]::GetFullPath($WorkspaceRoot) }
+    $base = Join-Path $root '.phasezero\workflow-automation'
+    $files = @(
+        [ordered]@{ path = (Join-Path $base 'README.md'); content = (Get-BootstrapN8nWorkflowReadmeText) },
+        [ordered]@{ path = (Join-Path $base 'youtube-transcript.workflow.json'); content = (Get-BootstrapN8nYoutubeWorkflowTemplateText) }
+    )
+
+    $results = New-Object System.Collections.Generic.List[object]
+    $changed = $false
+    foreach ($file in @($files)) {
+        $row = Write-BootstrapManagedTemplateFile -Path ([string]$file.path) -Content ([string]$file.content)
+        if ([string]$row['status'] -eq 'applied') { $changed = $true }
+        $results.Add($row) | Out-Null
+    }
+
+    return [ordered]@{
+        status = if ($changed) { 'applied' } else { 'configured' }
+        changed = $changed
+        root = $base
+        paths = @($results.ToArray() | ForEach-Object { [string]$_['path'] })
+        nextSteps = @('Importe o JSON em n8n manualmente.', 'Workflow vem inativo e sem credenciais.')
+    }
+}
+
+function Get-BootstrapAppTuningWorkspaceRoot {
+    param([AllowNull()][hashtable]$State = $null)
+
+    if ($State -and (Test-BootstrapMapContainsKey -Map $State -Key 'CloneBaseDir') -and -not [string]::IsNullOrWhiteSpace([string]$State['CloneBaseDir'])) {
+        return [string]$State['CloneBaseDir']
+    }
+    return (Get-Location).Path
+}
+
+function Apply-KnowledgeVaultTuning {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$State,
+        [Parameter(Mandatory = $true)]$Item
+    )
+
+    $template = Ensure-BootstrapKnowledgeVaultTemplate -WorkspaceRoot (Get-BootstrapAppTuningWorkspaceRoot -State $State)
+    return [ordered]@{
+        id = [string]$Item.id
+        category = [string]$Item.category
+        status = [string]$template.status
+        changed = [bool]$template.changed
+        root = [string]$template.root
+        paths = @($template.paths)
+        nextSteps = @($template.nextSteps)
+        rollback = 'file-template'
+    }
+}
+
+function Apply-WorkflowAutomationTuning {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$State,
+        [Parameter(Mandatory = $true)]$Item
+    )
+
+    $template = Ensure-BootstrapWorkflowAutomationTemplate -WorkspaceRoot (Get-BootstrapAppTuningWorkspaceRoot -State $State)
+    return [ordered]@{
+        id = [string]$Item.id
+        category = [string]$Item.category
+        status = [string]$template.status
+        changed = [bool]$template.changed
+        root = [string]$template.root
+        paths = @($template.paths)
+        nextSteps = @($template.nextSteps)
+        rollback = 'file-template'
+    }
+}
+
+function Apply-WindowsQolTuning {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$State,
+        [Parameter(Mandatory = $true)]$Item
+    )
+
+    $itemId = [string]$Item.id
+    $result = switch ($itemId) {
+        'quicklook-defaults'    { Ensure-BootstrapQuickLookSession }
+        'explorerpatcher-optin' { Ensure-BootstrapExplorerPatcherOptIn -State $State }
+        'mica-optin'            { Ensure-BootstrapMicaOptIn -State $State }
+        'powertoys-qol'         { Ensure-BootstrapPowerToysQol -State $State }
+        default                 { [ordered]@{ status = 'skipped'; reason = 'no-handler'; note = "Item windows-qol sem handler dedicado: $itemId." } }
+    }
+
+    $map = ConvertTo-BootstrapHashtable -InputObject $result
+    if (-not ($map -is [hashtable])) { $map = @{ status = 'skipped'; reason = 'invalid-result' } }
+    $map['id'] = $itemId
+    $map['category'] = [string]$Item.category
+    return $map
+}
+
 function Invoke-BootstrapAppTuningItem {
     param(
         [Parameter(Mandatory = $true)][hashtable]$State,
@@ -31021,15 +31908,44 @@ function Invoke-BootstrapAppTuningItem {
             if ([string]$Item.id -eq 'playnite-fullscreen') { return (Apply-PlayniteTuning -Item $Item) }
             return (Apply-SteamConsoleTuning -Item $Item)
         }
-        'steamdeck-control' { return (Apply-SteamDeckControlTuning -Item $Item) }
+        'steamdeck-control' { return (Apply-SteamDeckControlTuning -Item $Item -State $State) }
         'dev-ai' { return (Apply-DevAiTuning -State $State -Item $Item) }
         'agent-config' { return (Apply-AgentConfigTuning -State $State -Item $Item) }
         'local-ai-containers' { return (Apply-LocalAiContainerTuning -Item $Item) }
         'container-hosting' { return (Apply-ContainerHostingTuning -State $State -Item $Item) }
         'ai-edge-safe' { return (Apply-AiEdgeSafeTuning -State $State -Item $Item) }
         'ai-agent-performance' { return (Apply-AiAgentPerformanceTuning -State $State -Item $Item) }
-        'capture-creator' { return (Apply-CaptureTuning -Item $Item) }
-        default { return [ordered]@{ id = [string]$Item.id; category = [string]$Item.category; status = 'audited'; note = 'No mutable v1 action for this item.' } }
+        'capture-creator' { return (Apply-CaptureTuning -Item $Item -State $State) }
+        'windows-qol' { return (Apply-WindowsQolTuning -State $State -Item $Item) }
+        'connectivity' { return (Apply-ConnectivityTuning -State $State -Item $Item) }
+        'knowledge-vault' { return (Apply-KnowledgeVaultTuning -State $State -Item $Item) }
+        'workflow-automation' { return (Apply-WorkflowAutomationTuning -State $State -Item $Item) }
+        default {
+            # Sem handler para a categoria. Itens que so declaram auditoria sao honestos como
+            # 'audited'; itens que declaram acao mutante nao podem reportar sucesso sem ter mutado
+            # nada - viram 'skipped' com motivo explicito para nao mentir no status nem no -Audit.
+            $declaredActions = @()
+            if (($Item -is [System.Collections.IDictionary]) -and $Item.Contains('actions')) {
+                $declaredActions = @($Item['actions'])
+            } elseif ($Item.PSObject.Properties['actions']) {
+                $declaredActions = @($Item.actions)
+            }
+            $mutatingActions = @($declaredActions | Where-Object {
+                @('audit', 'install') -notcontains [string]$_
+            })
+            if ($mutatingActions.Count -gt 0) {
+                return [ordered]@{
+                    id = [string]$Item.id
+                    category = [string]$Item.category
+                    status = 'skipped'
+                    reason = 'no-handler'
+                    blocking = $false
+                    note = ('Categoria {0} nao possui handler de tuning; acoes declaradas nao foram aplicadas: {1}.' -f [string]$Item.category, (@($mutatingActions) -join ', '))
+                    declaredActions = @($mutatingActions)
+                }
+            }
+            return [ordered]@{ id = [string]$Item.id; category = [string]$Item.category; status = 'audited'; note = 'Item somente de auditoria; nenhuma mutacao declarada.' }
+        }
     }
 }
 
@@ -32114,8 +33030,7 @@ function Invoke-BootstrapComponent {
             Ensure-OpenCode -BashPath $State.GitInfo.Bash
         }
         'openclaw' {
-            Ensure-BootstrapNodeCore -State $State
-            Ensure-OpenClaw -NpmCmd $State.NodeInfo.NpmCmd
+            Assert-BootstrapOpenClawRequestGrant
         }
         'hermes' {
             Ensure-Hermes -State $State
@@ -33400,14 +34315,14 @@ function New-BootstrapAiMemoryDoctorReport {
 
 function Get-BootstrapAiConfigProviderEnvMap {
     return @(
-        [ordered]@{ provider = 'openai'; env = @('OPENAI_API_KEY'); targetApps = @('openCode','openClaw','hermes','continue','vsCode','cursor','windsurf','trae','roo','cline','zed','zCode','kilo') }
-        [ordered]@{ provider = 'anthropic'; env = @('ANTHROPIC_API_KEY'); targetApps = @('openClaw','hermes','continue','vsCode','cursor','windsurf','trae','roo','cline','zed','zCode') }
+        [ordered]@{ provider = 'openai'; env = @('OPENAI_API_KEY'); targetApps = @('openCode','hermes','continue','vsCode','cursor','windsurf','trae','roo','cline','zed','zCode','kilo') }
+        [ordered]@{ provider = 'anthropic'; env = @('ANTHROPIC_API_KEY'); targetApps = @('hermes','continue','vsCode','cursor','windsurf','trae','roo','cline','zed','zCode') }
         [ordered]@{ provider = 'gemini'; env = @('GEMINI_API_KEY','GOOGLE_API_KEY'); targetApps = @('continue','vsCode','cursor','windsurf','trae','roo','cline') }
-        [ordered]@{ provider = 'openrouter'; env = @('OPENROUTER_API_KEY'); targetApps = @('openCode','openClaw','hermes','continue','kilo','aiUsagebar') }
-        [ordered]@{ provider = 'deepseek'; env = @('DEEPSEEK_API_KEY'); targetApps = @('openCode','openClaw','hermes','continue','kilo','aiUsagebar') }
-        [ordered]@{ provider = 'xai'; env = @('XAI_API_KEY'); targetApps = @('openClaw','continue','vsCode') }
-        [ordered]@{ provider = 'dashscope'; env = @('DASHSCOPE_API_KEY','QWEN_API_KEY'); targetApps = @('openClaw','continue') }
-        [ordered]@{ provider = 'zai'; env = @('ZAI_API_KEY'); targetApps = @('openClaw','hermes','continue','aiUsagebar') }
+        [ordered]@{ provider = 'openrouter'; env = @('OPENROUTER_API_KEY'); targetApps = @('openCode','hermes','continue','kilo','aiUsagebar') }
+        [ordered]@{ provider = 'deepseek'; env = @('DEEPSEEK_API_KEY'); targetApps = @('openCode','hermes','continue','kilo','aiUsagebar') }
+        [ordered]@{ provider = 'xai'; env = @('XAI_API_KEY'); targetApps = @('continue','vsCode') }
+        [ordered]@{ provider = 'dashscope'; env = @('DASHSCOPE_API_KEY','QWEN_API_KEY'); targetApps = @('continue') }
+        [ordered]@{ provider = 'zai'; env = @('ZAI_API_KEY'); targetApps = @('hermes','continue','aiUsagebar') }
         [ordered]@{ provider = 'github'; env = @('GH_TOKEN','GITHUB_TOKEN'); targetApps = @('claudeCode','claudeDesktop','vsCode','cursor','windsurf','trae','continue','zed','zCode','openCode') }
     )
 }
@@ -33449,7 +34364,9 @@ function Get-BootstrapAiConfigTargetReport {
     $targets = New-Object System.Collections.Generic.List[object]
     foreach ($target in @(Get-BootstrapAiConfigKnownTargetList)) {
         $providerNames = @($Providers | Where-Object { [bool]$_['envPresent'] -and (@($_['targetApps']) -contains $target) } | ForEach-Object { [string]$_['provider'] })
-        $status = if ($target -in @('aionui')) {
+        $status = if ($target -eq 'openClaw') {
+            'blocked'
+        } elseif ($target -in @('aionui')) {
             'manualRequired'
         } elseif ($providerNames.Count -gt 0) {
             'ready'
@@ -33457,10 +34374,10 @@ function Get-BootstrapAiConfigTargetReport {
             'missing'
         }
         $manual = ($target -in @('aionui','openClaw','hermes'))
-        $reason = if ($target -eq 'aionui') {
+        $reason = if ($target -eq 'openClaw') {
+            'OpenClaw usage blocked: account grants are not bound to each request.'
+        } elseif ($target -eq 'aionui') {
             'AionUI provider store is encrypted/undocumented; use manual app settings.'
-        } elseif ($target -eq 'openClaw') {
-            'OpenClaw onboarding/config daemon remain manual unless stable CLI config set exists.'
         } elseif ($target -eq 'hermes') {
             'Hermes config writes must use hermes config set when command exists.'
         } elseif ($providerNames.Count -gt 0) {
@@ -33536,28 +34453,21 @@ function Get-BootstrapOpenClawAiConfigReport {
     $catalog = Get-BootstrapAiToolCatalog
     $entry = $catalog['openclaw']
     $cmd = Resolve-BootstrapAiToolCommandPath -CatalogEntry $entry -InstallRoot ''
-    $nodePath = Resolve-CommandPath -Name 'node'
-    $nodeMajor = 0
-    if ($nodePath) {
-        try {
-            $line = Invoke-NativeFirstLine -Exe $nodePath -Args @('-v') -TimeoutMs 3000
-            if ([string]$line -match 'v?(\d+)') { $nodeMajor = [int]$matches[1] }
-        } catch {
-            $nodeMajor = 0
-        }
-    }
     return [ordered]@{
+        ready = $false
+        usageBlocked = $true
+        blockedReason = 'connection-grant-not-enforceable'
         installed = -not [string]::IsNullOrWhiteSpace($cmd)
         commandPath = [string]$cmd
         minimumNodeMajor = [int]$entry['MinimumNodeMajor']
-        nodeMajor = $nodeMajor
-        nodeStatus = $(if ($nodeMajor -ge [int]$entry['MinimumNodeMajor']) { 'ready' } elseif ($nodeMajor -gt 0) { 'blocked' } else { 'missing' })
+        nodeMajor = $null
+        nodeStatus = 'not-probed'
         aliases = @($entry['Aliases'])
         onboarding = 'manual'
         daemon = 'manual-opt-in'
         smoke = [ordered]@{
-            version = $(if ($cmd) { Invoke-BootstrapDoctorCommandProbe -Label 'openclaw-version' -CommandName $cmd -CommandArgs @('--version') -TimeoutMs 3000 } else { [ordered]@{ status = 'missing' } })
-            status = $(if ($cmd) { Invoke-BootstrapDoctorCommandProbe -Label 'openclaw-status' -CommandName $cmd -CommandArgs @('status') -TimeoutMs 5000 } else { [ordered]@{ status = 'missing' } })
+            version = [ordered]@{ status = $(if ($cmd) { 'not-probed' } else { 'missing' }) }
+            status = [ordered]@{ status = 'blocked'; reason = 'connection-grant-not-enforceable' }
         }
     }
 }
@@ -36603,7 +37513,7 @@ if (-not $isDotSourced) {
         Ensure-NpmGlobalPackage -NpmCmd $nodeInfo.NpmCmd -Package '@qwen-code/qwen-code@latest' -DisplayName 'Qwen Code (@qwen-code/qwen-code)'
         Ensure-NpmGlobalPackage -NpmCmd $nodeInfo.NpmCmd -Package '@github/copilot' -DisplayName 'GitHub Copilot CLI (@github/copilot)'
         Ensure-NpmGlobalPackage -NpmCmd $nodeInfo.NpmCmd -Package '@openai/codex' -DisplayName 'OpenAI Codex CLI (@openai/codex)'
-        Ensure-OpenClaw -NpmCmd $nodeInfo.NpmCmd
+        Write-Log 'OpenClaw skipped: connection-grant-not-enforceable; no account grant is bound to each request.' 'WARN'
         Ensure-Hermes -State @{ NodeInfo = $nodeInfo; CloneBaseDir = $CloneBaseDir }
         Refresh-SessionPath
 
@@ -36669,7 +37579,7 @@ if (-not $isDotSourced) {
                 Write-Log "codex (PATH): $codexPath"
             }
         }
-        if (Test-Path $openclawCmd) { Write-Log "openclaw: $(& $openclawCmd --version) ($openclawCmd)" } else { Write-Log "openclaw: NÃO ENCONTRADO ($openclawCmd)" 'WARN' }
+        if (Test-Path $openclawCmd) { Write-Log "openclaw: detectado ($openclawCmd); uso bloqueado sem grant por requisição" 'WARN' } else { Write-Log "openclaw: NÃO ENCONTRADO ($openclawCmd)" 'WARN' }
         if (Test-Path $hermesCmd) { Write-Log "hermes: $(& $hermesCmd --version) ($hermesCmd)" } else { Write-Log "hermes: NÃO ENCONTRADO ($hermesCmd)" 'WARN' }
         $aiderExe = Resolve-CommandPath -Name 'aider'
         if ($aiderExe) { Write-Log "aider: $(Invoke-NativeFirstLine -Exe $aiderExe -Args @('--version')) ($aiderExe)" } else { Write-Log 'aider: NÃO ENCONTRADO' 'WARN' }

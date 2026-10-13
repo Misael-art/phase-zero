@@ -1,30 +1,14 @@
 #!/usr/bin/env bash
-# gaming-tweaks.sh - apply gaming performance optimizations
+# gaming-tweaks.sh - gaming performance optimizations (apply | revert | status)
 set -euo pipefail
 PZ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$PZ_ROOT/linux/lib/common.sh"
+source "$PZ_ROOT/linux/tuning/tune-common.sh"
 
-PZ_TUNE_MODE="${1:-apply}"
-case "$PZ_TUNE_MODE" in
-    apply) ;;
-    --dry-run) ;;
-    *) pz_error "usage: ${0##*/} [--dry-run]"; exit 1 ;;
-esac
-if [ "$PZ_TUNE_MODE" = "--dry-run" ]; then
-    # Preview da área: lista o que seria escrito sem tocar nenhum arquivo.
-    pz_write_managed_file() { pz_info "dry-run: escreveria arquivo gerenciado ($2): $1"; }
-    pz_enable_service() {
-        if [ "${PZ_USE_SUDO:-0}" = "1" ] && pz_can_sudo_noninteractive; then
-            sudo -n systemctl enable --now "$1" 2>/dev/null || true
-        else
-            pz_info "dry-run: habilitaria o serviço '$1' (requer root)"
-        fi
-    }
-fi
+pz_tune_init gaming "$@"
 
 pz_configure_gamemode() {
-    local cfg="/etc/gamemode.ini"
-    pz_write_managed_file "$cfg" root <<'EOF'
+    pz_tune_file /etc/gamemode.ini root <<'EOF'
 [general]
 reaper_freq=5
 defaultgov=performance
@@ -45,12 +29,12 @@ pin_cores=yes
 start=notify-send "GameMode started" "Optimizations applied"
 end=notify-send "GameMode ended" "Optimizations reverted"
 EOF
-    pz_info "gamemode configured: $cfg"
+    pz_info "gamemode configured: /etc/gamemode.ini"
 }
 
 pz_configure_mangohud() {
     local cfg="${HOME}/.config/MangoHud/MangoHud.conf"
-    pz_write_managed_file "$cfg" user <<'EOF'
+    pz_tune_file "$cfg" user <<'EOF'
 # PhaseZero MangoHud preset
 fps_limit=0
 fps_color=00FF00
@@ -71,8 +55,8 @@ EOF
 }
 
 pz_configure_ananicy() {
-    if [ -d /etc/ananicy.d ]; then
-        pz_write_managed_file /etc/ananicy.d/99-phasezero.rules root <<'EOF'
+    [ -d /etc/ananicy.d ] || return 0
+    pz_tune_file /etc/ananicy.d/99-phasezero.rules root <<'EOF'
 # PhaseZero ananicy rules for gaming
 {
   "name": "steam",
@@ -103,20 +87,13 @@ pz_configure_ananicy() {
   "class": "latency"
 }
 EOF
-        if [ "$PZ_TUNE_MODE" = "--dry-run" ]; then
-            pz_enable_service ananicy
-        elif [ "${PZ_USE_SUDO:-0}" = "1" ] && pz_can_sudo_noninteractive; then
-            sudo -n systemctl enable --now ananicy 2>/dev/null || true
-        else
-            pz_warn "ananicy service enable requires root; skipped"
-        fi
-        pz_info "ananicy rules added"
-    fi
+    pz_tune_service ananicy
+    pz_info "ananicy rules added"
 }
 
 pz_configure_corectrl() {
     local cfg="${HOME}/.config/corectrl/corectrl.conf"
-    pz_write_managed_file "$cfg" user <<'EOF'
+    pz_tune_file "$cfg" user <<'EOF'
 [General]
 polkit=false
 
@@ -127,8 +104,12 @@ EOF
     pz_info "corectrl configured"
 }
 
-pz_configure_gamemode
-pz_configure_mangohud
-pz_configure_ananicy
-pz_configure_corectrl
-pz_info "gaming tweaks complete"
+pz_tune_apply() {
+    pz_configure_gamemode
+    pz_configure_mangohud
+    pz_configure_ananicy
+    pz_configure_corectrl
+    pz_info "gaming tweaks complete"
+}
+
+pz_tune_main

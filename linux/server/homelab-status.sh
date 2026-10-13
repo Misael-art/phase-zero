@@ -27,6 +27,9 @@ STATUS_FILE="${PZ_HOMELAB_STATUS_FILE:-$HOMELAB_STATE/status.json}"
 COMPOSE_DIR="${PZ_HOMELAB_COMPOSE_DIR:-$PZ_ROOT/assets/home-server}"
 CORE_FILE="$COMPOSE_DIR/docker-compose.homelab.yml"
 LOCK_FILE_JSON="$COMPOSE_DIR/docker-compose.lock.json"
+APPS_CATALOG="${PZ_HOMELAB_APPS_CATALOG:-$COMPOSE_DIR/apps/catalog.json}"
+ENABLED_FILE="${PZ_HOMELAB_APPS_ENABLED:-$HOMELAB_STATE/apps.enabled.json}"
+ENV_FILE="${PZ_HOMELAB_ENV_FILE:-$HOMELAB_STATE/.env}"
 
 SCHEMA_VERSION="1"
 
@@ -65,7 +68,9 @@ compose_ver() {
 }
 
 running_containers() {
-    docker ps --filter "name=phasezero-" --format '{{.Names}}' 2>/dev/null | sort
+    # PZ-AUD-011: project-scoped; see homelab-stack.sh running_containers_json.
+    local project="${PZ_HOMELAB_PROJECT:-phasezero-homelab}"
+    docker ps --filter "label=com.docker.compose.project=$project" --filter "name=phasezero-" --format '{{.Names}}' 2>/dev/null | sort
 }
 
 container_health() {
@@ -74,8 +79,10 @@ container_health() {
 }
 
 health_proofs() {
-    # Return JSON: {running:[], unhealthy:[], starting:[], healthy:bool}
-    local -a running=() unhealthy=() starting=() health
+    # Return JSON: {running:[], unhealthy:[], starting:[], unchecked:[], healthy:bool}
+    # PZ-AUD-006: none/unknown are NOT proofs of health. A container
+    # without a healthcheck can never make the stack healthy on its own.
+    local -a running=() unhealthy=() starting=() unchecked=() health
     local c
     while IFS= read -r c; do
         [ -n "$c" ] || continue
@@ -85,14 +92,16 @@ health_proofs() {
             healthy) ;;
             unhealthy) unhealthy+=("$c") ;;
             starting) starting+=("$c") ;;
+            *) unchecked+=("$c") ;;
         esac
     done < <(running_containers)
     jq -cn \
         --argjson running "$(arr_json "${running[@]}")" \
         --argjson unhealthy "$(arr_json "${unhealthy[@]}")" \
         --argjson starting "$(arr_json "${starting[@]}")" \
-        '{running:$running, unhealthy:$unhealthy, starting:$starting,
-          healthy:((($running|length) > 0) and (($unhealthy|length) == 0) and (($starting|length) == 0))}'
+        --argjson unchecked "$(arr_json "${unchecked[@]}")" \
+        '{running:$running, unhealthy:$unhealthy, starting:$starting, unchecked:$unchecked,
+          healthy:((($running|length) > 0) and (($unhealthy|length) == 0) and (($starting|length) == 0) and (($unchecked|length) == 0))}'
 }
 
 stack_json() {
@@ -162,7 +171,95 @@ security_state_json() {
     jq -cn --argjson policyActive "$policy_active" \
         --argjson policy "$policy" \
         --argjson lastAudit "$last_audit" \
-        '{policyActive:$policyActive, policy:$policy, redaction:true, lastAudit:$lastAudit}'
+        '{policyActive:$policyActive, policy:$policy, redaction:true, lastAudit:$lastAudit,
+          scope:"install-policy",
+          executionEnforced:false,
+          note:"install/pull policy only; runtime tool execution is bounded by the caller allowlist"}'
+}
+
+expected_set_json() {
+    # PZ-AUD-006/012: desired set (registry, else catalog defaults) with
+    # the container names and ports the reconciler must keep running.
+    # {keys:[], containers:[], ports:{"8096":"jellyfin"}} — empty when unknown.
+    local keys='[]'
+    if [ -f "$ENABLED_FILE" ]; then
+        keys="$(jq -c '.enabled // []' "$ENABLED_FILE" 2>/dev/null || echo '[]')"
+    elif [ -f "$APPS_CATALOG" ]; then
+        keys="$(jq -c '[.apps[] | select(.userFacing == true and .defaultEnabled == true) | .key]' "$APPS_CATALOG" 2>/dev/null || echo '[]')"
+    fi
+    if [ ! -f "$APPS_CATALOG" ]; then
+        jq -cn --argjson keys "$keys" '{keys:$keys, containers:[], ports:{}}'
+        return 0
+    fi
+    jq -cn --argjson keys "$keys" --slurpfile cat "$APPS_CATALOG" '
+        ($cat[0].apps) as $apps
+        | {keys:$keys,
+           containers:[$apps[] | select(.key as $k | ($keys | index($k) != null)) | .container],
+           probes:[$apps[] | select(.key as $k | ($keys | index($k) != null))
+                    | select(.port != null and .port != 0)
+                    | {key:.key, container:.container, port:.port,
+                       path:(.firstUse.probe.path // "/"),
+                       expectMax:(.firstUse.probe.expectMax // 499)}]}'
+}
+
+probe_http() {
+    # PZ-AUD-008: recipe-aware probe. Any status <= expectMax proves the
+    # app answers (auth walls return 401/403, which still count as alive).
+    local port="$1" path="$2" expect_max="$3"
+    timeout 8 python3 -c '
+import sys, urllib.request
+port, path, expect = sys.argv[1], sys.argv[2], int(sys.argv[3])
+try:
+    r = urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5)
+    sys.exit(0 if r.status <= expect else 1)
+except urllib.error.HTTPError as e:
+    sys.exit(0 if e.code <= expect else 1)
+except Exception:
+    sys.exit(1)
+' "$port" "$path" "$expect_max" 2>/dev/null
+}
+
+functional_probes_json() {
+    # PZ-AUD-006/008: per-recipe HTTP proof for each expected RUNNING app.
+    # Skipped entirely when nothing runs, so hermetic runs stay silent.
+    # Nome distinto de `running`, que neste arquivo é um array (health_probe):
+    # reusá-lo como string faz o shellcheck ler expansão de array sem índice.
+    local expected="$1" running_json="$2"
+    local -a failed=() passed=()
+    local key container port path expect_max
+    while IFS=$'\t' read -r key container port path expect_max; do
+        [ -n "$key" ] || continue
+        if ! jq -e --arg c "$container" 'index($c) != null' <<< "$running_json" >/dev/null 2>&1; then
+            continue
+        fi
+        if probe_http "$port" "$path" "$expect_max"; then
+            passed+=("$key")
+        else
+            failed+=("$key")
+        fi
+    done < <(jq -r '.probes[]? | [.key, .container, (.port|tostring), .path, (.expectMax|tostring)] | @tsv' <<< "$expected" 2>/dev/null)
+    jq -cn --argjson passed "$(arr_json "${passed[@]}")" \
+        --argjson failed "$(arr_json "${failed[@]}")" \
+        '{passed:$passed, failed:$failed}'
+}
+
+required_secrets_missing() {
+    # Required = core secrets + secrets of every enabled key.
+    local keys='[]'
+    if [ -f "$ENABLED_FILE" ]; then
+        keys="$(jq -c '.enabled // []' "$ENABLED_FILE" 2>/dev/null || echo '[]')"
+    fi
+    {
+        jq -r '.apps[] | select(.layer == "core") | (.secrets // [])[]?' "$APPS_CATALOG" 2>/dev/null
+        jq -r --argjson en "$keys" '
+            .apps[] | select(.key as $k | ($en | index($k) != null)) | (.secrets // [])[]?
+        ' "$APPS_CATALOG" 2>/dev/null
+    } | sort -u | while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        if ! grep -Eq "^${key}=[^[:space:]]" "$ENV_FILE" 2>/dev/null; then
+            printf '%s\n' "$key"
+        fi
+    done | jq -R . | jq -cs .
 }
 
 build_status() {
@@ -186,11 +283,31 @@ build_status() {
     local installed=false configured=false active=false healthy=false ready=false degraded_flag=false
     runtime_installed && installed=true
     { [ "$core_ok" = "true" ] && [ "$env_ok" = "true" ]; } && configured=true
+    # PZ-AUD-006: configured also requires every required secret present.
+    local missing_secrets='[]'
+    if [ "$env_ok" = "true" ] && [ -f "$APPS_CATALOG" ]; then
+        missing_secrets="$(required_secrets_missing)"
+        [ "$(jq -r 'length' <<< "$missing_secrets")" = "0" ] || configured=false
+    fi
 
     local hp
     hp="$(health_proofs)"
     [ "$(echo "$hp" | jq -r '.running|length')" -gt 0 ] && active=true
     [ "$(echo "$hp" | jq -r '.healthy')" = "true" ] && healthy=true
+
+    # PZ-AUD-006: readiness is measured against the desired set, never
+    # against "any container with our name prefix".
+    local expected running_json missing_json unexpected_json probes
+    expected="$(expected_set_json)"
+    running_json="$(echo "$hp" | jq -c '.running')"
+    missing_json="$(jq -cn --argjson exp "$expected" --argjson run "$running_json" \
+        '[$exp.containers[]? as $c | select(($run | index($c) == null)) | $c]')"
+    unexpected_json="$(jq -cn --argjson exp "$expected" --argjson run "$running_json" \
+        '[$run[] as $r | select((($exp.containers // []) | index($r) == null)) | $r]')"
+    probes='{"passed":[],"failed":[]}'
+    if [ "$(echo "$hp" | jq -r '.running|length')" -gt 0 ]; then
+        probes="$(functional_probes_json "$expected" "$running_json")"
+    fi
 
     local degraded_flag_raw last_status
     degraded_flag_raw="$(echo "$degraded" | jq -r '.degraded')"
@@ -199,9 +316,24 @@ build_status() {
 
     # proofs for ready:
     [ "$installed" = "true" ] || reasons+=("runtime not installed")
-    [ "$configured" = "true" ] || reasons+=("homelab not configured (compose or .env missing)")
+    [ "$configured" = "true" ] || reasons+=("homelab not configured (compose, .env or required secrets missing)")
+    if [ "$(jq -r 'length' <<< "$missing_secrets")" != "0" ]; then
+        reasons+=("missing required secrets: $(jq -r 'join(", ")' <<< "$missing_secrets")")
+    fi
     [ "$active" = "true" ] || reasons+=("no homelab containers running")
     [ "$healthy" = "true" ] || reasons+=("containers missing or unhealthy")
+    if [ "$(echo "$hp" | jq -r '.unchecked|length')" -gt 0 ]; then
+        reasons+=("containers without health proof: $(echo "$hp" | jq -r '.unchecked|join(", ")')")
+    fi
+    if [ "$(jq -r 'length' <<< "$missing_json")" != "0" ]; then
+        reasons+=("expected containers not running: $(jq -r 'join(", ")' <<< "$missing_json")")
+    fi
+    if [ "$(jq -r 'length' <<< "$unexpected_json")" != "0" ]; then
+        reasons+=("unexpected containers running outside desired set: $(jq -r 'join(", ")' <<< "$unexpected_json"); run reconcile")
+    fi
+    if [ "$(echo "$probes" | jq -r '.failed|length')" -gt 0 ]; then
+        reasons+=("functional probe failed: $(echo "$probes" | jq -r '.failed|join(", ")')")
+    fi
     [ "$degraded_flag" = "true" ] && reasons+=("degraded state active: $(echo "$degraded" | jq -r '.reasons|join("; ")')")
     [ "$last_status" = "failed" ] && reasons+=("last operation failed")
     [ "$last_status" = "interrupted" ] && reasons+=("last operation interrupted; resume with: pz server homelab up --resume")
@@ -244,6 +376,12 @@ build_status() {
         --argjson rollbackAvailable "$(echo "$last_op" | jq '.rollbackAvailable // false')" \
         --argjson resume "$resume" \
         --argjson stack "$stack" \
+        --argjson healthProofs "$hp" \
+        --argjson expectedSet "$expected" \
+        --argjson missingContainers "$missing_json" \
+        --argjson unexpectedContainers "$unexpected_json" \
+        --argjson functionalProbes "$probes" \
+        --argjson missingSecrets "$missing_secrets" \
         '{schemaVersion:$schemaVersion,
           tool:$tool,
           profile:$profile,
@@ -266,21 +404,37 @@ build_status() {
           lastOperation:$lastOperation,
           rollbackAvailable:$rollbackAvailable,
           resume:$resume,
-          stack:$stack}'
+          stack:$stack,
+          healthProofs:$healthProofs,
+          expectedSet:$expectedSet,
+          missingContainers:$missingContainers,
+          unexpectedContainers:$unexpectedContainers,
+          functionalProbes:$functionalProbes,
+          missingSecrets:$missingSecrets}'
+}
+
+status_envelope() {
+    # A valid diagnostic report is a success, even when the stack is not
+    # ready: readiness lives in the fields, never in the exit code. The
+    # decorated keys give the UI (and scripts) an actionable next step.
+    jq -c '. + (
+        if .ready then {state:"ready", summary:"Homelab saudável.", nextAction:null}
+        elif (.configured == true|not) then {state:"needs-config", summary:"Homelab ainda não foi configurado.", nextAction:"linux/pz server homelab prepare"}
+        elif (.degraded == true) then {state:"degraded", summary:"Atenção necessária: revise os motivos.", nextAction:"linux/pz server homelab repair"}
+        elif ((.stack.apps // []) | map(.running == true) | any) then {state:"unhealthy", summary:"Serviços no ar, mas as provas de saúde não fecham.", nextAction:"linux/pz server homelab repair"}
+        else {state:"stopped", summary:"Configurado e desligado; dados preservados.", nextAction:"linux/pz server homelab up"} end
+    )'
 }
 
 cmd_status() {
     local data
-    data="$(build_status)"
+    data="$(build_status)" || return 1
+    data="$(status_envelope <<< "$data")"
     mkdir -p "$HOMELAB_STATE"
     printf '%s\n' "$data" > "$STATUS_FILE"
     chmod 0644 "$STATUS_FILE"
     printf '%s\n' "$data"
-    if [ "$(echo "$data" | jq -r '.ready')" = "true" ]; then
-        return 0
-    else
-        return 1
-    fi
+    return 0
 }
 
 cmd_verify() {
@@ -333,7 +487,19 @@ cmd_repair() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     case "$cmd" in
-        status) cmd_status ;;
+        status)
+            if ! cmd_status; then
+                # Tool-level failure: still answer with an honest envelope so
+                # callers never have to parse a bare failure.
+                jq -nc '{tool:"homelab-status",schemaVersion:"1",ready:false,
+                         state:"unavailable",
+                         summary:"O diagnóstico não conseguiu coletar provas agora.",
+                         reasons:["falha ao consultar Docker/Compose"],
+                         nextAction:"Confirme que o Docker está ativo e repita; se persistir, use Preparar Homelab."}' \
+                    && exit 0
+                exit 1
+            fi
+            ;;
         verify) cmd_verify ;;
         repair) cmd_repair ;;
         *) echo "usage: homelab-status.sh (status|verify|repair) [--json]" >&2; exit 2 ;;

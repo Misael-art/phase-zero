@@ -7,10 +7,15 @@
 # repo is mounted. No package manager owns that copy, so upgrading the PhaseZero
 # package silently leaves the GRUB boot path executing the previous release.
 #
-# This deliberately only warns. Re-running `boot install` regenerates grub.cfg,
-# runs os-prober and reconfigures Samba shares; none of that belongs inside a
-# package transaction, where a failure would abort the upgrade and a partially
-# rewritten bootloader is far worse than an outdated runtime.
+# What goes stale is only the copied files, so the hook resyncs THEM — a plain
+# copy of files the package just installed, into paths the existing GRUB entry
+# already points at. It never runs `boot install`: that regenerates grub.cfg,
+# runs os-prober and reconfigures Samba, none of which belongs inside a package
+# transaction, where a failure aborts the upgrade and a partially rewritten
+# bootloader is far worse than an outdated runtime.
+#
+# The notice survives for what the copy cannot fix: a resync that fails, or a
+# release that changes the GRUB stanza itself.
 #
 # Never fails the transaction: an inconclusive probe is silent, and a missing
 # dependency exits 0.
@@ -27,6 +32,15 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 state="$(bash "$VM_SH" boot runtime-check --json 2>/dev/null | jq -r '.bootRuntimeState // "unknown"' 2>/dev/null)"
 [ "$state" = "stale" ] || exit 0
+
+# Ressincroniza sozinho. Nunca derruba a transação: falha vira o aviso de antes.
+if bash "$VM_SH" boot sync-runtime >/dev/null 2>&1; then
+    state="$(bash "$VM_SH" boot runtime-check --json 2>/dev/null | jq -r '.bootRuntimeState // "unknown"' 2>/dev/null)"
+    if [ "$state" = "current" ]; then
+        printf '>>> PhaseZero: Windows VM boot runtime resynced automatically.\n' >&2
+        exit 0
+    fi
+fi
 
 # Leave a marker the app can read without privileges: status --json surfaces
 # bootRuntimePendingSync so the UI offers the one-click resync even when the

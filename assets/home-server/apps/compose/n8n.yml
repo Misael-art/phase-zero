@@ -1,0 +1,25 @@
+# Per-app compose module. Segredos nunca inline.
+services:
+  n8n:
+    image: ${PZ_IMAGE_N8N:-docker.n8n.io/n8nio/n8n:1.100.1}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    container_name: phasezero-n8n
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1024m
+    cpus: 1.0
+    environment:
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    ports:
+      - "${HOMELAB_ADMIN_BIND_ADDR:-127.0.0.1}:5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:

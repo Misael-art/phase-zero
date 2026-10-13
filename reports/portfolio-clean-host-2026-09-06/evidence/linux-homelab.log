@@ -1,0 +1,104 @@
+=== syntax ===
+  syntax ok
+=== server profile argument integrity ===
+  profile args ok
+=== compose has pinned tags and safe binds ===
+  compose pins/binds/hardening ok
+=== missing .env blocks sensitive services ===
+  missing secrets blockers ok
+=== repair generates secure .env without printing secrets ===
+  secure env ok
+=== apps catalog list/enable/disable/update ===
+  apps catalog ok
+=== apps JSON stays pure when compose writes to stdout ===
+  compose stdout isolation ok
+=== web CLI bootstrap (no serve) ===
+  web CLI ok
+=== host-facts never invent sensors ===
+  host-facts ok
+=== hosts registry + ssh envelope ===
+  hosts bridge ok
+=== compose config core/extras ===
+  docker compose unavailable; skipped
+=== tailscale logged-out blocker ===
+  tailscale blocker ok
+=== open/logical urls and backup/restore dry-runs ===
+  dry-runs ok
+=== CasaOS compatibility gate ===
+  casaos gate ok
+=== aggregate status schemaVersion + ready proofs ===
+  status schema ok
+  fresh verify ok
+  consistent verify ok
+  verify ok
+  status persisted ok
+=== operations: registry flow ===
+  operation registry ok
+=== operations: cross-process lock ===
+  lock ok
+=== operations: crash -> resume -> cancel ===
+  crash/resume/cancel ok
+=== operations: idempotent re-entry + corrupted state fail-closed ===
+  corrupted conflict reason ok
+  idempotency/corrupt ok
+=== profiles: registry + resource governor ===
+  registry 6 profiles ok
+  weights ok
+  overcommit fails closed ok
+  in-budget pass ok
+  budget-active real profile ok
+  unknown profile rejected ok
+  ops profile validation ok
+  profile set ok
+  status budget wiring ok
+  pz set validation ok
+  up profile gate ok
+=== winvm contract: status boundary, graceful suspend, resume ===
+  winvm weight registered ok
+  winvm idle detection ok
+  winvm unconfigured envelope ok
+  heavy profile passes when winvm idle ok
+  winvm active detection ok
+  winvm conflict impact plan ok
+  graceful suspend plan ok
+  graceful suspend executes configured command ok
+  suspend no-op when idle ok
+  resume after winvm end ok
+=== boot-prepare identity: marker absent is a no-op ===
+  marker-absent ok
+=== boot-prepare bring-up as target user, no root/real-home writes ===
+  identity ok
+=== boot-prepare essential failure marks degraded and fails unit ===
+  degraded/fail ok
+=== access mode persists in homelab env ===
+  access persistence ok
+=== backup: manifest + checksums + verify + restore ===
+  backup manifest ok
+  verify pass ok
+  verify missing-manifest fails closed ok
+  restore --plan zero-write ok
+  tamper fails closed ok
+  restore verify-then-apply ok
+  restore --confirm-file ok
+  restore tampered refused ok
+  legacy refused ok
+  restore partial failure rolls back to pre-restore ok
+  status backup state ok
+=== ai policy broker + hardened adapters ===
+  policy conservative default ok
+  broker action checks ok
+  policy set ok
+  policy invalid mode rejected ok
+  policy unknown action denied ok
+  adapters hardened ok
+  status policy wiring ok
+=== Homelab smoke ok ===
+ Container phasezero-n8n Stopping
+ Container phasezero-n8n Removed
+ Container phasezero-n8n Stopping
+ Container phasezero-n8n Removed
+ Container phasezero-n8n Stopping
+ Container phasezero-n8n Removed
+ERROR: profile registry missing: /run/user/1000/codex-desktop/tmp/tmp.Yxh64ybfhi/registry-ausente.json
+
+AUDIT_EXIT=0

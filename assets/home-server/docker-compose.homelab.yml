@@ -7,6 +7,11 @@ services:
   # Servidor de mídia
   jellyfin:
     image: ${PZ_IMAGE_JELLYFIN:-jellyfin/jellyfin:10.10.7}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-jellyfin
     restart: unless-stopped
     init: true
@@ -19,11 +24,16 @@ services:
     volumes:
       - jellyfin_config:/config
       - jellyfin_cache:/cache
-      - ${HOMELAB_MEDIA_DIR:-./media}:/media
+      - ${HOMELAB_MEDIA_DIR:-./media}:/media:ro
 
   # "Drive" leve (sync P2P) — alternativa de baixo RAM ao Nextcloud
   syncthing:
     image: ${PZ_IMAGE_SYNCTHING:-syncthing/syncthing:1.29.6}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-syncthing
     restart: unless-stopped
     hostname: phasezero-syncthing
@@ -42,6 +52,11 @@ services:
   # Cofre de senhas (Bitwarden-compatível). Só atrás de Tailscale/HTTPS.
   vaultwarden:
     image: ${PZ_IMAGE_VAULTWARDEN:-vaultwarden/server:1.34.3}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-vaultwarden
     restart: unless-stopped
     init: true
@@ -60,6 +75,11 @@ services:
   # Monitoramento de uptime + alertas (camada "self-healing" amigável)
   uptime-kuma:
     image: ${PZ_IMAGE_UPTIME_KUMA:-louislam/uptime-kuma:1.23.16}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: phasezero-uptime-kuma
     restart: unless-stopped
     init: true

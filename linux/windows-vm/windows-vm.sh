@@ -14,6 +14,10 @@ if [ $# -gt 0 ]; then
     shift || true
 fi
 
+# Where udisks mounts removable media. Overridable so the suite can exercise
+# the hot-plug paths inside a sandbox instead of writing under /run/media.
+REMOVABLE_ROOT="${PZ_WINDOWS_VM_REMOVABLE_ROOT:-/run/media}"
+MEDIA_ROOT="${PZ_WINDOWS_VM_MEDIA_ROOT:-/media}"
 TARGET_USER="${PZ_TARGET_USER:-${SUDO_USER:-${USER:-misael}}}"
 [ "$TARGET_USER" = "root" ] && TARGET_USER="misael"
 if [ "$EUID" -eq 0 ]; then
@@ -38,10 +42,15 @@ SYSTEMD_USER_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 BOOT_HELPER_SOURCE="$PZ_ROOT/linux/windows-vm/windows-vm-boot-prepare.sh"
 SESSION_SOURCE="$PZ_ROOT/linux/windows-vm/windows-vm-session.sh"
 DISPLAY_SESSION_SOURCE="$PZ_ROOT/linux/steamdeck/display-session.sh"
-BOOT_HELPER_TARGET="/usr/local/lib/phasezero/windows-vm-boot-prepare"
-SESSION_TARGET="/usr/local/lib/phasezero/windows-vm-session"
-DISPLAY_SESSION_TARGET="/usr/local/lib/phasezero/display-session"
-RUNTIME_ROOT="/usr/local/lib/phasezero/windows-vm-runtime"
+# Prefixo do runtime de boot. Em produção é sempre /usr/local — nenhum
+# gerenciador de pacotes é dono dele, que é justamente o motivo de a cópia
+# existir. A variável é costura de teste: permite exercer a ressincronização
+# sem root e sem tocar no host.
+BOOT_LOCAL_PREFIX="${PZ_BOOT_LOCAL_PREFIX:-/usr/local}"
+BOOT_HELPER_TARGET="$BOOT_LOCAL_PREFIX/lib/phasezero/windows-vm-boot-prepare"
+SESSION_TARGET="$BOOT_LOCAL_PREFIX/lib/phasezero/windows-vm-session"
+DISPLAY_SESSION_TARGET="$BOOT_LOCAL_PREFIX/lib/phasezero/display-session"
+RUNTIME_ROOT="$BOOT_LOCAL_PREFIX/lib/phasezero/windows-vm-runtime"
 # Written by the package post-transaction hook when an upgrade leaves the
 # installed runtime behind; cleared by `boot install` and read by status so
 # the UI can offer the one-click resync even before runtime-check runs.
@@ -49,7 +58,9 @@ BOOT_RUNTIME_PENDING_FILE="${PZ_BOOT_RUNTIME_PENDING:-/var/lib/phasezero/windows
 RUNTIME_LAUNCHER="$RUNTIME_ROOT/linux/windows-vm/windows-vm.sh"
 RUNTIME_GRAPHICS="$RUNTIME_ROOT/linux/windows-vm/graphics.sh"
 RUNTIME_COMMON="$RUNTIME_ROOT/linux/lib/common.sh"
-ROOT_ENV_FILE="/etc/phasezero/windows-vm.env"
+# Overridable so the suite asserts the shipped defaults instead of whatever the
+# developer's own host happens to have persisted in /etc.
+ROOT_ENV_FILE="${PZ_WINDOWS_VM_ROOT_ENV_FILE:-/etc/phasezero/windows-vm.env}"
 SERVICE_FILE="/etc/systemd/system/phasezero-windows-vm-boot-prepare.service"
 WAYLAND_SESSION_FILE="/usr/share/wayland-sessions/phasezero-windows-vm.desktop"
 XSESSION_FILE="/usr/share/xsessions/phasezero-windows-vm.desktop"
@@ -60,6 +71,8 @@ BOOT_ENTRY="PhaseZero Windows VM"
 BOOT_ID="phasezero-windows-vm"
 BOOT_DOCK_ENTRY="PhaseZero Windows VM (Dock)"
 BOOT_DOCK_ID="phasezero-windows-vm-dock"
+BOOT_HANDHELD_ENTRY="PhaseZero Windows VM (Handheld)"
+BOOT_HANDHELD_ID="phasezero-windows-vm-handheld"
 SAMBA_CONF="${PZ_WINDOWS_VM_SAMBA_CONF:-/etc/samba/smb.conf}"
 SAMBA_BEGIN="# BEGIN PHASEZERO WINDOWS VM SHARES"
 SAMBA_END="# END PHASEZERO WINDOWS VM SHARES"
@@ -163,6 +176,8 @@ Usage:
 Access:
   home, /mnt/sdcard, /run/media/\$USER and /mnt are exposed through SMB and virtiofs when available.
   USB redirection is enabled by default. Raw usb-host passthrough requires --usb-mode all or peripherals.
+  On a direct GRUB boot the Steam Deck controller is passed raw (28de:1205) so Steam Deck Tools sees the
+  real device; the host loses it until the VM exits. PZ_WINDOWS_VM_STEAMDECK_CONTROLLER=raw|virtio|off|auto.
   PCI/GPU passthrough is opt-in through PZ_WINDOWS_VM_PCI_DEVICES="0000:xx:yy.z ...".
 EOF
 }
@@ -251,6 +266,11 @@ run_privileged_noninteractive() {
     return 1
 }
 
+# Ajustes de host pulados por falta de privilégio. Treze WARN seguidos dizendo
+# "skipped" não dão ao usuário nada para fazer; o resumo sai uma vez, no fim,
+# com o comando que aplica tudo de uma vez.
+SKIPPED_HOST_TUNING=()
+
 write_root_value() {
     local path="$1" value="$2"
     local label="${3:-$path}"
@@ -266,7 +286,7 @@ write_root_value() {
     if run_privileged_noninteractive tee "$path" >/dev/null <<< "$value"; then
         return 0
     fi
-    pz_warn "$label requires root; skipped non-interactive write"
+    SKIPPED_HOST_TUNING+=("$label")
     return 0
 }
 
@@ -281,6 +301,15 @@ sysctl_set_noninteractive() {
     elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
         sudo -n sysctl -w "$key=$value" >/dev/null 2>&1 || true
     fi
+}
+
+report_skipped_host_tuning() {
+    [ "${#SKIPPED_HOST_TUNING[@]}" -gt 0 ] || return 0
+    local how="sudo"
+    command -v phasezero-admin >/dev/null 2>&1 && how="phasezero-admin"
+    pz_warn "${#SKIPPED_HOST_TUNING[@]} ajuste(s) de host exigem privilégio e ficaram de fora: ${SKIPPED_HOST_TUNING[*]}"
+    pz_warn "a VM inicia assim mesmo; para aplicá-los: $how pz windows-vm optimize"
+    SKIPPED_HOST_TUNING=()
 }
 
 apply_host_optimizations() {
@@ -299,11 +328,25 @@ apply_host_optimizations() {
     write_root_value /sys/kernel/mm/ksm/run 1 "KSM"
     write_root_value /sys/kernel/mm/ksm/pages_to_scan 1000 "KSM pages_to_scan"
     write_root_value /sys/kernel/mm/ksm/sleep_millisecs 20 "KSM sleep_millisecs"
-    local governor
+    local governor governors=0
     for governor in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
         [ -e "$governor" ] || continue
+        governors=$((governors + 1))
         write_root_value "$governor" performance "CPU governor"
     done
+    # Um governor por núcleo vira uma linha por núcleo; conta como um item.
+    if [ "$governors" -gt 1 ] && [ "${#SKIPPED_HOST_TUNING[@]}" -gt 0 ]; then
+        local kept=() entry seen_governor=0
+        for entry in "${SKIPPED_HOST_TUNING[@]}"; do
+            if [ "$entry" = "CPU governor" ]; then
+                [ "$seen_governor" = "1" ] && continue
+                seen_governor=1
+            fi
+            kept+=("$entry")
+        done
+        SKIPPED_HOST_TUNING=("${kept[@]}")
+    fi
+    report_skipped_host_tuning
 }
 
 json_escape() {
@@ -346,6 +389,15 @@ target_home() {
 chown_target_user() {
     [ "$EUID" -eq 0 ] || return 0
     chown "$TARGET_USER:$TARGET_USER" "$@" 2>/dev/null || true
+}
+
+# O runtime dir vive em /run/user/<uid> do usuário. Criado por um comando
+# elevado (a ponte admin), ele nascia root:root, e toda execução seguinte sem
+# privilégio morria com "Operação não permitida" ao tentar reaplicar o modo —
+# um `boot install` deixava o `windows-vm start` do usuário quebrado.
+ensure_runtime_dir() {
+    install -d -m 0700 "$@" || return 1
+    chown_target_user "$@"
 }
 
 target_user_can_rw() {
@@ -748,11 +800,17 @@ effective_config() {
     fi
     SHARE_ROOT="${PZ_WINDOWS_VM_SHARE_ROOT:-$VM_DIR/shares}"
     TPM_DIR="${PZ_WINDOWS_VM_TPM_DIR:-$VM_DIR/tpm}"
-    # Share policy: minimal (default) exposes ONLY the exchange dir. home,
-    # sdcard, removable, media and /mnt are exposed only with an explicit
-    # opt-in (PZ_WINDOWS_VM_SHARE_POLICY=full); expanded shares are read-only
-    # unless PZ_WINDOWS_VM_SHARE_WRITABLE=1.
-    SHARE_POLICY="${SHARE_POLICY:-${PZ_WINDOWS_VM_SHARE_POLICY:-minimal}}"
+    # Share policy: full (default) exposes home, sdcard, removable media and
+    # /mnt READ-ONLY, plus the exchange dir as the single writable door. The
+    # guest can therefore read everything on the Linux side while writes stay
+    # funnelled through one controlled path.
+    # PZ_WINDOWS_VM_SHARE_WRITABLE=1 makes the expanded shares writable too:
+    # that hands anything running in Windows - malware included - write access
+    # to the whole home directory under the operator's own identity, since the
+    # generated smb.conf uses `guest ok=yes` and `force user`. Keep it at 0
+    # unless that exposure is a deliberate decision.
+    # PZ_WINDOWS_VM_SHARE_POLICY=minimal narrows the share set back to exchange.
+    SHARE_POLICY="${SHARE_POLICY:-${PZ_WINDOWS_VM_SHARE_POLICY:-full}}"
     case "$SHARE_POLICY" in
         minimal|full) ;;
         *) pz_warn "unknown share policy '$SHARE_POLICY'; falling back to minimal"; SHARE_POLICY=minimal ;;
@@ -762,8 +820,14 @@ effective_config() {
         1|0) ;;
         *) pz_warn "invalid PZ_WINDOWS_VM_SHARE_WRITABLE '$SHARE_WRITABLE'; using 0 (read-only expanded shares)"; SHARE_WRITABLE=0 ;;
     esac
-    if [ -f "$CONFIG_FILE" ] && [ -z "${PZ_WINDOWS_VM_SHARE_POLICY:-}" ]; then
-        pz_warn "legacy Windows VM config without share policy — defaulting to minimal shares (only exchange exposed; home/sdcard/mnt need explicit PZ_WINDOWS_VM_SHARE_POLICY=full)"
+    # A config written before the default changed pins minimal explicitly, so it
+    # keeps the narrow share set and the operator sees only exchange in the
+    # guest. Say so out loud instead of letting it look like a broken share.
+    if [ -f "$CONFIG_FILE" ] && [ "$SHARE_POLICY" = "minimal" ]; then
+        # stderr: effective_config runs for every subcommand, including the
+        # --json ones, and pz_log sends INFO to stdout. On stdout this line
+        # lands inside the JSON envelope and breaks every consumer.
+        pz_info "share policy=minimal from $CONFIG_FILE (only exchange exposed). Set PZ_WINDOWS_VM_SHARE_POLICY=full there for read-only home/sdcard/removable." >&2
     fi
     # SPICE binding: loopback by default. Any non-loopback address requires an
     # explicit opt-in and emits a strong warning (unauthenticated SPICE server).
@@ -878,7 +942,7 @@ ensure_vm_storage() {
         pz_info "dry-run: would create VM directories under $VM_DIR"
     else
         install -d -m 0700 "$VM_DIR" "$STATE_DIR"
-        install -d -m 0700 "$RUNTIME_DIR"
+        ensure_runtime_dir "$RUNTIME_DIR"
     fi
     if [ ! -f "$DISK_PATH" ]; then
         if [ "$DRY_RUN" = "1" ]; then
@@ -1012,16 +1076,27 @@ vm_admin_run() {
 # QEMU's built-in SMB (\\10.0.2.4\qemu) serves ONE directory and does NOT follow
 # symlinks that point outside it, so the old symlink share root left the guest with
 # empty home/ and sdcard/ folders. Bind mounts are real directories smbd traverses
-# fine. We populate a share root under RUNTIME_DIR (outside $HOME, so bind-mounting
-# $HOME cannot recurse) and expose that; sets the global EFFECTIVE_SMB_DIR.
-SHARE_BIND_ROOT="$RUNTIME_DIR/shares"
+# fine. We populate a share root outside $HOME (so bind-mounting $HOME cannot
+# recurse) and expose that; sets the global EFFECTIVE_SMB_DIR.
+#
+# The root must also be disk-backed. Windows reports free space for the volume
+# of the share ROOT, not for the bind the user is writing into, so a root on the
+# RUNTIME_DIR tmpfs made the guest see ~1.4 GB and refuse larger copies even
+# though the exchange bind had hundreds of GB free. Prefer a persistent path and
+# fall back to RUNTIME_DIR only when there is no way to create it.
+SHARE_STATE_DIR="${PZ_WINDOWS_VM_SHARE_STATE_DIR:-/var/lib/phasezero/windows-vm}"
+SHARE_BIND_ROOT="${PZ_WINDOWS_VM_SHARE_BIND_ROOT:-$SHARE_STATE_DIR/shares}"
+# Fallback when the persistent root cannot be created (no admin bridge, e.g. a
+# GRUB boot session). The guest keeps working; only the free-space figure it
+# reports goes back to being the tmpfs size.
+SHARE_BIND_ROOT_FALLBACK="$RUNTIME_DIR/shares"
 share_pairs() {
     local ro_marker="${1:-0}"
     if [ "$SHARE_POLICY" = "full" ]; then
         if [ "$ro_marker" = "1" ]; then
-            printf '%s\n' "exchange:$EXCHANGE_DIR:rw" "home:$HOME:ro" "sdcard:/mnt/sdcard:ro" "removable:/run/media/$TARGET_USER:ro" "media:/media/$TARGET_USER:ro" "mnt:/mnt:ro"
+            printf '%s\n' "exchange:$EXCHANGE_DIR:rw" "home:$HOME:ro" "sdcard:/mnt/sdcard:ro" "removable:$REMOVABLE_ROOT/$TARGET_USER:ro" "media:$MEDIA_ROOT/$TARGET_USER:ro" "mnt:/mnt:ro"
         else
-            printf '%s\n' "exchange:$EXCHANGE_DIR" "home:$HOME" "sdcard:/mnt/sdcard" "removable:/run/media/$TARGET_USER" "media:/media/$TARGET_USER" "mnt:/mnt"
+            printf '%s\n' "exchange:$EXCHANGE_DIR" "home:$HOME" "sdcard:/mnt/sdcard" "removable:$REMOVABLE_ROOT/$TARGET_USER" "media:$MEDIA_ROOT/$TARGET_USER" "mnt:/mnt"
         fi
     else
         if [ "$ro_marker" = "1" ]; then
@@ -1043,7 +1118,10 @@ prune_share_links() {
             *" $name "*) continue ;;
         esac
         if mountpoint -q "$SHARE_BIND_ROOT/$name" 2>/dev/null; then
-            if ! vm_admin_run umount "$SHARE_BIND_ROOT/$name" 2>/dev/null; then
+            # -R: the binds are recursive, so a plain umount would detach the
+            # top and leave the submounts (a pen drive under removable/) still
+            # exposed to the guest under a policy that no longer allows it.
+            if ! vm_admin_run umount -R "$SHARE_BIND_ROOT/$name" 2>/dev/null; then
                 pz_warn "failed to unmount stale share bind: $SHARE_BIND_ROOT/$name"
                 rc=1
             elif mountpoint -q "$SHARE_BIND_ROOT/$name" 2>/dev/null; then
@@ -1073,6 +1151,42 @@ mount_is_rw() {
     return 0
 }
 
+# Create a directory inside the share root. The root can be root-owned
+# (/var/lib/phasezero/...), so fall back to the admin bridge.
+share_install_dir() {
+    install -d "$1" 2>/dev/null || vm_admin_run install -d "$1" 2>/dev/null
+}
+
+# udisks creates /run/media/$USER only when the first removable device is
+# mounted. Binding a path that does not exist yet was skipped outright, so a
+# pen drive inserted after boot could never reach the guest. Create the target
+# up front; the recursive bind below then carries every later mount into it.
+ensure_share_target() {
+    local target="$1"
+    [ -d "$target" ] && return 0
+    case "$target" in
+        "$REMOVABLE_ROOT"/*|"$MEDIA_ROOT"/*) share_install_dir "$target" ;;
+        *) return 1 ;;
+    esac
+}
+
+# A plain --bind exposes only the directory itself: every filesystem mounted
+# underneath stays invisible. Removable media are exactly that - each pen drive
+# is its own mount under /run/media/$USER - so the guest saw an empty folder.
+# --rbind carries the mounts that already exist, and --make-rslave makes the
+# ones mounted later propagate in, which is what hotplug needs.
+share_bind_mount() {
+    local target="$1" mountpoint_path="$2" readonly_bind="$3"
+    vm_admin_run mount --rbind "$target" "$mountpoint_path" 2>/dev/null || return 1
+    # Slave propagation: host -> guest share only. Without it a umount inside
+    # the share root could propagate back and unmount the user's real media.
+    vm_admin_run mount --make-rslave "$mountpoint_path" 2>/dev/null || true
+    if [ "$readonly_bind" = "1" ]; then
+        vm_admin_run mount -o remount,ro,bind "$mountpoint_path" 2>/dev/null || return 1
+    fi
+    return 0
+}
+
 ensure_share_links() {
     local hard_fail="${1:-0}"
     if [ "$DRY_RUN" = "1" ]; then
@@ -1083,7 +1197,15 @@ ensure_share_links() {
     local ok=1 pair name target mode attempt=0
     while [ "$attempt" -le 1 ]; do
         ok=1
-        install -d "$SHARE_BIND_ROOT" 2>/dev/null || ok=0
+        if ! share_install_dir "$SHARE_BIND_ROOT"; then
+            if [ "$SHARE_BIND_ROOT" != "$SHARE_BIND_ROOT_FALLBACK" ] && \
+               share_install_dir "$SHARE_BIND_ROOT_FALLBACK"; then
+                pz_warn "persistent share root unavailable ($SHARE_BIND_ROOT); using $SHARE_BIND_ROOT_FALLBACK. The guest will report that filesystem's free space, which may refuse large copies."
+                SHARE_BIND_ROOT="$SHARE_BIND_ROOT_FALLBACK"
+            else
+                ok=0
+            fi
+        fi
         if [ "$ok" = "1" ]; then
             mkdir -p "$EXCHANGE_DIR"
             while IFS= read -r pair; do
@@ -1093,6 +1215,7 @@ ensure_share_links() {
                 case "$target" in
                     *:rw|*:ro) mode="${target##*:}"; target="${target%:*}" ;;
                 esac
+                ensure_share_target "$target" || true
                 [ -d "$target" ] || continue
                 if [ "$mode" = "ro" ] && [ "$SHARE_WRITABLE" != "1" ]; then
                     if mountpoint -q "$SHARE_BIND_ROOT/$name"; then
@@ -1100,8 +1223,8 @@ ensure_share_links() {
                             vm_admin_run mount -o remount,ro,bind "$SHARE_BIND_ROOT/$name" 2>/dev/null || ok=0
                         fi
                     else
-                        install -d "$SHARE_BIND_ROOT/$name"
-                        vm_admin_run mount --bind -o ro "$target" "$SHARE_BIND_ROOT/$name" 2>/dev/null || { ok=0; break; }
+                        share_install_dir "$SHARE_BIND_ROOT/$name"
+                        share_bind_mount "$target" "$SHARE_BIND_ROOT/$name" 1 || { ok=0; break; }
                     fi
                 elif mountpoint -q "$SHARE_BIND_ROOT/$name"; then
                     if mount_is_rw "$SHARE_BIND_ROOT/$name"; then
@@ -1109,8 +1232,8 @@ ensure_share_links() {
                     fi
                     vm_admin_run mount -o remount,rw,bind "$SHARE_BIND_ROOT/$name" 2>/dev/null || ok=0
                 else
-                    install -d "$SHARE_BIND_ROOT/$name"
-                    vm_admin_run mount --bind "$target" "$SHARE_BIND_ROOT/$name" 2>/dev/null || { ok=0; break; }
+                    share_install_dir "$SHARE_BIND_ROOT/$name"
+                    share_bind_mount "$target" "$SHARE_BIND_ROOT/$name" 0 || { ok=0; break; }
                 fi
             done < <(share_pairs 1)
         fi
@@ -1151,8 +1274,8 @@ ensure_share_links() {
     if [ "$SHARE_POLICY" = "full" ]; then
         ln -sfn "$HOME" "$SHARE_ROOT/home"
         [ -d /mnt/sdcard ] && ln -sfn /mnt/sdcard "$SHARE_ROOT/sdcard"
-        [ -d "/run/media/$TARGET_USER" ] && ln -sfn "/run/media/$TARGET_USER" "$SHARE_ROOT/removable"
-        [ -d "/media/$TARGET_USER" ] && ln -sfn "/media/$TARGET_USER" "$SHARE_ROOT/media"
+        [ -d "$REMOVABLE_ROOT/$TARGET_USER" ] && ln -sfn "$REMOVABLE_ROOT/$TARGET_USER" "$SHARE_ROOT/removable"
+        [ -d "$MEDIA_ROOT/$TARGET_USER" ] && ln -sfn "$MEDIA_ROOT/$TARGET_USER" "$SHARE_ROOT/media"
         [ -d /mnt ] && ln -sfn /mnt "$SHARE_ROOT/mnt"
     fi
     EFFECTIVE_SMB_DIR="$SHARE_ROOT"
@@ -1281,8 +1404,8 @@ EOF
 samba_block_content() {
     local home removable media
     home="$(target_home)"
-    removable="/run/media/$TARGET_USER"
-    media="/media/$TARGET_USER"
+    removable="$REMOVABLE_ROOT/$TARGET_USER"
+    media="$MEDIA_ROOT/$TARGET_USER"
     if [ "$SHARE_POLICY" = "full" ]; then
         cat <<EOF
 $SAMBA_BEGIN
@@ -1487,7 +1610,7 @@ configure_windows_samba_shares() {
     }
     chown "$TARGET_USER:$TARGET_USER" "$EXCHANGE_DIR"
     chmod 0770 "$EXCHANGE_DIR"
-    install -d -o "$TARGET_USER" -g "$TARGET_USER" "/run/media/$TARGET_USER" "/media/$TARGET_USER"
+    install -d -o "$TARGET_USER" -g "$TARGET_USER" "$REMOVABLE_ROOT/$TARGET_USER" "$MEDIA_ROOT/$TARGET_USER"
     systemctl enable --now smb.service >/dev/null 2>&1 || systemctl restart smbd.service >/dev/null 2>&1 || true
     systemctl restart smb.service >/dev/null 2>&1 || systemctl restart smbd.service >/dev/null 2>&1 || true
     if command -v ufw >/dev/null 2>&1; then
@@ -1738,7 +1861,8 @@ start_virtiofs_share() {
 
 start_tpm() {
     command -v swtpm >/dev/null 2>&1 || return 0
-    install -d "$TPM_DIR" "$RUNTIME_DIR"
+    install -d "$TPM_DIR"
+    ensure_runtime_dir "$RUNTIME_DIR"
     local sock="$RUNTIME_DIR/swtpm.sock"
     TPM_PID_FILE="$RUNTIME_DIR/swtpm.pid"
     rm -f "$sock" "$TPM_PID_FILE"
@@ -1819,10 +1943,83 @@ add_host_input_device() {
     QEMU_ARGS+=("-device" "virtio-input-host-pci,id=$id,evdev=$path")
 }
 
-add_steamdeck_host_inputs() {
+# virtio-input carries every physical control (the joystick node exposes the
+# back paddles, BTN_MODE for STEAM and the trackpads as hats), but the guest
+# driver presents it as a generic HID gamepad. Steam Deck Tools and Steam Input
+# talk to the native Valve HID device instead, so they see nothing under
+# virtio-input. Raw usb-host passthrough hands the real 28de:1205 to Windows at
+# the cost of detaching it from the host for the whole session - acceptable
+# only on a direct GRUB boot, where Windows *is* the session and there is no
+# host UI left to drive.
+STEAMDECK_RAW_CONTROLLER_PATH=""
+STEAMDECK_CONTROLLER_VENDOR="28de"
+STEAMDECK_CONTROLLER_PRODUCT="1205"
+
+usb_sysfs_dir() {
+    printf '%s\n' "${PZ_WINDOWS_VM_USB_SYSFS_DIR:-/sys/bus/usb/devices}"
+}
+
+steamdeck_controller_sysfs_path() {
+    local dev
+    for dev in "$(usb_sysfs_dir)"/*; do
+        if [ ! -f "$dev/idVendor" ] || [ ! -f "$dev/idProduct" ]; then
+            continue
+        fi
+        [ "$(cat "$dev/idVendor" 2>/dev/null || true)" = "$STEAMDECK_CONTROLLER_VENDOR" ] || continue
+        [ "$(cat "$dev/idProduct" 2>/dev/null || true)" = "$STEAMDECK_CONTROLLER_PRODUCT" ] || continue
+        printf '%s\n' "$dev"
+        return 0
+    done
+    return 1
+}
+
+steamdeck_controller_mode() {
+    local requested="${PZ_WINDOWS_VM_STEAMDECK_CONTROLLER:-auto}"
+    case "$requested" in
+        raw|virtio|off) printf '%s\n' "$requested" ;;
+        auto|"")
+            if [ "${PZ_WINDOWS_VM_BOOT_SESSION:-0}" = "1" ]; then
+                printf 'raw\n'
+            else
+                printf 'virtio\n'
+            fi
+            ;;
+        *)
+            pz_warn "invalid PZ_WINDOWS_VM_STEAMDECK_CONTROLLER '$requested'; using virtio"
+            printf 'virtio\n'
+            ;;
+    esac
+}
+
+add_steamdeck_raw_controller() {
+    local dev bus addr
+    dev="$(steamdeck_controller_sysfs_path)" || return 1
+    bus="$(cat "$dev/busnum" 2>/dev/null || true)"
+    addr="$(cat "$dev/devnum" 2>/dev/null || true)"
+    [ -n "$bus" ] && [ -n "$addr" ] || return 1
+    QEMU_ARGS+=("-device" "usb-host,bus=xhci.0,hostbus=$((10#$bus)),hostaddr=$((10#$addr)),id=pz-steamdeck-controller")
+    STEAMDECK_RAW_CONTROLLER_PATH="$dev"
+    return 0
+}
+
+add_steamdeck_inputs() {
     [ "$GRAPHICS_PROFILE" = "virtio-gl" ] || return 0
     host_input_passthrough_enabled || return 0
 
+    case "$(steamdeck_controller_mode)" in
+        off) return 0 ;;
+        raw)
+            if add_steamdeck_raw_controller; then
+                pz_info "steamdeck controller: raw usb-host passthrough; the host loses the controller until the VM exits" >&2
+                return 0
+            fi
+            pz_warn "steamdeck controller ${STEAMDECK_CONTROLLER_VENDOR}:${STEAMDECK_CONTROLLER_PRODUCT} not found on USB; falling back to virtio-input"
+            ;;
+    esac
+    add_steamdeck_host_inputs
+}
+
+add_steamdeck_host_inputs() {
     local by_id_dir="${PZ_WINDOWS_VM_INPUT_BY_ID_DIR:-/dev/input/by-id}"
     local keyboard mouse gamepad
     keyboard="$(first_readable_input_path "$by_id_dir"/usb-Valve_Software_Steam_Deck_Controller_*-event-kbd || true)"
@@ -1837,7 +2034,12 @@ add_steamdeck_host_inputs() {
 add_raw_usb_devices() {
     local mode="$1" dev vendor product bus addr class
     [ "$mode" = "all" ] || [ "$mode" = "peripherals" ] || return 0
-    for dev in /sys/bus/usb/devices/*; do
+    for dev in "$(usb_sysfs_dir)"/*; do
+        # The controller may already be attached by name above; a second
+        # usb-host for the same hostbus/hostaddr makes QEMU refuse to start.
+        if [ -n "${STEAMDECK_RAW_CONTROLLER_PATH:-}" ] && [ "$dev" = "$STEAMDECK_RAW_CONTROLLER_PATH" ]; then
+            continue
+        fi
         if [ ! -f "$dev/idVendor" ] || [ ! -f "$dev/idProduct" ]; then
             continue
         fi
@@ -1871,21 +2073,23 @@ add_pci_devices() {
 build_qemu_args() {
     local audio netdev accel_cpu accel_machine display_geometry=""
     QEMU_ARGS=()
+    STEAMDECK_RAW_CONTROLLER_PATH=""
     VIRTIOFS_COUNT=0
     if [ "$DRY_RUN" = "1" ]; then
         pz_info "dry-run: would prepare runtime dir: $RUNTIME_DIR"
     else
         # QGA and QMP allow guest execution/power control. Their Unix sockets
         # must never be reachable by another local account.
-        install -d -m 0700 "$RUNTIME_DIR" "$STATE_DIR"
+        ensure_runtime_dir "$RUNTIME_DIR"
+        install -d -m 0700 "$STATE_DIR"
     fi
     ensure_share_links || return 1
     start_virtiofs_share exchange "$EXCHANGE_DIR"
     if [ "$SHARE_POLICY" = "full" ]; then
         start_virtiofs_share hosthome "$HOME"
         [ -d /mnt/sdcard ] && start_virtiofs_share sdcard /mnt/sdcard
-        [ -d "/run/media/$TARGET_USER" ] && start_virtiofs_share removable "/run/media/$TARGET_USER"
-        [ -d "/media/$TARGET_USER" ] && start_virtiofs_share media "/media/$TARGET_USER"
+        [ -d "$REMOVABLE_ROOT/$TARGET_USER" ] && start_virtiofs_share removable "$REMOVABLE_ROOT/$TARGET_USER"
+        [ -d "$MEDIA_ROOT/$TARGET_USER" ] && start_virtiofs_share media "$MEDIA_ROOT/$TARGET_USER"
         [ -d /mnt ] && start_virtiofs_share mnt /mnt
     fi
     start_tpm
@@ -1944,7 +2148,7 @@ build_qemu_args() {
     if [ "$GRAPHICS_PROFILE" != "virtio-gl" ]; then
         add_spice_usb_redirection
     else
-        add_steamdeck_host_inputs
+        add_steamdeck_inputs
     fi
     add_raw_usb_devices "$USB_MODE"
     audio="$(audio_driver)"
@@ -2006,25 +2210,52 @@ start_guest_touch_input_setup() {
         pz_warn "touch-input helper unavailable: $helper"
         return 0
     }
-    timeout="${PZ_WINDOWS_VM_TOUCH_INPUT_TIMEOUT_SECONDS:-180}"
-    [[ "$timeout" =~ ^[0-9]+$ ]] && [ "$timeout" -ge 10 ] && [ "$timeout" -le 600 ] || timeout=180
+    # 180s was shorter than a cold Windows 11 boot on handheld hardware: the
+    # guest reached the desktop long after the waiter had already given up, so
+    # the touch keyboard - the only way to type when QEMU attaches a USB
+    # keyboard - was never enabled. The guest side checks out (vioser.inf
+    # installed, qemu-ga Start=2, DelayedAutoStart=0, --retry-path), so the
+    # window, not the guest, was wrong.
+    timeout="${PZ_WINDOWS_VM_TOUCH_INPUT_TIMEOUT_SECONDS:-420}"
+    [[ "$timeout" =~ ^[0-9]+$ ]] && [ "$timeout" -ge 10 ] && [ "$timeout" -le 900 ] || timeout=420
     log="$STATE_DIR/touch-input.log"
+    # Replace the previous boot's result before returning to the launcher.
+    # Short sessions otherwise keep an old timeout/success indefinitely.
+    printf '{"success":false,"state":"pending","action":"touch-input","startedAt":"%s","timeoutSeconds":%s}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$timeout" >"${log}.tmp.$$"
+    mv -f "${log}.tmp.$$" "$log"
     (
-        local deadline attempt_log
+        local deadline attempt_log started attempts=0 remaining last_failure=socket-unavailable
+        started="$SECONDS"
         deadline=$((SECONDS + timeout))
         attempt_log="${log}.tmp.$$"
-        trap 'rm -f "$attempt_log"' EXIT
+        trap '
+            printf "{\"success\":false,\"state\":\"interrupted\",\"action\":\"touch-input\",\"waitedSeconds\":%s,\"attempts\":%s}\n" \
+                "$((SECONDS - started))" "$attempts" >"$attempt_log"
+            mv -f "$attempt_log" "$log"
+        ' EXIT
+        trap 'exit 0' HUP INT TERM
         while [ "$SECONDS" -lt "$deadline" ]; do
-            if [ -S "$RUNTIME_DIR/qga.sock" ] && \
-                "$helper" touch-input --socket "$RUNTIME_DIR/qga.sock" --user "$GUEST_USER" --json \
+            attempts=$((attempts + 1))
+            remaining=$((deadline - SECONDS))
+            [ "$remaining" -gt 0 ] || break
+            if [ -S "$RUNTIME_DIR/qga.sock" ]; then
+                last_failure=guest-policy-unavailable
+                if timeout --kill-after=2s "${remaining}s" \
+                    "$helper" touch-input --socket "$RUNTIME_DIR/qga.sock" --user "$GUEST_USER" --json \
                     >"$attempt_log" 2>&1; then
-                mv -f "$attempt_log" "$log"
-                trap - EXIT
-                exit 0
+                    mv -f "$attempt_log" "$log"
+                    trap - EXIT
+                    exit 0
+                fi
             fi
-            sleep 2
+            [ "$SECONDS" -ge "$deadline" ] || sleep 2
         done
-        printf '{"success":false,"state":"timeout","action":"touch-input"}\n' >"$attempt_log"
+        # Record how long we actually waited. The previous payload said only
+        # "timeout", which left no way to tell a window that is too short from
+        # a guest that never answers.
+        printf '{"success":false,"state":"timeout","action":"touch-input","waitedSeconds":%s,"attempts":%s,"lastFailure":"%s"}\n' \
+            "$((SECONDS - started))" "$attempts" "$last_failure" >"$attempt_log"
         mv -f "$attempt_log" "$log"
         trap - EXIT
     ) &
@@ -2836,7 +3067,7 @@ print_plan() {
     echo "  share_writable: $SHARE_WRITABLE"
     echo "  home_share: $([ "$SHARE_POLICY" = "full" ] && echo "$HOME" || echo 'hidden (policy=minimal)')"
     echo "  sdcard_share: $([ "$SHARE_POLICY" = "full" ] && { [ -d /mnt/sdcard ] && echo /mnt/sdcard || echo missing; } || echo 'hidden (policy=minimal)')"
-    echo "  removable_share: $([ "$SHARE_POLICY" = "full" ] && { [ -d "/run/media/$TARGET_USER" ] && echo "/run/media/$TARGET_USER" || echo missing; } || echo 'hidden (policy=minimal)')"
+    echo "  removable_share: $([ "$SHARE_POLICY" = "full" ] && { [ -d "$REMOVABLE_ROOT/$TARGET_USER" ] && echo "$REMOVABLE_ROOT/$TARGET_USER" || echo missing; } || echo 'hidden (policy=minimal)')"
     # shellcheck disable=SC2028 # intentional: echo with backslash escapes for user display
     echo "  smb_unc: \\\\10.0.2.4\\qemu"
     echo "  spice_usb: spice://$SPICE_ADDR:5930"
@@ -3015,6 +3246,7 @@ root_env_content() {
     printf 'PZ_WINDOWS_VM_DESKTOP_FALLBACK=%q\n' "${PZ_WINDOWS_VM_DESKTOP_FALLBACK:-0}"
     printf 'PZ_WINDOWS_VM_REQUIRE_LOGIN=%q\n' "${PZ_WINDOWS_VM_REQUIRE_LOGIN:-0}"
     printf 'PZ_WINDOWS_VM_BOOT_DOCK_ENTRY=%q\n' "$(boot_dock_entry_enabled)"
+    printf 'PZ_WINDOWS_VM_BOOT_HANDHELD_ENTRY=%q\n' "$(boot_handheld_entry_enabled)"
 }
 
 root_env_value() {
@@ -3032,12 +3264,68 @@ root_env_value() {
 # Dock GRUB entry state: the process environment wins (so `boot install
 # --dock-entry` takes effect in the same run and tests can pin it), then the
 # persisted root env, then disabled.
+# The default GRUB entry already resolves the display at session start: with an
+# external connector present it takes that output's mode and refresh rate, and
+# falls back to the Deck panel otherwise. These two entries do not carry
+# geometry - baking a resolution into a menuentry would freeze whatever monitor
+# happened to be attached at `boot install` time - they carry intent, pinning
+# the output when auto-detection is not what the operator wants.
+# Enabled by default: the cost is two extra menu lines, and the alternative is
+# having no way to override the choice from the boot menu at all.
 boot_dock_entry_enabled() {
     if [ -n "${PZ_WINDOWS_VM_BOOT_DOCK_ENTRY+x}" ]; then
-        case "$PZ_WINDOWS_VM_BOOT_DOCK_ENTRY" in 1) printf '1' ;; *) printf '0' ;; esac
+        case "$PZ_WINDOWS_VM_BOOT_DOCK_ENTRY" in 0) printf '0' ;; *) printf '1' ;; esac
         return 0
     fi
-    case "$(root_env_value PZ_WINDOWS_VM_BOOT_DOCK_ENTRY)" in 1) printf '1' ;; *) printf '0' ;; esac
+    case "$(root_env_value PZ_WINDOWS_VM_BOOT_DOCK_ENTRY)" in 0) printf '0' ;; *) printf '1' ;; esac
+}
+
+# Symmetric counterpart: the session has always understood
+# phasezero.windowsvm-display=internal, but no menuentry emitted it, so booting
+# while docked gave no way back to the handheld panel.
+# State of one optional menuentry in the managed GRUB script.
+# /etc/grub.d is root-only on most distributions (0700): an unreadable script
+# must report unknown-permission, never "missing".
+boot_menu_entry_state() {
+    local entry="$1" enabled="$2"
+    [ "$enabled" = "1" ] || { printf 'disabled'; return 0; }
+    if [ -r "$GRUB_SCRIPT" ]; then
+        if grep -Fq "menuentry '$entry'" "$GRUB_SCRIPT" 2>/dev/null; then
+            printf 'present'
+        else
+            printf 'missing'
+        fi
+    else
+        printf 'unknown-permission'
+    fi
+}
+
+# Outcome of the background touch-keyboard policy started by the boot session.
+# Windows hides the touch keyboard while a USB keyboard is attached, and QEMU
+# always attaches one, so without this policy a handheld guest has no way to
+# type at all. The helper wrote its result to a log nothing ever read: it timed
+# out waiting for QGA and the failure stayed invisible until someone tried to
+# use Windows with no keyboard.
+boot_touch_input_state() {
+    local log="$STATE_DIR/touch-input.log"
+    [ -r "$log" ] || { printf 'unknown'; return 0; }
+    command -v jq >/dev/null 2>&1 || { printf 'unknown'; return 0; }
+    local ok state
+    ok="$(jq -r '.success // false' "$log" 2>/dev/null || printf 'false')"
+    [ "$ok" = "true" ] && { printf 'applied'; return 0; }
+    state="$(jq -r '.state // "failed"' "$log" 2>/dev/null || printf 'failed')"
+    case "$state" in
+        ""|null) printf 'failed' ;;
+        *) printf '%s' "$state" ;;
+    esac
+}
+
+boot_handheld_entry_enabled() {
+    if [ -n "${PZ_WINDOWS_VM_BOOT_HANDHELD_ENTRY+x}" ]; then
+        case "$PZ_WINDOWS_VM_BOOT_HANDHELD_ENTRY" in 0) printf '0' ;; *) printf '1' ;; esac
+        return 0
+    fi
+    case "$(root_env_value PZ_WINDOWS_VM_BOOT_HANDHELD_ENTRY)" in 0) printf '0' ;; *) printf '1' ;; esac
 }
 
 # Arvore runtime da sessao de boot. Precisa ser auto-contida: durante o boot
@@ -3068,6 +3356,59 @@ install_runtime_tree() {
         install -d "$(dirname "$dst")"
         install -m "$mode" "$src" "$dst"
     done < <(runtime_file_specs)
+}
+
+# Copia só os arquivos de runtime para /usr/local/lib/phasezero. É o que um
+# upgrade de pacote invalida: os caminhos que a entrada GRUB já aponta passam a
+# ter código da versão anterior. Deliberadamente NÃO regenera grub.cfg, não roda
+# os-prober, não mexe em Samba nem no domínio libvirt — nada que possa deixar um
+# bootloader meio escrito. Por ser só cópia dos arquivos que o próprio pacote
+# acabou de instalar, roda seguro dentro da transação do gerenciador.
+sync_boot_runtime_files() {
+    install -d "$BOOT_LOCAL_PREFIX/lib/phasezero" "$RUNTIME_ROOT/linux/windows-vm" "$RUNTIME_ROOT/linux/lib" || return 1
+    install -m 0755 "$BOOT_HELPER_SOURCE" "$BOOT_HELPER_TARGET" || return 1
+    install -m 0755 "$SESSION_SOURCE" "$SESSION_TARGET" || return 1
+    install -m 0644 "$DISPLAY_SESSION_SOURCE" "$DISPLAY_SESSION_TARGET" || return 1
+    install_runtime_tree || return 1
+    write_runtime_provenance
+    rm -f -- "$BOOT_RUNTIME_PENDING_FILE" 2>/dev/null || true
+}
+
+write_runtime_provenance() {
+    command -v jq >/dev/null 2>&1 || return 0
+    local provenance_version="unknown"
+    [ -r "$PZ_ROOT/version.json" ] && \
+        provenance_version="$(jq -r '.version // "unknown"' "$PZ_ROOT/version.json" 2>/dev/null || echo unknown)"
+    jq -n \
+        --arg source "$PZ_ROOT" \
+        --arg version "$provenance_version" \
+        --arg installedAt "$(date -Iseconds)" \
+        '{schemaVersion:1, source:$source, version:$version, installedAt:$installedAt}' \
+        > "$RUNTIME_ROOT/provenance.json" 2>/dev/null || true
+    chmod 0644 "$RUNTIME_ROOT/provenance.json" 2>/dev/null || true
+}
+
+# `boot sync-runtime`: o passo manual que sobrava depois de todo upgrade.
+# Só faz sentido quando a integração de boot já existe — sem ela não há o que
+# ressincronizar, e instalar boot é decisão do usuário, não de um upgrade.
+cmd_boot_sync_runtime() {
+    parse_options "$@"
+    effective_config
+    if [ ! -e "$BOOT_HELPER_TARGET" ] && [ ! -e "$RUNTIME_LAUNCHER" ]; then
+        pz_info "boot integration not installed; nothing to resync"
+        return 0
+    fi
+    # O requisito real é poder escrever no prefixo, não ser root: em produção
+    # /usr/local é do root e dá no mesmo, mas assim o resync continua exercível
+    # com um prefixo de teste e não mente sobre o que precisa.
+    if [ ! -w "$BOOT_LOCAL_PREFIX/lib/phasezero" ]; then
+        pz_error "sem permissão de escrita em $BOOT_LOCAL_PREFIX/lib/phasezero"
+        pz_error "rode com privilégio: phasezero-admin $PZ_ROOT/linux/pz windows-vm boot sync-runtime"
+        return 1
+    fi
+    pz_boot_require_current_root_target
+    sync_boot_runtime_files || { pz_error "boot runtime resync failed"; return 1; }
+    pz_info "Windows VM boot runtime resynced from $PZ_ROOT"
 }
 
 runtime_tree_current() {
@@ -3236,6 +3577,18 @@ menuentry '$BOOT_DOCK_ENTRY' --id='$BOOT_DOCK_ID' --hotkey=d --class windows --c
 }
 EOF
     fi
+    if [ "$(boot_handheld_entry_enabled)" = "1" ]; then
+        cat <<EOF
+menuentry '$BOOT_HANDHELD_ENTRY' --id='$BOOT_HANDHELD_ID' --hotkey=h --class windows --class gnu-linux --class gnu --class os {
+    insmod part_gpt
+    insmod btrfs
+    search --no-floppy --fs-uuid --set=root $uuid
+    echo 'Booting PhaseZero Windows VM on the handheld panel...'
+    linux $kernel_rel root=UUID=$uuid rw$rootflags quiet splash phasezero.windowsvm=1 phasezero.windowsvm-display=internal
+    initrd $amd_ucode_rel $intel_ucode_rel $initrd_rel
+}
+EOF
+    fi
 }
 
 refresh_grub_config() {
@@ -3253,11 +3606,13 @@ grub_cfg_entry_state() {
 }
 
 install_boot() {
-    local loader dock_pref=""
+    local loader dock_pref="" handheld_pref=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --dock-entry) dock_pref=1; shift ;;
             --no-dock-entry) dock_pref=0; shift ;;
+            --handheld-entry) handheld_pref=1; shift ;;
+            --no-handheld-entry) handheld_pref=0; shift ;;
             *) shift ;;
         esac
     done
@@ -3268,36 +3623,21 @@ install_boot() {
     if [ -n "$dock_pref" ]; then
         export PZ_WINDOWS_VM_BOOT_DOCK_ENTRY="$dock_pref"
     fi
+    if [ -n "$handheld_pref" ]; then
+        export PZ_WINDOWS_VM_BOOT_HANDHELD_ENTRY="$handheld_pref"
+    fi
     loader="$(detected_loader)"
     pz_boot_backup_bundle "windows-vm-boot-install-${loader}"
     effective_config
     ensure_share_links 1
     configure_windows_samba_shares
     optimize_libvirt_domain
-    install -d /usr/local/lib/phasezero "$RUNTIME_ROOT/linux/windows-vm" "$RUNTIME_ROOT/linux/lib" /etc/phasezero /usr/share/wayland-sessions /usr/share/xsessions
-    install -m 0755 "$BOOT_HELPER_SOURCE" "$BOOT_HELPER_TARGET"
-    install -m 0755 "$SESSION_SOURCE" "$SESSION_TARGET"
-    install -m 0644 "$DISPLAY_SESSION_SOURCE" "$DISPLAY_SESSION_TARGET"
-    install_runtime_tree
-    # A successful install resolves the pending-sync marker the package hook
-    # may have left and records where this runtime came from, so a stale
-    # worktree-sourced runtime can never hide as "current" without a trace.
-    rm -f -- "$BOOT_RUNTIME_PENDING_FILE" 2>/dev/null || true
-    if command -v jq >/dev/null 2>&1; then
-        local provenance_version="unknown"
-        # PZ_ROOT is the package root (/usr/lib/phasezero in production, the
-        # repo root in a checkout) and version.json sits directly inside it.
-        [ -r "$PZ_ROOT/version.json" ] && \
-            provenance_version="$(jq -r '.version // "unknown"' "$PZ_ROOT/version.json" 2>/dev/null || echo unknown)"
-        jq -n \
-            --arg source "$PZ_ROOT" \
-            --arg version "$provenance_version" \
-            --arg installedAt "$(date -Iseconds)" \
-            '{schemaVersion:1, source:$source, version:$version, installedAt:$installedAt}' \
-            > "$RUNTIME_ROOT/provenance.json" 2>/dev/null || true
-        # Auditability was the point: root's umask must not hide the record.
-        chmod 0644 "$RUNTIME_ROOT/provenance.json" 2>/dev/null || true
-    fi
+    install -d /etc/phasezero /usr/share/wayland-sessions /usr/share/xsessions
+    # Mesma cópia que `boot sync-runtime` faz sozinha: um caminho só, para o
+    # que o hook de pacote executa e o que o install completo executa nunca
+    # divergirem. Também resolve o marcador pendente e grava a proveniência,
+    # para um runtime vindo de worktree nunca passar por "current" sem rastro.
+    sync_boot_runtime_files
     root_env_content > "$ROOT_ENV_FILE"
     chmod 0644 "$ROOT_ENV_FILE"
     session_desktop_content > "$WAYLAND_SESSION_FILE"
@@ -3550,20 +3890,10 @@ status_boot() {
     local loader_entry; loader_entry="$(loader_entry_state "$loader")"
     local grub_cfg_entry="n/a"
     [ "$loader" = "grub-efi" ] || [ "$loader" = "grub-bios" ] && grub_cfg_entry="$(grub_cfg_entry_state)"
-    local dock_entry="disabled"
-    if [ "$(boot_dock_entry_enabled)" = "1" ]; then
-        # /etc/grub.d is root-only on most distributions (0700): an
-        # unreadable script must not be reported as "missing".
-        if [ -r "$GRUB_SCRIPT" ]; then
-            if grep -Fq "menuentry '$BOOT_DOCK_ENTRY'" "$GRUB_SCRIPT" 2>/dev/null; then
-                dock_entry="present"
-            else
-                dock_entry="missing"
-            fi
-        else
-            dock_entry="unknown-permission"
-        fi
-    fi
+    local dock_entry handheld_entry touch_input
+    touch_input="$(boot_touch_input_state)"
+    dock_entry="$(boot_menu_entry_state "$BOOT_DOCK_ENTRY" "$(boot_dock_entry_enabled)")"
+    handheld_entry="$(boot_menu_entry_state "$BOOT_HANDHELD_ENTRY" "$(boot_handheld_entry_enabled)")"
     local active_sddm="no"; [ -f "$SDDM_CONF" ] && active_sddm="yes"
     local target_root; target_root="$(pz_boot_target_root)"
     local configured_repo; configured_repo="$(root_env_value PZ_WINDOWS_VM_REPO)"
@@ -3610,6 +3940,8 @@ status_boot() {
             --arg configuredBootUser "$configured_user" \
             --arg grubCfgEntry "$grub_cfg_entry" \
             --arg dockEntry "$dock_entry" \
+            --arg handheldEntry "$handheld_entry" \
+            --arg touchInput "$touch_input" \
             --arg grubNextEntry "${grub_next_entry:-none}" \
             --arg grubSavedEntry "${grub_saved_entry:-none}" \
             --arg sddmConf "$SDDM_CONF" \
@@ -3639,6 +3971,8 @@ status_boot() {
                 configuredRepo: $configuredRepo, configuredBootUser: $configuredBootUser,
                 grubCfgEntry: $grubCfgEntry,
                 dockEntryState: $dockEntry, dockEntryInstalled: ($dockEntry == "present"),
+                handheldEntryState: $handheldEntry, handheldEntryInstalled: ($handheldEntry == "present"),
+                touchInputState: $touchInput, touchInputApplied: ($touchInput == "applied"),
                 grubNextEntry: $grubNextEntry, grubSavedEntry: $grubSavedEntry,
                 sddmConf: $sddmConf, activeSddm: $activeSddm,
                 currentBootWindowsVm: $currentBootWindowsVm,
@@ -3665,6 +3999,8 @@ status_boot() {
         echo "configured_boot_user: $configured_user"
         echo "grub_cfg_entry: $grub_cfg_entry"
         echo "dock_entry: $dock_entry"
+        echo "handheld_entry: $handheld_entry"
+        echo "touch_input: $touch_input"
         echo "grub_next_entry: ${grub_next_entry:-none}"
         echo "grub_saved_entry: ${grub_saved_entry:-none}"
         echo "active_sddm_windows_vm_conf: $active_sddm"
@@ -3702,6 +4038,11 @@ dry_run_boot() {
     else
         echo "  dock entry: disabled"
     fi
+    if [ "$(boot_handheld_entry_enabled)" = "1" ]; then
+        echo "  handheld entry: enabled (id: $BOOT_HANDHELD_ID, hotkey: h, always internal panel)"
+    else
+        echo "  handheld entry: disabled"
+    fi
     [ "$loader" = "grub-efi" ] || [ "$loader" = "grub-bios" ] && echo "  grub hotkey: w"
     echo "  one-shot boot: sudo $PZ_ROOT/linux/windows-vm/windows-vm.sh boot next"
     echo "  one-shot reboot: sudo $PZ_ROOT/linux/windows-vm/windows-vm.sh boot next-reboot"
@@ -3725,7 +4066,8 @@ cmd_boot() {
         clear-next) clear_next_boot "$@" ;;
         dry-run|plan) dry_run_boot "$@" ;;
         runtime-check|check-runtime) runtime_check "$@" ;;
-        *) pz_error "usage: windows-vm boot (install|remove|status|runtime-check|next|next-reboot|set-default|clear-next|dry-run) [--loader auto|grub|systemd-boot|refind|efi-stub] [--target-root /]"; exit 1 ;;
+        sync-runtime|resync-runtime) cmd_boot_sync_runtime "$@" ;;
+        *) pz_error "usage: windows-vm boot (install|remove|status|runtime-check|sync-runtime|next|next-reboot|set-default|clear-next|dry-run) [--loader auto|grub|systemd-boot|refind|efi-stub] [--target-root /]"; exit 1 ;;
     esac
 }
 
