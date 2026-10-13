@@ -316,7 +316,15 @@ apply_host_optimizations() {
     [ "$OPTIMIZE_HOST" = "1" ] || return 0
     pz_info "applying Windows VM host optimizations"
     if command -v powerprofilesctl >/dev/null 2>&1; then
-        powerprofilesctl set performance >/dev/null 2>&1 || true
+        # Remembered so cleanup_runtime can put it back. This used to be set
+        # and left: a Deck that had run the VM once stayed on "performance"
+        # for the rest of the session, on battery.
+        PREVIOUS_POWER_PROFILE="$(powerprofilesctl get 2>/dev/null || true)"
+        if [ "$PREVIOUS_POWER_PROFILE" = "performance" ]; then
+            PREVIOUS_POWER_PROFILE=""
+        else
+            powerprofilesctl set performance >/dev/null 2>&1 || PREVIOUS_POWER_PROFILE=""
+        fi
     fi
     sysctl_set_noninteractive vm.swappiness 1
     sysctl_set_noninteractive vm.vfs_cache_pressure 50
@@ -1757,11 +1765,16 @@ audio_driver() {
 
 QEMU_ARGS=()
 CLEANUP_PIDS=()
+PREVIOUS_POWER_PROFILE=""
 TPM_PID_FILE=""
 VIRTIOFS_COUNT=0
 
 cleanup_runtime() {
     local pid
+    if [ -n "${PREVIOUS_POWER_PROFILE:-}" ]; then
+        powerprofilesctl set "$PREVIOUS_POWER_PROFILE" >/dev/null 2>&1 || true
+        PREVIOUS_POWER_PROFILE=""
+    fi
     for pid in "${CLEANUP_PIDS[@]:-}"; do
         kill "$pid" >/dev/null 2>&1 || true
     done
@@ -2409,6 +2422,13 @@ launch_vm() {
     local RESCUE_SOURCED=0
     RESCUE_SOURCED=0
     guard_graphics_profile || return 1
+    # Before anything is changed or anyone is asked for a password. The
+    # configured figure is whatever was right when the VM was installed;
+    # starting it into a host that cannot hold it ends with the OOM killer
+    # choosing between the VM and the desktop.
+    if [ "$DRY_RUN" != "1" ]; then
+        windows_vm_memory_guard "$RAM_MB" || return 1
+    fi
     trap cleanup_runtime EXIT INT TERM
     apply_host_optimizations
     if [ -n "$LIBVIRT_DOMAIN" ] && [ "$RAW_QEMU" != "1" ]; then
@@ -2455,10 +2475,6 @@ launch_vm() {
         shell_join qemu-system-x86_64 "${QEMU_ARGS[@]}"
         return 0
     fi
-    # The configured figure is whatever was right when the VM was installed.
-    # Starting it into a host that cannot hold it ends with the OOM killer
-    # choosing between the VM and the desktop.
-    windows_vm_memory_guard "$RAM_MB" || return 1
     start_guest_touch_input_setup
     pz_info "Windows VM shares: \\\\10.0.2.4\\qemu (policy=$SHARE_POLICY)"
     if [ "$GRAPHICS_PROFILE" = "virtio-gl" ]; then

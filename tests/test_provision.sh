@@ -1590,6 +1590,32 @@ PZ_WINDOWS_VM_PROFILE=desktop PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
     . "'"$PZ_ROOT"'/linux/lib/common.sh"; . "'"$PZ_ROOT"'/linux/windows-vm/memory.sh"
     windows_vm_memory_guard 12288' >/dev/null 2>&1 || mem_override_rc=$?
 assert_eq "explicit override lets an operator go ahead" "0" "$mem_override_rc"
+
+# launch refuses before it changes anything or asks for a password. It used to
+# check after the host tuning and the share mounts: on a desktop that meant a
+# power profile switched to "performance", an authentication dialog, and then
+# the refusal.
+mkdir -p "$MEM_T/bin" "$MEM_T/home"
+printf '#!/usr/bin/env bash\necho "$*" >> "%s/powerprofilesctl.log"\n[ "$1" = get ] && echo balanced\nexit 0\n' "$MEM_T" > "$MEM_T/bin/powerprofilesctl"
+printf '#!/usr/bin/env bash\necho "$*" >> "%s/admin.log"\nexit 1\n' "$MEM_T" > "$MEM_T/bin/phasezero-admin"
+chmod +x "$MEM_T/bin/powerprofilesctl" "$MEM_T/bin/phasezero-admin"
+mem_host 14820 2100 1000
+mem_launch_rc=0
+MEM_LAUNCH_ERR="$(PATH="$MEM_T/bin:$PATH" HOME="$MEM_T/home" XDG_CONFIG_HOME="$MEM_T/home/.config" \
+    XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE=desktop PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
+    bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch --raw-qemu --headless --ram 12288 2>&1)" || mem_launch_rc=$?
+assert_eq "launch refuses a VM that cannot fit" "1" "$mem_launch_rc"
+assert_contains "launch refusal names the shortfall" "$MEM_LAUNCH_ERR" "memória insuficiente"
+assert_eq "refused launch did not touch the power profile" "0" "$([ -e "$MEM_T/powerprofilesctl.log" ] && echo 1 || echo 0)"
+assert_eq "refused launch did not ask for privilege" "0" "$([ -e "$MEM_T/admin.log" ] && echo 1 || echo 0)"
+
+# The profile launch switches to is put back when the VM is gone.
+MEM_RESTORE="$(PATH="$MEM_T/bin:$PATH" bash -c '
+    eval "$(sed -n "/^cleanup_runtime()/,/^}/p" "'"$PZ_ROOT"'/linux/windows-vm/windows-vm.sh")"
+    CLEANUP_PIDS=(); PREVIOUS_POWER_PROFILE=balanced
+    cleanup_runtime; cleanup_runtime
+    cat "'"$MEM_T"'/powerprofilesctl.log"' 2>/dev/null)"
+assert_eq "cleanup restores the previous power profile, once" "set balanced" "$MEM_RESTORE"
 rm -rf "$MEM_T"
 
 rm -rf "$SUITE_STATE_ROOT"
