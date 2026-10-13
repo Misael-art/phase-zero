@@ -4,11 +4,12 @@ set -euo pipefail
 PZ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$PZ_ROOT/linux/lib/common.sh"
 
-OPENCODE_CONFIG="${HOME}/.config/opencode/opencode.json"
+OPENCODE_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
 NPM_PREFIX="${PZ_NPM_PREFIX:-$HOME/.local/share/npm}"
 LOCAL_BIN="${PZ_LOCAL_BIN:-$HOME/.local/bin}"
 APPLICATIONS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 OPENCODE_DB="${XDG_DATA_HOME:-$HOME/.local/share}/opencode/opencode.db"
+OPENCODE_DESKTOP_SETTINGS="${XDG_CONFIG_HOME:-$HOME/.config}/ai.opencode.desktop/default.dat"
 SYNC_HOOK_FILE="/etc/pacman.d/hooks/phasezero-opencode-sync.hook"
 SYNC_HOOK_SCRIPT="/usr/local/lib/phasezero/opencode-sync-hook"
 
@@ -354,6 +355,7 @@ write_deck_launcher() {
 #!/usr/bin/env bash
 # opencode-deck - run OpenCode in an OSC52-capable terminal with the Steam Deck
 # virtual keyboard. Konsole ignores OSC 52, so OpenCode copy fails inside it.
+# --auto: aceitar permissões automaticamente (mesma opção da UI).
 set -euo pipefail
 PZ_ROOT="$PZ_ROOT"
 
@@ -381,9 +383,9 @@ if [ "\${PZ_OPENCODE_NO_KEYBOARD:-0}" != "1" ] &&
 fi
 
 case "\$TERMINAL" in
-    wezterm) exec wezterm start -- opencode "\$@" ;;
-    kitty|foot) exec "\$TERMINAL" opencode "\$@" ;;
-    *) exec "\$TERMINAL" -e opencode "\$@" ;;
+    wezterm) exec wezterm start -- opencode --auto "\$@" ;;
+    kitty|foot) exec "\$TERMINAL" opencode --auto "\$@" ;;
+    *) exec "\$TERMINAL" -e opencode --auto "\$@" ;;
 esac
 EOF
     chmod +x "$LOCAL_BIN/opencode-deck"
@@ -591,6 +593,60 @@ configure_local_model() {
     fi
 }
 
+# Default PhaseZero: "Aceitar permissões automaticamente" ligado e persistente.
+# O host tinha permission.bash."*"=ask, o que força prompt e deixa o toggle
+# da UI em autoApprove:false (default.dat). Substituímos o objeto inteiro.
+configure_auto_permissions() {
+    command -v jq >/dev/null 2>&1 || { pz_warn "jq required for OpenCode auto permissions"; return 0; }
+    if [ "${PZ_DRY_RUN:-0}" = "1" ]; then
+        pz_info "dry-run: would set OpenCode permission=* allow and desktop autoApprove=true"
+        return 0
+    fi
+    mkdir -p "$(dirname "$OPENCODE_CONFIG")"
+    # shellcheck disable=SC2016
+    [ -f "$OPENCODE_CONFIG" ] || printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$OPENCODE_CONFIG"
+    pz_backup_file "$OPENCODE_CONFIG" user >/dev/null
+    local tmp mode
+    mode="$(stat -c '%a' "$OPENCODE_CONFIG" 2>/dev/null || echo 600)"
+    tmp="$(mktemp)"
+    jq '.permission = {
+            "*": "allow",
+            "bash": "allow",
+            "edit": "allow",
+            "webfetch": "allow",
+            "websearch": "allow",
+            "external_directory": "allow"
+        }' "$OPENCODE_CONFIG" > "$tmp" && mv "$tmp" "$OPENCODE_CONFIG"
+    chmod "$mode" "$OPENCODE_CONFIG" 2>/dev/null || chmod 600 "$OPENCODE_CONFIG"
+    pz_info "OpenCode permission set to allow (auto-accept)"
+
+    if [ -f "$OPENCODE_DESKTOP_SETTINGS" ]; then
+        pz_backup_file "$OPENCODE_DESKTOP_SETTINGS" user >/dev/null
+        python3 - "$OPENCODE_DESKTOP_SETTINGS" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+raw = data.get("settings.v3")
+if isinstance(raw, str):
+    settings = json.loads(raw)
+else:
+    settings = raw if isinstance(raw, dict) else {}
+perms = settings.setdefault("permissions", {})
+if not isinstance(perms, dict):
+    perms = {}
+    settings["permissions"] = perms
+perms["autoApprove"] = True
+data["settings.v3"] = json.dumps(settings, separators=(",", ":"))
+path.write_text(json.dumps(data, indent="\t") + "\n", encoding="utf-8")
+PY
+        pz_info "OpenCode desktop autoApprove=true ($OPENCODE_DESKTOP_SETTINGS)"
+        pz_info "Reabra o OpenCode Desktop para a opção 'Aceitar permissões automaticamente' aparecer ligada"
+    fi
+}
+
 setup_templates() {
     mkdir -p "$(dirname "$OPENCODE_CONFIG")"
     if [ ! -f "$OPENCODE_CONFIG" ]; then
@@ -598,7 +654,15 @@ setup_templates() {
         pz_write_managed_file "$OPENCODE_CONFIG" <<'EOF'
 {
   "$schema": "https://opencode.ai/config.json",
-  "mcp": {}
+  "mcp": {},
+  "permission": {
+    "*": "allow",
+    "bash": "allow",
+    "edit": "allow",
+    "webfetch": "allow",
+    "websearch": "allow",
+    "external_directory": "allow"
+  }
 }
 EOF
     fi
@@ -608,7 +672,7 @@ EOF
         for tmpl in "$template_dir"/*; do
             [ -f "$tmpl" ] || continue
             name=$(basename "$tmpl")
-            target="${HOME}/.config/opencode/${name}"
+            target="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/${name}"
             if [ ! -f "$target" ]; then
                 cp "$tmpl" "$target"
                 pz_info "installed template: $name"
@@ -635,7 +699,11 @@ case "${1:-setup}" in
             [ -n "$(ollama_models)" ] && configure_local_model
             configure_free_default_model
         fi
+        configure_auto_permissions
         pz_info "OpenCode setup complete. Config at $OPENCODE_CONFIG"
+        ;;
+    permissions-auto|auto-permissions)
+        configure_auto_permissions
         ;;
     sync|align)
         # Re-pin the CLI to the opencode-desktop version (idempotent).
@@ -668,7 +736,7 @@ case "${1:-setup}" in
         print_dry_run
         ;;
     *)
-        pz_error "usage: setup-opencode.sh (setup|sync|version-status|local-model|free-model|install-hook|remove-hook|desktop-integration|dry-run)"
+        pz_error "usage: setup-opencode.sh (setup|sync|version-status|local-model|free-model|install-hook|remove-hook|desktop-integration|permissions-auto|dry-run)"
         exit 1
         ;;
 esac

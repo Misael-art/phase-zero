@@ -623,6 +623,7 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
         ("opencode-verify", "Verificar OpenCode + 9Router", "Confere configuração local; execução gerenciada aguarda vínculo de conta por requisição.", ("ai", "opencode", "verify"), None),
         ("opencode", "Alinhar versão OpenCode", "Alinha CLI e desktop.", ("ai", "opencode", "sync"), ("ai", "opencode", "version-status")),
         ("opencode-free", "Modelo free OpenCode", "Corrige 'Interrompido' com modelo free (deepseek-flash).", ("ai", "opencode", "free-model"), ("ai", "opencode", "status")),
+        ("opencode-auto-permissions", "Aceitar permissões OpenCode", "Liga por padrão 'Aceitar permissões automaticamente' no CLI e no Desktop.", ("ai", "opencode", "permissions-auto"), ("ai", "opencode", "status")),
         ("omo", "Instalar OMO", "Plugin oh-my-openagent.", ("ai", "omo", "setup"), ("ai", "omo", "status")),
         ("memory", "Instalar ai-memory", "Memória persistente de agentes.", ("ai", "setup", "memory"), ("ai", "status")),
         ("ollama", "Instalar Ollama", "Runtime local de modelos.", ("ai", "setup", "ollama"), ("ai", "status")),
