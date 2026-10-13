@@ -740,6 +740,9 @@ cmd_ui() {
             PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
                 python3 "$PZ_ROOT/linux/ui/menu.py" "${2:-scan}" "${@:3}"
             ;;
+        launchers|kde-apps)
+            bash "$PZ_ROOT/linux/ui/kde-launchers.sh" "${2:-status}" "${@:3}"
+            ;;
         web|open)
             # start server in background and open browser
             local log_file="$PZ_STATE/ui-server.log"

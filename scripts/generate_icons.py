@@ -18,9 +18,103 @@ SVG = '''<?xml version="1.0" encoding="UTF-8"?>
 </svg>'''
 
 def icon(body: str, accent=ACCENT, muted=MUTED, bg=BG) -> str:
-    return SVG.format(bg=bg, body=body)
+    return SVG.format(bg=bg, body=body.format(accent=accent, muted=muted, bg=bg))
 
 icons = {
+    # ── PhaseZero application family ──
+    "phasezero-port-steam": (
+        '<path d="M5 8.5a7 7 0 1 1 2 9.7" fill="none" stroke="{muted}" stroke-width="2" stroke-linecap="round"/>'
+        '\n  <circle cx="15.5" cy="8.5" r="2.5" fill="{accent}"/>'
+        '\n  <path d="m8 15 5-3 3 2-5 3Z" fill="{accent}"/>'
+        '\n  <circle cx="7" cy="17" r="2" fill="{muted}"/>'
+    ),
+    "phasezero-9router": (
+        '<circle cx="12" cy="5" r="2.2" fill="{accent}"/>'
+        '\n  <circle cx="6" cy="18" r="2.2" fill="{muted}"/>'
+        '\n  <circle cx="18" cy="18" r="2.2" fill="{muted}"/>'
+        '\n  <path d="M12 7v4m0 0-6 5m6-5 6 5" fill="none" stroke="{accent}" stroke-width="1.8" stroke-linecap="round"/>'
+    ),
+    "phasezero-windows-vm": (
+        '<rect x="3.5" y="4" width="17" height="12" rx="2" fill="{muted}"/>'
+        '\n  <path d="M7 7h4v3H7Zm6 0h4v3h-4Zm-6 5h4v3H7Zm6 0h4v3h-4Z" fill="{accent}"/>'
+        '\n  <path d="M9 20h6m-4-4v4m2-4v4" stroke="{accent}" stroke-width="1.4" stroke-linecap="round"/>'
+    ),
+    "phasezero-windows-reboot": (
+        '<path d="M12 4V2l4 3-4 3V6a6 6 0 1 0 5.7 8h2.1A8 8 0 1 1 12 4Z" fill="{muted}"/>'
+        '\n  <path d="M9 9h3v3H9Zm4 0h3v3h-3Zm-4 4h3v3H9Zm4 0h3v3h-3Z" fill="{accent}"/>'
+    ),
+    "phasezero-deck-handheld": (
+        '<rect x="3" y="6" width="18" height="12" rx="4" fill="{muted}"/>'
+        '\n  <rect x="8" y="8" width="8" height="8" rx="1" fill="{bg}"/>'
+        '\n  <path d="M5.5 12h3m-1.5-1.5v3" stroke="{accent}" stroke-width="1.3" stroke-linecap="round"/>'
+        '\n  <circle cx="18" cy="11" r="1" fill="{accent}"/><circle cx="17" cy="14" r="1" fill="{accent}"/>'
+    ),
+    "phasezero-deck-monitor": (
+        '<rect x="3" y="4" width="18" height="11" rx="2" fill="{muted}"/>'
+        '\n  <rect x="5" y="6" width="14" height="7" rx="1" fill="{accent}"/>'
+        '\n  <path d="M9 19h6m-4-4v4m2-4v4" stroke="{muted}" stroke-width="1.5" stroke-linecap="round"/>'
+        '\n  <circle cx="6.5" cy="9.5" r="1.5" fill="{bg}"/>'
+    ),
+    "phasezero-deck-tv": (
+        '<rect x="3" y="5" width="18" height="13" rx="2" fill="{muted}"/>'
+        '\n  <path d="M7 2.5 12 6l5-3.5" fill="none" stroke="{accent}" stroke-width="1.4" stroke-linecap="round"/>'
+        '\n  <path d="M7 9h6v5H7Z" fill="{accent}"/><circle cx="17" cy="10" r="1" fill="{accent}"/><circle cx="17" cy="14" r="1" fill="{accent}"/>'
+    ),
+    "phasezero-deck-desktop": (
+        '<rect x="3" y="4" width="18" height="12" rx="2" fill="{muted}"/>'
+        '\n  <path d="M6 7h7v6H6Zm9 0h3v2h-3Zm0 4h3v2h-3Z" fill="{accent}"/>'
+        '\n  <path d="M8 20h8m-5-4v4m2-4v4" stroke="{accent}" stroke-width="1.5" stroke-linecap="round"/>'
+    ),
+    "phasezero-steam-gamepad": (
+        '<path d="M7 7h10a4 4 0 0 1 3.7 5.5l-1.5 4a2 2 0 0 1-3.2.8L14.5 16h-5L8 17.3a2 2 0 0 1-3.2-.8l-1.5-4A4 4 0 0 1 7 7Z" fill="{muted}"/>'
+        '\n  <path d="M8 10v4m-2-2h4" stroke="{accent}" stroke-width="1.5" stroke-linecap="round"/>'
+        '\n  <circle cx="16" cy="11" r="1" fill="{accent}"/><circle cx="18" cy="13" r="1" fill="{accent}"/>'
+    ),
+    "phasezero-keyboard": (
+        '<rect x="3" y="6" width="18" height="12" rx="2" fill="{muted}"/>'
+        '\n  <path d="M6 9h2m2 0h2m2 0h2m2 0h1M6 12h2m2 0h2m2 0h2m2 0h1M7 15h10" stroke="{accent}" stroke-width="1.2" stroke-linecap="round"/>'
+    ),
+    "phasezero-voice": (
+        '<rect x="9" y="3" width="6" height="11" rx="3" fill="{accent}"/>'
+        '\n  <path d="M6 11a6 6 0 0 0 12 0M12 17v4m-3 0h6" fill="none" stroke="{muted}" stroke-width="1.7" stroke-linecap="round"/>'
+    ),
+    "phasezero-shortcuts": (
+        '<rect x="3" y="5" width="18" height="14" rx="2" fill="{muted}"/>'
+        '\n  <path d="M6 9h3v3H6Zm5 0h3v3h-3Zm5 0h2v3h-2ZM7 14h10" fill="none" stroke="{accent}" stroke-width="1.4" stroke-linecap="round"/>'
+    ),
+    "phasezero-odysseus": (
+        '<path d="M6 18c4-1 7-5 7-10 3 1 5 4 5 7 0 4-3 7-7 7-2 0-4-1-5-4Z" fill="{muted}"/>'
+        '\n  <path d="M5 18c5 0 9-4 9-10M11 12l4-1m-7 5 4 2" fill="none" stroke="{accent}" stroke-width="1.5" stroke-linecap="round"/>'
+    ),
+    "phasezero-hermes": (
+        '<path d="M12 4c3 0 5 2 5 5 0 4-3 5-5 8-2-3-5-4-5-8 0-3 2-5 5-5Z" fill="{muted}"/>'
+        '\n  <path d="M7 9 3 7l2 5m12-3 4-2-2 5M9 20h6" fill="none" stroke="{accent}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        '\n  <circle cx="10" cy="9" r="1" fill="{accent}"/><circle cx="14" cy="9" r="1" fill="{accent}"/>'
+    ),
+    "phasezero-ollama": (
+        '<path d="M8 6V3m8 3V3M7 8c0-2 2-3 5-3s5 1 5 3v9c0 3-2 4-5 4s-5-1-5-4Z" fill="{muted}"/>'
+        '\n  <circle cx="10" cy="11" r="1" fill="{accent}"/><circle cx="14" cy="11" r="1" fill="{accent}"/>'
+        '\n  <path d="M10 16h4" stroke="{accent}" stroke-width="1.5" stroke-linecap="round"/>'
+    ),
+    "phasezero-proxy-kimi": (
+        '<path d="M6 18V6h3v5l5-5h4l-6 6 6 6h-4l-5-5v5Z" fill="{accent}"/>'
+    ),
+    "phasezero-proxy-qwen": (
+        '<circle cx="12" cy="12" r="7" fill="none" stroke="{muted}" stroke-width="2"/>'
+        '\n  <path d="M12 8a4 4 0 1 0 3 6.5L18 18" fill="none" stroke="{accent}" stroke-width="2" stroke-linecap="round"/>'
+    ),
+    "phasezero-proxy-deepseek": (
+        '<path d="M4 13c3-5 7-7 13-5l3-2-1 4c1 5-3 9-8 9-3 0-5-2-7-6Z" fill="{muted}"/>'
+        '\n  <circle cx="15" cy="11" r="1" fill="{accent}"/><path d="M6 15c3 1 6 0 8-2" fill="none" stroke="{accent}" stroke-width="1.5" stroke-linecap="round"/>'
+    ),
+    "phasezero-proxy-mimo": (
+        '<path d="M4 18V7l4 5 4-5 4 5 4-5v11" fill="none" stroke="{muted}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>'
+        '\n  <circle cx="12" cy="17" r="2" fill="{accent}"/>'
+    ),
+    "phasezero-proxy-generic": (
+        '<path d="M5 8h6v4H5Zm8 4h6v4h-6Z" fill="{muted}"/>'
+        '\n  <path d="M11 10h4v4h-2m-5 0h5" fill="none" stroke="{accent}" stroke-width="1.7" stroke-linecap="round"/>'
+    ),
     # ── Dashboard ──
     "go-home": '<path d="M4 21V9l8-6 8 6v12H14v-7h-4v7H4Z" fill="{accent}"/>',
     # ── Overview ──
@@ -159,7 +253,7 @@ icons = {
 
 for name, body in sorted(icons.items()):
     path = OUT / f"{name}.svg"
-    svg = SVG.replace("{bg}", BG).format(accent=ACCENT, muted=MUTED, body=body)
+    svg = icon(body)
     path.write_text(svg)
     print(f"  {path.name}")
 

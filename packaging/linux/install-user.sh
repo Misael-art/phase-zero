@@ -63,6 +63,10 @@ mv "$APP_DIR/io.phasezero.ControlCenter.desktop.tmp" \
 chmod 644 "$APP_DIR/io.phasezero.ControlCenter.desktop"
 install -m644 "$ROOT/packaging/linux/io.phasezero.ControlCenter.svg" \
     "$ICON_DIR/io.phasezero.ControlCenter.svg"
+for icon in "$ROOT"/assets/icons/hicolor/scalable/apps/*.svg; do
+    install -m644 "$icon" "$ICON_DIR/$(basename "$icon")"
+done
+bash "$CURRENT_LINK/linux/ui/kde-launchers.sh" install
 
 prune_install_tree() {
     local base="$1" keep="$2" protected="${3:-}" index path

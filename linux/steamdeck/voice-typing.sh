@@ -54,7 +54,7 @@ install_whisper_user_fallback() {
     # The Arch whisper.cpp package ships /usr/bin/stream, which collides with
     # imagemagick. Extract only whisper-cli (+ its lib) into the user prefix
     # and install the conflict-free dependencies system-wide.
-    local pkg dest
+    local pkg dest stage archive previous=""
     admin_run pacman -S --needed --noconfirm ggml-git openblas ||
         pz_warn "could not install whisper dependencies (ggml-git, openblas)"
     admin_run pacman -Sw --noconfirm whisper.cpp || true
@@ -70,22 +70,71 @@ install_whisper_user_fallback() {
         return 1
     fi
 
-    dest="$DATA_DIR/whisper-cpp"
-    rm -rf "$dest"
-    mkdir -p "$dest"
-    tar -C "$dest" -xf "$pkg" --wildcards 'usr/bin/whisper-cli' 'usr/lib/libwhisper*' || {
+    mkdir -p "$DATA_DIR"
+    stage="$(mktemp -d "$DATA_DIR/.whisper-cpp-stage.XXXXXX")"
+    archive="$stage/package.tar"
+    if [ -r "$pkg" ]; then
+        cp -- "$pkg" "$archive"
+    elif ! admin_run cat "$pkg" > "$archive"; then
+        rm -rf "$stage"
+        pz_warn "could not read root-owned whisper.cpp package: $pkg"
+        return 1
+    fi
+    chmod 0600 "$archive"
+    if ! tar -C "$stage" -xf "$archive" --wildcards 'usr/bin/whisper-cli' 'usr/lib/libwhisper*'; then
+        rm -rf "$stage"
         pz_warn "failed to extract whisper-cli from $pkg"
+        return 1
+    fi
+    rm -f "$archive"
+    [ -x "$stage/usr/bin/whisper-cli" ] || {
+        rm -rf "$stage"
+        pz_warn "whisper-cli missing from verified package"
         return 1
     }
 
+    dest="$DATA_DIR/whisper-cpp"
+    if [ -e "$dest" ]; then
+        previous="$DATA_DIR/.whisper-cpp-previous.$$"
+        mv "$dest" "$previous"
+    fi
+    if ! mv "$stage" "$dest"; then
+        [ -z "$previous" ] || mv "$previous" "$dest"
+        pz_warn "failed to activate user-local whisper-cli"
+        return 1
+    fi
     mkdir -p "$LOCAL_BIN"
-    pz_write_managed_file "$LOCAL_BIN/whisper-cli" <<EOF
+    if ! pz_write_managed_file "$LOCAL_BIN/whisper-cli" <<EOF
 #!/usr/bin/env bash
 export LD_LIBRARY_PATH="$dest/usr/lib:\${LD_LIBRARY_PATH:-}"
 exec "$dest/usr/bin/whisper-cli" "\$@"
 EOF
+    then
+        rm -rf "$dest"
+        [ -z "$previous" ] || mv "$previous" "$dest"
+        return 1
+    fi
     chmod +x "$LOCAL_BIN/whisper-cli"
+    "$LOCAL_BIN/whisper-cli" --help >/dev/null 2>&1 || {
+        rm -rf "$dest"
+        if [ -n "$previous" ]; then
+            mv "$previous" "$dest"
+        else
+            rm -f "$LOCAL_BIN/whisper-cli"
+        fi
+        pz_warn "user-local whisper-cli failed its execution probe"
+        return 1
+    }
+    [ -z "$previous" ] || rm -rf "$previous"
     pz_info "whisper-cli installed for the user: $LOCAL_BIN/whisper-cli"
+}
+
+whisper_system_package_conflicts() {
+    local owner
+    [ -e /usr/bin/stream ] || return 1
+    command -v pacman >/dev/null 2>&1 || return 1
+    owner="$(pacman -Qqo /usr/bin/stream 2>/dev/null || true)"
+    [ -n "$owner" ] && [ "$owner" != "whisper.cpp" ]
 }
 
 voice_lang() {
@@ -198,7 +247,11 @@ voice_setup() {
             pz_info "dry-run: would install whisper.cpp"
         else
             pz_info "installing whisper.cpp (local speech-to-text)"
-            if ! admin_run pacman -S --needed --noconfirm whisper.cpp; then
+            if whisper_system_package_conflicts; then
+                pz_info "/usr/bin/stream belongs to another package; using user-prefix whisper-cli"
+                install_whisper_user_fallback ||
+                    pz_warn "could not install whisper-cli; voice typing stays disabled"
+            elif ! admin_run pacman -S --needed --noconfirm whisper.cpp; then
                 pz_warn "system whisper.cpp install failed (likely /usr/bin/stream conflict); using user-prefix fallback"
                 install_whisper_user_fallback ||
                     pz_warn "could not install whisper-cli; voice typing stays disabled"

@@ -119,18 +119,29 @@ desktop_entry() {
     local name="$1"
     local exec_line="$2"
     local comment="$3"
-    local shortcut="${4:-}"
-    local terminal="${5:-false}"
+    local icon="$4"
+    local shortcut="${5:-}"
+    local terminal="${6:-false}"
     cat <<EOF
 [Desktop Entry]
 Type=Application
 Name=$name
 Comment=$comment
 Exec=$exec_line
+Icon=$icon
 Terminal=$terminal
-Categories=Game;Utility;
+Categories=X-PhaseZero;
 ${shortcut:+X-KDE-Shortcuts=$shortcut}
 EOF
+}
+
+write_desktop_entry() {
+    local path="$1" group="$2" content="$3"
+    if [ "$DRY_RUN" = "1" ]; then
+        pz_info "dry-run: would write $path"
+        return 0
+    fi
+    printf '%s\n' "$content" | pz_desktop_write_entry "$path" "$group"
 }
 
 boot_reboot_exec() {
@@ -146,24 +157,24 @@ install_desktop_entries() {
     boot_exec="$(boot_reboot_exec)"
     command -v pkexec >/dev/null 2>&1 || boot_terminal="true"
 
-    write_managed_file "$APPLICATIONS_DIR/phasezero-steamdeck-handheld.desktop" \
-        "$(desktop_entry "PhaseZero Handheld Mode" "$HOTKEY_BIN handheld" "Apply Steam Deck handheld mode" "Meta+Shift+F1")"
-    write_managed_file "$APPLICATIONS_DIR/phasezero-steamdeck-docked-monitor.desktop" \
-        "$(desktop_entry "PhaseZero Docked Monitor Mode" "$HOTKEY_BIN docked-monitor" "Apply Steam Deck docked monitor mode" "Meta+Shift+F2")"
-    write_managed_file "$APPLICATIONS_DIR/phasezero-steamdeck-docked-tv.desktop" \
-        "$(desktop_entry "PhaseZero Docked TV Mode" "$HOTKEY_BIN docked-tv" "Apply Steam Deck docked TV mode" "Meta+Shift+F3")"
-    write_managed_file "$APPLICATIONS_DIR/phasezero-virtual-keyboard.desktop" \
-        "$(desktop_entry "PhaseZero Virtual Keyboard" "$HOTKEY_BIN keyboard" "Toggle virtual keyboard" "Meta+Shift+F4")"
-    write_managed_file "$APPLICATIONS_DIR/phasezero-steam-gamepad-ui.desktop" \
-        "$(desktop_entry "PhaseZero Steam Gamepad UI" "$HOTKEY_BIN console" "Launch Steam Gamepad UI" "Meta+Shift+F5")"
-    write_managed_file "$APPLICATIONS_DIR/phasezero-steamdeck-dev.desktop" \
-        "$(desktop_entry "PhaseZero Desktop Dev Session" "$HOTKEY_BIN dev" "Apply desktop/dev Steam Deck session" "Meta+Shift+F6")"
-    write_managed_file "$APPLICATIONS_DIR/phasezero-shortcut-cheatsheet.desktop" \
-        "$(desktop_entry "PhaseZero Shortcut Cheat Sheet" "$HOTKEY_BIN cheatsheet" "Toggle the shortcut overlay table" "Meta+Shift+F7")"
-    write_managed_file "$APPLICATIONS_DIR/phasezero-voice-typing.desktop" \
-        "$(desktop_entry "PhaseZero Voice Typing" "$HOTKEY_BIN voice" "Speak-to-type into the focused window" "Meta+Shift+F8")"
-    write_managed_file "$APPLICATIONS_DIR/phasezero-reboot-steamos-plus.desktop" \
-        "$(desktop_entry "PhaseZero Reboot to SteamOS Plus" "$boot_exec" "Set one-shot GRUB boot to SteamOS Plus and reboot" "" "$boot_terminal")"
+    write_desktop_entry "$APPLICATIONS_DIR/phasezero-steamdeck-handheld.desktop" system.steamdeck \
+        "$(desktop_entry "Steam Deck — Modo portátil" "$HOTKEY_BIN handheld" "Aplicar perfil da tela integrada" phasezero-deck-handheld "Meta+Shift+F1")"
+    write_desktop_entry "$APPLICATIONS_DIR/phasezero-steamdeck-docked-monitor.desktop" system.steamdeck \
+        "$(desktop_entry "Steam Deck — Monitor" "$HOTKEY_BIN docked-monitor" "Aplicar perfil dock com monitor" phasezero-deck-monitor "Meta+Shift+F2")"
+    write_desktop_entry "$APPLICATIONS_DIR/phasezero-steamdeck-docked-tv.desktop" system.steamdeck \
+        "$(desktop_entry "Steam Deck — TV" "$HOTKEY_BIN docked-tv" "Aplicar perfil dock para televisão" phasezero-deck-tv "Meta+Shift+F3")"
+    write_desktop_entry "$APPLICATIONS_DIR/phasezero-virtual-keyboard.desktop" system.steamdeck \
+        "$(desktop_entry "Teclado virtual" "$HOTKEY_BIN keyboard" "Mostrar ou ocultar teclado na tela" phasezero-keyboard "Meta+Shift+F4")"
+    write_desktop_entry "$APPLICATIONS_DIR/phasezero-steam-gamepad-ui.desktop" system.steamdeck \
+        "$(desktop_entry "Steam — Interface para controle" "$HOTKEY_BIN console" "Abrir Steam Gamepad UI" phasezero-steam-gamepad "Meta+Shift+F5")"
+    write_desktop_entry "$APPLICATIONS_DIR/phasezero-steamdeck-dev.desktop" system.steamdeck \
+        "$(desktop_entry "Steam Deck — Modo desktop" "$HOTKEY_BIN dev" "Aplicar sessão desktop e desenvolvimento" phasezero-deck-desktop "Meta+Shift+F6")"
+    write_desktop_entry "$APPLICATIONS_DIR/phasezero-shortcut-cheatsheet.desktop" system.tools \
+        "$(desktop_entry "Atalhos PhaseZero" "$HOTKEY_BIN cheatsheet" "Mostrar tabela de atalhos" phasezero-shortcuts "Meta+Shift+F7")"
+    write_desktop_entry "$APPLICATIONS_DIR/phasezero-voice-typing.desktop" system.tools \
+        "$(desktop_entry "Digitação por voz" "$HOTKEY_BIN voice" "Gravar, transcrever localmente e digitar" phasezero-voice "Meta+Shift+F8")"
+    write_desktop_entry "$APPLICATIONS_DIR/phasezero-reboot-steamos-plus.desktop" system.boot \
+        "$(desktop_entry "Reiniciar no SteamOS Plus" "$boot_exec" "Selecionar SteamOS Plus uma vez e reiniciar" system-reboot "" "$boot_terminal")"
 }
 
 install_sxhkd_service() {
@@ -347,6 +358,7 @@ install_hotkeys() {
     write_managed_file "$SXHKD_DIR/sxhkdrc" "$(sxhkd_config)"
     write_managed_file "$SWHKD_DIR/swhkdrc" "$(swhkd_config)"
     install_desktop_entries
+    [ "$DRY_RUN" = "1" ] || bash "$PZ_ROOT/linux/ui/kde-launchers.sh" install
     PZ_DRY_RUN="$DRY_RUN" bash "$PZ_ROOT/linux/steamdeck/input-actions.sh" configure || pz_warn "virtual keyboard configuration failed"
     install_sxhkd_service
     install_kde_shortcuts

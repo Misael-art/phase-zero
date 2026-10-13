@@ -26,6 +26,7 @@ secrets/
 # Never commit backup dumps
 .bootstrap-tools/*.bak
 .bootstrap-tools/ui-runs/
+.mimosa/
 
 # Local run logs (diagnostico de instalacao real)
 

@@ -170,29 +170,100 @@ steamdeck_admin_run() {
     fi
 }
 
+steamdeck_install_wvkbd_aur() {
+    local expected_pkgbuild="70d2d552cac5ce440e167753e93c16e7026878efb4532645187fa029a3d9f188"
+    local stage pkgdir actual package package_name package_version
+    command -v yay >/dev/null 2>&1 || return 1
+    command -v makepkg >/dev/null 2>&1 || return 1
+    stage="$(mktemp -d)"
+    if ! (cd "$stage" && yay -G wvkbd >/dev/null); then
+        rm -rf "$stage"
+        pz_warn "could not acquire wvkbd PKGBUILD"
+        return 1
+    fi
+    pkgdir="$stage/wvkbd"
+    actual="$(sha256sum "$pkgdir/PKGBUILD" 2>/dev/null | awk '{print $1}')"
+    if [ "$actual" != "$expected_pkgbuild" ]; then
+        rm -rf "$stage"
+        pz_warn "wvkbd PKGBUILD changed; refusing unreviewed AUR build"
+        return 1
+    fi
+    steamdeck_admin_run pacman -S --needed --noconfirm scdoc >/dev/null || {
+        rm -rf "$stage"
+        return 1
+    }
+    if ! (cd "$pkgdir" && makepkg --cleanbuild --noconfirm >/dev/null); then
+        rm -rf "$stage"
+        pz_warn "wvkbd user build failed"
+        return 1
+    fi
+    package="$(find "$pkgdir" -maxdepth 1 -type f -name 'wvkbd-*.pkg.tar*' ! -name '*.sig' -print -quit)"
+    [ -n "$package" ] || { rm -rf "$stage"; pz_warn "wvkbd package artifact missing"; return 1; }
+    package_name="$(pacman -Qp "$package" 2>/dev/null | awk '{print $1}')"
+    package_version="$(pacman -Qp "$package" 2>/dev/null | awk '{print $2}')"
+    if [ "$package_name" != "wvkbd" ] || [ "$package_version" != "0.20-1" ]; then
+        rm -rf "$stage"
+        pz_warn "wvkbd package identity mismatch"
+        return 1
+    fi
+    if ! steamdeck_admin_run pacman -U --noconfirm "$package"; then
+        rm -rf "$stage"
+        return 1
+    fi
+    rm -rf "$stage"
+    command -v wvkbd-mobintl >/dev/null 2>&1
+}
+
 steamdeck_ensure_terminal_keyboard() {
     # KWin/Maliit never shows for terminal apps (no text-input protocol), so a
-    # standalone keyboard like wvkbd is required for typing into Konsole & co.
+    # standalone keyboard is required for typing into Konsole & co. KWin does
+    # not expose wlroots' virtual_keyboard_manager to wvkbd; use Onboard there.
     local candidate
-    for candidate in wvkbd-mobintl wvkbd onboard; do
+    if steamdeck_kde_virtual_keyboard_supported; then
+        candidate=onboard
         command -v "$candidate" >/dev/null 2>&1 && return 0
-    done
+    else
+        for candidate in wvkbd-mobintl wvkbd onboard; do
+            command -v "$candidate" >/dev/null 2>&1 && return 0
+        done
+    fi
 
     if [ "${PZ_DRY_RUN:-0}" = "1" ]; then
-        pz_info "dry-run: would install wvkbd (terminal-capable virtual keyboard)"
+        if steamdeck_kde_virtual_keyboard_supported; then
+            pz_info "dry-run: would install onboard (KDE terminal-capable virtual keyboard)"
+        else
+            pz_info "dry-run: would install wvkbd (terminal-capable virtual keyboard)"
+        fi
         return 0
     fi
 
     if ! command -v pacman >/dev/null 2>&1; then
-        pz_warn "no terminal-capable virtual keyboard found; install wvkbd manually"
+        pz_warn "no terminal-capable virtual keyboard found"
         return 0
     fi
 
+    if steamdeck_kde_virtual_keyboard_supported; then
+        pz_info "installing onboard (KDE terminal-capable virtual keyboard)"
+        if steamdeck_admin_run pacman -S --needed --noconfirm onboard; then
+            pz_info "onboard installed"
+        else
+            pz_warn "could not install onboard; virtual keyboard remains degraded"
+        fi
+        return 0
+    fi
+
+    for candidate in wvkbd-mobintl wvkbd onboard; do
+        command -v "$candidate" >/dev/null 2>&1 && return 0
+    done
+
     pz_info "installing wvkbd (terminal-capable virtual keyboard)"
-    if steamdeck_admin_run pacman -S --needed --noconfirm wvkbd; then
+    if pacman -Si wvkbd >/dev/null 2>&1 &&
+        steamdeck_admin_run pacman -S --needed --noconfirm wvkbd; then
         pz_info "wvkbd installed"
+    elif steamdeck_install_wvkbd_aur; then
+        pz_info "wvkbd installed from reviewed AUR recipe"
     else
-        pz_warn "could not install wvkbd automatically; run: sudo pacman -S wvkbd"
+        pz_warn "could not install reviewed wvkbd package; virtual keyboard remains degraded"
     fi
 }
 
@@ -231,7 +302,9 @@ steamdeck_request_steam_keyboard() {
 
 steamdeck_start_keyboard_binary() {
     local candidate pid
-    for candidate in wvkbd-mobintl wvkbd onboard maliit-keyboard; do
+    local -a candidates=(wvkbd-mobintl wvkbd onboard maliit-keyboard)
+    steamdeck_kde_virtual_keyboard_supported && candidates=(onboard)
+    for candidate in "${candidates[@]}"; do
         command -v "$candidate" >/dev/null 2>&1 || continue
 
         # standalone maliit is pointless under KWin: the compositor already
@@ -282,6 +355,7 @@ steamdeck_toggle_virtual_keyboard() {
 
 steamdeck_virtual_keyboard_status() {
     local provider="none" kde_supported=false kde_available=false kde_enabled=false kde_visible=false kde_active=false method=""
+    local fallback="" fallback_running=false ready=false
     if steamdeck_kde_virtual_keyboard_supported; then
         provider="kde-kwin"
         kde_supported=true
@@ -303,9 +377,24 @@ steamdeck_virtual_keyboard_status() {
     elif command -v maliit-keyboard >/dev/null 2>&1; then
         provider="maliit-keyboard"
     fi
+    if steamdeck_kde_virtual_keyboard_supported && command -v onboard >/dev/null 2>&1; then
+        fallback="onboard"
+    elif ! steamdeck_kde_virtual_keyboard_supported; then
+        for fallback in wvkbd-mobintl wvkbd onboard; do
+            command -v "$fallback" >/dev/null 2>&1 && break
+            fallback=""
+        done
+    fi
+    [ -n "$fallback" ] && pgrep -x "$fallback" >/dev/null 2>&1 && fallback_running=true
+    if [ "$kde_available" = true ] && [ -n "$fallback" ]; then
+        ready=true
+    elif [ "$kde_supported" = false ] && [ -n "$fallback" ]; then
+        ready=true
+    fi
 
     jq -n \
         --arg provider "$provider" \
+        --arg fallback "$fallback" \
         --arg inputMethod "$method" \
         --argjson kdeSupported "$kde_supported" \
         --argjson kdeAvailable "$kde_available" \
@@ -313,8 +402,11 @@ steamdeck_virtual_keyboard_status() {
         --argjson kdeVisible "$kde_visible" \
         --argjson kdeActive "$kde_active" \
         --argjson maliit "$([ -n "$(steamdeck_maliit_desktop_file || true)" ] && echo true || echo false)" \
+        --argjson fallbackRunning "$fallback_running" \
+        --argjson ready "$ready" \
         '{
             provider: $provider,
+            ready: $ready,
             kde: {
                 supported: $kdeSupported,
                 available: $kdeAvailable,
@@ -323,6 +415,7 @@ steamdeck_virtual_keyboard_status() {
                 active: $kdeActive,
                 inputMethod: $inputMethod
             },
+            fallback: {command:$fallback, running:$fallbackRunning},
             maliitDesktopFile: $maliit
         }'
 }

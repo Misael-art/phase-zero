@@ -34,13 +34,13 @@ EOF
     chmod +x "$BIN_DIR/phasezero-waydroid"
 
     for row in \
-        "Return to Gaming Mode|Return to SteamOS/Gamepad UI|phasezero-return|steamdeck-gaming-return|Game;" \
-        "Boot Selector|Choose next PhaseZero boot before reboot|phasezero-boot-selector|system-reboot|Game;System;" \
-        "Windows VM|Launch Windows VM in fullscreen|phasezero-windows-vm|computer|Game;System;" \
-        "Waydroid|Launch Android session|phasezero-waydroid|phone|Game;System;"; do
-        IFS='|' read -r name comment command icon categories <<< "$row"
+        "Return to Gaming Mode|Return to SteamOS/Gamepad UI|phasezero-return|phasezero-steam-gamepad|system.steamdeck" \
+        "Boot Selector|Choose next PhaseZero boot before reboot|phasezero-boot-selector|system-reboot|system.boot" \
+        "Windows VM|Launch Windows VM in fullscreen|phasezero-windows-vm|phasezero-windows-vm|system.machines" \
+        "Waydroid|Launch Android session|phasezero-waydroid|phone|system.machines"; do
+        IFS='|' read -r name comment command icon group <<< "$row"
         file="$(tr '[:upper:] ' '[:lower:]-' <<< "$name")"
-        pz_write_managed_file "$APP_DIR/phasezero-$file.desktop" user <<EOF
+        pz_desktop_write_entry "$APP_DIR/phasezero-$file.desktop" "$group" <<EOF
 [Desktop Entry]
 Type=Application
 Name=$name
@@ -48,9 +48,8 @@ Comment=$comment
 Exec=$BIN_DIR/$command
 Icon=$icon
 Terminal=false
-Categories=$categories
+Categories=X-PhaseZero;
 StartupNotify=false
-X-PhaseZero-Managed=true
 EOF
     done
     old_selector="$APP_DIR/phasezero-phasezero-boot-selector.desktop"

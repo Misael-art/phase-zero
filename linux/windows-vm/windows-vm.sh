@@ -911,8 +911,9 @@ Type=Application
 Name=PhaseZero Windows VM
 Comment=Launch PhaseZero Windows VM
 Exec=$PZ_ROOT/linux/pz windows-vm launch --fullscreen
+Icon=phasezero-windows-vm
 Terminal=false
-Categories=System;Utility;
+Categories=X-PhaseZero;
 EOF
 }
 
@@ -931,8 +932,9 @@ Type=Application
 Name=PhaseZero Reboot to Windows VM
 Comment=Set one-shot GRUB boot to PhaseZero Windows VM and reboot
 Exec=$exec_line
+Icon=phasezero-windows-reboot
 Terminal=$terminal
-Categories=System;Utility;
+Categories=X-PhaseZero;
 EOF
 }
 

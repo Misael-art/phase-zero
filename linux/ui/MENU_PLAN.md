@@ -28,6 +28,33 @@ Comandos: `pz ui menu scan|plan|apply|rollback`. Scan/plan são somente leitura.
 Apply usa escrita atômica e ledger privado `0600`. Jogos individuais permanecem
 ocultos, salvo `X-PhaseZero-Favorite=true` ou `X-PHZ-ShowInMenu=true`.
 
+## Aplicativos PhaseZero gerenciados
+
+`pz ui launchers install|status|verify` materializa e valida os aplicativos
+operacionais do host. Cada entrada chama `phasezero-kde-launch`, usa caminho
+estável e possui ícone SVG próprio no tema `hicolor`.
+
+Grupos atuais:
+
+- Sistema: Control Center, Port_Steam, 9Router e Windows VM.
+- Sessões: perfis Steam Deck, interface Steam, teclado, voz e atalhos.
+- Boot: Windows VM e SteamOS Plus, sempre com confirmação e preflight.
+- IA local: Odysseus, Hermes e Ollama. Política Homelab pode bloquear execução.
+- Proxies: uma entrada por backend conhecido. Ausência segura mostra diagnóstico;
+  não baixa código mutável nem executa instalador sem proveniência validada.
+
+`status --json` separa prontidão do lançador (`launcherReady`, `desktopReady`,
+`iconReady`) da prontidão do backend (`backend`). Assim, menu continua íntegro
+mesmo quando serviço opcional está bloqueado ou ainda não instalado.
+
+Ícones PhaseZero são adicionados somente em `hicolor/scalable/apps`. O
+instalador não cria `~/.local/share/icons/hicolor/index.theme`: índice local
+parcial sombreia o índice completo do sistema e quebra ícones nativos em outros
+tamanhos. Migração remove somente o índice incompleto legado de hash conhecido;
+índice personalizado do usuário permanece byte a byte. A mesma migração invalida
+uma única vez `icon-cache.kcache` e reconstrói `ksycoca` sem incremento. Plasma
+recarrega o cache no ciclo normal; instalador nunca reinicia nem recarrega shell.
+
 ## Histórico: estrutura anterior
 
 ## 1. XDG Menu Structure
