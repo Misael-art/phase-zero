@@ -16,7 +16,7 @@ class FeatureSpec:
     id: str
     title: str
     description: str
-    section: str  # aparência | acessibilidade | wallpaper | vídeo | gamemode
+    section: str  # aparência | desktop | acessibilidade | wallpaper | vídeo | gamemode
     kind: str  # kde-config | plasma-dbus | file-managed | decky-plugin
     plasma_major: int = 6
     invasive: bool = False  # jamais liga em perfil padrão

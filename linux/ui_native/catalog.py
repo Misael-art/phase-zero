@@ -1233,6 +1233,20 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
         ("access.bounce-keys", "Teclas de repercussão", "Ignora toques repetidos."),
         ("power.adaptive", "Animações adaptativas", "Pausa animações em bateria."),
         ("power.pause-on-game", "Pausar em jogos", "Pausa animações durante Game Mode."),
+        (
+            "desktop.controller",
+            "Mapa do controle",
+            "O controle vira mouse e teclado neste desktop. Vem ligado. "
+            "Desligar para o mapa; o ponteiro do firmware não volta sozinho. "
+            "Ligar de novo recusa enquanto o Steam ou o gamescope estiver aberto.",
+        ),
+        (
+            "desktop.terminal-keyboard",
+            "Teclado no terminal",
+            "Um toque na tela abre o teclado quando o Ashyterm, o Konsole, o kitty "
+            "ou o Yakuake está em foco. Vem ligado. Desligar só tira esse toque; "
+            "o teclado do Steam+X continua.",
+        ),
     )
     for feature_id, title, description in _themes_features:
         for state, state_label in (("on", "Ativar"), ("off", "Desativar")):

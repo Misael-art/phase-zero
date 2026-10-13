@@ -17,7 +17,9 @@ garantida por snapshot/restauração byte a byte.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from .kde import process_running
@@ -851,6 +853,109 @@ class _WallpaperEngineAdapter(FeatureAdapter):
         return self.effective(facts, session)["state"] == "ligado"
 
 
+class _UserServiceAdapter(FeatureAdapter):
+    """Liga ou desliga uma unit de usuário sem passar pelo start do controle.
+
+    persist-on/off/status moram no script do serviço. O start do mapa reescreve
+    o perfil, arma o timer de reversão e recusa com o Steam aberto; este
+    adapter não chama esse caminho. O carimbo só existe depois de uma mutação
+    bem-sucedida, para o rollback de um plano falho não desligar uma unit que
+    este apply não mexeu.
+    """
+
+    def __init__(self, spec: FeatureSpec, script_name: str) -> None:
+        super().__init__(spec)
+        self.script_name = script_name
+
+    def _script(self) -> Path:
+        return Path(__file__).resolve().parents[1] / "steamdeck" / self.script_name
+
+    def _stamp(self) -> Path:
+        root = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+        return Path(root) / "phasezero" / "desktop-service-toggles" / f"{self.spec.id}.stamp"
+
+    def _run(self, command: str) -> tuple[int, dict[str, str]]:
+        try:
+            result = subprocess.run(
+                ["bash", str(self._script()), command],
+                capture_output=True,
+                text=True,
+                timeout=45,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return 1, {"state": "indisponivel", "reason": f"leitura do serviço falhou: {exc}"}
+        parsed: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key in {"state", "reason", "mutated"}:
+                parsed[key] = value.strip()
+        if "state" not in parsed:
+            tail = (result.stderr or result.stdout or "sem resposta do serviço").strip().splitlines()
+            parsed["state"] = "indisponivel"
+            parsed["reason"] = (tail[-1][:240] if tail else "sem resposta do serviço")
+        return result.returncode, parsed
+
+    def effective(self, facts, session) -> dict:  # noqa: ARG002
+        _code, parsed = self._run("persist-status")
+        state = parsed.get("state", "indisponivel")
+        if state not in {"ligado", "desligado", "degradado", "indisponivel"}:
+            state = "indisponivel"
+        return {"state": state, "reason": parsed.get("reason", ""), "params": {}}
+
+    def apply(self, facts, session, action) -> dict:  # noqa: ARG002
+        wanted = _wanted_state(action)
+        command = "persist-on" if wanted == "ligado" else "persist-off"
+        self._discard_stamp()
+        code, parsed = self._run(command)
+        state = parsed.get("state", "")
+        if code != 0 or state != wanted:
+            return {
+                "status": "failed",
+                "error": parsed.get("reason") or "não foi possível alterar o serviço",
+            }
+        if parsed.get("mutated") == "1":
+            inverse = "persist-off" if wanted == "ligado" else "persist-on"
+            self._write_stamp(inverse)
+        return {"status": wanted, "reason": parsed.get("reason", "")}
+
+    def verify(self, facts, session) -> bool:  # noqa: ARG002
+        return self.effective(facts, session)["state"] == "ligado"
+
+    def rollback(self, facts, session, action) -> dict:  # noqa: ARG002
+        stamp = self._stamp()
+        if not stamp.is_file():
+            return {"status": "ok"}
+        try:
+            inverse = stamp.read_text(encoding="utf-8").strip()
+        except OSError:
+            return {"status": "ok"}
+        self._discard_stamp()
+        if inverse not in {"persist-on", "persist-off"}:
+            return {"status": "ok"}
+        code, parsed = self._run(inverse)
+        if code != 0:
+            return {"status": "failed", "error": parsed.get("reason", "")}
+        return {"status": "ok"}
+
+    def _discard_stamp(self) -> None:
+        try:
+            self._stamp().unlink(missing_ok=True)
+        except OSError:
+            return
+
+    def _write_stamp(self, inverse: str) -> None:
+        stamp = self._stamp()
+        stamp.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        stamp.write_text(inverse + "\n", encoding="utf-8")
+        try:
+            stamp.chmod(0o600)
+        except OSError:
+            return
+
+
 REGISTRY = _Registry()
 
 REGISTRY.register("theme.phasezero", _PhaseZeroThemeAdapter(FEATURES["theme.phasezero"]))
@@ -874,6 +979,11 @@ REGISTRY.register("access.bounce-keys", _KeysAccessAdapter(FEATURES["access.boun
 REGISTRY.register("video.wallpaper-engine", _WallpaperEngineAdapter(FEATURES["video.wallpaper-engine"]))
 REGISTRY.register("power.adaptive", _PowerAdaptiveAdapter(FEATURES["power.adaptive"]))
 REGISTRY.register("power.pause-on-game", _PowerAdaptiveAdapter(FEATURES["power.pause-on-game"], pause_in_game=True))
+REGISTRY.register("desktop.controller", _UserServiceAdapter(FEATURES["desktop.controller"], "controller-desktop.sh"))
+REGISTRY.register(
+    "desktop.terminal-keyboard",
+    _UserServiceAdapter(FEATURES["desktop.terminal-keyboard"], "terminal-keyboard.sh"),
+)
 
 
 def adapter_for(spec: FeatureSpec) -> FeatureAdapter | None:

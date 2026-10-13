@@ -358,6 +358,131 @@ cmd_stop() {
     pz_info "para recuperar o ponteiro: pz steamdeck controller start"
 }
 
+# systemd --user is the real user manager. A missing binary or a dead bus is
+# "indisponível", not a guess that the map is off.
+systemd_user_ready() {
+    command -v systemctl >/dev/null 2>&1 || return 1
+    systemctl --user show --property=Version >/dev/null 2>&1
+}
+
+# Theme toggles call these. They must not arm the revert timer, must not
+# rewrite a profile that already exists, and must not start the apps unit.
+# `start` still owns that heavier path.
+cmd_persist_status() {
+    local enabled active
+    if ! systemd_user_ready; then
+        printf 'state=indisponivel\nreason=systemd do usuário ausente\n'
+        return 0
+    fi
+    if [ ! -f "$SERVICE_PATH" ]; then
+        printf 'state=desligado\nreason=padrão do Deck é ligado; ainda não está nesta sessão\n'
+        return 0
+    fi
+    enabled="$(systemctl --user is-enabled "$SERVICE_NAME" 2>/dev/null || true)"
+    active="$(systemctl --user is-active "$SERVICE_NAME" 2>/dev/null || true)"
+    case "$enabled" in
+        enabled|enabled-runtime|alias|indirect|generated|linked|linked-runtime)
+            if [ "$active" = "active" ]; then
+                printf 'state=ligado\n'
+            else
+                printf 'state=degradado\nreason=habilitado no login, mas parado agora\n'
+            fi
+            ;;
+        *)
+            printf 'state=desligado\nreason=padrão do Deck é ligado; desligado por escolha\n'
+            ;;
+    esac
+}
+
+cmd_persist_on() {
+    local bin conflict was_enabled=0 was_active=0 restarts
+    if [ "${PZ_DRY_RUN:-0}" = "1" ]; then
+        printf 'state=ligado\nmutated=0\n'
+        pz_info "dry-run: persistiria $SERVICE_NAME sem timer e sem reescrever perfil existente"
+        return 0
+    fi
+    if ! systemd_user_ready; then
+        printf 'state=indisponivel\nreason=systemd do usuário ausente\nmutated=0\n'
+        return 1
+    fi
+    # Already the product default. Do not rewrite the unit or the profile of
+    # a map that is running: daemon-reload does not restart it, but a later
+    # rollback must not be handed a reason to stop it.
+    if systemctl --user is-enabled --quiet "$SERVICE_NAME" \
+        && systemctl --user is-active --quiet "$SERVICE_NAME"; then
+        printf 'state=ligado\nmutated=0\n'
+        return 0
+    fi
+    bin="$(scc_daemon_bin)" || true
+    if [ -z "$bin" ]; then
+        printf 'state=indisponivel\nreason=sc-controller ausente\nmutated=0\n'
+        pz_error "sc-controller ausente; instale o pacote sc-controller"
+        return 1
+    fi
+    if conflict="$(conflicting_session)"; then
+        printf 'state=indisponivel\nreason=%s está ativo; o mapa não liga junto\nmutated=0\n' "$conflict"
+        pz_error "$conflict está ativo e também mapeia o controle; feche antes de ligar o mapa"
+        return 1
+    fi
+    if ! controller_present; then
+        printf 'state=indisponivel\nreason=controle do Deck não encontrado\nmutated=0\n'
+        pz_error "controle do Deck (28de:1205) não encontrado"
+        return 1
+    fi
+    systemctl --user is-enabled --quiet "$SERVICE_NAME" && was_enabled=1
+    systemctl --user is-active --quiet "$SERVICE_NAME" && was_active=1
+    if [ ! -f "$PROFILE_DEST" ]; then
+        install_profile || {
+            printf 'state=indisponivel\nreason=perfil desktop ausente\nmutated=0\n'
+            return 1
+        }
+    fi
+    install_service || {
+        printf 'state=indisponivel\nreason=não consegui instalar a unit\nmutated=0\n'
+        return 1
+    }
+    if ! systemctl --user enable --now "$SERVICE_NAME"; then
+        printf 'state=indisponivel\nreason=não consegui ligar o mapa\nmutated=0\n'
+        return 1
+    fi
+    if [ "$was_active" != 1 ]; then
+        sleep "${PZ_CONTROLLER_PERSIST_SETTLE:-3}"
+        restarts="$(systemctl --user show -p NRestarts --value "$SERVICE_NAME" 2>/dev/null || echo 0)"
+        if ! service_active || [ "${restarts:-0}" -gt 0 ]; then
+            if [ "$was_enabled" = 1 ]; then
+                systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+            else
+                systemctl --user disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
+            fi
+            printf 'state=degradado\nreason=o mapa não estabilizou\nmutated=0\n'
+            pz_error "$SERVICE_NAME não estabilizou"
+            return 1
+        fi
+    fi
+    printf 'state=ligado\nmutated=1\n'
+    pz_info "mapa do controle ligado no login; sem timer de reversão"
+}
+
+cmd_persist_off() {
+    if [ "${PZ_DRY_RUN:-0}" = "1" ]; then
+        printf 'state=desligado\nmutated=0\n'
+        pz_info "dry-run: desabilitaria só $SERVICE_NAME"
+        return 0
+    fi
+    if ! systemd_user_ready; then
+        printf 'state=indisponivel\nreason=systemd do usuário ausente\nmutated=0\n'
+        return 1
+    fi
+    # This unit only. The apps unit, scc-daemon stop and a pid kill stay on
+    # the explicit `stop` path. Lizard mode still does not return.
+    if ! systemctl --user disable --now "$SERVICE_NAME"; then
+        printf 'state=indisponivel\nreason=não consegui desligar o mapa\nmutated=0\n'
+        return 1
+    fi
+    printf 'state=desligado\nmutated=1\n'
+    pz_info "mapa do controle desligado; o ponteiro do firmware não volta sozinho"
+}
+
 cmd_status() {
     local conflict=""
     conflict="$(conflicting_session || true)"
@@ -391,8 +516,11 @@ case "${1:-status}" in
     stop|disable)        cmd_stop ;;
     status)              cmd_status ;;
     dry-run)             PZ_DRY_RUN=1 cmd_start ;;
+    persist-on)          cmd_persist_on ;;
+    persist-off)         cmd_persist_off ;;
+    persist-status)      cmd_persist_status ;;
     *)
-        pz_error "usage: controller-desktop.sh (start|confirm|stop|status|dry-run)"
+        pz_error "usage: controller-desktop.sh (start|confirm|stop|status|dry-run|persist-on|persist-off|persist-status)"
         exit 1
         ;;
 esac

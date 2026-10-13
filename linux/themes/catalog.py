@@ -424,6 +424,37 @@ FEATURES["power.pause-on-game"] = FeatureSpec(
     default_state="desligado",
 )
 
+# Interruptores independentes. Não entram em nenhum perfil: um persist-on
+# recusado (Steam ou gamescope no ar) falharia o plano inteiro e reverteria
+# a aparência junto. default_state documenta o padrão do Deck; a UI lê o
+# estado vivo da unit e não liga nada ao abrir a página.
+FEATURES["desktop.controller"] = FeatureSpec(
+    id="desktop.controller",
+    title="Mapa do controle",
+    description=(
+        "O controle vira mouse e teclado neste desktop. Vem ligado. "
+        "Desligar para o mapa; o ponteiro do firmware não volta sozinho. "
+        "Ligar de novo recusa enquanto o Steam ou o gamescope estiver aberto."
+    ),
+    section="desktop",
+    kind="systemd-user",
+    config_keys=(),
+    default_state="ligado",
+)
+FEATURES["desktop.terminal-keyboard"] = FeatureSpec(
+    id="desktop.terminal-keyboard",
+    title="Teclado no terminal",
+    description=(
+        "Um toque na tela abre o teclado quando o Ashyterm, o Konsole, o kitty "
+        "ou o Yakuake está em foco. Vem ligado. Desligar só tira esse toque; "
+        "o teclado do Steam+X continua."
+    ),
+    section="desktop",
+    kind="systemd-user",
+    config_keys=(),
+    default_state="ligado",
+)
+
 QUICK_ENVIRONMENTS: dict[str, dict] = {
     "foco": {
         "title": "Foco",
