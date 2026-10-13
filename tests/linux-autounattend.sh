@@ -231,6 +231,7 @@ echo 'unattended install contracts ok'
 # host with 2 GiB available.
 VM_SH="$ROOT/linux/windows-vm/memory.sh"
 for consumer in windows-vm.sh provision.sh; do
+    # shellcheck disable=SC2016 # literal source line, not an expansion
     grep -Fq 'source "$PZ_ROOT/linux/windows-vm/memory.sh"' "$ROOT/linux/windows-vm/$consumer"
     if grep -q '^default_ram_mb()' "$ROOT/linux/windows-vm/$consumer"; then
         echo "$consumer still defines its own default_ram_mb" >&2
