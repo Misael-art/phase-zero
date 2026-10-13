@@ -21,6 +21,7 @@ Usage:
   pz steamdeck keyboard repair Select Plasma Keyboard, or keep a valid explicit choice
   pz steamdeck keyboard revert Restore kwinrc from the backup taken before repair
   pz steamdeck cursor          Read-only pointer handoff diagnostic (does not restart anything)
+  pz steamdeck dock-record     Passive input record across dock/undock (once|watch|report)
   pz steamdeck console [mode]  Apply mode and launch Steam Gamepad UI
   pz steamdeck dev [mode]      Apply desktop/dev session mode
   pz steamdeck hotkeys install Install Meta+Shift+F1..F8 shortcuts
@@ -353,7 +354,7 @@ cmd_flatpak() {
 
 cmd_steamdeck() {
     local action="${1:-}" target="${2:-}"
-    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|terminal-keyboard|panel|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
+    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|dock-record|terminal-keyboard|panel|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
     source "$PZ_ROOT/linux/steamdeck/common.sh"
     source "$PZ_ROOT/linux/steamdeck/input-actions.sh"
     case "$action" in
@@ -373,6 +374,9 @@ cmd_steamdeck() {
             ;;
         cursor|pointer)
             bash "$PZ_ROOT/linux/steamdeck/cursor-diagnose.sh" "${target:-snapshot}" "${3:-}"
+            ;;
+        dock-record)
+            python3 "$PZ_ROOT/linux/steamdeck/dock_input_record.py" "${target:-report}" "${@:3}"
             ;;
         terminal-keyboard)
             bash "$PZ_ROOT/linux/steamdeck/terminal-keyboard.sh" "${target:-watch}"

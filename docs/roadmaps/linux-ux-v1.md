@@ -154,6 +154,21 @@ eventos de input e KWin durante desconexão do DP; registrar estado de
 explicitamente touch devices a saídas. Não marcar LUX-033 `verified` só porque
 `event9` ou `event17` ainda existe: provar evento físico e ponteiro no KDE.
 
+Instrumento (2026-10-13): `pz steamdeck dock-record watch` grava sozinho cada
+troca do conector externo, sem pedir nada ao operador no momento em que o
+ponteiro some. Só lê: não captura dispositivo, não reinicia o mapa nem o KWin.
+Por transição ficam dois registros em
+`~/.local/state/phasezero/dock-input/records.jsonl`: o estado (conectores, nó
+da tela e do SCController, `enabled`/`outputName` no KWin, unit do mapa) e uma
+contagem de eventos do kernel numa janela de 45 s. `pz steamdeck dock-record
+report` classifica cada caminho: `node-gone`, `kwin-disabled`,
+`mapped-to-missing-output`, `kernel-events-arrive` ou `not-proven`. Silêncio na
+janela não é prova. Leitura com o dock presente em 2026-10-13: tela no
+`event9` (`INPUT_PROP_DIRECT`), `SCController Mouse` no `event19`, os dois
+`enabled=true` e `outputName` vazio no KWin; `DP-1` e `eDP-1` conectados.
+Nenhum unplug gravado ainda; o journal deste host só guarda os dois últimos
+boots e não tem nenhum. Causa-raiz continua não confirmada.
+
 ## Físico / operador (não implementar às cegas)
 
 - Deck LCD/OLED a 150%/200%: capturas de Início, Visão geral, Preview, Progress (confirma LUX-012/020).
