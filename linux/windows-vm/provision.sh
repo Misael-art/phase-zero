@@ -2958,11 +2958,15 @@ provision_pending_finalize_id() {
     local base vm_dir op operation_file state removed adopted snapshot updated best="" best_updated=""
     base="$(pz_staging_base)"
     for vm_dir in "$base"/op-*; do
-        [ -d "$vm_dir" ] && [ ! -L "$vm_dir" ] || continue
+        if [ ! -d "$vm_dir" ] || [ -L "$vm_dir" ]; then
+            continue
+        fi
         op="$(basename -- "$vm_dir")"
         case "$op" in */*|*..*|*[!A-Za-z0-9._-]*) continue ;; esac
         operation_file="$OPERATIONS_DIR/$op/operation.json"
-        [ -f "$operation_file" ] && [ ! -L "$operation_file" ] || continue
+        if [ ! -f "$operation_file" ] || [ -L "$operation_file" ]; then
+            continue
+        fi
         state="$(jq -r '.state // ""' "$operation_file" 2>/dev/null || true)"
         [ "$state" = "completed" ] || continue
         removed="$(jq -r '.vmRemovedAt // ""' "$operation_file" 2>/dev/null || true)"
@@ -2974,7 +2978,9 @@ provision_pending_finalize_id() {
             continue
         fi
         snapshot="$(cat "$OPERATIONS_DIR/$op/snapshot_path" 2>/dev/null || true)"
-        [ -n "$snapshot" ] && [ -f "$snapshot" ] || continue
+        if [ -z "$snapshot" ] || [ ! -f "$snapshot" ]; then
+            continue
+        fi
         updated="$(jq -r '.updatedAt // ""' "$operation_file" 2>/dev/null || true)"
         if [ -z "$best" ] || [[ "$updated" > "$best_updated" ]]; then
             best="$op"
