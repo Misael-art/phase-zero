@@ -135,6 +135,25 @@ Gate F1: todos `verified`; `test_accessibility_gate.py` verde com pares novos; s
 | LUX-031 | Rótulo de cópia honesto | "Copiar saída" → "Copiar detalhes técnicos" | pytest | verified `bbb3006` |
 | LUX-032 | Emoji fora do nome acessível | título sem emoji; emoji em QLabel decorativo com `setAccessibleName("")` | pytest a11y | verified `b54ecf7` |
 
+### Incidente P0 — ponteiro/touch após retirar do dock
+
+Relato do operador em 2026-09-28: ao retirar o Steam Deck do dock, o touch do
+aparelho deixa de funcionar como ponteiro no KDE e o dispositivo desaparece.
+Tratar como regressão P0 de entrada no host Steam Deck LCD/Jupiter, BigLinux/
+Manjaro, KDE Wayland, pacote PhaseZero `1.21.1-1`, kernel `6.18.49-1-MANJARO`.
+
+| ID | Requisito | Implementação e evidência inicial | Teste de aceite | Estado |
+|---|---|---|---|---|
+| LUX-033 | Entrada interna continua utilizável ao alternar dock/handheld | Host lido sem mutações: FTS3528 (`ID_INPUT_TOUCHSCREEN=1`) está no `event9`; controle Steam Deck `28de:1205` está conectado; `phasezero-controller-desktop.service` está ativo e possui `SCController Mouse` em `event17/mouse3`. Não havia watcher de modo PhaseZero instalado. O perfil `controller-desktop.sh` afirma que `scc-daemon` assume o controle, desliga a emulação de mouse do firmware e pode deixar o Deck sem ponteiro quando para. Dock presente durante esta coleta; o unplug ainda precisa ser reproduzido. Estes dois caminhos — tela FTS e trackpad virtual — devem ser medidos separadamente; causa-raiz não confirmada. | Teste hermético de perda/retorno do daemon e presença dos dois dispositivos; no host: KDE Wayland, 10 ciclos dock→handheld→dock; FTS toca e ativa alvos na tela interna; trackpad move/clica o ponteiro com perfil PhaseZero ativo; identidade/disponibilidade das entradas não muda para `unknown`; falha do mapper dá estado e recuperação explícitos. Provar antes/depois e sem perder o único meio de controle. | in_progress |
+
+Escopo imediato: descobrir se o relato é a tela FTS ou o trackpad; monitorar
+eventos de input e KWin durante desconexão do DP; registrar estado de
+`scc-daemon` e do mouse virtual. Não alterar TDP, perfil de energia, rotação,
+`kcminputrc` ou configuração de monitor como tentativa cega. O modo de exibição
+`handheld` no código atual altera energia e taxa de atualização, não associa
+explicitamente touch devices a saídas. Não marcar LUX-033 `verified` só porque
+`event9` ou `event17` ainda existe: provar evento físico e ponteiro no KDE.
+
 ## Físico / operador (não implementar às cegas)
 
 - Deck LCD/OLED a 150%/200%: capturas de Início, Visão geral, Preview, Progress (confirma LUX-012/020).

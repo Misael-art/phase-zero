@@ -9,7 +9,7 @@ restart de `phasezero-controller-desktop`.
 
 | ID | Assunto | Estado |
 | --- | --- | --- |
-| SDK-001 | Seleção, migração e recarga do teclado virtual | Corrigido e medido no host até `available=true`. Painel visível e caractere digitado pendentes. |
+| SDK-001 | Seleção, migração e recarga do teclado virtual | Corrigido no host. Abertura do painel confirmada pelo usuário em 2026-10-10. Caractere digitado pendente. |
 | SDK-002 | Cursor depois de Game Mode → KDE | Não comprovado. Instrumento apenas. Sem correção de causa. |
 
 ## Causa comprovada (SDK-001)
@@ -65,7 +65,11 @@ PIDs que permaneceram os desta sessão: `sddm` 2033, `sddm-helper` 25869,
 `startplasma-wayland` 25893, `kwin_wayland` 26018 (início 2026-10-09 14:56:00),
 `plasmashell` 26147, `phasezero-controller-desktop` MainPID 26394,
 `NRestarts=0`. Onboard 557082 não foi encerrado. Pacote instalado no início:
-`phasezero-control-center` 1.22.1-1.
+`phasezero-control-center` 1.22.1-1. A confirmação de abertura abaixo ocorreu
+com `phasezero-control-center` 1.22.4-1 (`version.json` 1.22.4, canal beta,
+`builtAt` 2026-10-10T14:21:28Z) já instalado. A sessão 3 e os PIDs do KWin
+26018, do `plasma-keyboard` 3821305, do plasmashell 26147 e do controlador
+26394 continuavam os mesmos.
 
 | Checagem | Resultado | Não é |
 | --- | --- | --- |
@@ -74,6 +78,7 @@ PIDs que permaneceram os desta sessão: `sddm` 2033, `sddm-helper` 25869,
 | Filho do KWin | `plasma-keyboard` (PID 3821305 após o segundo flip) | Teclado utilizável |
 | `input-actions.sh status` | provider `plasma-keyboard`, origin `explicit`, action `keep`, open `kwin-available-closed`, fallback onboard `alive-unusable-on-wayland`. `kwinrc` não mudou | Sucesso de toque |
 | `forceActivate` sem campo e sobre `kdialog` | `active=true`, `visible=false`. Painel não apareceu. KWin e o processo do teclado permaneceram | Caractere entregue |
+| Abertura física, relato do usuário em 2026-10-10 | O painel abriu. Leitura D-Bus seguinte: `available=true`, `visible=false`, `active=false`, `activeClientSupportsTextInput=true`, `mode=1`, `willShowOnActive=false` | Caractere no campo. Captura de `visible=true`. Game Mode. Boot direto |
 | Sonda do cursor | `mouseEnabled=true`, `mousePointer=true`, conclusão `not-proven`, sem amostra de movimento | Causa do cursor sumir |
 | Boot direto e Game Mode → Switch Desktop | Não executados | Verificado |
 
@@ -98,13 +103,17 @@ Pacote anterior, antes de qualquer upgrade desta linha: `phasezero-control-cente
 
 ## Gates físicos pendentes
 
-Não marcar como verificado.
+A abertura do painel está confirmada. O restante não marcar como verificado.
 
-1. Campo de texto real, noutra interação, sem encerrar o KDE. Focar um campo
-   que use text-input do Wayland, tocar a tela, confirmar `visible=true` em
-   `pz steamdeck keyboard status` e que um caractere chega. Fechar pelo mesmo
-   comando de toggle, não por `keyboard close` se o onboard antigo ainda for
-   necessário.
+1. Abertura: confirmada pelo usuário em 2026-10-10, na sessão 3, com o pacote
+   1.22.4-1. O relato foi que o teste funcionou abrindo o teclado. A leitura
+   D-Bus feita depois do relato já encontrou o painel fechado (`visible=false`,
+   `active=false`) e um cliente com text-input
+   (`activeClientSupportsTextInput=true`). Não houve captura de `visible=true`
+   nesse instante.
+   Caractere: pendente. Falta o usuário confirmar que um caractere entrou num
+   campo real, sem encerrar o KDE. Fechar pelo toggle, não por `keyboard close`,
+   se o onboard antigo ainda for necessário.
 2. Game Mode → Switch Desktop, numa sessão em que encerrar o desktop seja
    aceitável. Anotar o ID da sessão nova. Mover o touchpad direito e gravar
    `pz steamdeck cursor sample 5`. A conclusão só deixa `not-proven` se a
@@ -115,8 +124,12 @@ Não marcar como verificado.
 
 ## Release
 
-1.22.2 sai no canal beta (pré-release). O canal estável exigiria os gates
-físicos acima. Não reutilizar as tags `v1.22.1` e `v1.21.1`.
+A linha foi cortada no canal beta. `v1.22.2` e `v1.22.3` ficaram sem
+release publicada. A confirmação de abertura em 2026-10-10 não promove o
+canal para estável: caractere digitado e Game Mode → Switch Desktop
+continuam pendentes. A release publicada desta linha, e a que estava
+instalada no teste, é a beta `v1.22.4`. Não mover as tags `v1.22.1`,
+`v1.22.2`, `v1.22.3` nem `v1.22.4`.
 
 O repositório passou a se chamar `Misael-art/phase-zero`. O CI do Arch
 comparava `GITHUB_REPOSITORY` só com `Misael-art/PhaseZero` e falhava antes
