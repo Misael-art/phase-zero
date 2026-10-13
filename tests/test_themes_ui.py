@@ -43,17 +43,17 @@ def page(qapp):
     instance.close()
 
 
-def test_themes_page_has_seven_tabs(page):
+def test_themes_page_has_eight_tabs(page):
     tabs = page.findChild(QTabWidget)
     assert tabs is not None
     assert [tabs.tabText(index) for index in range(tabs.count())] == [
-        "Perfis", "Aparência", "Acessibilidade", "Wallpapers", "Game Mode",
+        "Perfis", "Aparência", "Desktop", "Acessibilidade", "Wallpapers", "Game Mode",
         "Catálogo avaliado", "Histórico",
     ]
 
 
-def test_themes_page_exposes_twenty_toggles(page):
-    assert len(page._controls) == 20
+def test_themes_page_exposes_twenty_two_toggles(page):
+    assert len(page._controls) == 22
     feature_ids = {feature_id for feature_id, _toggle, _detail in page._controls}
     for required in (
         "theme.phasezero", "theme.night-color", "access.text-size",

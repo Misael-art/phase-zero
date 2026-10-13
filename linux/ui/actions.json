@@ -6822,6 +6822,54 @@
       "plan_command": "linux/pz themes plan --feature power.pause-on-game --state off"
     },
     {
+      "name": "themes.feature.desktop.controller.on",
+      "label": "Mapa do controle — Ativar",
+      "command": "linux/pz themes apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Temas",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz themes plan --feature desktop.controller --state on"
+    },
+    {
+      "name": "themes.feature.desktop.controller.off",
+      "label": "Mapa do controle — Desativar",
+      "command": "linux/pz themes apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Temas",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz themes plan --feature desktop.controller --state off"
+    },
+    {
+      "name": "themes.feature.desktop.terminal-keyboard.on",
+      "label": "Teclado no terminal — Ativar",
+      "command": "linux/pz themes apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Temas",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz themes plan --feature desktop.terminal-keyboard --state on"
+    },
+    {
+      "name": "themes.feature.desktop.terminal-keyboard.off",
+      "label": "Teclado no terminal — Desativar",
+      "command": "linux/pz themes apply --plan-id {plan_id} --confirm {confirm}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Temas",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz themes plan --feature desktop.terminal-keyboard --state off"
+    },
+    {
       "name": "themes.profile.essencial",
       "label": "Perfil Essencial",
       "command": "linux/pz themes apply --plan-id {plan_id} --confirm {confirm}",

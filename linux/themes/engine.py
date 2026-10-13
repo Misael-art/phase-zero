@@ -107,9 +107,12 @@ def _profile_effective(facts: HostFacts, session: KdeSession) -> dict:
         feature_id: feature_state(spec, facts, session)
         for feature_id, spec in FEATURES.items()
     }
+    # Serviços de desktop são interruptores à parte. Ligados, não podem
+    # fazer o perfil de aparência parecer personalizado.
     active_features = {
         feature_id for feature_id, value in states.items()
         if value.get("state") in ("ligado", "aplicando", "pausado-bateria", "pausado-jogo")
+        and FEATURES[feature_id].section != "desktop"
     }
     for profile in PROFILES.values():
         targets = set(profile.features)

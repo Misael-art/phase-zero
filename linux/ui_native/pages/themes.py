@@ -1,7 +1,7 @@
-"""Temas e acessibilidade: página com hero e 7 abas.
+"""Temas e acessibilidade: página com hero e 8 abas.
 
-Abas: Perfis, Aparência, Acessibilidade, Wallpapers, Game Mode, Catálogo
-avaliado e Histórico. Toggles seguem o padrão otimista de
+Abas: Perfis, Aparência, Desktop, Acessibilidade, Wallpapers, Game Mode,
+Catálogo avaliado e Histórico. Toggles seguem o padrão otimista de
 `cancel_pending_action`; toda alteração passa por plan/preview/apply com
 bindings `{plan_id}`/`{confirm}` do catálogo.
 """
@@ -41,6 +41,21 @@ FEATURE_TITLES: dict[str, str] = {
     "access.bounce-keys": "Teclas de repercussão",
     "power.adaptive": "Animações adaptativas",
     "power.pause-on-game": "Pausar em jogos",
+    "desktop.controller": "Mapa do controle",
+    "desktop.terminal-keyboard": "Teclado no terminal",
+}
+
+FEATURE_HINTS: dict[str, str] = {
+    "desktop.controller": (
+        "O controle vira mouse e teclado neste desktop. Vem ligado. "
+        "Desligar para o mapa; o ponteiro do firmware não volta sozinho. "
+        "Ligar de novo recusa enquanto o Steam ou o gamescope estiver aberto."
+    ),
+    "desktop.terminal-keyboard": (
+        "Um toque na tela abre o teclado quando o Ashyterm, o Konsole, o kitty "
+        "ou o Yakuake está em foco. Vem ligado. Desligar só tira esse toque; "
+        "o teclado do Steam+X continua."
+    ),
 }
 
 APPEARANCE = (
@@ -54,6 +69,7 @@ ACCESSIBILITY = (
     "access.bounce-keys",
 )
 POWER = ("power.adaptive", "power.pause-on-game")
+DESKTOP = ("desktop.controller", "desktop.terminal-keyboard")
 
 PROFILES = (
     ("essencial", "Perfil Essencial"),
@@ -98,7 +114,7 @@ class ThemesPage(BasePage):
 
         layout.addWidget(SectionHeader(
             "Temas e acessibilidade",
-            "Aparência, conforto visual e acessibilidade do Plasma.",
+            "Aparência, desktop do Deck e acessibilidade do Plasma.",
         ))
 
         layout.addWidget(self._build_hero())
@@ -157,6 +173,11 @@ class ThemesPage(BasePage):
 
         self.profiles_tab = self._build_profiles_tab()
         self.appearance_tab = self._build_features_tab("Aparência", APPEARANCE)
+        self.desktop_tab = self._build_features_tab(
+            "Desktop",
+            DESKTOP,
+            "Mapa do controle e teclado no terminal. Os dois vêm ligados. Você pode desligar cada um.",
+        )
         self.accessibility_tab = self._build_features_tab("Acessibilidade", ACCESSIBILITY)
         self.wallpapers_tab = self._build_wallpapers_tab()
         self.gamemode_tab = self._build_gamemode_tab()
@@ -166,6 +187,7 @@ class ThemesPage(BasePage):
         for widget, title in (
             (self.profiles_tab, "Perfis"),
             (self.appearance_tab, "Aparência"),
+            (self.desktop_tab, "Desktop"),
             (self.accessibility_tab, "Acessibilidade"),
             (self.wallpapers_tab, "Wallpapers"),
             (self.gamemode_tab, "Game Mode"),
@@ -198,11 +220,15 @@ class ThemesPage(BasePage):
         layout.addStretch()
         return page
 
-    def _build_features_tab(self, title: str, feature_ids: tuple[str, ...]) -> QWidget:
+    def _build_features_tab(
+        self, title: str, feature_ids: tuple[str, ...], subtitle: str = "",
+    ) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setSpacing(8)
-        layout.addWidget(SectionHeader(title, "Alternância otimista com confirmação segura."))
+        layout.addWidget(SectionHeader(
+            title, subtitle or "Alternância otimista com confirmação segura.",
+        ))
         for feature_id in feature_ids:
             row, toggle, detail = self._feature_switch(feature_id)
             index = len(self._controls)
@@ -210,9 +236,17 @@ class ThemesPage(BasePage):
             toggle.toggled.connect(
                 lambda checked, feature_index=index: self._feature_toggle_requested(feature_index, checked)
             )
+            if feature_id.startswith("desktop."):
+                self._mark_feature_actions(feature_id)
             layout.addWidget(row)
         layout.addStretch()
         return page
+
+    def _mark_feature_actions(self, feature_id: str) -> None:
+        for state in ("on", "off"):
+            action = self.by_id.get(f"themes.feature.{feature_id}.{state}")
+            if action is not None:
+                self.mark_represented(action)
 
     def _feature_switch(self, feature_id: str) -> tuple[QWidget, SwitchControl, QLabel]:
         row = QWidget()
@@ -228,6 +262,12 @@ class ThemesPage(BasePage):
         toggle.setEnabled(False)
         toggle.setAccessibleName(name.text())
         copy.addWidget(name)
+        hint_text = FEATURE_HINTS.get(feature_id, "")
+        if hint_text:
+            hint = QLabel(hint_text)
+            hint.setObjectName("cardDescription")
+            hint.setWordWrap(True)
+            copy.addWidget(hint)
         copy.addWidget(detail)
         row_layout.addLayout(copy, 1)
         row_layout.addWidget(toggle)

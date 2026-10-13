@@ -327,7 +327,7 @@ revisão de segredos, paths do host e mudanças não relacionadas.
 | TH-CAT-001 | Catálogo com licença+SHA-256 e recusas rastreáveis | catalog.py | pytest: itens recusados/adiados presentes com motivo | python-test | verified | — |
 | TH-VID-001 | Vídeo opcional com watchdog e rescue | video adapter | pytest: crash→rescue; bateria; sem aceleração | python-test | deferred | Extensão de vídeo (Wallpaper Engine/Waywallen) permanece experimental; watchdog+rescue já presentes; reprovar vídeo sem perfil explícito |
 | TH-STE-001 | Game Mode com ownership e uninstall-managed | steam adapter | pytest: steam nativo/flatpak, decky ausente | python-test | verified | — |
-| TH-UI-001 | ThemesPage com 7 abas e hero real | `pages/themes.py` | QA offscreen: teclado/D-pad, 44 px, cancelamento | python-test | verified | — |
+| TH-UI-001 | ThemesPage com 8 abas e hero real | `pages/themes.py` | QA offscreen: teclado/D-pad, 44 px, cancelamento | python-test | verified | — |
 
 Estados permitidos: `pending`, `in_progress`, `blocked`, `verified`, `deferred`.
 
