@@ -724,7 +724,7 @@ effective_config() {
     fi
     ISO_PATH="${ISO_PATH:-${PZ_WINDOWS_VM_ISO:-$(detect_windows_iso)}}"
     VIRTIO_ISO="${VIRTIO_ISO:-${PZ_WINDOWS_VM_VIRTIO_ISO:-$(detect_virtio_iso)}}"
-    RAM_MB="${RAM_MB:-${PZ_WINDOWS_VM_RAM_MB:-$(default_ram_mb)}}"
+    RAM_MB="${RAM_MB:-$(windows_vm_configured_ram_mb "${PZ_WINDOWS_VM_RAM_MB:-}")}"
     CPUS="${CPUS:-${PZ_WINDOWS_VM_CPUS:-$(default_cpus)}}"
     USB_MODE="${USB_MODE:-${PZ_WINDOWS_VM_USB_MODE:-redir}}"
     USB_AUTO_FILTER="${USB_AUTO_FILTER:-${PZ_WINDOWS_VM_USB_AUTO_FILTER:-0x08,-1,-1,-1,1}}"
@@ -2624,6 +2624,14 @@ launch_check() {
     [ -f "$OVMF_VARS" ] && [ -r "$OVMF_VARS" ] && [ -w "$OVMF_VARS" ] && vars=true || blockers+=("OVMF_VARS ausente ou sem escrita")
     command -v qemu-system-x86_64 >/dev/null 2>&1 && qemu=true || blockers+=("qemu-system-x86_64 ausente")
 
+    # The same verdict launch_vm acts on. A green pre-check that the launch then
+    # refuses for memory is a dead end for the person following it.
+    local mem_fit
+    mem_fit="$(windows_vm_memory_notice "$RAM_MB")"
+    if [ "$mem_fit" = "exceed" ]; then
+        blockers+=("memória: o host não tem como entregar ${RAM_MB} MiB agora")
+    fi
+
     case "$GRAPHICS_PROFILE" in
         compat) graphics=true ;;
         virtio-gl)
@@ -2646,6 +2654,8 @@ launch_check() {
 
     local success=false
     [ "${#blockers[@]}" -eq 0 ] && success=true
+    local mem_requested_mb="$RAM_MB"
+    case "$mem_requested_mb" in ''|*[!0-9]*) mem_requested_mb=0 ;; esac
     if [ "$JSON_OUT" = "1" ]; then
         printf '%s\n' "${blockers[@]:-}" | jq -R -s \
             --argjson success "$success" \
@@ -2653,8 +2663,12 @@ launch_check() {
             --arg diskPath "$DISK_PATH" \
             --argjson kvm "$kvm" --argjson disk "$disk" --argjson ovmf "$ovmf" \
             --argjson vars "$vars" --argjson qemu "$qemu" --argjson graphics "$graphics" \
+            --argjson memoryRequestedMb "$mem_requested_mb" --arg memoryFit "$mem_fit" \
+            --argjson memoryAvailableMb "$(windows_vm_meminfo_mb MemAvailable)" \
+            --argjson memorySwapFreeMb "$(windows_vm_meminfo_mb SwapFree)" \
             '{success:$success,graphicsProfile:$profile,diskPath:$diskPath,
               checks:{kvm:$kvm,disk:$disk,ovmf:$ovmf,ovmfVars:$vars,qemu:$qemu,graphics:$graphics},
+              memory:{requestedMb:$memoryRequestedMb,fit:$memoryFit,availableMb:$memoryAvailableMb,swapFreeMb:$memorySwapFreeMb},
               blockers:(split("\n")|map(select(length>0)))}'
     else
         if $success; then

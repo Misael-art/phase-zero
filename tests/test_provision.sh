@@ -1612,6 +1612,92 @@ assert_contains "launch refusal names the shortfall" "$MEM_LAUNCH_ERR" "memória
 assert_eq "refused launch did not touch the power profile" "0" "$([ -e "$MEM_T/powerprofilesctl.log" ] && echo 1 || echo 0)"
 assert_eq "refused launch did not ask for privilege" "0" "$([ -e "$MEM_T/admin.log" ] && echo 1 || echo 0)"
 
+# The pre-check answered "success": true on a host that could not hold the VM:
+# only launch_vm ran the memory guard, so a lay user read a green pre-check and
+# then a refusal. The check has to answer with the same verdict the launch uses.
+echo "--- launch-check reports the memory verdict ---"
+mem_lc() {
+    local _rc=0
+    PZ_TEST_MODE=1 HOME="$MEM_T/home" XDG_CONFIG_HOME="$MEM_T/home/.config" \
+        XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE="$1" \
+        PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" PZ_WINDOWS_VM_CONFIG="$MEM_T/lc.conf" \
+        bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch-check "${@:2}" --json 2>/dev/null || _rc=$?
+    return 0
+}
+mem_lc_err() {
+    local _rc=0
+    PZ_TEST_MODE=1 HOME="$MEM_T/home" XDG_CONFIG_HOME="$MEM_T/home/.config" \
+        XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE="$1" \
+        PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" PZ_WINDOWS_VM_CONFIG="$MEM_T/lc.conf" \
+        bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch-check "${@:2}" 2>"$MEM_T/lc.err" >/dev/null || _rc=$?
+    cat "$MEM_T/lc.err"
+}
+mem_host 14820 2100 1000
+LC_EXCEED="$(mem_lc desktop --ram 12288)"
+assert_eq "launch-check names what the VM asked for" "12288" "$(jq -r '.memory.requestedMb' <<< "$LC_EXCEED")"
+assert_eq "launch-check reads what the host has, not its total" "2100" "$(jq -r '.memory.availableMb' <<< "$LC_EXCEED")"
+assert_eq "launch-check calls the verdict exceed" "exceed" "$(jq -r '.memory.fit' <<< "$LC_EXCEED")"
+assert_eq "launch-check blocks a VM the host cannot hold" "1" "$(jq -r '[.blockers[] | select(test("memória"))] | length' <<< "$LC_EXCEED")"
+assert_eq "launch-check fails" "false" "$(jq -r '.success' <<< "$LC_EXCEED")"
+
+mem_host 14820 12000 4000
+LC_FITS="$(mem_lc desktop --ram 8192)"
+assert_eq "roomy host: launch-check calls it fits" "fits" "$(jq -r '.memory.fit' <<< "$LC_FITS")"
+assert_eq "roomy host: launch-check raises no memory blocker" "0" "$(jq -r '[.blockers[] | select(test("memória"))] | length' <<< "$LC_FITS")"
+
+mem_host 14820 3000 4000
+LC_TIGHT="$(mem_lc desktop --ram 6144)"
+assert_eq "swap-covered size is tight, not blocked" "tight" "$(jq -r '.memory.fit' <<< "$LC_TIGHT")"
+assert_eq "tight host: launch-check raises no memory blocker" "0" "$(jq -r '[.blockers[] | select(test("memória"))] | length' <<< "$LC_TIGHT")"
+assert_contains "tight host says the session will swap" "$(mem_lc_err desktop --ram 6144)" "swap"
+
+mem_lc_conf() {
+    local _rc=0
+    PZ_TEST_MODE=1 HOME="$MEM_T/home" XDG_CONFIG_HOME="$MEM_T/home/.config" \
+        XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE="$1" \
+        PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" PZ_WINDOWS_VM_CONFIG="$2" \
+        bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch-check --json "${@:3}" 2>/dev/null || _rc=$?
+    return 0
+}
+mem_lc_conf_err() {
+    local _rc=0
+    PZ_TEST_MODE=1 HOME="$MEM_T/home" XDG_CONFIG_HOME="$MEM_T/home/.config" \
+        XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE="$1" \
+        PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" PZ_WINDOWS_VM_CONFIG="$2" \
+        bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch-check --json "${@:3}" 2>"$MEM_T/lc.err" >/dev/null || _rc=$?
+    cat "$MEM_T/lc.err"
+}
+
+# The figure saved in the config was right for the host that wrote it. On a
+# 14 GiB Deck a 12288 from an earlier install blocks every desktop launch, and
+# nothing re-bases it, so the only escape was a terminal flag.
+echo "--- a configured figure the host cannot hold is re-based ---"
+mem_host 14820 5300 3600
+printf 'PZ_WINDOWS_VM_RAM_MB=12288\n' > "$MEM_T/stale.conf"
+LC_REBASE="$(mem_lc_conf desktop "$MEM_T/stale.conf")"
+assert_eq "configured figure beyond the host becomes the host-aware size" "4096" "$(jq -r '.memory.requestedMb' <<< "$LC_REBASE")"
+assert_eq "re-based figure is not a memory blocker" "0" "$(jq -r '[.blockers[] | select(test("memória"))] | length' <<< "$LC_REBASE")"
+assert_eq "re-based figure fits" "fits" "$(jq -r '.memory.fit' <<< "$LC_REBASE")"
+LC_REBASE_ERR="$(mem_lc_conf_err desktop "$MEM_T/stale.conf")"
+assert_contains "the re-base names the configured figure" "$LC_REBASE_ERR" "12288"
+assert_contains "the re-base names the size it chose instead" "$LC_REBASE_ERR" "a VM vai iniciar com 4096 MiB"
+assert_contains "the re-base says where the figure lives" "$LC_REBASE_ERR" "PZ_WINDOWS_VM_RAM_MB"
+
+mem_host 14820 12000 4000
+LC_KEEP="$(mem_lc_conf desktop "$MEM_T/stale.conf")"
+assert_eq "a host that can hold the configured figure keeps it" "12288" "$(jq -r '.memory.requestedMb' <<< "$LC_KEEP")"
+
+# A dedicated GRUB boot has no desktop to protect, so its saved figure stands.
+LC_KIOSK="$(mem_lc_conf kiosk "$MEM_T/stale.conf")"
+assert_eq "kiosk boot keeps the configured figure" "12288" "$(jq -r '.memory.requestedMb' <<< "$LC_KIOSK")"
+
+# An explicit --ram is the operator speaking: it is honoured, and refused when
+# the host cannot hold it (proved above). It is never re-based quietly.
+mem_host 14820 5300 3600
+LC_EXPLICIT="$(mem_lc desktop --ram 8192)"
+assert_eq "explicit size is not re-based" "8192" "$(jq -r '.memory.requestedMb' <<< "$LC_EXPLICIT")"
+assert_eq "explicit size covered by swap stays tight" "tight" "$(jq -r '.memory.fit' <<< "$LC_EXPLICIT")"
+
 # The profile launch switches to is put back when the VM is gone.
 MEM_RESTORE="$(PATH="$MEM_T/bin:$PATH" bash -c '
     eval "$(sed -n "/^cleanup_runtime()/,/^}/p" "'"$PZ_ROOT"'/linux/windows-vm/windows-vm.sh")"

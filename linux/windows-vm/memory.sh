@@ -114,26 +114,76 @@ windows_vm_memory_fit() {
     fi
 }
 
+# Say out loud what the host can do with this figure, and print the verdict.
+# Split from the guard so the pre-check can report the same thing without
+# deciding anything: it used to answer "success" for a VM the host could not
+# hold, because only launch_vm ever looked at memory.
+windows_vm_memory_notice() {
+    local ram="${1:-0}" fit avail swap_free
+    fit="$(windows_vm_memory_fit "$ram")"
+    if [ "$fit" = "fits" ]; then
+        printf 'fits'
+        return 0
+    fi
+    avail="$(windows_vm_meminfo_mb MemAvailable)"
+    swap_free="$(windows_vm_meminfo_mb SwapFree)"
+    if [ "$fit" = "tight" ]; then
+        pz_warn "a VM pede ${ram} MiB e o host tem ${avail} MiB disponíveis agora; o resto sai da swap (${swap_free} MiB livres) e a sessão vai ficar lenta"
+    fi
+    if [ "$fit" = "exceed" ]; then
+        pz_error "memória insuficiente: a VM pede ${ram} MiB, o host tem ${avail} MiB disponíveis e ${swap_free} MiB de swap livre"
+        pz_error "feche aplicativos ou escolha um valor menor com --ram (mínimo do Windows 11: 4096)"
+    fi
+    printf '%s' "$fit"
+}
+
 # Refuse a start that cannot fit. Returns 1 only for "exceed", and only when
 # the operator has not said to go ahead anyway.
 windows_vm_memory_guard() {
-    local ram="${1:-0}" fit avail swap_free
-    fit="$(windows_vm_memory_fit "$ram")"
-    avail="$(windows_vm_meminfo_mb MemAvailable)"
-    swap_free="$(windows_vm_meminfo_mb SwapFree)"
-    case "$fit" in
-        tight)
-            pz_warn "a VM pede ${ram} MiB e o host tem ${avail} MiB disponíveis agora; o resto sai da swap (${swap_free} MiB livres) e a sessão vai ficar lenta"
-            ;;
-        exceed)
-            if [ "${PZ_WINDOWS_VM_ALLOW_MEMORY_OVERCOMMIT:-0}" = "1" ]; then
-                pz_warn "a VM pede ${ram} MiB com ${avail} MiB disponíveis e ${swap_free} MiB de swap livre; seguindo por PZ_WINDOWS_VM_ALLOW_MEMORY_OVERCOMMIT=1"
-                return 0
+    local ram="${1:-0}" fit
+    fit="$(windows_vm_memory_notice "$ram")"
+    if [ "$fit" = "exceed" ]; then
+        if [ "${PZ_WINDOWS_VM_ALLOW_MEMORY_OVERCOMMIT:-0}" = "1" ]; then
+            pz_warn "seguindo mesmo assim por PZ_WINDOWS_VM_ALLOW_MEMORY_OVERCOMMIT=1"
+            return 0
+        fi
+        return 1
+    fi
+    return 0
+}
+
+# The figure saved in the config was right for the host that wrote it. A Deck
+# that installed the VM through the GRUB boot saved 12288 and then could never
+# launch it from the desktop: the value stayed pinned, the guard refused every
+# start, and the only way out was a flag typed in a terminal.
+#
+# Used only when the figure came from the config. An explicit --ram is someone
+# speaking now: it is honoured, and refused when the host cannot hold it.
+windows_vm_configured_ram_mb() {
+    local configured="${1:-}" fit default
+    case "$configured" in
+        ''|*[!0-9]*)
+            if [ -z "$configured" ]; then
+                default_ram_mb
+            else
+                # A figure this shell cannot read as MiB is not ours to judge.
+                printf '%s' "$configured"
             fi
-            pz_error "memória insuficiente: a VM pede ${ram} MiB, o host tem ${avail} MiB disponíveis e ${swap_free} MiB de swap livre"
-            pz_error "feche aplicativos ou escolha um valor menor com --ram (mínimo do Windows 11: 4096)"
-            return 1
+            return 0
             ;;
     esac
-    return 0
+    fit="$(windows_vm_memory_fit "$configured")"
+    if [ "$fit" != "exceed" ]; then
+        printf '%s' "$configured"
+        return 0
+    fi
+    default="$(default_ram_mb)"
+    if [ "$default" -ge "$configured" ]; then
+        # Nothing smaller would help: the host cannot hold even the floor.
+        printf '%s' "$configured"
+        return 0
+    fi
+    pz_warn "a configuração pede ${configured} MiB e o host não tem como entregar isso; a VM vai iniciar com ${default} MiB"
+    pz_warn "para fixar um valor que o host sustente, edite PZ_WINDOWS_VM_RAM_MB ou passe --ram"
+    printf '%s' "$default"
 }
