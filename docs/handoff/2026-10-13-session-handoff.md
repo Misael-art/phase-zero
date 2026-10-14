@@ -150,3 +150,120 @@ O classificador de permissões barrou, mesmo com pedido do operador em alguns
 casos: `gh pr merge 105`, `git push origin --delete` em lote, remoção em massa
 de worktrees. Nesses casos o agente deixa o comando para o operador rodar com
 `! <comando>`.
+
+## Atualização — 2026-10-14
+
+Sessão de vigília + implementação das duas lacunas de RAM. Host `misael-jupiter`
+sem reboot e com a sessão KDE intacta do começo ao fim (mandato do operador).
+
+### PRs
+
+| PR | Estado ao fechar | Como seguir |
+|---|---|---|
+| #114 `fix/winvm-memory-and-hermetic` | head `6a99db8`, **CI verde** (confirmado nesta sessão), `MERGEABLE` | Merge é do operador; classificador barra `gh pr merge` para o agente. |
+| #116 `fix/winvm-ram-rebase` | **aberto nesta sessão**, base = #114, head `870ff42`. No fechamento: `windows-vm-shell-test`, `lint`, `arch-clean-host`, `compose-validate`, `homelab-python-test`, `hosted-qemu-kvm-probe`, `security-secret-scan`, `scan` verdes; `shell-lint` (0.9.0/0.11.0), `python-test`, `pester` ainda rodando | Mergear **depois** do #114. Reconferir o rollup terminal do SHA `870ff42` antes de merger. |
+| #113, #105, #63 | inalterados desde o registro de 2026-10-13 | #113 e #105 prontos para o operador; #63 continua **não mergear**. |
+
+### O que o #116 muda
+
+1. `launch-check`/`status` respondem com memória: `memory:{requestedMb,fit,availableMb,swapFreeMb}` e, quando o veredito é `exceed`, entram como blocker. Antes o JSON dizia `success: true` com a memória ausente (`null`).
+2. `PZ_WINDOWS_VM_RAM_MB` pinado num valor que o host não entrega é **re-baseado** para o valor calculado pela regra de `linux/windows-vm/memory.sh`, com aviso que nomeia o número novo. `--ram` explícito e o modo kiosk nunca são re-baseados.
+3. `tests/test_provision.sh`: o caso do sentinela do preflight roda com `env -u PZ_TEST_MODE`. Sem isso a suíte dependia do ambiente de quem a chamou (era eu quem estava vazando o sentinela ao rodar `PZ_TEST_MODE=1 bash tests/test_provision.sh`).
+
+Evidência (arquivos estáveis, todos fora do repositório, em
+`~/.local/state/phasezero/homologation/winvm-20261013/`):
+`baseline-test_provision-6a99db8-clean.log` (295/0 — suíte completa no head do
+#114, rodando com `env -u PZ_TEST_MODE`, sem as assertivas novas),
+`red-test_provision.log` (299 PASS / 16 FAIL com as assertivas novas antes do
+código), `green-test_provision.log` e `final-test_provision.log` (315/0),
+`green-linux-windows-vm.log`, `green-session.log`, `green-graphics.log`,
+`green-ui.log`. O arquivo `baseline-test_provision-6a99db8.log` é uma tentativa
+anterior abortada (292 PASS antes de parar no primeiro caso novo, por
+`set -euo pipefail`, e 1 FAIL que era o meu próprio ambiente vazando
+`PZ_TEST_MODE`); **não** serve de baseline — use o `-clean`.
+
+Prova no host real com o conf pinado em 12288 MiB: instalado `1.22.5-1` →
+`.memory = null`, `success: true`; árvore nova →
+`memory:{requestedMb:4096,fit:"fits",availableMb:6402,swapFreeMb:3861}` sem
+blocker de memória, com o aviso "a configuração pede 12288 MiB ... a VM vai
+iniciar com 4096 MiB".
+
+### A janela de instalação nunca abriu
+
+Regra derivada do próprio código, não inventada: piso do Windows 11 (4096 MiB) +
+reserva do perfil desktop (3072 MiB) ⇒ `MemAvailable ≥ 7168` MiB, e ainda PSI
+`some avg10 < 10`, nenhum QEMU real rodando e `corruption_errs` estável.
+
+Monitor: unit transiente `pz-winvm-resource-monitor` (user unit), amostra a cada
+30 s em `resource-samples.log`, colunas `ts gate need_mb avail_mb total_mb
+swap_free_mb psi_some_avg10 load1 io_in_mb io_out_mb qemu top btrfs_corr
+reason`. De 2026-10-13 23:13 local (`2026-10-14T02:13:31Z`) até
+2026-10-14T09:56Z: **926 amostras `gate=FAIL`, 0 `gate=PASS`**, 1 linha
+`gate=INFO`, máx `avail_mb` 6509, mín 2908, PSI sempre < 2, `btrfs_corr`
+constante em **603** (nenhuma corrupção nova), nenhum QEMU real. Ler assim:
+
+```
+LOG=~/.local/state/phasezero/homologation/winvm-20261013/resource-samples.log
+grep -c 'gate=PASS' "$LOG"; grep -o 'avail_mb=[0-9]*' "$LOG" | cut -d= -f2 | sort -n | tail -1
+```
+
+Dois registros saíram com `reason=qemu-running` por stubs de teste
+(`/tmp/tmp.*/bin/qemu-system-x86_64` do `linux-windows-vm.sh`); o filtro agora
+exige `/proc/<pid>/exe` realmente qemu. A unidade foi rearmada às
+2026-10-14T09:40:43Z e a lacuna de ~2 min está marcada no log como `gate=INFO`.
+
+Quem segura a RAM que falta: o processo do próprio agente (`qoder` 1,1–1,6 GiB)
+e `electron` (~0,9 GiB). Faltaram ~1,7 GiB no melhor momento; só o operador
+libera.
+
+### Inventário de lacunas (nada disso está resolvido)
+
+- **`PZ_WINDOWS_VM_ISO` está errado.** O conf aponta
+  `/home/misael/Downloads/Win11_25H2_BrazilianPortuguese_x64_v2.iso` (não
+  existe). As mídias boas: `/home/misael/ISOs/Win11_25H2_BrazilianPortuguese_x64_v2.iso`
+  e `/home/misael/Downloads/Win11_25H2_BrazilianPortuguese_x64_v2 (1).iso`, ambas
+  com `sha256 50fe4703cf0df0072e093d1f5d58ed450e4c49d8ca960433bbe6278d5ef10107`
+  e 8 172 068 864 bytes — verificado nesta sessão, mesmo hash do plano tirado da
+  ISO real. Ou seja: a instalação falha por caminho, não por mídia. Corrigir o
+  conf **com backup antes**, ou passar `--iso` no `plan`.
+- `preflight.sh:208` `resource_check()` ainda deriva `RAM_MB` de **MemTotal**
+  (o plan JSON mostra `preflight.resources.ramMb: 14820` ao lado de
+  `resources.memory.availableMb: 6291`). Não corrigi — mudança de comportamento
+  pede aprovação por unidade.
+- Perfil de energia do host está em `performance`; origem não verificável
+  (`journalctl` do `power-profiles-daemon` sem entradas a partir de
+  2026-10-13T20:00). O #114 restaura o perfil na saída do `launch`, mas um
+  `launch` morto no meio deixa o valor para trás.
+- Staging `op-20260923-225352-18359` = **40 GB** em
+  `~/.local/state/phasezero/windows-vm/vms/`. **Não remover** antes de o
+  operador abrir a VM instalada pela interface.
+- 969 arquivos órfãos de plano em
+  `~/.local/state/phasezero/windows-vm/provision/plans/`. Lixo de suítes
+  antigas; não limpo.
+- `/home` com 161 GB livres (83% usado).
+- Continua **não validado**: instalação nova a partir da ISO; `launch` real no
+  desktop (diálogo de senha do `phasezero-admin`); boot direto pelo GRUB
+  (WBR-005/006); ciclo remover → reinstalar (WBR-003); cópia de `tpm/` no
+  `finalize` sem teste hermético; `status` ainda marca `boot-runtime-stale`.
+- Teste `tests/test_windows_vm_ui.py::test_windows_vm_page_reflows_without_cut_cta`
+  falha neste host. **Atribuído, não consertado**: reproduzi num checkout limpo
+  de `6a99db8` em worktree descartável, então é pré-existente e dependente de
+  host, com CI verde.
+- LUX-033: o gravador de dock era unit transiente e o reboot de 2026-10-13 o
+  matou. Rearmar após mergear o #113
+  (`systemd-run --user --unit=phasezero-dock-record python3 linux/steamdeck/dock_input_record.py watch`);
+  ainda não existe nenhum registro de undock.
+
+### Como retomar a instalação
+
+1. Com `avail ≥ 7168` confirmado no log (ou fechando aplicativos até isso):
+   ```
+   pz windows-vm provision plan --iso /home/misael/ISOs/Win11_25H2_BrazilianPortuguese_x64_v2.iso --json
+   pz windows-vm provision start --plan-id <id> --confirm <confirmToken>
+   ```
+2. Em paralelo, num terminal: `pz windows-vm provision watch` e
+   `~/.local/state/phasezero/homologation/winvm-20261013/install-watch.sh <op>`.
+3. Antes de qualquer `finalize`: backup de `~/.config/phasezero/windows-vm.conf`
+   (a sessão de 2026-10-13 não teve backup e o `finalize` antigo não levava
+   `tpm/`).
+4. Registrar a linha no ledger de `docs/roadmaps/winvm-boot-resilience-v1.md`.
