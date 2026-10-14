@@ -115,7 +115,10 @@ echo "=== provision: preflight override sentinel ==="
 # Without PZ_TEST_MODE=1 the override must NOT be honored: an invalid fixture
 # must never reach the plan as preflight data.
 set +e
-PLAN_NO_SENTINEL="$(PZ_PREFLIGHT_JSON='not-json' PZ_STATE="$PZ_STATE_DIR" bash "$PROVISION_SCRIPT" plan --iso "$DUMMY_ISO" --json 2>/dev/null)"
+# The sentinel has to be absent for this case to mean anything. Running the
+# suite by hand with PZ_TEST_MODE=1 exported leaked it in and turned a green
+# suite red, so the case strips it no matter how the file is invoked.
+PLAN_NO_SENTINEL="$(env -u PZ_TEST_MODE PZ_PREFLIGHT_JSON='not-json' PZ_STATE="$PZ_STATE_DIR" bash "$PROVISION_SCRIPT" plan --iso "$DUMMY_ISO" --json 2>/dev/null)"
 NO_SENTINEL_RC=$?
 set -e
 assert_eq "override without sentinel does not abort plan" "0" "$NO_SENTINEL_RC"
