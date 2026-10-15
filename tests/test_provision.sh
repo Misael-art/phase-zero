@@ -502,6 +502,74 @@ assert_eq "finalize contention preserves staging" "1" \
 rm -rf "$FINALIZE_LOCK_T"
 
 echo ""
+echo "=== provision: finalize carries the boot artifacts the guest was installed against ==="
+# The flatten step produces a disk, but the disk alone is not the VM: the
+# firmware variables and the swtpm state decide which machine Windows thinks it
+# is. Sourcing the seam keeps this hermetic — `finalize` itself ends in `adopt`,
+# which needs a real target user and a disk that looks installed.
+CARRY_T="$(mktemp -d)"
+carry() {
+    local vm_dir="$1" target_dir="$2" _rc=0
+    (
+        XDG_STATE_HOME="$CARRY_T"
+        # shellcheck source=linux/windows-vm/provision.sh
+        source "$PROVISION_SCRIPT" >/dev/null 2>&1 || true
+        provision_finalize_carry_boot_artifacts "$vm_dir" "$target_dir"
+    )
+    _rc=$?
+    return $_rc
+}
+CARRY_STAGING="$CARRY_T/staging"
+CARRY_TARGET="$CARRY_T/target"
+mkdir -p "$CARRY_STAGING/tpm" "$CARRY_TARGET"
+printf 'firmware\n' > "$CARRY_STAGING/OVMF_VARS.fd"
+chmod 600 "$CARRY_STAGING/OVMF_VARS.fd"
+printf 'swtpm-state\n' > "$CARRY_STAGING/tpm/tpm2000.sample"
+carry_rc=0
+carry "$CARRY_STAGING" "$CARRY_TARGET" || carry_rc=$?
+assert_eq "carry succeeds with both artifacts present" "0" "$carry_rc"
+assert_eq "carry copies the firmware variables" "firmware" "$(cat "$CARRY_TARGET/OVMF_VARS.fd" 2>/dev/null || echo missing)"
+assert_eq "carry keeps the firmware variables private" "600" "$(stat -c '%a' "$CARRY_TARGET/OVMF_VARS.fd" 2>/dev/null || echo 000)"
+assert_eq "carry copies the tpm state file" "swtpm-state" "$(cat "$CARRY_TARGET/tpm/tpm2000.sample" 2>/dev/null || echo missing)"
+assert_eq "carry keeps the tpm directory private" "700" "$(stat -c '%a' "$CARRY_TARGET/tpm" 2>/dev/null || echo 000)"
+rm -rf "$CARRY_STAGING" "$CARRY_TARGET"
+
+# Nothing to carry is not a failure: an operation that never started swtpm
+# still has to reach adoption.
+mkdir -p "$CARRY_T/empty-staging" "$CARRY_T/empty-target"
+carry_rc=0
+carry "$CARRY_T/empty-staging" "$CARRY_T/empty-target" || carry_rc=$?
+assert_eq "carry succeeds when staging holds no boot artifacts" "0" "$carry_rc"
+assert_eq "carry invents no tpm directory" "0" "$([ -e "$CARRY_T/empty-target/tpm" ] && echo 1 || echo 0)"
+assert_eq "carry invents no firmware file" "0" "$([ -e "$CARRY_T/empty-target/OVMF_VARS.fd" ] && echo 1 || echo 0)"
+
+# A symlinked staging tpm is not the guest's state — it is a path planted for
+# the copy to follow out of the sandbox.
+mkdir -p "$CARRY_T/outside" "$CARRY_T/link-staging" "$CARRY_T/link-target"
+printf 'victim\n' > "$CARRY_T/outside/tpm2000.sample"
+ln -s "$CARRY_T/outside" "$CARRY_T/link-staging/tpm"
+carry_rc=0
+carry "$CARRY_T/link-staging" "$CARRY_T/link-target" || carry_rc=$?
+assert_eq "carry refuses a symlinked tpm without replacing it" "0" "$carry_rc"
+assert_eq "symlinked tpm is not followed into the target" "0" "$([ -e "$CARRY_T/link-target/tpm" ] && echo 1 || echo 0)"
+assert_eq "symlinked tpm still points at the planted tree" "victim" "$(cat "$CARRY_T/outside/tpm2000.sample" 2>/dev/null || echo gone)"
+
+# A target that already has tpm state belongs to whoever put it there; the copy
+# must not seal a second VM onto the first one's state.
+mkdir -p "$CARRY_T/keep-staging/tpm" "$CARRY_T/keep-target/tpm"
+printf 'new\n' > "$CARRY_T/keep-staging/tpm/tpm2000.sample"
+printf 'keep\n' > "$CARRY_T/keep-target/tpm/tpm2000.sample"
+carry_rc=0
+carry "$CARRY_T/keep-staging" "$CARRY_T/keep-target" || carry_rc=$?
+assert_eq "carry succeeds against an occupied target" "0" "$carry_rc"
+assert_eq "carry never overwrites existing tpm state" "keep" "$(cat "$CARRY_T/keep-target/tpm/tpm2000.sample" 2>/dev/null || echo missing)"
+# Without the occupied-target guard, cp -a would drop the new state one level
+# deeper and swtpm would look at an empty directory.
+assert_eq "carry does not nest a second tpm inside the occupied one" "0" \
+    "$([ -e "$CARRY_T/keep-target/tpm/tpm" ] && echo 1 || echo 0)"
+rm -rf "$CARRY_T"
+
+echo ""
 echo "=== graphics: plan serialization ==="
 GFX_PLAN_DIR="$(mktemp -d)"
 GFX_VIRTIO=$(PZ_STATE="$GFX_PLAN_DIR" bash "$PROVISION_SCRIPT" plan --iso "$DUMMY_ISO" --graphics virtio-gl --json 2>/dev/null | jq -r '.graphics // ""' 2>/dev/null || echo "")

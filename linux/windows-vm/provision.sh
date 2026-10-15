@@ -3022,6 +3022,24 @@ provision_pending_finalize() {
     fi
 }
 
+# The flattened disk is not the whole VM. The guest was installed against this
+# firmware-variable file and this swtpm state: without them the adopted VM boots
+# with a blank machine, and anything Windows sealed to the TPM during setup is
+# lost. `adopt` points the config at $target_dir/tpm, so both are carried across
+# together. Neither copy is allowed to follow a planted symlink or to overwrite
+# state another VM already owns.
+provision_finalize_carry_boot_artifacts() {
+    local vm_dir="$1" target_dir="$2"
+    if [ -f "$vm_dir/OVMF_VARS.fd" ]; then
+        cp --preserve=mode,timestamps "$vm_dir/OVMF_VARS.fd" "$target_dir/OVMF_VARS.fd"
+        chmod 600 "$target_dir/OVMF_VARS.fd"
+    fi
+    if [ -d "$vm_dir/tpm" ] && [ ! -L "$vm_dir/tpm" ] && [ ! -e "$target_dir/tpm" ]; then
+        cp -a -- "$vm_dir/tpm" "$target_dir/tpm"
+        chmod 700 "$target_dir/tpm"
+    fi
+}
+
 provision_finalize() {
     local operation_id="" target_dir="" json=0 latest=0
     while [ $# -gt 0 ]; do
@@ -3120,18 +3138,7 @@ provision_finalize() {
     mv -- "$partial_disk" "$target_disk"
     partial_disk=""
     chmod 600 "$target_disk"
-    if [ -f "$vm_dir/OVMF_VARS.fd" ]; then
-        cp --preserve=mode,timestamps "$vm_dir/OVMF_VARS.fd" "$target_dir/OVMF_VARS.fd"
-        chmod 600 "$target_dir/OVMF_VARS.fd"
-    fi
-    # The guest was installed against this TPM. Without its state the adopted
-    # VM boots with a blank one: Windows sees a different machine, and
-    # anything sealed to the TPM during setup is lost. adopt points the config
-    # at $target_dir/tpm, so carry it across with the firmware variables.
-    if [ -d "$vm_dir/tpm" ] && [ ! -L "$vm_dir/tpm" ] && [ ! -e "$target_dir/tpm" ]; then
-        cp -a -- "$vm_dir/tpm" "$target_dir/tpm"
-        chmod 700 "$target_dir/tpm"
-    fi
+    provision_finalize_carry_boot_artifacts "$vm_dir" "$target_dir"
 
     local graphics ovmf_code net_model="virtio-net-pci"
     graphics="$(jq -r '.graphics // "compat"' "$op_dir/plan.json")"
