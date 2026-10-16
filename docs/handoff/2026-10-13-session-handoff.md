@@ -256,6 +256,10 @@ libera.
 
 ### Como retomar a instalação
 
+> **Esta seção foi executada em 2026-10-15 e o item 1 está invalidado.** Ler
+> "Atualização — 2026-10-15 (instalação completa rodou)", mais abaixo, antes de
+> repetir qualquer passo.
+
 1. Com `avail ≥ 7168` confirmado no log (ou fechando aplicativos até isso):
    ```
    pz windows-vm provision plan --iso /home/misael/ISOs/Win11_25H2_BrazilianPortuguese_x64_v2.iso --json
@@ -267,3 +271,113 @@ libera.
    (a sessão de 2026-10-13 não teve backup e o `finalize` antigo não levava
    `tpm/`).
 4. Registrar a linha no ledger de `docs/roadmaps/winvm-boot-resilience-v1.md`.
+
+## Atualização — 2026-10-15 (instalação completa rodou)
+
+Sessão Qoder (`claude-session a4227094`), continuando o #116. O host reiniciou às
+2026-10-15 19:51 local sem pedido meu antes desta faixa (a vigília anterior
+parou junto com a unidade transiente); nada foi reiniciado nem fechado depois
+disso, e a sessão KDE (`seat0`, `startplasma-wayland` pid 5907) permaneceu
+intacta durante a instalação inteira.
+
+### Resultado
+
+A instalação nova do Windows **concluiu de ponta a ponta**, sem root, a partir da
+árvore do #116 (`/mnt/sdcard/Projects/pz-winvm-ram-rebase`, head `d761000`), com
+ISO íntegra em `/home/misael/ISOs/Win11_25H2_BrazilianPortuguese_x64_v2.iso`
+(sha256 `50fe4703cf0df0072e093d1f5d58ed450e4c49d8ca960433bbe6278d5ef10107`).
+
+| passo | evidência |
+|---|---|
+| plano | `plan-20261015-224202-27493`, `ramMb:4096` explícito, `memory.fit:"fits"`, `blockers:[]` — `~/.local/state/phasezero/homologation/winvm-20261013/plan-20261016.json` |
+| start | `op-20261015-224232-10324` em `start-20261016.json`, worker `setsid nohup`, `state=running` |
+| fim | `01:42:32Z` → `02:20:27Z` (38 min), `state=completed checkpoint=relaunch progress=100`, os 10 checkpoints em `done` |
+| payload | disco realocado 19 G, `allocatedBytes:20987645952`, snapshot `golden-clean.qcow2`, QGA no relaunch reportando SO e rede OK, drivers virtio exit 0 |
+
+Para reler o estado terminal de qualquer shell:
+
+```
+jq -r '"\(.state) \(.checkpoint) \(.progress) \(.checkpoints)"' \
+  ~/.local/state/phasezero/operations/op-20261015-224232-10324/operation.json
+```
+
+### O gate de 7168 MiB estava errado por excesso
+
+Eu defini `MemAvailable ≥ 7168` (piso 4096 + reserva 3072) como janela mínima
+para instalar e vigiei 2 800+ amostras contra ele. A corrida prova que o limiar
+é conservador demais: a instalação inteira rodou com `MemAvailable` mínimo de
+**1166 MiB**, sem nenhum OOM-kill, sem PSI alto (máx 15,12) e sem erro de disco.
+O que segurou foi o que o próprio código já calcula — `fits` = RAM da VM ≤
+`MemAvailable` — mais o zram, que o host expandiu sozinho três vezes durante a
+corrida (`dmesg`: `Adding … swap on /dev/zram0`, `zram1`, `zram3`).
+
+Consequência prática: o gate de vigília deve ser re-derivado do
+`windows_vm_memory_fit` em `linux/windows-vm/memory.sh`, não da soma
+piso+reserva. **Não mudei o gate nem o código de sizing** — é mudança de
+comportamento e precisa de aprovação por unidade.
+
+Contagens reconciliadas (três samplers independentes sobre a mesma janela):
+
+```
+L=~/.local/state/phasezero/homologation/winvm-20261013
+awk '$1>="2026-10-16T01:42:00Z" && $1<="2026-10-16T02:21:00Z"' $L/resource-samples.log | wc -l   # 78, todos gate=FAIL
+grep -c '^2026' $L/guard-op-20261015-224232-10324.log                                             # 111
+grep -c 'op=op-20261015' $L/install-watch-op-20261015-224232-10324.log                             # 69
+awk '$1>="2026-10-16T01:42:00Z" && $1<="2026-10-16T02:21:00Z"' $L/resource-samples.log | \
+  grep -o 'avail_mb=[0-9]*' | cut -d= -f2 | sort -n | sed -n '1p;$p'                               # 1166 / 5911
+grep -o 'btrfs_corr=[0-9]*' $L/guard-op-20261015-224232-10324.log | sort -u                         # só 603
+```
+
+### Nada pré-existente foi tocado
+
+- conf: md5 `f90148ad19668141fd2b01b65a962012`, igual ao backup
+  `windows-vm.conf.bak-20261015T200748` tomado antes de começar.
+- discos ativados: `~/VirtualMachines/PhaseZero-Windows-20260923-225352-18359/phasezero-windows.qcow2`
+  continua com mtime `2026-10-13T01:10`; `adoptedDiskExists:false` na operação nova.
+- `finalize` **não foi rodado**. Ele achata 19,5 GB e chama `windows-vm.sh adopt`,
+  que reescreve conf e disco — fica com o operador presente.
+  `provision pending-finalize` já lista a operação.
+
+### Lacunas abertas por esta corrida
+
+1. `preflight cache SHA mismatch (expected=e14cf2b9… cached=4fcae9c9…)` obriga
+   re-download de 753 MB de virtio em cada instalação (43 s + banda). O hash
+   pinado e a cache do host divergem permanentemente.
+2. QGA reporta `Windows 10 Home` para uma ISO Windows 11 25H2. É o nome de
+   produto que o agente devolve, não uma verificação de SKU; `guestLoginVerified`
+   continua em aberto e nada nesta corrida fecha isso.
+3. A resolução do fim da fase `setup` é o poll de 30 s de `run_setup`: o heartbeat
+   de 1800 s e o `QEMU exited` caíram no mesmo sample, então o término real do
+   convidado está em (1770 s, 1800 s].
+4. `install-watch.sh` mede `qcow_bytes` pelo glob
+   `~/VirtualMachines/PhaseZero-Windows*/phasezero-windows.qcow2`, ou seja, o
+   disco **ativado**. Durante uma instalação ele mostra o disco velho congelado
+   (38,6 GB constantes) enquanto o staging crescia. O número real desta corrida
+   veio de `qemu-img info`/`du` direto em `$vm_dir`. O sampler precisa apontar
+   para o staging da operação.
+5. Espaço: staging novo 19,5 GB somado ao `op-20260923-225352-18359` de 42,7 GB.
+   `/home` foi de 147 GB para 128 GB livres. Nenhum dos dois removíveis antes de
+   o operador confirmar que abre a VM pela interface.
+
+### Estado no fechamento
+
+A VM relançada está de pé com janela GTK (`qemuPid 988752`, RSS ~4,1 GiB,
+`-display gtk`, graphics `compat`/QXL) para o operador abrir. Unidades de
+usuário: `pz-winvm-resource-monitor.service` ativa; `pz-winvm-install-guard` e
+`pz-winvm-install-watch` encerraram sozinhas ao estado terminal, como projetado.
+Artefatos novos em `~/.local/state/phasezero/homologation/winvm-20261013/`:
+`plan-20261016.json`/`.err`, `start-20261016.json`/`.err`,
+`guard-op-20261015-224232-10324.log`, `install-watch-op-20261015-224232-10324.log`,
+`await-op-20261015-224232-10324.log`, `install-guard.sh`, `await-install.sh`,
+`dmesg-baseline-op-20261015-224232-10324.txt`.
+
+### Como continuar daqui
+
+1. Abrir a VM nova na janela GTK já aberta (ou `pz windows-vm launch`) e registrar
+   o que a tela mostra — é a primeira vez que esta imagem instalada aparece na UI.
+2. Decidir o `finalize` com backup do conf já existente; depois verificar que o
+   `tpm/` e o `OVMF_VARS.fd` foram carregados (o teste `6fd7c69` cobre a cópia, a
+   UI ainda não cobre o resultado).
+3. Mergear #114 e depois #116 (head `d761000`) com o rollup terminal do CI no SHA
+   pinado.
+4. Rearmar o gravador LUX-033 depois do #113 e decidir o caminho de `PZ_WINDOWS_VM_ISO`.
