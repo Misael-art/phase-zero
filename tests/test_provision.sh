@@ -761,6 +761,138 @@ assert_eq "virtio-source.sh carries the trusted version and hash" "1" "$VT_SOURC
 rm -rf "$VT_T"
 
 echo ""
+echo "=== virtio: o mesmo pino do lado do convidado ==="
+# The host already verifies every vendor MSI against vendor.json before it ships
+# the bundle; the guest installs whatever its own download returns. The virtiofs
+# entry pinned a SHA-256 while pointing at the floating stable-virtio directory,
+# and the two have since diverged: on 2026-10-16 that directory served
+# 4f438846… for a file the manifest still describes as fafd93cb…, which is the
+# bytes archive-virtio/virtio-win-0.1.285-1 holds. A re-download therefore can
+# never satisfy the hash it publishes, and the only code path that still runs is
+# the guest one that verifies nothing.
+GV_MANIFEST="$PZ_ROOT/linux/windows-vm/guest/vendor/vendor.json"
+GV_VENDOR_DIR="$PZ_ROOT/linux/windows-vm/guest/vendor"
+GV_FLOATING="$(jq -r '[.components[] | (.url // ""), (.urlTemplate // ""), (.version // "")]
+    | map(select(test("stable-virtio"))) | length' "$GV_MANIFEST")"
+assert_eq "no vendor component points at the floating directory" "0" "$GV_FLOATING"
+# Positive control: the manifest must still describe the guest-tools file,
+# otherwise the check above would pass on an emptied file.
+assert_eq "the manifest still describes the guest tools MSI" "virtio-win-gt-x64.msi" \
+    "$(jq -r '.components.virtiofs.file' "$GV_MANIFEST")"
+GV_SHA_DRIFT="$(jq -r '.components | to_entries[] | "\(.value.file) \(.value.sha256)"' "$GV_MANIFEST" \
+    | while read -r gv_name gv_sha; do
+        [ -f "$GV_VENDOR_DIR/$gv_name" ] || continue
+        [ "$(sha256sum "$GV_VENDOR_DIR/$gv_name" | cut -d' ' -f1)" = "${gv_sha,,}" ] || printf '%s\n' "$gv_name"
+    done)"
+assert_eq "every vendored MSI matches the hash its manifest pins" "" "$GV_SHA_DRIFT"
+
+# Version, URL and hash stay in one place: the guest-tools URL is derived from
+# the same pinned version the ISO is derived from, not copied next to it.
+GV_GT_DERIVED="$(PZ_WINDOWS_VM_VIRTIO_VERSION=9.9.9 bash -c \
+    '. "$0/linux/windows-vm/virtio-source.sh"; printf %s "$PZ_VIRTIO_WIN_GT_MSI_URL"' "$PZ_ROOT")"
+assert_eq "the single source derives the guest tools URL from the pinned version" \
+    "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-9.9.9-1/virtio-win-gt-x64.msi" \
+    "$GV_GT_DERIVED"
+
+# The resolution has to happen in the bundle the guest actually receives: the
+# manifest a Windows guest reads cannot source a shell file.
+GV_T="$(mktemp -d)"
+GV_ROOT="$GV_T/root"
+GV_BIN="$GV_T/bin"
+GV_EXCHANGE="$GV_T/exchange"
+GV_HOME="$GV_T/home"
+mkdir -p "$GV_ROOT/linux/windows-vm/guest/vendor" "$GV_BIN" "$GV_HOME" "$GV_EXCHANGE"
+ln -s "$PZ_ROOT/linux/lib" "$GV_ROOT/linux/lib"
+cp "$PZ_ROOT/linux/windows-vm/virtio-source.sh" "$GV_ROOT/linux/windows-vm/"
+cp "$GV_MANIFEST" "$GV_ROOT/linux/windows-vm/guest/vendor/vendor.json"
+printf 'stub\n' > "$GV_ROOT/linux/windows-vm/guest/Install-VirtioFS.ps1"
+printf 'winfsp fixture\n' > "$GV_ROOT/linux/windows-vm/guest/vendor/winfsp-2.0.23075.msi"
+printf 'spice fixture\n' > "$GV_ROOT/linux/windows-vm/guest/vendor/spice-webdavd-x64-latest.msi"
+GV_WINFSP_SHA="$(sha256sum "$GV_ROOT/linux/windows-vm/guest/vendor/winfsp-2.0.23075.msi" | cut -d' ' -f1)"
+GV_SPICE_SHA="$(sha256sum "$GV_ROOT/linux/windows-vm/guest/vendor/spice-webdavd-x64-latest.msi" | cut -d' ' -f1)"
+printf 'guest tools fixture\n' > "$GV_T/gt-good"
+GV_GT_SHA="$(sha256sum "$GV_T/gt-good" | cut -d' ' -f1)"
+jq --arg w "$GV_WINFSP_SHA" --arg s "$GV_SPICE_SHA" --arg g "$GV_GT_SHA" \
+    '.components.winfsp.sha256 = $w
+     | .components."spice-webdavd".sha256 = $s
+     | .components.virtiofs.sha256 = $g' \
+    "$GV_ROOT/linux/windows-vm/guest/vendor/vendor.json" > "$GV_T/manifest.json"
+mv "$GV_T/manifest.json" "$GV_ROOT/linux/windows-vm/guest/vendor/vendor.json"
+cat > "$GV_BIN/curl" <<'GV_CURL'
+#!/usr/bin/env bash
+# Fake curl: logs every argument and writes the payload the case chose. The
+# point of the log is the URL the caller actually asked for.
+printf '%s\n' "$@" >> "$GV_CURL_LOG"
+prev=""
+for arg in "$@"; do
+    if [ "$prev" = "-o" ]; then
+        cp "$GV_FAKE_FILE" "$arg"
+        exit 0
+    fi
+    prev="$arg"
+done
+exit 0
+GV_CURL
+chmod +x "$GV_BIN/curl"
+GV_BUNDLE="$GV_EXCHANGE/phasezero-guest-setup"
+GV_RUN=(env PATH="$GV_BIN:$PATH" HOME="$GV_HOME"
+    XDG_CONFIG_HOME="$GV_HOME/.config" XDG_DATA_HOME="$GV_HOME/.local/share"
+    XDG_STATE_HOME="$GV_HOME/.local/state" XDG_CACHE_HOME="$GV_HOME/.cache"
+    PZ_ROOT="$GV_ROOT" PZ_LOCAL_BIN="$GV_HOME/.local/bin"
+    PZ_WINDOWS_VM_EXCHANGE_DIR="$GV_EXCHANGE" PZ_WINDOWS_VM_VIRTIO_VERSION="9.9.9"
+    GV_FAKE_FILE="$GV_T/gt-good")
+GV_FRONTENDS="$PZ_ROOT/linux/windows-vm/container-frontends.sh"
+
+: > "$GV_T/log-good"
+"${GV_RUN[@]}" GV_CURL_LOG="$GV_T/log-good" bash "$GV_FRONTENDS" install-virtiofs >/dev/null 2>&1 || true
+assert_contains "the bundle downloads the guest tools from the derived archive URL" \
+    "$(cat "$GV_T/log-good")" "archive-virtio/virtio-win-9.9.9-1/virtio-win-gt-x64.msi"
+assert_eq "the bundle never asks the floating directory for an MSI" "0" \
+    "$(grep -c 'stable-virtio' "$GV_T/log-good" | tr -d ' ' || true)"
+assert_eq "a verified download lands in the bundle the guest receives" "1" \
+    "$([ -f "$GV_BUNDLE/virtio-win-gt-x64.msi" ] && echo 1 || echo 0)"
+GV_BUNDLE_SHA=""
+if [ -f "$GV_BUNDLE/virtio-win-gt-x64.msi" ]; then
+    GV_BUNDLE_SHA="$(sha256sum "$GV_BUNDLE/virtio-win-gt-x64.msi" | cut -d' ' -f1)"
+fi
+assert_eq "the bundled MSI is the one the manifest pins" "$GV_GT_SHA" "$GV_BUNDLE_SHA"
+# The guest reads JSON, not shell, so the host resolves the template before the
+# bundle leaves. A guest handed "{version}" would have nothing to verify against.
+GV_BUNDLE_URL="$(jq -r '.components.virtiofs.url // ""' "$GV_BUNDLE/vendor.json" 2>/dev/null || true)"
+assert_eq "the bundle manifest holds a concrete URL, not a template" "virtio-win-9.9.9-1" \
+    "$(sed -n 's|.*archive-virtio/\(virtio-win-[0-9][0-9.]*-[0-9]*\)/virtio-win-gt-x64.msi.*|\1|p' <<< "$GV_BUNDLE_URL")"
+GV_LEFTOVER_TEMPLATES="$(jq -r '.components | to_entries[] | .value.urlTemplate // ""' \
+    "$GV_BUNDLE/vendor.json" 2>/dev/null | grep -c . | tr -d ' ' || true)"
+assert_eq "the bundle manifest carries no template left to resolve" "0" "$GV_LEFTOVER_TEMPLATES"
+
+printf 'other bytes entirely\n' > "$GV_T/gt-bad"
+rm -rf "$GV_EXCHANGE" "$GV_ROOT/linux/windows-vm/guest/vendor/virtio-win-gt-x64.msi"
+mkdir -p "$GV_EXCHANGE"
+: > "$GV_T/log-bad"
+"${GV_RUN[@]}" GV_FAKE_FILE="$GV_T/gt-bad" GV_CURL_LOG="$GV_T/log-bad" \
+    bash "$GV_FRONTENDS" install-virtiofs >/dev/null 2>&1 || true
+assert_eq "bytes that do not match the pinned hash never reach the bundle" "0" \
+    "$([ -f "$GV_BUNDLE/virtio-win-gt-x64.msi" ] && echo 1 || echo 0)"
+assert_eq "mismatched bytes are not kept as the vendor cache either" "0" \
+    "$([ -f "$GV_ROOT/linux/windows-vm/guest/vendor/virtio-win-gt-x64.msi" ] && echo 1 || echo 0)"
+
+# And the guest must stop installing whatever a download returns.
+GV_PS="$PZ_ROOT/linux/windows-vm/guest/Install-VirtioFS.ps1"
+GV_VENDOR_LIB="$PZ_ROOT/linux/windows-vm/guest/PZ-Vendor.ps1"
+assert_eq "the guest installer carries no URL of its own" "0" \
+    "$(grep -cE 'https?://' "$GV_PS" | tr -d ' ' || true)"
+# Positive control: the grep finds downloads where they do live, so the zero
+# above means the installer is clean rather than that nothing was searched.
+GV_FETCHES=""
+if [ -f "$GV_VENDOR_LIB" ]; then
+    GV_FETCHES="$(grep -c 'Invoke-WebRequest' "$GV_VENDOR_LIB" | tr -d ' ' || true)"
+fi
+assert_eq "the verified downloader is the one place that fetches" "1" "$GV_FETCHES"
+assert_eq "the guest installer obtains every MSI through it" "3" \
+    "$(grep -c 'Get-PZVerifiedMsi' "$GV_PS" | tr -d ' ' || true)"
+rm -rf "$GV_T"
+
+echo ""
 echo "=== preflight: the RAM it reports is memory the host can hand over ==="
 # A plan once showed 14820 MiB of "RAM" on a 14820 MiB machine that had 2100
 # MiB free. MemTotal is not a budget; the figure a caller can act on is what is

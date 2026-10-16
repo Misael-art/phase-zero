@@ -10,6 +10,8 @@ param(
     [string]$BundlePath = "$PSScriptRoot"
 )
 
+. (Join-Path $PSScriptRoot 'PZ-Vendor.ps1')
+
 $PZ_LOG_DIR = "$env:ProgramData\PhaseZero"
 $null = New-Item -ItemType Directory -Force -Path $PZ_LOG_DIR
 $LOG = "$PZ_LOG_DIR\provisioning.log"
@@ -22,32 +24,15 @@ function Write-Log {
     Write-Host "$ts $Message"
 }
 
-function Get-VendorMsi {
-    param([string]$FileName)
-    $path = Join-Path $BundlePath $FileName
-    if (Test-Path $path) { return $path }
-    return $null
-}
-
 function Install-VirtioFS {
     Write-Log "=== Installing VirtioFS + WinFsp ==="
     $tmpDir = "$env:TEMP\pz-virtiofs"
     $null = New-Item -ItemType Directory -Force -Path $tmpDir
     try {
-        $winfspMsi = Get-VendorMsi "winfsp-2.0.23075.msi"
-        $virtioMsi = Get-VendorMsi "virtio-win-gt-x64.msi"
-        if (-not $winfspMsi -and -not $Offline) {
-            Write-Log "Downloading WinFsp from GitHub..."
-            $winfspMsi = "$tmpDir\winfsp.msi"
-            Invoke-WebRequest -Uri "https://github.com/winfsp/winfsp/releases/download/v2.0/winfsp-2.0.23075.msi" -OutFile $winfspMsi -UseBasicParsing
-        }
-        if (-not $virtioMsi -and -not $Offline) {
-            Write-Log "Downloading Virtio-win Guest Tools from Fedora People..."
-            $virtioMsi = "$tmpDir\virtio-win-gt-x64.msi"
-            Invoke-WebRequest -Uri "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win-gt-x64.msi" -OutFile $virtioMsi -UseBasicParsing
-        }
-        if (-not $winfspMsi) { throw "WinFsp MSI not found (use -Offline only when MSIs are vendored in bundle)" }
-        if (-not $virtioMsi)  { throw "Virtio-win MSI not found (use -Offline only when MSIs are vendored in bundle)" }
+        $winfspMsi = Get-PZVerifiedMsi -BundlePath $BundlePath -Entry 'winfsp' `
+            -DownloadDir $tmpDir -Offline:$Offline
+        $virtioMsi = Get-PZVerifiedMsi -BundlePath $BundlePath -Entry 'virtiofs' `
+            -DownloadDir $tmpDir -Offline:$Offline
         Write-Log "Installing WinFsp..."
         Start-Process msiexec.exe -ArgumentList "/i `"$winfspMsi`" /qn /norestart" -Wait -NoNewWindow
         Write-Log "Installing Virtio-win Guest Tools (includes VirtioFS)..."
@@ -106,13 +91,8 @@ function Install-SpiceWebDAV {
     $tmpDir = "$env:TEMP\pz-spice"
     $null = New-Item -ItemType Directory -Force -Path $tmpDir
     try {
-        $msi = Get-VendorMsi "spice-webdavd-x64-latest.msi"
-        if (-not $msi -and -not $Offline) {
-            Write-Log "Downloading spice-webdavd..."
-            $msi = "$tmpDir\spice-webdavd.msi"
-            Invoke-WebRequest -Uri "https://www.spice-space.org/download/windows/spice-webdavd/spice-webdavd-x64-latest.msi" -OutFile $msi -UseBasicParsing
-        }
-        if (-not $msi) { throw "spice-webdavd MSI not found (use -Offline only when MSIs are vendored in bundle)" }
+        $msi = Get-PZVerifiedMsi -BundlePath $BundlePath -Entry 'spice-webdavd' `
+            -DownloadDir $tmpDir -Offline:$Offline
         Write-Log "Installing spice-webdavd..."
         Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait -NoNewWindow
         Write-Log "spice-webdavd installed"

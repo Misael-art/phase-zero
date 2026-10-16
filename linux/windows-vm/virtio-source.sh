@@ -11,6 +11,12 @@
 PZ_VIRTIO_WIN_VERSION="${PZ_WINDOWS_VM_VIRTIO_VERSION:-0.1.285}"
 PZ_VIRTIO_WIN_URL="${PZ_WINDOWS_VM_VIRTIO_URL:-https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-${PZ_VIRTIO_WIN_VERSION}-1/virtio-win-${PZ_VIRTIO_WIN_VERSION}.iso}"
 PZ_VIRTIO_WIN_SHA256="${PZ_WINDOWS_VM_VIRTIO_SHA256:-e14cf2b94492c3e925f0070ba7fdfedeb2048c91eea9c5a5afb30232a3976331}"
+# The guest tools MSI the Windows side installs is the same release as the ISO,
+# so it comes from the same archive directory. stable-virtio is a moving
+# directory: on 2026-10-16 it served 4f438846… while the archive for this
+# version holds fafd93cb…, which is the bytes the vendored file and its pinned
+# hash describe. Deriving from the version keeps one number in charge.
+PZ_VIRTIO_WIN_GT_MSI_URL="${PZ_WINDOWS_VM_VIRTIO_GT_MSI_URL:-https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-${PZ_VIRTIO_WIN_VERSION}-1/virtio-win-gt-x64.msi}"
 
 # A file is trusted only when its hash equals the hash above. Never treat a
 # cached or freshly downloaded ISO as ready just because it exists.
