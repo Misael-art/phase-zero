@@ -642,7 +642,14 @@ teclado, GRUB).
    convidado de novo apenas se a decisão for validar interação primeiro.
 3. `provision finalize --preview` e ativação com o operador presente; conferir o
    `windows-vm.conf.bak-*` criado.
-4. Mergear #114 e depois #116 (head `c7ed0bc`), #113, #105.
+4. Mergear #114 e depois #116 (head `c7ed0bc`), #113, #105. **Fazer isso antes do
+   passo 3, não depois:** `git grep -c "windows-vm.conf.bak-" origin/main` não dá
+   hit, ou seja, o backup automático e o rollback da troca existem só no `c7ed0bc`
+   e não no que está releaseado. Ativar antes do merge é rodar a troca pelo caminho
+   antigo, sem `windows-vm.conf.bak-*` — exatamente o P0 que a revisão apontou.
+   Não localizei a cópia instalada do script (`pz` resolve para o wrapper
+   `/usr/bin/pz`; nada de `windows-vm.sh` sob os caminhos de share habituais), então
+   confirmar qual código a ativação executa é passo prévio obrigatório.
 5. Depois: fonte única do virtio, caminho/SHA da ISO no conf, política de memória
    por perfil, instrumentação do staging no repositório.
 
