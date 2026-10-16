@@ -364,6 +364,9 @@ class AiDevPage(BasePage):
             self._set_bridge_state(
                 "● Atenção: o ~/.codex do seu Codex normal aponta para um bridge local. "
                 "A ponte nunca faz isso; confira a configuração.", "error")
+        elif running and payload.get("upstreamMode") == "full":
+            self._set_bridge_state("● Web ativo — ferramentas em verificação"
+                                   + (f"; {login}" if login else ""), "warning")
         elif running:
             self._set_bridge_state(f"● Pronto — {label}" + (f"; {login}" if login else ""),
                                    "success")
@@ -375,8 +378,13 @@ class AiDevPage(BasePage):
             self._set_bridge_state(f"● Parado — {label}. Use Ligar ou reparar.", "warning")
         blockers = node("eligibility").get("blockers")
         if payload.get("upstreamMode") == "full":
-            self.bridge_tools.setText("Com ferramentas: ligado (experimental). Cada ação "
-                                      "local pede sua aprovação.")
+            if isinstance(blockers, list) and blockers:
+                self.bridge_tools.setText(f"Com ferramentas: configuração bloqueada — "
+                                          f"{blockers[0]}.")
+            else:
+                self.bridge_tools.setText("Com ferramentas: configurado, mas chamada MCP "
+                                          "real ainda não verificada. Cada ação local exige "
+                                          "permissão do seu plano e aprovação.")
         elif isinstance(blockers, list) and blockers:
             self.bridge_tools.setText(f"Com ferramentas: bloqueado — {blockers[0]}.")
         else:
