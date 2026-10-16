@@ -22,9 +22,32 @@ from linux.ai.chatgpt_web_bridge import (
     UNIT_NAME,
     Bridge,
     BridgeError,
+    Runner,
 )
 
 ACKS = {"experimental", "unofficial", "unsigned", "same-user-boundary", "no-quota-promise"}
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="logind é Linux")
+def test_other_users_uses_uid_and_falls_back_to_logind_session_files(tmp_path, monkeypatch):
+    runner = Runner()
+    own_uid = os.getuid()
+    monkeypatch.setattr(runner, "run", lambda *args, **kwargs:
+                        (0, f"{own_uid} nome-irrelevante yes active\n", ""))
+    monkeypatch.setenv("LOGNAME", "another-user")
+    assert runner.other_users() == []
+
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    (sessions / "1").write_text(f"UID={own_uid}\nSTATE=active\n")
+    monkeypatch.setattr(runner, "session_dir", sessions)
+    monkeypatch.setattr(runner, "run", lambda *args, **kwargs: (1, "", "bus unavailable"))
+    assert runner.other_users() == []
+
+    (sessions / "2").write_text(f"UID={own_uid + 1}\nSTATE=active\n")
+    assert runner.other_users() not in ([], ["unknown"])
+    (sessions / "2").write_text("STATE=active\n")
+    assert runner.other_users() == ["unknown"]
 
 
 class FakeRunner:
@@ -948,7 +971,7 @@ def ready_host(host, monkeypatch, mode: str = "browser-only"):
 
 
 def tools_gate_met(bridge: Bridge) -> None:
-    bridge.record_eligibility("pro", "yes", "use", "yes")
+    bridge.record_eligibility("business", "yes", "use", "yes")
     bridge._secret_store = FakeVault()
     bridge.key_store("runtime-key-material", 30)
 
@@ -1277,7 +1300,7 @@ def test_tools_steps_explain_an_ineligible_plan_and_the_single_next_step(host, m
     assert "Plus" in step["detail"] and "Pro" in step["detail"] and "Business" in step["detail"]
     assert "help.openai.com" in step["action"]
     # Later steps are listed but never offered before the plan is resolved.
-    assert [item["id"] for item in status["steps"]][:3] == ["eligibility", "plan", "developer-mode"]
+    assert [item["id"] for item in status["steps"]][:3] == ["eligibility", "plan", "plan-full"]
 
     bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
                                     "unpacked": "verified"}
@@ -1295,6 +1318,9 @@ def test_tools_steps_explain_an_ineligible_plan_and_the_single_next_step(host, m
 def test_tools_steps_report_runtime_blocker_after_other_requirements(host, monkeypatch):
     bridge, runner, _ = ready_host(host, monkeypatch)
     bridge.record_eligibility("pro", "yes", "use", "yes")
+    pro_step = bridge.tools_steps()["next"]
+    assert pro_step["id"] == "plan-full" and "só leitura/fetch" in pro_step["detail"]
+    bridge.record_eligibility("business", "yes", "use", "yes")
     single_user = next(item for item in bridge.tools_steps()["steps"]
                        if item["id"] == "single-user")
     assert single_user["ok"] is True and "verificado" in single_user["detail"]
@@ -1330,6 +1356,19 @@ def test_tools_steps_report_runtime_blocker_after_other_requirements(host, monke
     done = bridge.tools_steps()
     assert done["ready"] is False and done["next"]["id"] == "full-runtime"
     assert "runtime-key-material" not in json.dumps(done)
+
+
+def test_pro_cannot_unlock_full_host_tools_by_setting_launcher_mode(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch, mode="full")
+    bridge.record_eligibility("pro", "yes", "use", "yes")
+    bridge._secret_store = FakeVault()
+    bridge.key_store("runtime-key-material", 30)
+
+    with pytest.raises(BridgeError) as error:
+        bridge.require_tools_ready(bridge.load_state())
+
+    assert "plano Pro permite apenas leitura/fetch" in str(error.value)
+    assert bridge.tools_steps()["next"]["id"] == "plan-full"
 
 
 def test_tools_check_rejects_healthy_doctor_without_a_working_turn(host, monkeypatch):

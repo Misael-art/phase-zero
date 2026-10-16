@@ -385,6 +385,8 @@ def load_sibling(name: str) -> Any:
 class Runner:
     """Process seam; tests replace it, production uses real commands."""
 
+    session_dir = Path("/run/systemd/sessions")
+
     def run(self, args: list[str], *, env: dict[str, str] | None = None,
             timeout: int = 30, input_text: str | None = None) -> tuple[int, str, str]:
         try:
@@ -438,11 +440,42 @@ class Runner:
             return probe.connect_ex(("127.0.0.1", port)) == 0
 
     def other_users(self) -> list[str]:
-        code, out, _ = self.run(["loginctl", "list-users", "--no-legend"], timeout=5)
-        if code != 0:
+        if not hasattr(os, "getuid"):
             return ["unknown"]
-        users = [line.split()[1] for line in out.splitlines() if len(line.split()) >= 2]
-        return [user for user in users if user != getpass.getuser()]
+        code, out, _ = self.run(["loginctl", "list-users", "--no-legend"], timeout=5)
+        own_uid = os.getuid()
+        if code == 0:
+            rows = [line.split() for line in out.splitlines() if line.strip()]
+            if rows and all(row and row[0].isdigit() for row in rows):
+                uids = {int(row[0]) for row in rows}
+                if own_uid in uids:
+                    return [self.uid_label(uid) for uid in sorted(uids - {own_uid})]
+        # logind's D-Bus query can fail inside an otherwise working Codex turn.
+        # Read its runtime session records as a second source; unknown remains
+        # fail-closed if records are absent or cannot be parsed completely.
+        try:
+            entries = [path for path in self.session_dir.iterdir() if path.is_file()]
+            if not entries:
+                return ["unknown"]
+            uids = set()
+            for path in entries:
+                match = re.search(r"(?m)^UID=(\d+)$", path.read_text(encoding="utf-8"))
+                if match is None:
+                    return ["unknown"]
+                uids.add(int(match.group(1)))
+            if own_uid not in uids:
+                return ["unknown"]
+            return [self.uid_label(uid) for uid in sorted(uids - {own_uid})]
+        except OSError:
+            return ["unknown"]
+
+    @staticmethod
+    def uid_label(uid: int) -> str:
+        try:
+            import pwd
+            return pwd.getpwuid(uid).pw_name
+        except (ImportError, KeyError):
+            return f"uid:{uid}"
 
     def launcher_processes(self, binary: Path, data_dir: Path,
                            readonly_path: Path) -> list[dict[str, Any]]:
@@ -2218,6 +2251,12 @@ class Bridge:
         if self.runner.other_users():
             blockers.append("há outros usuários com sessão neste host")
         if need_broker:
+            capability = self.eligibility(state).get("planMcpCapability")
+            if capability == "read":
+                blockers.append("o plano Pro permite apenas leitura/fetch pelo conector MCP; "
+                                "escrita exige Business, Enterprise ou Edu")
+            elif capability != "write-beta":
+                blockers.append("acesso completo pelo conector MCP não comprovado no plano informado")
             config = self.upstream_config() or {}
             if config.get("mode") != "full":
                 blockers.append("launcher não está no modo com ferramentas")
@@ -2267,6 +2306,16 @@ class Bridge:
                                    "sem modo desenvolvedor. A OpenAI libera conectores MCP próprios "
                                    "em Pro (só leitura) e em Business, Enterprise e Edu"),
              f"Mude para um plano com modo desenvolvedor e registre de novo. Fonte: {PLAN_SOURCE}"),
+            ("plan-full", eligibility.get("planMcpCapability") == "write-beta",
+             "acesso completo a ferramentas MCP disponível no plano informado"
+             if eligibility.get("planMcpCapability") == "write-beta" else
+             f"plano {label} permite só leitura/fetch; acesso completo exige "
+             "Business, Enterprise ou Edu"
+             if eligibility.get("planMcpCapability") == "read" else
+             "acesso completo não disponível ou não comprovado no plano informado",
+             "Mantenha o modo Web. Para escrita pelo conector, use um plano compatível "
+             "e registre a nova elegibilidade; a assinatura Pro e a chave de túnel "
+             "não ampliam as permissões do ChatGPT."),
             ("developer-mode", (record or {}).get("developerMode") == "yes",
              "modo desenvolvedor do ChatGPT " + ("confirmado" if (record or {}).get("developerMode")
                                                  == "yes" else "não confirmado"),
