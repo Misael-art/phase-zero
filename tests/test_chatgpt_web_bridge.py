@@ -1295,6 +1295,10 @@ def test_tools_steps_explain_an_ineligible_plan_and_the_single_next_step(host, m
 def test_tools_steps_report_runtime_blocker_after_other_requirements(host, monkeypatch):
     bridge, runner, _ = ready_host(host, monkeypatch)
     bridge.record_eligibility("pro", "yes", "use", "yes")
+    single_user = next(item for item in bridge.tools_steps()["steps"]
+                       if item["id"] == "single-user")
+    assert single_user["ok"] is True and "verificado" in single_user["detail"]
+    assert single_user["action"] == "Nenhuma ação necessária."
     assert bridge.tools_steps()["next"]["id"] == "runtime-key"
     assert "tunnel key store" in bridge.tools_steps()["next"]["action"]
 
@@ -1302,6 +1306,19 @@ def test_tools_steps_report_runtime_blocker_after_other_requirements(host, monke
     bridge.key_store("runtime-key-material", 30)
     step = bridge.tools_steps()["next"]
     assert step["id"] == "full-runtime" and "browser-only" in step["action"]
+    launcher_mode = next(item for item in bridge.tools_steps()["steps"]
+                         if item["id"] == "launcher-mode")
+    assert launcher_mode["ok"] is False
+    assert "Não altere o launcher" in launcher_mode["action"]
+
+    runner.other_users = lambda: ["another-user"]
+    single_user = bridge.tools_steps()["next"]
+    assert single_user["id"] == "single-user" and single_user["ok"] is False
+    assert "outra conta local" in single_user["detail"]
+    assert "Não ative ferramentas" in single_user["action"]
+    runner.other_users = lambda: ["unknown"]
+    assert "não foi possível verificar" in bridge.tools_steps()["next"]["detail"]
+    runner.other_users = lambda: []
 
     config = bridge.paths.core_home / "config.json"
     config.write_text(json.dumps({**json.loads(config.read_text()), "mode": "full",
