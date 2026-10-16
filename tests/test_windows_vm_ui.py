@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import ModuleType
 
@@ -53,6 +54,11 @@ UI_MODULES: list[str] = [
 
 @pytest.fixture(scope="module")
 def qapp():
+    # The reflow test resizes the page to fixed widths. On a live desktop the
+    # compositor clamps them to the screen, so the page never reaches the wide
+    # layout and the test fails for a reason that has nothing to do with the
+    # page. Same platform CI runs on.
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     return QApplication.instance() or QApplication([])
 
 
