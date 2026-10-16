@@ -14,6 +14,25 @@ fi
 
 RESCUE_LOG="${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/phasezero/windows-vm}/rescue.log"
 
+# The rescue wizard downloads the driver ISO too, so it needs the same trusted
+# version/URL/hash as provisioning. This file is sourced by callers that may not
+# have set PZ_ROOT, hence the same candidate search as tui.sh above.
+if ! type virtio_win_sha_matches >/dev/null 2>&1; then
+    for _rescue_virtio_candidate in \
+        "${PZ_ROOT:-}/linux/windows-vm/virtio-source.sh" \
+        "/usr/local/lib/phasezero/windows-vm-runtime/linux/windows-vm/virtio-source.sh"; do
+        [ -f "$_rescue_virtio_candidate" ] && source "$_rescue_virtio_candidate" 2>/dev/null && break
+    done
+fi
+
+# Removable-media mounts are named after the logged-in account. A boot session
+# is spawned by systemd, which does not export USER, and its caller runs under
+# `set -u` — so reading $USER directly aborts the wizard before it lists
+# anything. Fall back through LOGNAME to the uid that actually owns the run.
+_rescue_user_name() {
+    printf '%s' "${USER:-${LOGNAME:-$(id -un 2>/dev/null || true)}}"
+}
+
 _vm_rescue_log() {
     local ts
     ts="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo "unknown")"
@@ -56,7 +75,7 @@ vm_rescue_should_run() {
 # ---------------------------------------------------------------------------
 vm_rescue_scan_isos() {
     local base found all=""
-    for base in "$HOME/Downloads" "$HOME" /mnt/sdcard "/run/media/$USER" "/media/$USER" /mnt; do
+    for base in "$HOME/Downloads" "$HOME" /mnt/sdcard "/run/media/$(_rescue_user_name)" "/media/$(_rescue_user_name)" /mnt; do
         [ -d "$base" ] || continue
         found="$(find "$base" -maxdepth 4 -type f \( -iname '*win*.iso' -o -iname '*windows*.iso' \) 2>/dev/null || true)"
         [ -n "$found" ] && all="$all$found"$'\n'
@@ -70,7 +89,7 @@ vm_rescue_scan_isos() {
 vm_rescue_scan_disks() {
     local base found all="" patterns
     patterns=( -iname '*win*.qcow2' -o -iname '*windows*.qcow2' -o -iname '*win*.img' -o -iname '*windows*.img' -o -iname '*win*.raw' -o -iname '*windows*.raw' -o -iname '*win*.vmdk' -o -iname '*windows*.vmdk' )
-    for base in "$HOME/VirtualMachines" "$HOME/.local/share/libvirt/images" "/var/lib/libvirt/images" "$HOME" /mnt/sdcard "/run/media/$USER" "/media/$USER" /mnt; do
+    for base in "$HOME/VirtualMachines" "$HOME/.local/share/libvirt/images" "/var/lib/libvirt/images" "$HOME" /mnt/sdcard "/run/media/$(_rescue_user_name)" "/media/$(_rescue_user_name)" /mnt; do
         [ -d "$base" ] || continue
         found="$(find "$base" -maxdepth 4 -type f \( "${patterns[@]}" \) 2>/dev/null || true)"
         [ -n "$found" ] || continue
@@ -115,10 +134,15 @@ vm_rescue_download_official() {
     local dest_dir="${PZ_WINDOWS_VM_RESCUE_DOWNLOAD_DIR:-$HOME/Downloads}"
     install -d "$dest_dir" 2>/dev/null || true
     local iso_path="$dest_dir/virtio-win.iso"
-    local url="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
-    local known_sha256=""
-    # known_sha256 — update after verifying once:
-    #   curl -L "$url" -o /tmp/virtio-win.iso && sha256sum /tmp/virtio-win.iso
+    local url="${PZ_VIRTIO_WIN_URL:-}"
+    local known_sha256="${PZ_VIRTIO_WIN_SHA256:-}"
+    if [ -z "$url" ] || [ -z "$known_sha256" ]; then
+        # The floating stable-virtio link has no hash to check, so an ISO from it
+        # cannot be proven to be the one provisioning will accept.
+        _vm_rescue_log "trusted virtio source unavailable; refusing an unverified download"
+        pz_error "virtio-win trusted URL/hash missing; refusing to download what cannot be verified"
+        return 1
+    fi
     _vm_rescue_log "download starting: $url -> $iso_path"
     if command -v download_atomic >/dev/null 2>&1; then
         download_atomic "$url" "$iso_path" 2>&1 || {

@@ -22,6 +22,57 @@ winpodx_status() { app_state_json winpodx; }
 GUEST_BUNDLE_SOURCE="$PZ_ROOT/linux/windows-vm/guest"
 GUEST_BUNDLE_VENDOR="$GUEST_BUNDLE_SOURCE/vendor"
 GUEST_EXCHANGE_DIR="${PZ_WINDOWS_VM_EXCHANGE_DIR:-$HOME/.local/share/phasezero/windows-vm/exchange}"
+VIRTIO_SOURCE="$PZ_ROOT/linux/windows-vm/virtio-source.sh"
+VENDOR_VERSION_MARKER="from-virtio-source"
+VENDOR_VERSION_PLACEHOLDER='{version}'
+
+# A manifest entry either carries its own URL or defers to the virtio source.
+# The guest reads JSON, not shell, so only the host can resolve the deferral.
+vendor_component_version() {
+    local entry="$1" manifest="$2" version
+    version="$(jq -r ".components.$entry.version // empty" "$manifest")"
+    if [ "$version" != "$VENDOR_VERSION_MARKER" ]; then
+        printf '%s\n' "$version"
+        return 0
+    fi
+    [ -f "$VIRTIO_SOURCE" ] || { pz_error "virtio source missing: $VIRTIO_SOURCE"; return 1; }
+    # shellcheck source=/dev/null
+    source "$VIRTIO_SOURCE"
+    printf '%s\n' "$PZ_VIRTIO_WIN_VERSION"
+}
+
+vendor_component_url() {
+    local entry="$1" manifest="$2" url tmpl version
+    url="$(jq -r ".components.$entry.url // empty" "$manifest")"
+    if [ -n "$url" ]; then
+        printf '%s\n' "$url"
+        return 0
+    fi
+    tmpl="$(jq -r ".components.$entry.urlTemplate // empty" "$manifest")"
+    [ -n "$tmpl" ] || { pz_error "vendor/$entry has neither url nor urlTemplate"; return 1; }
+    version="$(vendor_component_version "$entry" "$manifest")" || return 1
+    printf '%s\n' "${tmpl//$VENDOR_VERSION_PLACEHOLDER/$version}"
+}
+
+# The bundle must travel with the URLs the host actually used. Handing the guest
+# a template it cannot resolve would leave it guessing -- and guessing meant
+# installing whatever a moving directory happened to serve.
+render_vendor_manifest() {
+    local manifest="$1" bundle_dir="$2" rendered entry tmpl url version
+    [ -f "$manifest" ] || return 0
+    rendered="$(cat "$manifest")"
+    for entry in winfsp virtiofs spice-webdavd; do
+        tmpl="$(jq -r ".components.$entry.urlTemplate // empty" "$manifest")"
+        [ -n "$tmpl" ] || continue
+        url="$(vendor_component_url "$entry" "$manifest")" || return 1
+        version="$(vendor_component_version "$entry" "$manifest")" || return 1
+        rendered="$(jq --arg e "$entry" --arg url "$url" --arg v "$version" \
+            '.components[$e] |= (del(.urlTemplate) | .url = $url | .version = $v)' <<< "$rendered")"
+    done
+    printf '%s\n' "$rendered" > "$bundle_dir/vendor.json"
+    chmod 0644 "$bundle_dir/vendor.json"
+    pz_info "vendor manifest resolved to $bundle_dir/vendor.json"
+}
 
 vendor_msis() {
     local bundle_dir="$1" manifest entry name url sha file tmp
@@ -29,7 +80,7 @@ vendor_msis() {
     [ -f "$manifest" ] || { pz_warn "vendor manifest not found: $manifest"; return 0; }
     for entry in winfsp virtiofs spice-webdavd; do
         name="$(jq -r ".components.$entry.file // empty" "$manifest")"
-        url="$(jq -r ".components.$entry.url // empty" "$manifest")"
+        url="$(vendor_component_url "$entry" "$manifest")" || return 1
         sha="$(jq -r ".components.$entry.sha256 // empty" "$manifest")"
         if [ -n "$name" ] && [ -n "$sha" ]; then
             :
@@ -80,6 +131,8 @@ install_guest_bundle() {
     cp -a "$GUEST_BUNDLE_SOURCE/" "$bundle_dir/"
     rm -rf "$bundle_dir/vendor" 2>/dev/null || true
     vendor_msis "$bundle_dir" || pz_warn "vendor MSI download failed; guest will download at runtime"
+    render_vendor_manifest "$GUEST_BUNDLE_VENDOR/vendor.json" "$bundle_dir" \
+        || pz_warn "vendor manifest could not be resolved; guest refuses unverified downloads"
     pz_info "guest provisioning bundle copied to $bundle_dir"
     pz_info "inside the Windows guest, run as Administrator:"
     case "$component" in

@@ -115,7 +115,10 @@ echo "=== provision: preflight override sentinel ==="
 # Without PZ_TEST_MODE=1 the override must NOT be honored: an invalid fixture
 # must never reach the plan as preflight data.
 set +e
-PLAN_NO_SENTINEL="$(PZ_PREFLIGHT_JSON='not-json' PZ_STATE="$PZ_STATE_DIR" bash "$PROVISION_SCRIPT" plan --iso "$DUMMY_ISO" --json 2>/dev/null)"
+# The sentinel has to be absent for this case to mean anything. Running the
+# suite by hand with PZ_TEST_MODE=1 exported leaked it in and turned a green
+# suite red, so the case strips it no matter how the file is invoked.
+PLAN_NO_SENTINEL="$(env -u PZ_TEST_MODE PZ_PREFLIGHT_JSON='not-json' PZ_STATE="$PZ_STATE_DIR" bash "$PROVISION_SCRIPT" plan --iso "$DUMMY_ISO" --json 2>/dev/null)"
 NO_SENTINEL_RC=$?
 set -e
 assert_eq "override without sentinel does not abort plan" "0" "$NO_SENTINEL_RC"
@@ -499,6 +502,74 @@ assert_eq "finalize contention preserves staging" "1" \
 rm -rf "$FINALIZE_LOCK_T"
 
 echo ""
+echo "=== provision: finalize carries the boot artifacts the guest was installed against ==="
+# The flatten step produces a disk, but the disk alone is not the VM: the
+# firmware variables and the swtpm state decide which machine Windows thinks it
+# is. The seam is called directly rather than through `finalize`, which ends in
+# `adopt` and needs a real target user and a disk that looks installed. The
+# function comes from the file-level source above; if that source ever fails,
+# the subshell returns 127 and the first assertion below fails rather than
+# passing on an undefined call.
+CARRY_T="$(mktemp -d)"
+carry() {
+    local vm_dir="$1" target_dir="$2" _rc=0
+    (
+        provision_finalize_carry_boot_artifacts "$vm_dir" "$target_dir"
+    )
+    _rc=$?
+    return $_rc
+}
+CARRY_STAGING="$CARRY_T/staging"
+CARRY_TARGET="$CARRY_T/target"
+mkdir -p "$CARRY_STAGING/tpm" "$CARRY_TARGET"
+printf 'firmware\n' > "$CARRY_STAGING/OVMF_VARS.fd"
+chmod 600 "$CARRY_STAGING/OVMF_VARS.fd"
+printf 'swtpm-state\n' > "$CARRY_STAGING/tpm/tpm2000.sample"
+carry_rc=0
+carry "$CARRY_STAGING" "$CARRY_TARGET" || carry_rc=$?
+assert_eq "carry succeeds with both artifacts present" "0" "$carry_rc"
+assert_eq "carry copies the firmware variables" "firmware" "$(cat "$CARRY_TARGET/OVMF_VARS.fd" 2>/dev/null || echo missing)"
+assert_eq "carry keeps the firmware variables private" "600" "$(stat -c '%a' "$CARRY_TARGET/OVMF_VARS.fd" 2>/dev/null || echo 000)"
+assert_eq "carry copies the tpm state file" "swtpm-state" "$(cat "$CARRY_TARGET/tpm/tpm2000.sample" 2>/dev/null || echo missing)"
+assert_eq "carry keeps the tpm directory private" "700" "$(stat -c '%a' "$CARRY_TARGET/tpm" 2>/dev/null || echo 000)"
+rm -rf "$CARRY_STAGING" "$CARRY_TARGET"
+
+# Nothing to carry is not a failure: an operation that never started swtpm
+# still has to reach adoption.
+mkdir -p "$CARRY_T/empty-staging" "$CARRY_T/empty-target"
+carry_rc=0
+carry "$CARRY_T/empty-staging" "$CARRY_T/empty-target" || carry_rc=$?
+assert_eq "carry succeeds when staging holds no boot artifacts" "0" "$carry_rc"
+assert_eq "carry invents no tpm directory" "0" "$([ -e "$CARRY_T/empty-target/tpm" ] && echo 1 || echo 0)"
+assert_eq "carry invents no firmware file" "0" "$([ -e "$CARRY_T/empty-target/OVMF_VARS.fd" ] && echo 1 || echo 0)"
+
+# A symlinked staging tpm is not the guest's state — it is a path planted for
+# the copy to follow out of the sandbox.
+mkdir -p "$CARRY_T/outside" "$CARRY_T/link-staging" "$CARRY_T/link-target"
+printf 'victim\n' > "$CARRY_T/outside/tpm2000.sample"
+ln -s "$CARRY_T/outside" "$CARRY_T/link-staging/tpm"
+carry_rc=0
+carry "$CARRY_T/link-staging" "$CARRY_T/link-target" || carry_rc=$?
+assert_eq "carry refuses a symlinked tpm without replacing it" "0" "$carry_rc"
+assert_eq "symlinked tpm is not followed into the target" "0" "$([ -e "$CARRY_T/link-target/tpm" ] && echo 1 || echo 0)"
+assert_eq "symlinked tpm still points at the planted tree" "victim" "$(cat "$CARRY_T/outside/tpm2000.sample" 2>/dev/null || echo gone)"
+
+# A target that already has tpm state belongs to whoever put it there; the copy
+# must not seal a second VM onto the first one's state.
+mkdir -p "$CARRY_T/keep-staging/tpm" "$CARRY_T/keep-target/tpm"
+printf 'new\n' > "$CARRY_T/keep-staging/tpm/tpm2000.sample"
+printf 'keep\n' > "$CARRY_T/keep-target/tpm/tpm2000.sample"
+carry_rc=0
+carry "$CARRY_T/keep-staging" "$CARRY_T/keep-target" || carry_rc=$?
+assert_eq "carry succeeds against an occupied target" "0" "$carry_rc"
+assert_eq "carry never overwrites existing tpm state" "keep" "$(cat "$CARRY_T/keep-target/tpm/tpm2000.sample" 2>/dev/null || echo missing)"
+# Without the occupied-target guard, cp -a would drop the new state one level
+# deeper and swtpm would look at an empty directory.
+assert_eq "carry does not nest a second tpm inside the occupied one" "0" \
+    "$([ -e "$CARRY_T/keep-target/tpm/tpm" ] && echo 1 || echo 0)"
+rm -rf "$CARRY_T"
+
+echo ""
 echo "=== graphics: plan serialization ==="
 GFX_PLAN_DIR="$(mktemp -d)"
 GFX_VIRTIO=$(PZ_STATE="$GFX_PLAN_DIR" bash "$PROVISION_SCRIPT" plan --iso "$DUMMY_ISO" --graphics virtio-gl --json 2>/dev/null | jq -r '.graphics // ""' 2>/dev/null || echo "")
@@ -580,6 +651,262 @@ assert_eq "Venus preflight refuses provisioning support" "false" "$(jq -r '.grap
 assert_contains "Venus preflight explains provisioning boundary" \
     "$(jq -r '.graphics.failures[]' <<< "$GFX_PREFLIGHT_VENUS")" "not supported by automated provisioning"
 rm -rf "$GFX_PREFLIGHT_T"
+
+echo ""
+echo "=== virtio: one trusted source for version, URL and hash ==="
+# preflight followed the floating stable-virtio link while provision required the
+# pinned 0.1.285 hash, so --auto-fix could only ever hand over an ISO that
+# provisioning would refuse. On this host that is exactly what happened: the
+# cache holds 4fca… while the installer demands e14c….
+VT_T="$(mktemp -d)"
+VT_BIN="$VT_T/bin"
+mkdir -p "$VT_BIN"
+# The trusted URL is what the single source must derive from version 9.9.9.
+VT_TRUSTED_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-9.9.9-1/virtio-win-9.9.9.iso"
+VT_TRUSTED_SHA="$(printf 'trusted-iso-bytes' | sha256sum | cut -d' ' -f1)"
+VT_FLOATING_URL="https://example.invalid/archive-virtio/virtio-win-8.8.8-1/virtio-win-8.8.8.iso"
+cat > "$VT_BIN/curl" <<'VT_CURL'
+#!/usr/bin/env bash
+# Fake curl: a HEAD answers with the floating upstream redirect; a download
+# writes $VT_FAKE_BYTES to the -o target. Every argument is logged so the test
+# can see which URL the caller actually asked for.
+printf '%s\n' "$@" >> "$VT_CURL_LOG"
+for arg in "$@"; do
+    case "$arg" in
+        *-sI*) printf 'HTTP/1.1 302 Found\r\nlocation: %s\r\n' "$VT_FLOATING_URL"; exit 0 ;;
+    esac
+done
+prev=""
+for arg in "$@"; do
+    if [ "$prev" = "-o" ]; then
+        printf '%s' "$VT_FAKE_BYTES" > "$arg"
+        exit 0
+    fi
+    prev="$arg"
+done
+exit 0
+VT_CURL
+chmod +x "$VT_BIN/curl"
+
+# do_auto_fix runs its fixers as bare statements under set -e, and
+# swtpm_auto_fix fails on a host without the binary or without a reachable user
+# bus. Such a host therefore never reaches the virtio step, and the --auto-fix
+# the UI advertises silently does nothing for virtio. The cases below pin a
+# host shape: no swtpm socket, a swtpm binary that exists, and a systemctl that
+# cannot talk to a bus.
+cat > "$VT_BIN/swtpm" <<'VT_SWTPM'
+#!/usr/bin/env bash
+exit 0
+VT_SWTPM
+cat > "$VT_BIN/systemctl" <<'VT_SYSTEMCTL'
+#!/usr/bin/env bash
+printf '%s\n' 'Failed to connect to user scope bus via local transport: Host is down' >&2
+exit 1
+VT_SYSTEMCTL
+chmod +x "$VT_BIN/swtpm" "$VT_BIN/systemctl"
+
+VT_PLAN_OVERRIDE="$(PZ_TEST_MODE=1 PZ_PREFLIGHT_JSON="$PREFLIGHT_PASS_FIXTURE" XDG_STATE_HOME="$VT_T/plan-override" \
+    PZ_WINDOWS_VM_VIRTIO_VERSION="9.9.9" PZ_WINDOWS_VM_VIRTIO_SHA256="$VT_TRUSTED_SHA" \
+    bash "$PROVISION_SCRIPT" plan --iso "$DUMMY_ISO" --json 2>/dev/null || echo '{}')"
+assert_eq "plan carries the trusted virtio URL" "$VT_TRUSTED_URL" "$(jq -r '.virtio.url // ""' <<< "$VT_PLAN_OVERRIDE")"
+assert_eq "plan carries the trusted virtio SHA" "$VT_TRUSTED_SHA" "$(jq -r '.virtio.sha256 // ""' <<< "$VT_PLAN_OVERRIDE")"
+
+VT_PLAN_DEFAULT="$(PZ_TEST_MODE=1 PZ_PREFLIGHT_JSON="$PREFLIGHT_PASS_FIXTURE" XDG_STATE_HOME="$VT_T/plan-default" \
+    bash "$PROVISION_SCRIPT" plan --iso "$DUMMY_ISO" --json 2>/dev/null || echo '{}')"
+: > "$VT_T/log-check"
+VT_PREFLIGHT_JSON="$(PATH="$VT_BIN:$PATH" XDG_STATE_HOME="$VT_T/preflight" VT_CURL_LOG="$VT_T/log-check" \
+    VT_FLOATING_URL="$VT_FLOATING_URL" VT_FAKE_BYTES="anything" \
+    bash "$PREFLIGHT_SCRIPT" --json 2>/dev/null || echo '{}')"
+assert_eq "preflight pins the version the plan downloads" \
+    "$(jq -r '.virtio.pinned' <<< "$VT_PREFLIGHT_JSON")" \
+    "$(sed -n 's|.*virtio-win-\([0-9.]*\)-1/.*|\1|p' <<< "$(jq -r '.virtio.url // ""' <<< "$VT_PLAN_DEFAULT")")"
+
+# --auto-fix has to reach the virtio step at all.
+VT_FIX_ISO="$VT_T/fix-state/phasezero/windows-vm/vm/virtio-win.iso"
+VT_FIX_LOG="$VT_T/log-fix"
+: > "$VT_FIX_LOG"
+PATH="$VT_BIN:$PATH" HOME="$VT_T/home" XDG_RUNTIME_DIR="$VT_T/run" \
+    XDG_CONFIG_HOME="$VT_T/config-fix" XDG_DATA_HOME="$VT_T/data" \
+    XDG_STATE_HOME="$VT_T/fix-state" VT_CURL_LOG="$VT_FIX_LOG" \
+    VT_FLOATING_URL="$VT_FLOATING_URL" VT_FAKE_BYTES="trusted-iso-bytes" \
+    PZ_WINDOWS_VM_VIRTIO_VERSION="9.9.9" PZ_WINDOWS_VM_VIRTIO_SHA256="$VT_TRUSTED_SHA" \
+    bash "$PREFLIGHT_SCRIPT" --auto-fix --json >/dev/null 2>&1 || true
+assert_eq "auto-fix reaches the virtio step when swtpm cannot start" "1" "$([ -f "$VT_FIX_ISO" ] && echo 1 || echo 0)"
+assert_contains "auto-fix downloads the trusted URL, not the floating one" "$(cat "$VT_FIX_LOG")" "$VT_TRUSTED_URL"
+
+# The produced file must be verified before anything treats it as ready.
+VT_BAD_ISO="$VT_T/bad-state/phasezero/windows-vm/vm/virtio-win.iso"
+PATH="$VT_BIN:$PATH" HOME="$VT_T/home" XDG_RUNTIME_DIR="$VT_T/run" \
+    XDG_CONFIG_HOME="$VT_T/config-bad" XDG_DATA_HOME="$VT_T/data" \
+    XDG_STATE_HOME="$VT_T/bad-state" VT_CURL_LOG="$VT_T/log-bad" \
+    VT_FLOATING_URL="$VT_FLOATING_URL" VT_FAKE_BYTES="not-the-trusted-iso" \
+    PZ_WINDOWS_VM_VIRTIO_VERSION="9.9.9" PZ_WINDOWS_VM_VIRTIO_SHA256="$VT_TRUSTED_SHA" \
+    bash "$PREFLIGHT_SCRIPT" --auto-fix --json >/dev/null 2>&1 || true
+assert_eq "auto-fix refuses an ISO whose SHA does not match the trusted hash" "0" "$([ -f "$VT_BAD_ISO" ] && echo 1 || echo 0)"
+
+# "Single source" has to be checkable in the tree, not by reading every caller.
+# The drift this section exists to close happened because provisioning and
+# preflight each carried their own literal, so two artifacts were both "pinned".
+VT_COPY_HITS="$(grep -rl -e 'e14cf2b94492c3e925f0070ba7fdfedeb2048c91eea9c5a5afb30232a3976331' \
+    -e 'virtio-win-0\.1\.285-1' "$PZ_ROOT/linux/windows-vm" 2>/dev/null \
+    | grep -vc '/virtio-source\.sh$' | tr -d ' ' || true)"
+assert_eq "the trusted virtio version and hash live in virtio-source.sh only" "0" "$VT_COPY_HITS"
+# Positive control: the same pattern must still find the one file that carries
+# it, otherwise the check above passes because it searched for nothing.
+VT_SOURCE_HITS="$(grep -rl -e 'e14cf2b94492c3e925f0070ba7fdfedeb2048c91eea9c5a5afb30232a3976331' \
+    -e 'virtio-win-0\.1\.285-1' "$PZ_ROOT/linux/windows-vm" 2>/dev/null \
+    | grep -c '/virtio-source\.sh$' | tr -d ' ' || true)"
+assert_eq "virtio-source.sh carries the trusted version and hash" "1" "$VT_SOURCE_HITS"
+
+rm -rf "$VT_T"
+
+echo ""
+echo "=== virtio: o mesmo pino do lado do convidado ==="
+# The host already verifies every vendor MSI against vendor.json before it ships
+# the bundle; the guest installs whatever its own download returns. The virtiofs
+# entry pinned a SHA-256 while pointing at the floating stable-virtio directory,
+# and the two have since diverged: on 2026-10-16 that directory served
+# 4f438846… for a file the manifest still describes as fafd93cb…, which is the
+# bytes archive-virtio/virtio-win-0.1.285-1 holds. A re-download therefore can
+# never satisfy the hash it publishes, and the only code path that still runs is
+# the guest one that verifies nothing.
+GV_MANIFEST="$PZ_ROOT/linux/windows-vm/guest/vendor/vendor.json"
+GV_VENDOR_DIR="$PZ_ROOT/linux/windows-vm/guest/vendor"
+GV_FLOATING="$(jq -r '[.components[] | (.url // ""), (.urlTemplate // ""), (.version // "")]
+    | map(select(test("stable-virtio"))) | length' "$GV_MANIFEST")"
+assert_eq "no vendor component points at the floating directory" "0" "$GV_FLOATING"
+# Positive control: the manifest must still describe the guest-tools file,
+# otherwise the check above would pass on an emptied file.
+assert_eq "the manifest still describes the guest tools MSI" "virtio-win-gt-x64.msi" \
+    "$(jq -r '.components.virtiofs.file' "$GV_MANIFEST")"
+GV_SHA_DRIFT="$(jq -r '.components | to_entries[] | "\(.value.file) \(.value.sha256)"' "$GV_MANIFEST" \
+    | while read -r gv_name gv_sha; do
+        [ -f "$GV_VENDOR_DIR/$gv_name" ] || continue
+        [ "$(sha256sum "$GV_VENDOR_DIR/$gv_name" | cut -d' ' -f1)" = "${gv_sha,,}" ] || printf '%s\n' "$gv_name"
+    done)"
+assert_eq "every vendored MSI matches the hash its manifest pins" "" "$GV_SHA_DRIFT"
+
+# Version, URL and hash stay in one place: the guest-tools URL is derived from
+# the same pinned version the ISO is derived from, not copied next to it.
+GV_GT_DERIVED="$(PZ_WINDOWS_VM_VIRTIO_VERSION=9.9.9 bash -c \
+    '. "$0/linux/windows-vm/virtio-source.sh"; printf %s "$PZ_VIRTIO_WIN_GT_MSI_URL"' "$PZ_ROOT")"
+assert_eq "the single source derives the guest tools URL from the pinned version" \
+    "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-9.9.9-1/virtio-win-gt-x64.msi" \
+    "$GV_GT_DERIVED"
+
+# The resolution has to happen in the bundle the guest actually receives: the
+# manifest a Windows guest reads cannot source a shell file.
+GV_T="$(mktemp -d)"
+GV_ROOT="$GV_T/root"
+GV_BIN="$GV_T/bin"
+GV_EXCHANGE="$GV_T/exchange"
+GV_HOME="$GV_T/home"
+mkdir -p "$GV_ROOT/linux/windows-vm/guest/vendor" "$GV_BIN" "$GV_HOME" "$GV_EXCHANGE"
+ln -s "$PZ_ROOT/linux/lib" "$GV_ROOT/linux/lib"
+cp "$PZ_ROOT/linux/windows-vm/virtio-source.sh" "$GV_ROOT/linux/windows-vm/"
+cp "$GV_MANIFEST" "$GV_ROOT/linux/windows-vm/guest/vendor/vendor.json"
+printf 'stub\n' > "$GV_ROOT/linux/windows-vm/guest/Install-VirtioFS.ps1"
+printf 'winfsp fixture\n' > "$GV_ROOT/linux/windows-vm/guest/vendor/winfsp-2.0.23075.msi"
+printf 'spice fixture\n' > "$GV_ROOT/linux/windows-vm/guest/vendor/spice-webdavd-x64-latest.msi"
+GV_WINFSP_SHA="$(sha256sum "$GV_ROOT/linux/windows-vm/guest/vendor/winfsp-2.0.23075.msi" | cut -d' ' -f1)"
+GV_SPICE_SHA="$(sha256sum "$GV_ROOT/linux/windows-vm/guest/vendor/spice-webdavd-x64-latest.msi" | cut -d' ' -f1)"
+printf 'guest tools fixture\n' > "$GV_T/gt-good"
+GV_GT_SHA="$(sha256sum "$GV_T/gt-good" | cut -d' ' -f1)"
+jq --arg w "$GV_WINFSP_SHA" --arg s "$GV_SPICE_SHA" --arg g "$GV_GT_SHA" \
+    '.components.winfsp.sha256 = $w
+     | .components."spice-webdavd".sha256 = $s
+     | .components.virtiofs.sha256 = $g' \
+    "$GV_ROOT/linux/windows-vm/guest/vendor/vendor.json" > "$GV_T/manifest.json"
+mv "$GV_T/manifest.json" "$GV_ROOT/linux/windows-vm/guest/vendor/vendor.json"
+cat > "$GV_BIN/curl" <<'GV_CURL'
+#!/usr/bin/env bash
+# Fake curl: logs every argument and writes the payload the case chose. The
+# point of the log is the URL the caller actually asked for.
+printf '%s\n' "$@" >> "$GV_CURL_LOG"
+prev=""
+for arg in "$@"; do
+    if [ "$prev" = "-o" ]; then
+        cp "$GV_FAKE_FILE" "$arg"
+        exit 0
+    fi
+    prev="$arg"
+done
+exit 0
+GV_CURL
+chmod +x "$GV_BIN/curl"
+GV_BUNDLE="$GV_EXCHANGE/phasezero-guest-setup"
+GV_RUN=(env PATH="$GV_BIN:$PATH" HOME="$GV_HOME"
+    XDG_CONFIG_HOME="$GV_HOME/.config" XDG_DATA_HOME="$GV_HOME/.local/share"
+    XDG_STATE_HOME="$GV_HOME/.local/state" XDG_CACHE_HOME="$GV_HOME/.cache"
+    PZ_ROOT="$GV_ROOT" PZ_LOCAL_BIN="$GV_HOME/.local/bin"
+    PZ_WINDOWS_VM_EXCHANGE_DIR="$GV_EXCHANGE" PZ_WINDOWS_VM_VIRTIO_VERSION="9.9.9"
+    GV_FAKE_FILE="$GV_T/gt-good")
+GV_FRONTENDS="$PZ_ROOT/linux/windows-vm/container-frontends.sh"
+
+: > "$GV_T/log-good"
+"${GV_RUN[@]}" GV_CURL_LOG="$GV_T/log-good" bash "$GV_FRONTENDS" install-virtiofs >/dev/null 2>&1 || true
+assert_contains "the bundle downloads the guest tools from the derived archive URL" \
+    "$(cat "$GV_T/log-good")" "archive-virtio/virtio-win-9.9.9-1/virtio-win-gt-x64.msi"
+assert_eq "the bundle never asks the floating directory for an MSI" "0" \
+    "$(grep -c 'stable-virtio' "$GV_T/log-good" | tr -d ' ' || true)"
+assert_eq "a verified download lands in the bundle the guest receives" "1" \
+    "$([ -f "$GV_BUNDLE/virtio-win-gt-x64.msi" ] && echo 1 || echo 0)"
+GV_BUNDLE_SHA=""
+if [ -f "$GV_BUNDLE/virtio-win-gt-x64.msi" ]; then
+    GV_BUNDLE_SHA="$(sha256sum "$GV_BUNDLE/virtio-win-gt-x64.msi" | cut -d' ' -f1)"
+fi
+assert_eq "the bundled MSI is the one the manifest pins" "$GV_GT_SHA" "$GV_BUNDLE_SHA"
+# The guest reads JSON, not shell, so the host resolves the template before the
+# bundle leaves. A guest handed "{version}" would have nothing to verify against.
+GV_BUNDLE_URL="$(jq -r '.components.virtiofs.url // ""' "$GV_BUNDLE/vendor.json" 2>/dev/null || true)"
+assert_eq "the bundle manifest holds a concrete URL, not a template" "virtio-win-9.9.9-1" \
+    "$(sed -n 's|.*archive-virtio/\(virtio-win-[0-9][0-9.]*-[0-9]*\)/virtio-win-gt-x64.msi.*|\1|p' <<< "$GV_BUNDLE_URL")"
+GV_LEFTOVER_TEMPLATES="$(jq -r '.components | to_entries[] | .value.urlTemplate // ""' \
+    "$GV_BUNDLE/vendor.json" 2>/dev/null | grep -c . | tr -d ' ' || true)"
+assert_eq "the bundle manifest carries no template left to resolve" "0" "$GV_LEFTOVER_TEMPLATES"
+
+printf 'other bytes entirely\n' > "$GV_T/gt-bad"
+rm -rf "$GV_EXCHANGE" "$GV_ROOT/linux/windows-vm/guest/vendor/virtio-win-gt-x64.msi"
+mkdir -p "$GV_EXCHANGE"
+: > "$GV_T/log-bad"
+"${GV_RUN[@]}" GV_FAKE_FILE="$GV_T/gt-bad" GV_CURL_LOG="$GV_T/log-bad" \
+    bash "$GV_FRONTENDS" install-virtiofs >/dev/null 2>&1 || true
+assert_eq "bytes that do not match the pinned hash never reach the bundle" "0" \
+    "$([ -f "$GV_BUNDLE/virtio-win-gt-x64.msi" ] && echo 1 || echo 0)"
+assert_eq "mismatched bytes are not kept as the vendor cache either" "0" \
+    "$([ -f "$GV_ROOT/linux/windows-vm/guest/vendor/virtio-win-gt-x64.msi" ] && echo 1 || echo 0)"
+
+# And the guest must stop installing whatever a download returns.
+GV_PS="$PZ_ROOT/linux/windows-vm/guest/Install-VirtioFS.ps1"
+GV_VENDOR_LIB="$PZ_ROOT/linux/windows-vm/guest/PZ-Vendor.ps1"
+assert_eq "the guest installer carries no URL of its own" "0" \
+    "$(grep -cE 'https?://' "$GV_PS" | tr -d ' ' || true)"
+# Positive control: the grep finds downloads where they do live, so the zero
+# above means the installer is clean rather than that nothing was searched.
+GV_FETCHES=""
+if [ -f "$GV_VENDOR_LIB" ]; then
+    GV_FETCHES="$(grep -c 'Invoke-WebRequest' "$GV_VENDOR_LIB" | tr -d ' ' || true)"
+fi
+assert_eq "the verified downloader is the one place that fetches" "1" "$GV_FETCHES"
+assert_eq "the guest installer obtains every MSI through it" "3" \
+    "$(grep -c 'Get-PZVerifiedMsi' "$GV_PS" | tr -d ' ' || true)"
+rm -rf "$GV_T"
+
+echo ""
+echo "=== preflight: the RAM it reports is memory the host can hand over ==="
+# A plan once showed 14820 MiB of "RAM" on a 14820 MiB machine that had 2100
+# MiB free. MemTotal is not a budget; the figure a caller can act on is what is
+# actually available.
+PF_RAM_T="$(mktemp -d)"
+printf 'MemTotal: %s kB\nMemAvailable: %s kB\nSwapFree: %s kB\n' \
+    "$(( 14820 * 1024 ))" "$(( 2100 * 1024 ))" "$(( 1000 * 1024 ))" > "$PF_RAM_T/meminfo"
+PF_RAM_JSON="$(PZ_WINDOWS_VM_MEMINFO_FILE="$PF_RAM_T/meminfo" \
+    bash "$PREFLIGHT_SCRIPT" --graphics compat --json 2>/dev/null || true)"
+assert_eq "preflight reports available memory, not the whole machine" "2100" \
+    "$(jq -r '.resources.ramMb' <<< "$PF_RAM_JSON")"
+assert_eq "preflight still names the machine total" "14820" \
+    "$(jq -r '.resources.totalMb' <<< "$PF_RAM_JSON")"
+rm -rf "$PF_RAM_T"
 
 echo ""
 echo "=== graphics: unsupported virtio-gl becomes a plan blocker ==="
@@ -1609,6 +1936,95 @@ assert_contains "launch refusal names the shortfall" "$MEM_LAUNCH_ERR" "memória
 assert_eq "refused launch did not touch the power profile" "0" "$([ -e "$MEM_T/powerprofilesctl.log" ] && echo 1 || echo 0)"
 assert_eq "refused launch did not ask for privilege" "0" "$([ -e "$MEM_T/admin.log" ] && echo 1 || echo 0)"
 
+# The pre-check answered "success": true on a host that could not hold the VM:
+# only launch_vm ran the memory guard, so a lay user read a green pre-check and
+# then a refusal. The check has to answer with the same verdict the launch uses.
+echo "--- launch-check reports the memory verdict ---"
+mem_lc() {
+    local _rc=0
+    PZ_TEST_MODE=1 HOME="$MEM_T/home" XDG_CONFIG_HOME="$MEM_T/home/.config" \
+        XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE="$1" \
+        PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" PZ_WINDOWS_VM_CONFIG="$MEM_T/lc.conf" \
+        bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch-check "${@:2}" --json 2>/dev/null || _rc=$?
+    return 0
+}
+mem_lc_err() {
+    local _rc=0
+    PZ_TEST_MODE=1 HOME="$MEM_T/home" XDG_CONFIG_HOME="$MEM_T/home/.config" \
+        XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE="$1" \
+        PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" PZ_WINDOWS_VM_CONFIG="$MEM_T/lc.conf" \
+        bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch-check "${@:2}" 2>"$MEM_T/lc.err" >/dev/null || _rc=$?
+    cat "$MEM_T/lc.err"
+}
+mem_host 14820 2100 1000
+LC_EXCEED="$(mem_lc desktop --ram 12288)"
+assert_eq "launch-check names what the VM asked for" "12288" "$(jq -r '.memory.requestedMb' <<< "$LC_EXCEED")"
+assert_eq "launch-check reads what the host has, not its total" "2100" "$(jq -r '.memory.availableMb' <<< "$LC_EXCEED")"
+assert_eq "launch-check calls the verdict exceed" "exceed" "$(jq -r '.memory.fit' <<< "$LC_EXCEED")"
+assert_eq "launch-check blocks a VM the host cannot hold" "1" "$(jq -r '[.blockers[] | select(test("memória"))] | length' <<< "$LC_EXCEED")"
+assert_eq "launch-check fails" "false" "$(jq -r '.success' <<< "$LC_EXCEED")"
+
+mem_host 14820 12000 4000
+LC_FITS="$(mem_lc desktop --ram 8192)"
+assert_eq "roomy host: launch-check calls it fits" "fits" "$(jq -r '.memory.fit' <<< "$LC_FITS")"
+assert_eq "roomy host: launch-check raises no memory blocker" "0" "$(jq -r '[.blockers[] | select(test("memória"))] | length' <<< "$LC_FITS")"
+
+mem_host 14820 3000 4000
+LC_TIGHT="$(mem_lc desktop --ram 6144)"
+assert_eq "swap-covered size is tight, not blocked" "tight" "$(jq -r '.memory.fit' <<< "$LC_TIGHT")"
+assert_eq "tight host: launch-check raises no memory blocker" "0" "$(jq -r '[.blockers[] | select(test("memória"))] | length' <<< "$LC_TIGHT")"
+assert_contains "tight host says the session will swap" "$(mem_lc_err desktop --ram 6144)" "swap"
+
+mem_lc_conf() {
+    local _rc=0
+    PZ_TEST_MODE=1 HOME="$MEM_T/home" XDG_CONFIG_HOME="$MEM_T/home/.config" \
+        XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE="$1" \
+        PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" PZ_WINDOWS_VM_CONFIG="$2" \
+        bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch-check --json "${@:3}" 2>/dev/null || _rc=$?
+    return 0
+}
+mem_lc_conf_err() {
+    local _rc=0
+    PZ_TEST_MODE=1 HOME="$MEM_T/home" XDG_CONFIG_HOME="$MEM_T/home/.config" \
+        XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE="$1" \
+        PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" PZ_WINDOWS_VM_CONFIG="$2" \
+        bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch-check --json "${@:3}" 2>"$MEM_T/lc.err" >/dev/null || _rc=$?
+    cat "$MEM_T/lc.err"
+}
+
+# The figure saved in the config was right for the host that wrote it. On a
+# 14 GiB Deck a 12288 from an earlier install blocks every desktop launch, and
+# nothing re-bases it, so the only escape was a terminal flag.
+echo "--- a configured figure the host cannot hold is re-based ---"
+mem_host 14820 5300 3600
+printf 'PZ_WINDOWS_VM_RAM_MB=12288\n' > "$MEM_T/stale.conf"
+LC_REBASE="$(mem_lc_conf desktop "$MEM_T/stale.conf")"
+assert_eq "configured figure beyond the host becomes the host-aware size" "4096" "$(jq -r '.memory.requestedMb' <<< "$LC_REBASE")"
+assert_eq "re-based figure is not a memory blocker" "0" "$(jq -r '[.blockers[] | select(test("memória"))] | length' <<< "$LC_REBASE")"
+# 5300 MiB available with a 4096 guest leaves 1204 MiB for the desktop, under
+# its 3072 reserve. Re-basing to the Windows floor is the best the host can do,
+# not a comfortable start: the verdict says so even though nothing blocks.
+assert_eq "re-based to the floor: still inside the reserve, so tight" "tight" "$(jq -r '.memory.fit' <<< "$LC_REBASE")"
+LC_REBASE_ERR="$(mem_lc_conf_err desktop "$MEM_T/stale.conf")"
+assert_contains "the re-base names the configured figure" "$LC_REBASE_ERR" "12288"
+assert_contains "the re-base names the size it chose instead" "$LC_REBASE_ERR" "a VM vai iniciar com 4096 MiB"
+assert_contains "the re-base says where the figure lives" "$LC_REBASE_ERR" "PZ_WINDOWS_VM_RAM_MB"
+
+mem_host 14820 12000 4000
+LC_KEEP="$(mem_lc_conf desktop "$MEM_T/stale.conf")"
+assert_eq "a host that can hold the configured figure keeps it" "12288" "$(jq -r '.memory.requestedMb' <<< "$LC_KEEP")"
+
+# A dedicated GRUB boot has no desktop to protect, so its saved figure stands.
+LC_KIOSK="$(mem_lc_conf kiosk "$MEM_T/stale.conf")"
+assert_eq "kiosk boot keeps the configured figure" "12288" "$(jq -r '.memory.requestedMb' <<< "$LC_KIOSK")"
+
+# An explicit --ram is the operator speaking: it is honoured, and refused when
+# the host cannot hold it (proved above). It is never re-based quietly.
+mem_host 14820 5300 3600
+LC_EXPLICIT="$(mem_lc desktop --ram 8192)"
+assert_eq "explicit size is not re-based" "8192" "$(jq -r '.memory.requestedMb' <<< "$LC_EXPLICIT")"
+assert_eq "explicit size covered by swap stays tight" "tight" "$(jq -r '.memory.fit' <<< "$LC_EXPLICIT")"
+
 # The profile launch switches to is put back when the VM is gone.
 MEM_RESTORE="$(PATH="$MEM_T/bin:$PATH" bash -c '
     eval "$(sed -n "/^cleanup_runtime()/,/^}/p" "'"$PZ_ROOT"'/linux/windows-vm/windows-vm.sh")"
@@ -1617,6 +2033,293 @@ MEM_RESTORE="$(PATH="$MEM_T/bin:$PATH" bash -c '
     cat "'"$MEM_T"'/powerprofilesctl.log"' 2>/dev/null)"
 assert_eq "cleanup restores the previous power profile, once" "set balanced" "$MEM_RESTORE"
 rm -rf "$MEM_T"
+
+echo ""
+echo "=== memória: margem por perfil e pressão observada, não só o instante ==="
+# A successful install run does not prove `fits` is a safe limit. On this Deck
+# MemAvailable fell to 1166 MiB with PSI at 15,12 while the verdict for the
+# 4096 MiB guest stayed `fits` the whole time: the reserve that sizes the guest
+# never entered the verdict, and pressure was never read at all.
+MP_T="$(mktemp -d)"
+mkdir -p "$MP_T/home" "$MP_T/xdg" "$MP_T/config/phasezero"
+mp_meminfo() {
+    printf 'MemTotal: %s kB\nMemAvailable: %s kB\nSwapFree: %s kB\n' \
+        "$(( $1 * 1024 ))" "$(( $2 * 1024 ))" "$(( $3 * 1024 ))" > "$MP_T/meminfo"
+}
+mp_pressure() {
+    if [ -z "$1" ]; then
+        rm -f "$MP_T/pressure"
+    else
+        printf 'some avg10=%s avg60=0.50 avg300=0.20 total=99999\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' \
+            "$1" "$1" "$1" > "$MP_T/pressure"
+    fi
+}
+mp_sh() {
+    PZ_WINDOWS_VM_PROFILE="${MP_PROFILE:-desktop}" \
+        PZ_WINDOWS_VM_MEMINFO_FILE="$MP_T/meminfo" PZ_WINDOWS_VM_PRESSURE_FILE="$MP_T/pressure" \
+        PZ_WINDOWS_VM_HOST_RESERVE_MB="${MP_RESERVE:-}" \
+        bash -c '. "'"$PZ_ROOT"'/linux/lib/common.sh"; . "'"$PZ_ROOT"'/linux/windows-vm/memory.sh"; '"$1"
+}
+
+# The desktop profile keeps a reserve so the session stays usable. When the
+# margin above the guest is smaller than that reserve the host is already
+# over-subscribed, swap or no swap.
+mp_meminfo 14820 12000 4000
+mp_pressure ""
+assert_eq "margin covers the desktop reserve: fits" "fits" "$(mp_sh 'windows_vm_memory_fit 8192')"
+mp_meminfo 14820 5432 3624
+assert_eq "the instant the 2026-10-16 install ran at is not a comfortable limit" "tight" \
+    "$(mp_sh 'windows_vm_memory_fit 4096')"
+assert_contains "a short margin is reported as a margin problem" \
+    "$(mp_sh 'windows_vm_memory_notice 4096 2>&1')" "reserva"
+
+# Pressure is the second axis: enough free memory right now does not mean the
+# host is not already stalling.
+mp_meminfo 14820 12000 4000
+mp_pressure "15.12"
+assert_eq "memory pressure demotes fits to tight" "tight" "$(mp_sh 'windows_vm_memory_fit 8192')"
+assert_contains "pressure is reported as pressure" \
+    "$(mp_sh 'windows_vm_memory_notice 8192 2>&1')" "pressão"
+mp_pressure "0.40"
+assert_eq "a quiet host with room keeps fits" "fits" "$(mp_sh 'windows_vm_memory_fit 8192')"
+
+# The reserve belongs to the profile, not to a magic number.
+MP_RESERVE=1024
+mp_meminfo 14820 5432 3624
+assert_eq "a smaller reserve is a smaller requirement" "fits" "$(mp_sh 'windows_vm_memory_fit 4096')"
+MP_RESERVE=""
+
+# A GRUB boot has no desktop to protect, but it still cannot hand out more than
+# the machine has: the kiosk used to answer fits without checking anything.
+MP_PROFILE=kiosk
+mp_meminfo 14820 2100 1000
+assert_eq "kiosk: the sized figure keeps its own reserve" "fits" "$(mp_sh 'windows_vm_memory_fit 12288')"
+assert_eq "kiosk: a guest that eats the host reserve is tight" "tight" "$(mp_sh 'windows_vm_memory_fit 14000')"
+assert_eq "kiosk: a guest larger than the machine exceeds" "exceed" "$(mp_sh 'windows_vm_memory_fit 15000')"
+MP_PROFILE=desktop
+
+# A fixture describes a host. Reading the machine the suite happens to run on
+# would let CI load change a verdict, so pressure is unread unless described too.
+# The body lives in a variable: a `bash -c` payload with nested quotes inside a
+# command substitution is how this assert first broke.
+MP_PF_BODY="$(printf '. "%s/linux/lib/common.sh"; . "%s/linux/windows-vm/memory.sh"; windows_vm_pressure_file' "$PZ_ROOT" "$PZ_ROOT")"
+assert_eq "a described host reads no live pressure" "/dev/null" \
+    "$(env PZ_WINDOWS_VM_MEMINFO_FILE="$MP_T/meminfo" PZ_WINDOWS_VM_PRESSURE_FILE= bash -c "$MP_PF_BODY")"
+assert_eq "a real host reads the real pressure file" "/proc/pressure/memory" \
+    "$(env PZ_WINDOWS_VM_MEMINFO_FILE= PZ_WINDOWS_VM_PRESSURE_FILE= bash -c "$MP_PF_BODY")"
+
+# The arithmetic is what the UI and the watch both read, so it travels with the
+# verdict instead of being re-derived in three places.
+MP_ISO="$MP_T/dummy.iso"
+dd if=/dev/urandom bs=1M count=2 of="$MP_ISO" 2>/dev/null
+mp_meminfo 14820 5432 3624
+mp_pressure ""
+MP_PLAN="$(PZ_TEST_MODE=1 PZ_PREFLIGHT_JSON="$PREFLIGHT_PASS_FIXTURE" XDG_STATE_HOME="$MP_T/xdg" \
+    HOME="$MP_T/home" XDG_CONFIG_HOME="$MP_T/config" PZ_WINDOWS_VM_PROFILE=desktop \
+    PZ_WINDOWS_VM_MEMINFO_FILE="$MP_T/meminfo" PZ_WINDOWS_VM_PRESSURE_FILE="$MP_T/pressure" \
+    bash "$PROVISION_SCRIPT" plan --iso "$MP_ISO" --ram 4096 --json 2>/dev/null || true)"
+assert_eq "the plan reports the tightness the margin shows" "tight" "$(jq -r '.resources.memory.fit' <<< "$MP_PLAN")"
+assert_eq "the plan names the reserve it required" "3072" "$(jq -r '.resources.memory.reserveMb' <<< "$MP_PLAN")"
+assert_eq "the plan shows the margin it measured" "1336" "$(jq -r '.resources.memory.marginMb' <<< "$MP_PLAN")"
+
+MP_LC="$(PZ_TEST_MODE=1 HOME="$MP_T/home" XDG_CONFIG_HOME="$MP_T/config" \
+    XDG_STATE_HOME="$MP_T/xdg" PZ_WINDOWS_VM_PROFILE=desktop \
+    PZ_WINDOWS_VM_MEMINFO_FILE="$MP_T/meminfo" PZ_WINDOWS_VM_PRESSURE_FILE="$MP_T/pressure" \
+    PZ_WINDOWS_VM_CONFIG="$MP_T/config/phasezero/windows-vm.conf" \
+    bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch-check --ram 4096 --json 2>/dev/null || true)"
+assert_eq "launch-check carries the same margin" "1336" "$(jq -r '.memory.marginMb' <<< "$MP_LC")"
+assert_eq "launch-check carries the same reserve" "3072" "$(jq -r '.memory.reserveMb' <<< "$MP_LC")"
+assert_eq "launch-check still calls the tightness tight" "tight" "$(jq -r '.memory.fit' <<< "$MP_LC")"
+assert_eq "a tight margin is still not a blocker: the guard keeps its meaning" "0" \
+    "$(jq -r '[(.blockers // [])[] | select(test("memória"))] | length' <<< "$MP_LC")"
+rm -rf "$MP_T"
+
+echo ""
+echo "=== finalize: a preview names what the swap copies, where, and what it replaces ==="
+# finalize flattens a multi-gigabyte snapshot and then rewrites the config that
+# describes the VM in use. Until now the only way to see any of that was to run
+# it, with 42 GB and the working VM on the line.
+FP_T="$(mktemp -d)"
+FP_HOME="$FP_T/home"
+FP_XDG="$FP_T/xdg"
+FP_CONF_DIR="$FP_T/config/phasezero"
+FP_OP="op-20260501-000000-5"
+FP_VM="$FP_XDG/phasezero/windows-vm/vms/$FP_OP"
+FP_SNAP="$FP_VM/golden-clean.qcow2"
+FP_OLD_DIR="$FP_HOME/VirtualMachines/PhaseZero-Windows"
+FP_OLD_DISK="$FP_OLD_DIR/phasezero-windows.qcow2"
+FP_TARGET_DIR="$FP_HOME/VirtualMachines/PhaseZero-Windows-20260501-000000-5"
+FP_TARGET="$FP_TARGET_DIR/phasezero-windows.qcow2"
+mkdir -p "$FP_XDG/phasezero/operations/$FP_OP" "$FP_VM" "$FP_CONF_DIR" "$FP_OLD_DIR"
+truncate -s 4M "$FP_SNAP"
+printf 'old-windows\n' > "$FP_OLD_DISK"
+printf '%s\n' "$FP_SNAP" > "$FP_XDG/phasezero/operations/$FP_OP/snapshot_path"
+printf '%s\n' "$FP_VM" > "$FP_XDG/phasezero/operations/$FP_OP/vm_dir"
+jq -n --arg id "$FP_OP" '{id:$id, state:"completed", updatedAt:"2026-05-01T00:00:00Z"}' \
+    > "$FP_XDG/phasezero/operations/$FP_OP/operation.json"
+jq -n '{graphics:"compat"}' > "$FP_XDG/phasezero/operations/$FP_OP/plan.json"
+# A staging directory left by a real install carries its own firmware variables
+# and TPM state, and finalize moves both into the target VM directory. Without
+# them adopt reaches for the host's edk2 VARS template, which is a file a CI
+# runner does not have — the swap then died before it ever touched the config.
+truncate -s 4k "$FP_VM/OVMF_VARS.fd"
+mkdir -p "$FP_VM/tpm"
+printf 'swtpm-state\n' > "$FP_VM/tpm/tpm2-00.permall"
+FP_OVMF_CODE="$FP_T/OVMF_CODE.fd"
+printf 'ovmf-code\n' > "$FP_OVMF_CODE"
+fp_conf() {
+    cat > "$FP_CONF_DIR/windows-vm.conf" <<EOF
+PZ_WINDOWS_VM_NAME='PhaseZero-Windows'
+PZ_WINDOWS_VM_DIR='$FP_OLD_DIR'
+PZ_WINDOWS_VM_DISK='$FP_OLD_DISK'
+PZ_WINDOWS_VM_RAM_MB='4096'
+PZ_WINDOWS_VM_CPUS='2'
+EOF
+}
+fp_conf
+cp "$FP_CONF_DIR/windows-vm.conf" "$FP_T/conf.before"
+FP_REQUIRED="$(stat -c %s "$FP_SNAP")"
+set +e
+FP_PREVIEW="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
+    bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --preview --json 2>"$FP_T/preview.err")"
+FP_PREVIEW_RC=$?
+set -e
+assert_eq "preview succeeds" "0" "$FP_PREVIEW_RC"
+assert_eq "preview names the snapshot it would flatten" "$FP_SNAP" "$(jq -r '.originSnapshot // ""' <<< "$FP_PREVIEW")"
+assert_eq "preview names the disk it would write" "$FP_TARGET" "$(jq -r '.targetDisk // ""' <<< "$FP_PREVIEW")"
+assert_eq "preview names the VM that would be replaced" "$FP_OLD_DISK" "$(jq -r '.replacesDisk // ""' <<< "$FP_PREVIEW")"
+assert_eq "preview reports the bytes the copy needs" "$FP_REQUIRED" "$(jq -r '.requiredBytes // -1' <<< "$FP_PREVIEW")"
+assert_eq "preview reports free space at the destination" "true" "$(jq -r '(.freeBytes // 0) > 0' <<< "$FP_PREVIEW")"
+assert_eq "preview says the copy fits" "true" "$(jq -r '.fits' <<< "$FP_PREVIEW")"
+assert_eq "preview reports the staging VM as off" "false" "$(jq -r '.running' <<< "$FP_PREVIEW")"
+assert_eq "preview says the origin it names is actually there" "true" "$(jq -r '.originExists' <<< "$FP_PREVIEW")"
+assert_eq "preview writes no target directory" "0" "$([ -e "$FP_TARGET_DIR" ] && echo 1 || echo 0)"
+assert_eq "preview leaves the config alone" "0" "$(cmp -s "$FP_CONF_DIR/windows-vm.conf" "$FP_T/conf.before" && echo 0 || echo 1)"
+assert_eq "preview keeps the snapshot" "1" "$([ -f "$FP_SNAP" ] && echo 1 || echo 0)"
+
+# The snapshot is what the whole activation reads from, and it lives under
+# $XDG_STATE_HOME while the flattened disk lands under $HOME: nothing links the
+# two, so the recorded origin can simply stop existing between the install and
+# the decision. requiredBytes was 0 there and fits compared 0 against the free
+# space, so the preview answered "room enough" about a copy it could not make,
+# while finalize itself refuses with "verified snapshot missing".
+rm -f -- "$FP_SNAP"
+FP_GONE_PREVIEW="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
+    bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --preview --json 2>/dev/null)"
+FP_GONE_TEXT="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
+    bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --preview 2>/dev/null)"
+assert_eq "a vanished origin is reported as vanished" "false" "$(jq -r '.originExists' <<< "$FP_GONE_PREVIEW")"
+assert_eq "a vanished origin never claims the copy fits" "false" "$(jq -r '.fits' <<< "$FP_GONE_PREVIEW")"
+assert_contains "the text preview says there is nothing to flatten" "$FP_GONE_TEXT" "AUSENTE"
+truncate -s 4M "$FP_SNAP"
+
+echo ""
+echo "=== status: the installed VM and a finished second install are both reported ==="
+# The page reads status. With a working VM configured and a second install
+# finished in staging it said nothing at all, so the operator could not see
+# that a 42 GB install existed, and the only action offered was launching the
+# old one.
+SI_T="$(mktemp -d)"
+SI_HOME="$SI_T/home"
+SI_XDG="$SI_T/xdg"
+SI_CONF_DIR="$SI_T/config/phasezero"
+SI_DATA="$SI_T/data"
+SI_BIN="$SI_T/bin"
+SI_OP="op-20260601-000000-6"
+SI_VM="$SI_XDG/phasezero/windows-vm/vms/$SI_OP"
+SI_OLD_DISK="$SI_HOME/VirtualMachines/PhaseZero-Windows/phasezero-windows.qcow2"
+mkdir -p "$SI_XDG/phasezero/operations/$SI_OP" "$SI_VM" "$SI_CONF_DIR" "$SI_DATA" \
+    "$(dirname "$SI_OLD_DISK")" "$SI_BIN"
+truncate -s 2M "$SI_VM/golden-clean.qcow2"
+printf 'installed-windows\n' > "$SI_OLD_DISK"
+printf '%s\n' "$SI_VM/golden-clean.qcow2" > "$SI_XDG/phasezero/operations/$SI_OP/snapshot_path"
+printf '%s\n' "$SI_VM" > "$SI_XDG/phasezero/operations/$SI_OP/vm_dir"
+jq -n --arg id "$SI_OP" '{id:$id, state:"completed", updatedAt:"2026-06-01T00:00:00Z"}' \
+    > "$SI_XDG/phasezero/operations/$SI_OP/operation.json"
+cat > "$SI_CONF_DIR/windows-vm.conf" <<EOF
+PZ_WINDOWS_VM_NAME='PhaseZero-Windows'
+PZ_WINDOWS_VM_DIR='$(dirname "$SI_OLD_DISK")'
+PZ_WINDOWS_VM_DISK='$SI_OLD_DISK'
+PZ_WINDOWS_VM_RAM_MB='4096'
+PZ_WINDOWS_VM_CPUS='2'
+EOF
+cat > "$SI_BIN/qemu-img" <<'EOF'
+#!/usr/bin/env bash
+# Large enough for disk_looks_installed; the suite never opens a real qcow2.
+printf '{"virtual-size":68719476736,"actual-size":6442450944,"format":"qcow2","filename":"stub"}\n'
+EOF
+chmod +x "$SI_BIN/qemu-img"
+SI_STATUS="$(HOME="$SI_HOME" XDG_STATE_HOME="$SI_XDG" XDG_CONFIG_HOME="$SI_T/config" \
+    XDG_DATA_HOME="$SI_DATA" PATH="$SI_BIN:$PATH" \
+    bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" status 2>/dev/null || echo '{}')"
+assert_eq "status keeps reporting the configured VM" "$SI_OLD_DISK" "$(jq -r '.vm.disk // ""' <<< "$SI_STATUS")"
+assert_eq "status says the configured disk is installed" "true" "$(jq -r '.vm.installedLike // false' <<< "$SI_STATUS")"
+assert_eq "status also finds the pending install" "$SI_OP" "$(jq -r '.provision.pendingFinalize.operationId // ""' <<< "$SI_STATUS")"
+assert_eq "and warns that an install awaits activation" "1" \
+    "$(jq -r '[.health.findings[] | select(.id == "install-awaiting-activation" and .action == "windows.provision.finalize")] | length' <<< "$SI_STATUS")"
+assert_eq "without calling the configured VM broken" "0" \
+    "$(jq -r '[.health.findings[] | select(.id == "vm-not-configured" or .id == "disk-missing" or .id == "guest-not-installed")] | length' <<< "$SI_STATUS")"
+assert_eq "the pending record says which VM activation replaces" "$SI_OLD_DISK" \
+    "$(jq -r '.provision.pendingFinalize.replacesDisk // ""' <<< "$SI_STATUS")"
+rm -rf "$SI_T"
+
+echo ""
+echo "=== finalize: a swap that dies half-done rolls back, and retrying finishes ==="
+# adopt rewrites the config and installs the launcher. If the launcher step
+# fails, the config already points at the new disk while the VM is half
+# described: the old Windows becomes unlaunchable with no record of what was
+# there before. Failure injected where the real one lands — after the swap,
+# before the launcher.
+FE_BIN="$FP_T/bin"
+mkdir -p "$FE_BIN" "$FP_T/data"
+cat > "$FE_BIN/qemu-img" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+    convert)
+        prev=""; last=""
+        for arg in "$@"; do prev="$last"; last="$arg"; done
+        cp -- "$prev" "$last" || exit 1
+        ;;
+    check) : ;;
+    info) printf '{"virtual-size":68719476736,"actual-size":6442450944,"format":"qcow2","filename":"stub"}\n' ;;
+    *) : ;;
+esac
+EOF
+chmod +x "$FE_BIN/qemu-img"
+# A file where the applications directory must be: install -d fails for root
+# and for a user alike, so the injection does not depend on who runs the suite.
+printf 'not-a-directory\n' > "$FP_T/data/applications"
+set +e
+FE_ERR="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
+    XDG_DATA_HOME="$FP_T/data" PZ_WINDOWS_VM_OVMF_CODE="$FP_OVMF_CODE" PATH="$FE_BIN:$PATH" \
+    bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --json 2>&1)"
+FE_RC=$?
+set -e
+assert_eq "finalize reports the failed swap" "1" "$FE_RC"
+assert_eq "the previous config is restored" "0" "$(cmp -s "$FP_CONF_DIR/windows-vm.conf" "$FP_T/conf.before" && echo 0 || echo 1)"
+assert_contains "and says the config was restored" "$FE_ERR" "configuração restaurada"
+assert_eq "a readable backup of the replaced config is kept" "1" \
+    "$(ls "$FP_CONF_DIR"/windows-vm.conf.bak-* >/dev/null 2>&1 && echo 1 || echo 0)"
+assert_eq "the replaced VM's disk is untouched" "old-windows" "$(cat "$FP_OLD_DISK")"
+assert_eq "the disk left by a half swap is not kept" "0" "$([ -e "$FP_TARGET" ] && echo 1 || echo 0)"
+assert_eq "the operation is not marked finalized" "" "$(jq -r '.adoptedDisk // ""' "$FP_XDG/phasezero/operations/$FP_OP/operation.json")"
+
+rm -f "$FP_T/data/applications"
+mkdir -p "$FP_T/data/applications"
+set +e
+FE_RETRY="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
+    XDG_DATA_HOME="$FP_T/data" PZ_WINDOWS_VM_OVMF_CODE="$FP_OVMF_CODE" PATH="$FE_BIN:$PATH" \
+    bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --json 2>&1)"
+FE_RETRY_RC=$?
+set -e
+assert_eq "retrying after the injected failure succeeds" "0" "$FE_RETRY_RC"
+# pz_info writes to stdout, so the --json envelope is not the only line here;
+# the durable operation record is what the next command reads.
+assert_eq "the retry activates the new disk" "$FP_TARGET" "$(jq -r '.adoptedDisk // ""' "$FP_XDG/phasezero/operations/$FP_OP/operation.json")"
+assert_eq "the config now points at the new disk" "$FP_TARGET" \
+    "$(bash -c '. "$0"; printf "%s\n" "${PZ_WINDOWS_VM_DISK:-}"' "$FP_CONF_DIR/windows-vm.conf")"
+assert_eq "the old VM's disk survived the swap" "old-windows" "$(cat "$FP_OLD_DISK")"
+rm -rf "$FP_T"
 
 rm -rf "$SUITE_STATE_ROOT"
 

@@ -81,6 +81,7 @@ EXCHANGE_DIR="${PZ_WINDOWS_VM_EXCHANGE_DIR:-$HOME/Shared/WindowsVM}"
 
 ISO_PATH=""
 ISO_EXPLICIT=0
+ISO_VERIFY=0
 VIRTIO_ISO=""
 VM_DIR=""
 DISK_PATH=""
@@ -131,7 +132,7 @@ Usage:
   pz windows-vm status
   pz windows-vm discover [--json]
   pz windows-vm adopt [--disk PATH] [--source provisioned|adopted-existing]
-  pz windows-vm plan --iso <windows.iso> [--json]
+  pz windows-vm plan --iso <windows.iso> [--json] [--verify-iso]
   pz windows-vm install --iso <windows.iso> [--disk-size 256G] [--ram 8192|8G] [--cpus N] [--dry-run]
   pz windows-vm remove [--dry-run] --yes [--json]
   pz windows-vm optimize [--dry-run]
@@ -187,6 +188,7 @@ parse_options() {
         case "$1" in
             --iso) ISO_PATH="${2:-}"; ISO_EXPLICIT=1; shift 2 ;;
             --iso=*) ISO_PATH="${1#*=}"; ISO_EXPLICIT=1; shift ;;
+            --verify-iso) ISO_VERIFY=1; shift ;;
             --virtio-iso) VIRTIO_ISO="${2:-}"; shift 2 ;;
             --virtio-iso=*) VIRTIO_ISO="${1#*=}"; shift ;;
             --vm-dir) VM_DIR="${2:-}"; shift 2 ;;
@@ -660,6 +662,41 @@ detect_windows_iso() {
     return 0
 }
 
+# Existence is a weak preview when one installation medium sits on the disk under
+# two names: the config can point at a third, dead one and detection still answers
+# "some ISO". The hash is what proves the substitute is the same media, so
+# re-pointing the config is a decision with evidence instead of a guess. Reading
+# 8 GiB is not free, so this runs only when it was asked for.
+iso_sha256_of() {
+    sha256sum "$1" 2>/dev/null | cut -d' ' -f1
+}
+
+verify_iso_preview() {
+    local resolved_sha iso_size candidate candidate_size
+    if [ -z "$ISO_PATH" ] || [ ! -f "$ISO_PATH" ]; then
+        echo "  iso_sha256: none (no readable ISO)"
+        return 0
+    fi
+    resolved_sha="$(iso_sha256_of "$ISO_PATH")"
+    echo "  iso_sha256: ${resolved_sha:-unreadable}"
+    [ -n "$resolved_sha" ] || return 0
+    iso_size="$(wc -c < "$ISO_PATH" | tr -d '[:space:]')"
+    # Same size first: hashing every ISO on the disk to find duplicates of one
+    # would read tens of gigabytes for a preview.
+    while read -r candidate; do
+        [ -n "$candidate" ] || continue
+        if [ "$candidate" = "$ISO_PATH" ]; then continue; fi
+        if [ ! -f "$candidate" ]; then continue; fi
+        candidate_size="$(wc -c < "$candidate" | tr -d '[:space:]')"
+        if [ "$candidate_size" != "$iso_size" ]; then continue; fi
+        if [ "$(iso_sha256_of "$candidate")" = "$resolved_sha" ]; then
+            echo "  iso_same_hash: $candidate"
+        fi
+    done < <(bash "$PZ_ROOT/linux/windows-vm/media-inspect.sh" scan --json 2>/dev/null \
+        | jq -r '.candidates[].path // empty' 2>/dev/null)
+    return 0
+}
+
 detect_virtio_iso() {
     local path
     for path in \
@@ -722,9 +759,17 @@ effective_config() {
         domain_bus="$(libvirt_domain_disk_bus "$LIBVIRT_DOMAIN")"
         [ -n "$domain_bus" ] && RAW_DISK_BUS="$domain_bus"
     fi
-    ISO_PATH="${ISO_PATH:-${PZ_WINDOWS_VM_ISO:-$(detect_windows_iso)}}"
+    # The installed config can outlive its media: a moved or deleted ISO leaves a
+    # path no run can act on, and every plan built from it fails at launch. Trust
+    # the configured path only while the file is there, and say which path was dropped.
+    local configured_iso="${PZ_WINDOWS_VM_ISO:-}"
+    if [ -n "$configured_iso" ] && [ ! -f "$configured_iso" ] && [ -z "$ISO_PATH" ]; then
+        pz_warn "configured Windows ISO does not exist, ignoring it: $configured_iso"
+        configured_iso=""
+    fi
+    ISO_PATH="${ISO_PATH:-${configured_iso:-$(detect_windows_iso)}}"
     VIRTIO_ISO="${VIRTIO_ISO:-${PZ_WINDOWS_VM_VIRTIO_ISO:-$(detect_virtio_iso)}}"
-    RAM_MB="${RAM_MB:-${PZ_WINDOWS_VM_RAM_MB:-$(default_ram_mb)}}"
+    RAM_MB="${RAM_MB:-$(windows_vm_configured_ram_mb "${PZ_WINDOWS_VM_RAM_MB:-}")}"
     CPUS="${CPUS:-${PZ_WINDOWS_VM_CPUS:-$(default_cpus)}}"
     USB_MODE="${USB_MODE:-${PZ_WINDOWS_VM_USB_MODE:-redir}}"
     USB_AUTO_FILTER="${USB_AUTO_FILTER:-${PZ_WINDOWS_VM_USB_AUTO_FILTER:-0x08,-1,-1,-1,1}}"
@@ -806,6 +851,21 @@ effective_config() {
 
 write_config() {
     install -d "$CONFIG_DIR"
+    # This file describes the VM the user is about to start. Writing it in place
+    # means a failure halfway through leaves a truncated config behind, so the
+    # new text is staged next to it and swapped in by one rename.
+    # The rename also replaces whatever the file said before, so the previous
+    # version is kept: the ISO and disk paths it recorded are the only way back
+    # when a re-point turns out to be wrong.
+    local config_backup=""
+    if [ -f "$CONFIG_FILE" ]; then
+        config_backup="$CONFIG_FILE.bak-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+        cp -p -- "$CONFIG_FILE" "$config_backup" || {
+            pz_error "could not back up $CONFIG_FILE; refusing to overwrite it"
+            return 1
+        }
+    fi
+    local tmp="$CONFIG_FILE.tmp.$$"
     {
         printf '# PhaseZero managed Windows VM config\n'
         printf 'PZ_WINDOWS_VM_NAME=%q\n' "$VM_NAME"
@@ -835,7 +895,12 @@ write_config() {
         printf 'PZ_WINDOWS_VM_SHARE_POLICY=%q\n' "$SHARE_POLICY"
         printf 'PZ_WINDOWS_VM_SHARE_WRITABLE=%q\n' "$SHARE_WRITABLE"
         printf 'PZ_WINDOWS_VM_SPICE_ADDR=%q\n' "$SPICE_ADDR"
-    } > "$CONFIG_FILE"
+    } > "$tmp" || { rm -f -- "$tmp"; pz_error "failed to write $CONFIG_FILE"; return 1; }
+    if ! mv -f -- "$tmp" "$CONFIG_FILE"; then
+        rm -f -- "$tmp"
+        pz_error "failed to install $CONFIG_FILE${config_backup:+; the previous config is still at $config_backup}"
+        return 1
+    fi
     chown_target_user "$CONFIG_DIR" "$CONFIG_FILE"
     pz_info "wrote $CONFIG_FILE"
 }
@@ -976,10 +1041,13 @@ install_user_files() {
         pz_info "dry-run: would write $SYSTEMD_USER_DIR/phasezero-windows-vm.service"
         return 0
     fi
-    install -d "$APPLICATIONS_DIR" "$SYSTEMD_USER_DIR"
-    desktop_entry_content | pz_desktop_write_entry "$APPLICATIONS_DIR/phasezero-windows-vm.desktop" system.machines
-    boot_reboot_desktop_content | pz_desktop_write_entry "$APPLICATIONS_DIR/phasezero-reboot-windows-vm.desktop" system.boot
-    user_service_content > "$SYSTEMD_USER_DIR/phasezero-windows-vm.service"
+    # Every step here has to succeed: the caller treats a zero return as "the
+    # launcher and service exist", so a failure that fell through to pz_info
+    # would report a complete install with no desktop entry and no unit.
+    install -d "$APPLICATIONS_DIR" "$SYSTEMD_USER_DIR" || return 1
+    desktop_entry_content | pz_desktop_write_entry "$APPLICATIONS_DIR/phasezero-windows-vm.desktop" system.machines || return 1
+    boot_reboot_desktop_content | pz_desktop_write_entry "$APPLICATIONS_DIR/phasezero-reboot-windows-vm.desktop" system.boot || return 1
+    user_service_content > "$SYSTEMD_USER_DIR/phasezero-windows-vm.service" || return 1
     chown_target_user "$APPLICATIONS_DIR" "$APPLICATIONS_DIR/phasezero-windows-vm.desktop" "$APPLICATIONS_DIR/phasezero-reboot-windows-vm.desktop" "$SYSTEMD_USER_DIR" "$SYSTEMD_USER_DIR/phasezero-windows-vm.service"
     pz_info "installed user launcher and service"
 }
@@ -2624,6 +2692,14 @@ launch_check() {
     [ -f "$OVMF_VARS" ] && [ -r "$OVMF_VARS" ] && [ -w "$OVMF_VARS" ] && vars=true || blockers+=("OVMF_VARS ausente ou sem escrita")
     command -v qemu-system-x86_64 >/dev/null 2>&1 && qemu=true || blockers+=("qemu-system-x86_64 ausente")
 
+    # The same verdict launch_vm acts on. A green pre-check that the launch then
+    # refuses for memory is a dead end for the person following it.
+    local mem_fit
+    mem_fit="$(windows_vm_memory_notice "$RAM_MB")"
+    if [ "$mem_fit" = "exceed" ]; then
+        blockers+=("memória: o host não tem como entregar ${RAM_MB} MiB agora")
+    fi
+
     case "$GRAPHICS_PROFILE" in
         compat) graphics=true ;;
         virtio-gl)
@@ -2646,6 +2722,8 @@ launch_check() {
 
     local success=false
     [ "${#blockers[@]}" -eq 0 ] && success=true
+    local mem_requested_mb="$RAM_MB"
+    case "$mem_requested_mb" in ''|*[!0-9]*) mem_requested_mb=0 ;; esac
     if [ "$JSON_OUT" = "1" ]; then
         printf '%s\n' "${blockers[@]:-}" | jq -R -s \
             --argjson success "$success" \
@@ -2653,8 +2731,14 @@ launch_check() {
             --arg diskPath "$DISK_PATH" \
             --argjson kvm "$kvm" --argjson disk "$disk" --argjson ovmf "$ovmf" \
             --argjson vars "$vars" --argjson qemu "$qemu" --argjson graphics "$graphics" \
+            --argjson memoryRequestedMb "$mem_requested_mb" --arg memoryFit "$mem_fit" \
+            --argjson memoryMarginMb "$(windows_vm_memory_margin_mb "$mem_requested_mb")" \
+            --argjson memoryReserveMb "$(windows_vm_profile_reserve_mb)" \
+            --argjson memoryAvailableMb "$(windows_vm_meminfo_mb MemAvailable)" \
+            --argjson memorySwapFreeMb "$(windows_vm_meminfo_mb SwapFree)" \
             '{success:$success,graphicsProfile:$profile,diskPath:$diskPath,
               checks:{kvm:$kvm,disk:$disk,ovmf:$ovmf,ovmfVars:$vars,qemu:$qemu,graphics:$graphics},
+              memory:{requestedMb:$memoryRequestedMb,fit:$memoryFit,availableMb:$memoryAvailableMb,swapFreeMb:$memorySwapFreeMb,marginMb:$memoryMarginMb,reserveMb:$memoryReserveMb},
               blockers:(split("\n")|map(select(length>0)))}'
     else
         if $success; then
@@ -2820,8 +2904,12 @@ status_json() {
                     and $bootArtifactsCurrent == "yes" and ($bootRuntimeStale | not)
                 ),
                 findings: [
-                    if $pendingFinalize != null and ($configInstalled != "yes" or $diskExists != "yes" or $diskInstalledLike != "yes") then
-                        {id:"install-awaiting-activation", severity:"warning", message:"Uma instalação do Windows foi concluída, mas ainda não foi ativada nesta máquina virtual.", action:"windows.provision.finalize"}
+                    if $pendingFinalize != null then
+                        {id:"install-awaiting-activation", severity:"warning",
+                         message: (if $configInstalled == "yes" and $diskExists == "yes" and $diskInstalledLike == "yes"
+                             then "Duas máquinas virtuais existem: a que está configurada segue em uso, e a instalação concluída " + ($pendingFinalize.operationId // "") + " aguarda ativação."
+                             else "Uma instalação do Windows foi concluída, mas ainda não foi ativada nesta máquina virtual." end),
+                         action:"windows.provision.finalize"}
                     elif $configInstalled != "yes" then
                         {id:"vm-not-configured", severity:"warning", message:"A máquina virtual ainda não foi configurada.", action:"windows.provision.player"}
                     elif $diskExists != "yes" then
@@ -2937,8 +3025,28 @@ cmd_adopt() {
         *) pz_error "unknown adopt source: $ADOPT_SOURCE (provisioned|adopted-existing)"; return 1 ;;
     esac
     ensure_vm_storage
-    write_config
-    install_user_files
+    # adopt is the moment the VM in use changes: write_config replaces the
+    # config that described the previous one. Keep a copy so a step that fails
+    # afterwards can be undone instead of leaving a half-described VM.
+    local config_backup=""
+    if [ -f "$CONFIG_FILE" ]; then
+        config_backup="$CONFIG_FILE.bak-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+        cp -p -- "$CONFIG_FILE" "$config_backup" || { pz_error "could not back up $CONFIG_FILE"; return 1; }
+    fi
+    write_config || return 1
+    if ! install_user_files; then
+        if [ -n "$config_backup" ] && ! cp -p -- "$config_backup" "$CONFIG_FILE"; then
+            pz_error "adoção incompleta e a restauração da configuração falhou: $config_backup"
+            return 1
+        fi
+        if [ -n "$config_backup" ]; then
+            chown_target_user "$CONFIG_FILE"
+            pz_error "adoção incompleta: configuração restaurada a partir de $config_backup"
+        else
+            pz_error "adoção incompleta: nenhuma configuração anterior existia para restaurar"
+        fi
+        return 1
+    fi
     pz_info "adopted existing Windows VM disk: $target"
 }
 
@@ -3027,11 +3135,19 @@ print_plan() {
     parse_options "$@"
     effective_config
     if [ "$JSON_OUT" = "1" ]; then
+        # The status envelope is what the UI polls, so it never reads an 8 GiB ISO.
+        # Say that out loud rather than letting the request pass for nothing.
+        if [ "$ISO_VERIFY" = "1" ]; then
+            pz_warn "--verify-iso applies to the text plan only; the JSON envelope does not hash the ISO"
+        fi
         status_json
         return 0
     fi
     echo "PhaseZero Windows VM plan"
-    echo "  iso: ${ISO_PATH:-missing}"
+    local iso_verdict="missing"
+    [ -n "$ISO_PATH" ] && [ -f "$ISO_PATH" ] && iso_verdict="present"
+    echo "  iso: ${ISO_PATH:-none} ($iso_verdict)"
+    if [ "$ISO_VERIFY" = "1" ]; then verify_iso_preview; fi
     echo "  disk: $DISK_PATH ($DISK_SIZE)"
     echo "  disk_source: $DISK_SOURCE"
     echo "  disk_installed_like: $([ -f "$DISK_PATH" ] && disk_looks_installed "$DISK_PATH" && echo yes || echo no)"
@@ -3317,6 +3433,8 @@ $PZ_ROOT/linux/windows-vm/rescue.sh|$RUNTIME_ROOT/linux/windows-vm/rescue.sh|064
 $PZ_ROOT/linux/windows-vm/guest-login.sh|$RUNTIME_ROOT/linux/windows-vm/guest-login.sh|0755
 $PZ_ROOT/linux/windows-vm/guest-login.ps1|$RUNTIME_ROOT/linux/windows-vm/guest-login.ps1|0644
 $PZ_ROOT/linux/windows-vm/provision.sh|$RUNTIME_ROOT/linux/windows-vm/provision.sh|0644
+$PZ_ROOT/linux/windows-vm/memory.sh|$RUNTIME_ROOT/linux/windows-vm/memory.sh|0644
+$PZ_ROOT/linux/windows-vm/virtio-source.sh|$RUNTIME_ROOT/linux/windows-vm/virtio-source.sh|0644
 $PZ_ROOT/linux/windows-vm/graphics-profiles.json|$RUNTIME_ROOT/linux/windows-vm/graphics-profiles.json|0644
 $PZ_ROOT/linux/lib/common.sh|$RUNTIME_COMMON|0644
 $PZ_ROOT/linux/lib/ledger.sh|$RUNTIME_ROOT/linux/lib/ledger.sh|0644
@@ -4050,6 +4168,9 @@ cmd_boot() {
 
 case "$ACTION" in
     status) parse_options "$@"; print_status ;;
+    # Owner of the config path: provision.sh needs to know which VM finalize
+    # would replace without re-deriving where the config lives.
+    config-path) printf '%s\n' "$CONFIG_FILE" ;;
     discover|detect) print_discover "$@" ;;
     adopt|use-existing) cmd_adopt "$@" ;;
     remove|delete) cmd_remove "$@" ;;

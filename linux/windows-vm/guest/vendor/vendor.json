@@ -9,18 +9,18 @@
       "description": "WinFsp - Windows File System Proxy (required by VirtioFS)"
     },
     "virtiofs": {
-      "version": "stable-virtio",
-      "url": "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win-gt-x64.msi",
+      "version": "from-virtio-source",
+      "urlTemplate": "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-{version}-1/virtio-win-gt-x64.msi",
       "file": "virtio-win-gt-x64.msi",
       "sha256": "fafd93cb12b8a5df2668d3459d8b5589e7195a28424f9a40e16b50f462cf8fab",
-      "description": "Virtio-win Guest Tools (includes VirtioFS driver)"
+      "description": "Virtio-win Guest Tools (includes VirtioFS driver). Version and URL come from linux/windows-vm/virtio-source.sh; the host resolves them into this file before the bundle reaches the guest."
     },
     "spice-webdavd": {
-      "version": "latest",
-      "url": "https://www.spice-space.org/download/windows/spice-webdavd/spice-webdavd-x64-latest.msi",
+      "version": "2.4",
+      "url": "https://www.spice-space.org/download/windows/spice-webdavd/spice-webdavd-x64-2.4.msi",
       "file": "spice-webdavd-x64-latest.msi",
       "sha256": "f278c17fca6b129eb5c9a46b8634af2ecfaf3bca8903eb9a5c7874f0e45f82b9",
-      "description": "SPICE WebDAV daemon for Windows"
+      "description": "SPICE WebDAV daemon for Windows. Pinned to 2.4: upstream publishes spice-webdavd-x64-2.4.msi.sha256 with exactly this hash, and the -latest artifact is the same bytes today but moves without notice."
     }
   }
 }

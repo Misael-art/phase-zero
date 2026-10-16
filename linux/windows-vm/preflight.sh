@@ -3,14 +3,15 @@ set -euo pipefail
 
 PZ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$PZ_ROOT/linux/lib/common.sh"
+source "$PZ_ROOT/linux/windows-vm/memory.sh"
+source "$PZ_ROOT/linux/windows-vm/virtio-source.sh"
 
 SWTPM_BIN=""
 SWTPM_RUNNING=false
 SWTPM_SOCKET=""
 SWTPM_PID=""
 SWTPM_SERVICE_INSTALLED=false
-VIRTIO_PINNED="0.1.285"
-VIRTIO_PINNED_SHA="e14cf2b94492c3e925f0070ba7fdfedeb2048c91eea9c5a5afb30232a3976331"
+VIRTIO_PINNED="$PZ_VIRTIO_WIN_VERSION"
 VIRTIO_LATEST=""
 VIRTIO_LATEST_URL=""
 VIRTIO_OUTDATED=false
@@ -22,6 +23,7 @@ GRAPHICS_CONTRACT="${PZ_WINDOWS_VM_GRAPHICS_CONTRACT:-$PZ_ROOT/linux/windows-vm/
 KVM_ACCESS=false
 OVMF_PRESENT=false
 RAM_MB=0
+TOTAL_MB=0
 CPUS=0
 DISK_GB=0
 
@@ -60,7 +62,9 @@ swtpm_auto_fix() {
     mkdir -p "$service_dir"
     if ! $SWTPM_SERVICE_INSTALLED; then
         cp "$PZ_ROOT/linux/windows-vm/swtpm.service" "$service_dir/swtpm.service"
-        systemctl --user daemon-reload
+        # Hosts without a reachable user bus (no systemd session, containers)
+        # fail here; that must not abort the rest of the fix.
+        systemctl --user daemon-reload || pz_warn "systemd user daemon-reload failed"
         SWTPM_SERVICE_INSTALLED=true
     fi
 
@@ -105,34 +109,47 @@ virtio_check() {
 
 virtio_auto_fix() {
     $VIRTIO_OUTDATED || return 0
-    [ -z "$VIRTIO_LATEST_URL" ] && { pz_warn "cannot resolve latest virtio-win URL"; return 1; }
 
     local vm_dir="${PZ_STATE}/windows-vm/vm"
+    local iso="$vm_dir/virtio-win.iso"
     mkdir -p "$vm_dir"
 
-    pz_info "downloading virtio-win $VIRTIO_LATEST → $vm_dir/virtio-win.iso"
+    # An existing cache is only kept when its hash equals the trusted one; a
+    # file of unknown origin is not refreshed into readiness by being there.
+    if virtio_win_sha_matches "$iso"; then
+        pz_info "virtio-win cache verified: $iso"
+        return 0
+    fi
+
+    # The download target is the pinned URL, never the floating stable-virtio
+    # link: provisioning validates the pinned hash, so a newer ISO would be
+    # downloaded, refused and re-downloaded on every attempt.
+    pz_info "downloading virtio-win $PZ_VIRTIO_WIN_VERSION → $iso"
     local ok=0
     if command -v curl >/dev/null 2>&1; then
-        if curl -L -o "$vm_dir/virtio-win.iso" "$VIRTIO_LATEST_URL"; then
+        if curl -L -o "$iso" "$PZ_VIRTIO_WIN_URL"; then
             ok=1
         fi
     elif command -v wget >/dev/null 2>&1; then
-        if wget -O "$vm_dir/virtio-win.iso" "$VIRTIO_LATEST_URL"; then
+        if wget -O "$iso" "$PZ_VIRTIO_WIN_URL"; then
             ok=1
         fi
     fi
 
-    if [ "$ok" = "1" ]; then
-        local actual
-        actual="$(sha256sum "$vm_dir/virtio-win.iso" | cut -d' ' -f1)"
-        pz_info "virtio-win.iso SHA-256: $actual"
-        echo "  url: $VIRTIO_LATEST_URL"
-        echo "  sha: $actual"
-        echo "  pinned_version: $VIRTIO_LATEST"
-    else
+    if [ "$ok" != "1" ]; then
         pz_warn "virtio-win download failed"
-        rm -f "$vm_dir/virtio-win.iso"
+        rm -f "$iso"
+        return 1
     fi
+
+    if ! virtio_win_sha_matches "$iso"; then
+        pz_warn "virtio-win SHA-256 does not match the trusted hash — refusing $(basename "$iso")"
+        rm -f "$iso"
+        return 1
+    fi
+
+    pz_info "virtio-win verified against the trusted SHA-256: ${PZ_VIRTIO_WIN_SHA256:0:8}…"
+    return 0
 }
 
 graphics_check() {
@@ -205,7 +222,11 @@ graphics_check() {
 }
 
 resource_check() {
-    RAM_MB="$(awk '/MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 0)"
+    # MemTotal is not a budget. This field is what a caller reads to decide
+    # whether the host can carry a guest, so it has to be the memory the host
+    # can actually hand over. The total stays next to it for context.
+    RAM_MB="$(windows_vm_meminfo_mb MemAvailable)"
+    TOTAL_MB="$(windows_vm_meminfo_mb MemTotal)"
     CPUS="$(nproc 2>/dev/null || echo 0)"
     local root_avail
     root_avail="$(df -BG / | awk 'NR==2 {print $4}' 2>/dev/null | tr -d 'G' || echo 0)"
@@ -242,6 +263,7 @@ emit_json() {
         --argjson kvmAccess "$KVM_ACCESS" \
         --argjson ovmfPresent "$OVMF_PRESENT" \
         --argjson ramMb "$RAM_MB" \
+        --argjson totalMb "$TOTAL_MB" \
         --argjson cpus "$CPUS" \
         --argjson diskGb "$DISK_GB" \
         --argjson graphicsFailures "$(if [ "${#GRAPHICS_FAILURES[@]}" -eq 0 ]; then echo '[]'; else printf '%s\n' "${GRAPHICS_FAILURES[@]}" | jq -R . | jq -s -c .; fi)" \
@@ -268,6 +290,7 @@ emit_json() {
             },
             resources: {
                 ramMb: $ramMb,
+                totalMb: $totalMb,
                 cpus: $cpus,
                 diskGb: $diskGb,
                 kvmAccess: $kvmAccess,
@@ -284,11 +307,14 @@ run_checks() {
 }
 
 do_auto_fix() {
+    # Every step is independent. Under `set -e` a bare failing fixer would end
+    # the function, so a host that cannot start swtpm silently never got its
+    # driver ISO refreshed — and provisioning then failed on the missing media.
     if ! $SWTPM_RUNNING; then
-        swtpm_auto_fix
+        swtpm_auto_fix || pz_warn "swtpm auto-fix did not complete"
     fi
     if $VIRTIO_OUTDATED; then
-        virtio_auto_fix
+        virtio_auto_fix || pz_warn "virtio-win auto-fix did not complete"
     fi
     if ! $OVMF_PRESENT; then
         pz_info "installing edk2-ovmf..."

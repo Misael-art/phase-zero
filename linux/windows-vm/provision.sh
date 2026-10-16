@@ -9,6 +9,11 @@ source "$PZ_ROOT/linux/lib/common.sh"
 # shellcheck source=memory.sh
 source "$PZ_ROOT/linux/windows-vm/memory.sh"
 
+# PZ_VIRTIO_WIN_VERSION/URL/SHA256 and virtio_win_sha_matches: the only place the
+# trusted virtio-win artifact is written down.
+# shellcheck source=virtio-source.sh
+source "$PZ_ROOT/linux/windows-vm/virtio-source.sh"
+
 default_cpus() {
     local total cpus
     total="$(nproc 2>/dev/null || echo 2)"
@@ -232,12 +237,15 @@ provision_plan() {
     fi
 
     local json_ram json_cpus ram_source="auto" memory_fit mem_available_mb swap_free_mb
+    local memory_margin_mb memory_reserve_mb
     [ -n "$ram" ] && ram_source="explicit"
     json_ram="${ram:-$(default_ram_mb)}"
     json_cpus="${cpus:-$(default_cpus)}"
     memory_fit="$(windows_vm_memory_fit "$json_ram")"
     mem_available_mb="$(windows_vm_meminfo_mb MemAvailable)"
     swap_free_mb="$(windows_vm_meminfo_mb SwapFree)"
+    memory_margin_mb="$(windows_vm_memory_margin_mb "$json_ram")"
+    memory_reserve_mb="$(windows_vm_profile_reserve_mb)"
 
     local plan_id confirm_token timestamp
     plan_id="plan-$(date +%Y%m%d-%H%M%S)-${RANDOM}"
@@ -245,8 +253,8 @@ provision_plan() {
     timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
     local virtio_source="auto"
-    local virtio_url="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.285-1/virtio-win-0.1.285.iso"
-    local virtio_sha_expected="e14cf2b94492c3e925f0070ba7fdfedeb2048c91eea9c5a5afb30232a3976331"
+    local virtio_url="$PZ_VIRTIO_WIN_URL"
+    local virtio_sha_expected="$PZ_VIRTIO_WIN_SHA256"
 
     local preflight_json preflight_status preflight_stderr
     if [ "${PZ_TEST_MODE:-0}" = "1" ] && [ -n "${PZ_PREFLIGHT_JSON:-}" ]; then
@@ -338,6 +346,8 @@ provision_plan() {
         --arg memoryFit "$memory_fit" \
         --argjson memAvailableMb "$mem_available_mb" \
         --argjson swapFreeMb "$swap_free_mb" \
+        --argjson memoryMarginMb "$memory_margin_mb" \
+        --argjson memoryReserveMb "$memory_reserve_mb" \
         --arg cpus "$json_cpus" \
         --arg diskSize "$disk_size" \
         --argjson imageIndex "$image_index" \
@@ -360,7 +370,8 @@ provision_plan() {
             resources: {
                 ramMb: ($ram|tonumber),
                 ramSource: $ramSource,
-                memory: {fit: $memoryFit, availableMb: $memAvailableMb, swapFreeMb: $swapFreeMb},
+                memory: {fit: $memoryFit, availableMb: $memAvailableMb, swapFreeMb: $swapFreeMb,
+                         marginMb: $memoryMarginMb, reserveMb: $memoryReserveMb},
                 cpus: ($cpus|tonumber),
                 diskSize: $diskSize
             },
@@ -3010,26 +3021,139 @@ provision_pending_finalize() {
     operation_file="$OPERATIONS_DIR/$op/operation.json"
     vm_dir="$(resolve_vm_staging_dir "$op" 2>/dev/null || true)"
     if [ "$json" = "1" ]; then
+        # status reads this object, so the preview travels with it: the page can
+        # show what activating would replace without a second call. A preview
+        # that fails must never hide the pending install, so it degrades to {}.
+        local preview='{}'
+        preview="$(provision_finalize_preview "$op" "$(provision_finalize_target_dir "$op")" 2>/dev/null || true)"
+        jq -e 'type == "object"' <<<"$preview" >/dev/null 2>&1 || preview='{}'
         jq -n \
             --arg id "$op" \
             --arg completedAt "$(jq -r '.updatedAt // ""' "$operation_file" 2>/dev/null || true)" \
             --argjson running "$(if [ -n "$vm_dir" ] && operation_vm_running "$vm_dir"; then echo true; else echo false; fi)" \
             --argjson allocatedBytes "$(if [ -n "$vm_dir" ]; then operation_allocated_bytes "$vm_dir"; else echo 0; fi)" \
-            '{operationId: $id, completedAt: $completedAt, running: $running, allocatedBytes: $allocatedBytes}'
+            --argjson preview "$preview" \
+            '$preview + {operationId: $id, completedAt: $completedAt, running: $running, allocatedBytes: $allocatedBytes}'
     else
         pz_info "instalação concluída aguardando ativação: $op"
         pz_info "ative com: pz windows-vm provision finalize --latest"
     fi
 }
 
+# The destination is chosen the same way for the preview and for the real run:
+# the canonical directory while it is free, a sibling named after the operation
+# once a VM already lives there.
+provision_finalize_target_dir() {
+    local operation_id="$1" explicit="${2:-}" default_dir
+    if [ -n "$explicit" ]; then
+        printf '%s\n' "$explicit"
+        return 0
+    fi
+    default_dir="$HOME/VirtualMachines/PhaseZero-Windows"
+    if [ ! -e "$default_dir/phasezero-windows.qcow2" ]; then
+        printf '%s\n' "$default_dir"
+    else
+        printf '%s\n' "$HOME/VirtualMachines/PhaseZero-Windows-${operation_id#op-}"
+    fi
+}
+
+# The config names the VM an activation replaces. windows-vm.sh owns where that
+# file lives, so ask it rather than rebuilding the path here.
+provision_current_vm_disk() {
+    local conf
+    conf="$(bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" config-path 2>/dev/null || true)"
+    if [ -z "$conf" ] || [ ! -f "$conf" ] || [ -L "$conf" ]; then
+        printf '\n'
+        return 0
+    fi
+    bash -c '. "$0"; printf "%s\n" "${PZ_WINDOWS_VM_DISK:-}"' "$conf" 2>/dev/null || printf '\n'
+}
+
+provision_free_bytes() {
+    local path="$1" probe="$1"
+    # df needs an existing path; walk up to the nearest ancestor that is one.
+    while [ "$probe" != "/" ] && [ ! -e "$probe" ]; do
+        probe="$(dirname -- "$probe")"
+    done
+    df -B1 --output=avail "$probe" 2>/dev/null | awk 'NR==2 {print $1+0}'
+}
+
+# What activating would do, without doing any of it. finalize flattens a
+# multi-gigabyte snapshot and then swaps the config that describes the VM in
+# use, so the operator sees the origin, the destination, the room it needs and
+# the VM it replaces before anything is written.
+provision_finalize_preview() {
+    local operation_id="$1" target_dir="$2"
+    local op_dir="$OPERATIONS_DIR/$operation_id" snapshot target_disk replaces required free vm_dir origin_exists running=false
+    snapshot="$(cat "$op_dir/snapshot_path" 2>/dev/null || true)"
+    target_dir="$(readlink -m -- "$target_dir")"
+    target_disk="$target_dir/phasezero-windows.qcow2"
+    replaces="$(provision_current_vm_disk)"
+    vm_dir="$(resolve_vm_staging_dir "$operation_id" 2>/dev/null || true)"
+    if [ -n "$vm_dir" ] && operation_vm_running "$vm_dir"; then
+        running=true
+    fi
+    required=0
+    origin_exists=false
+    if [ -f "$snapshot" ]; then
+        origin_exists=true
+        required="$(stat -c %s -- "$snapshot" 2>/dev/null || echo 0)"
+    fi
+    free="$(provision_free_bytes "$target_dir")"
+    # fits has to be about a copy that could actually happen. The origin lives
+    # under $XDG_STATE_HOME while the target lives under $HOME and nothing links
+    # the two, so the recorded snapshot can be gone long before the decision is
+    # made; comparing the resulting 0 required bytes against the free space used
+    # to answer "room enough" for a flatten that finalize then refuses.
+    jq -n \
+        --arg operationId "$operation_id" \
+        --arg originSnapshot "$snapshot" \
+        --argjson originExists "$origin_exists" \
+        --arg targetDir "$target_dir" \
+        --arg targetDisk "$target_disk" \
+        --arg replacesDisk "$replaces" \
+        --argjson running "$running" \
+        --argjson requiredBytes "${required:-0}" \
+        --argjson freeBytes "${free:-0}" \
+        '{operationId: $operationId,
+          originSnapshot: $originSnapshot,
+          originExists: $originExists,
+          targetDir: $targetDir,
+          targetDisk: $targetDisk,
+          replacesDisk: (if $replacesDisk == "" then null else $replacesDisk end),
+          running: $running,
+          requiredBytes: ($requiredBytes // 0),
+          freeBytes: ($freeBytes // 0),
+          fits: ($originExists and (($freeBytes // 0) >= ($requiredBytes // 0)))}'
+}
+
+# The flattened disk is not the whole VM. The guest was installed against this
+# firmware-variable file and this swtpm state: without them the adopted VM boots
+# with a blank machine, and anything Windows sealed to the TPM during setup is
+# lost. `adopt` points the config at $target_dir/tpm, so both are carried across
+# together. Neither copy is allowed to follow a planted symlink or to overwrite
+# state another VM already owns.
+provision_finalize_carry_boot_artifacts() {
+    local vm_dir="$1" target_dir="$2"
+    if [ -f "$vm_dir/OVMF_VARS.fd" ]; then
+        cp --preserve=mode,timestamps "$vm_dir/OVMF_VARS.fd" "$target_dir/OVMF_VARS.fd"
+        chmod 600 "$target_dir/OVMF_VARS.fd"
+    fi
+    if [ -d "$vm_dir/tpm" ] && [ ! -L "$vm_dir/tpm" ] && [ ! -e "$target_dir/tpm" ]; then
+        cp -a -- "$vm_dir/tpm" "$target_dir/tpm"
+        chmod 700 "$target_dir/tpm"
+    fi
+}
+
 provision_finalize() {
-    local operation_id="" target_dir="" json=0 latest=0
+    local operation_id="" target_dir="" json=0 latest=0 preview=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --operation-id) operation_id="${2:-}"; shift 2 ;;
             --operation-id=*) operation_id="${1#*=}"; shift ;;
             --target-dir) target_dir="${2:-}"; shift 2 ;;
             --target-dir=*) target_dir="${1#*=}"; shift ;;
+            --preview) preview=1; shift ;;
             --latest) latest=1; shift ;;
             --json) json=1; shift ;;
             *) pz_error "unknown finalize option: $1"; return 1 ;;
@@ -3049,6 +3173,25 @@ provision_finalize() {
     managed_vm_base="$(readlink -m -- "$HOME/VirtualMachines/PhaseZero-Windows")"
     state="$(jq -r '.state // ""' "$operation_file")"
     [ "$state" = "completed" ] || { pz_error "operation must be completed before finalize"; return 1; }
+    if [ "$preview" = "1" ]; then
+        local preview_json
+        preview_json="$(provision_finalize_preview "$operation_id" "$(provision_finalize_target_dir "$operation_id" "$target_dir")")" || return 1
+        if [ "$json" = "1" ]; then
+            printf '%s\n' "$preview_json"
+            return 0
+        fi
+        jq -r '"origem:   " + (.originSnapshot // "—")
+                   + (if .originExists then "" else " (AUSENTE)" end),
+               "destino:  " + (.targetDisk // "—"),
+               "substitui: " + (.replacesDisk // "nenhuma VM configurada"),
+               "espaço:   " + (if .originExists
+                               then ((.freeBytes // 0) / 1073741824 | floor | tostring) + " GiB livres para " + ((.requiredBytes // 0) / 1073741824 | floor | tostring) + " GiB"
+                               else "indeterminado sem a origem" end),
+               (if (.originExists | not) then "status:   a origem verificada não existe; finalize recusaria — nada foi copiado"
+                elif .running then "status:   a VM da instalação ainda está ligada — desligue-a antes de ativar"
+                else "status:   pronta para ativar" end)' <<< "$preview_json"
+        return 0
+    fi
     existing_adopted="$(jq -r '.adoptedDisk // ""' "$operation_file")"
     if [ -n "$existing_adopted" ] && [ -f "$existing_adopted" ]; then
         existing_adopted_real="$(readlink -f -- "$existing_adopted" 2>/dev/null || true)"
@@ -3082,12 +3225,7 @@ provision_finalize() {
     fi
 
     if [ -z "$target_dir" ]; then
-        local default_dir="$HOME/VirtualMachines/PhaseZero-Windows"
-        if [ ! -e "$default_dir/phasezero-windows.qcow2" ]; then
-            target_dir="$default_dir"
-        else
-            target_dir="$HOME/VirtualMachines/PhaseZero-Windows-${operation_id#op-}"
-        fi
+        target_dir="$(provision_finalize_target_dir "$operation_id")"
     fi
     target_dir="$(readlink -m -- "$target_dir")"
     case "$target_dir" in
@@ -3098,6 +3236,8 @@ provision_finalize() {
     local target_disk="$target_dir/phasezero-windows.qcow2"
     partial_disk="$target_dir/.phasezero-windows.qcow2.partial.$$"
     [ ! -e "$target_disk" ] || { pz_error "final target already exists: $target_disk"; return 1; }
+    local created_target_dir=false
+    [ -e "$target_dir" ] || created_target_dir=true
     install -d -m 700 "$target_dir"
     target_dir="$(readlink -f -- "$target_dir")"
     case "$target_dir" in
@@ -3120,26 +3260,22 @@ provision_finalize() {
     mv -- "$partial_disk" "$target_disk"
     partial_disk=""
     chmod 600 "$target_disk"
-    if [ -f "$vm_dir/OVMF_VARS.fd" ]; then
-        cp --preserve=mode,timestamps "$vm_dir/OVMF_VARS.fd" "$target_dir/OVMF_VARS.fd"
-        chmod 600 "$target_dir/OVMF_VARS.fd"
-    fi
-    # The guest was installed against this TPM. Without its state the adopted
-    # VM boots with a blank one: Windows sees a different machine, and
-    # anything sealed to the TPM during setup is lost. adopt points the config
-    # at $target_dir/tpm, so carry it across with the firmware variables.
-    if [ -d "$vm_dir/tpm" ] && [ ! -L "$vm_dir/tpm" ] && [ ! -e "$target_dir/tpm" ]; then
-        cp -a -- "$vm_dir/tpm" "$target_dir/tpm"
-        chmod 700 "$target_dir/tpm"
-    fi
+    provision_finalize_carry_boot_artifacts "$vm_dir" "$target_dir"
 
     local graphics ovmf_code net_model="virtio-net-pci"
-    graphics="$(jq -r '.graphics // "compat"' "$op_dir/plan.json")"
+    graphics="$(jq -r '.graphics // "compat"' "$op_dir/plan.json" 2>/dev/null || echo compat)"
     ovmf_code="$(provision_ovmf_code)"
     # --source provisioned: this disk was built by PhaseZero, not found on the
     # host. `windows-vm remove` uses that distinction to decide whether the VM
     # is PhaseZero's to delete without extra warnings.
     if ! bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" adopt --disk "$target_disk" --graphics "$graphics" --net-model "$net_model" --ovmf-code "$ovmf_code" --source provisioned; then
+        # adopt already put the previous config back. Drop the disk it did not
+        # adopt so a retry has somewhere to write; the staging snapshot is
+        # untouched, so the flattened copy can be rebuilt.
+        rm -f -- "$target_disk"
+        if [ "$created_target_dir" = "true" ]; then
+            rmdir --ignore-fail-on-non-empty -- "$target_dir" 2>/dev/null || true
+        fi
         pz_error "disk created but PhaseZero adoption failed: $target_disk"
         return 1
     fi
@@ -3294,7 +3430,7 @@ Usage:
   provision plan --iso <windows.iso> [options] [--json]
   provision start --plan-id <id> --confirm <token> [--json]
   provision status --operation-id <id> [--json]
-  provision finalize (--operation-id <id>|--latest) [--target-dir PATH] [--json]
+  provision finalize (--operation-id <id>|--latest) [--target-dir PATH] [--preview] [--json]
   provision pending-finalize [--json]
   provision watch --operation-id <id>
   provision resume --operation-id <id>
