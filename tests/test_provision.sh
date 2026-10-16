@@ -1791,6 +1791,167 @@ MEM_RESTORE="$(PATH="$MEM_T/bin:$PATH" bash -c '
 assert_eq "cleanup restores the previous power profile, once" "set balanced" "$MEM_RESTORE"
 rm -rf "$MEM_T"
 
+echo ""
+echo "=== finalize: a preview names what the swap copies, where, and what it replaces ==="
+# finalize flattens a multi-gigabyte snapshot and then rewrites the config that
+# describes the VM in use. Until now the only way to see any of that was to run
+# it, with 42 GB and the working VM on the line.
+FP_T="$(mktemp -d)"
+FP_HOME="$FP_T/home"
+FP_XDG="$FP_T/xdg"
+FP_CONF_DIR="$FP_T/config/phasezero"
+FP_OP="op-20260501-000000-5"
+FP_VM="$FP_XDG/phasezero/windows-vm/vms/$FP_OP"
+FP_SNAP="$FP_VM/golden-clean.qcow2"
+FP_OLD_DIR="$FP_HOME/VirtualMachines/PhaseZero-Windows"
+FP_OLD_DISK="$FP_OLD_DIR/phasezero-windows.qcow2"
+FP_TARGET_DIR="$FP_HOME/VirtualMachines/PhaseZero-Windows-20260501-000000-5"
+FP_TARGET="$FP_TARGET_DIR/phasezero-windows.qcow2"
+mkdir -p "$FP_XDG/phasezero/operations/$FP_OP" "$FP_VM" "$FP_CONF_DIR" "$FP_OLD_DIR"
+truncate -s 4M "$FP_SNAP"
+printf 'old-windows\n' > "$FP_OLD_DISK"
+printf '%s\n' "$FP_SNAP" > "$FP_XDG/phasezero/operations/$FP_OP/snapshot_path"
+printf '%s\n' "$FP_VM" > "$FP_XDG/phasezero/operations/$FP_OP/vm_dir"
+jq -n --arg id "$FP_OP" '{id:$id, state:"completed", updatedAt:"2026-05-01T00:00:00Z"}' \
+    > "$FP_XDG/phasezero/operations/$FP_OP/operation.json"
+jq -n '{graphics:"compat"}' > "$FP_XDG/phasezero/operations/$FP_OP/plan.json"
+fp_conf() {
+    cat > "$FP_CONF_DIR/windows-vm.conf" <<EOF
+PZ_WINDOWS_VM_NAME='PhaseZero-Windows'
+PZ_WINDOWS_VM_DIR='$FP_OLD_DIR'
+PZ_WINDOWS_VM_DISK='$FP_OLD_DISK'
+PZ_WINDOWS_VM_RAM_MB='4096'
+PZ_WINDOWS_VM_CPUS='2'
+EOF
+}
+fp_conf
+cp "$FP_CONF_DIR/windows-vm.conf" "$FP_T/conf.before"
+FP_REQUIRED="$(stat -c %s "$FP_SNAP")"
+set +e
+FP_PREVIEW="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
+    bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --preview --json 2>"$FP_T/preview.err")"
+FP_PREVIEW_RC=$?
+set -e
+assert_eq "preview succeeds" "0" "$FP_PREVIEW_RC"
+assert_eq "preview names the snapshot it would flatten" "$FP_SNAP" "$(jq -r '.originSnapshot // ""' <<< "$FP_PREVIEW")"
+assert_eq "preview names the disk it would write" "$FP_TARGET" "$(jq -r '.targetDisk // ""' <<< "$FP_PREVIEW")"
+assert_eq "preview names the VM that would be replaced" "$FP_OLD_DISK" "$(jq -r '.replacesDisk // ""' <<< "$FP_PREVIEW")"
+assert_eq "preview reports the bytes the copy needs" "$FP_REQUIRED" "$(jq -r '.requiredBytes // -1' <<< "$FP_PREVIEW")"
+assert_eq "preview reports free space at the destination" "true" "$(jq -r '(.freeBytes // 0) > 0' <<< "$FP_PREVIEW")"
+assert_eq "preview says the copy fits" "true" "$(jq -r '.fits' <<< "$FP_PREVIEW")"
+assert_eq "preview reports the staging VM as off" "false" "$(jq -r '.running' <<< "$FP_PREVIEW")"
+assert_eq "preview writes no target directory" "0" "$([ -e "$FP_TARGET_DIR" ] && echo 1 || echo 0)"
+assert_eq "preview leaves the config alone" "0" "$(cmp -s "$FP_CONF_DIR/windows-vm.conf" "$FP_T/conf.before" && echo 0 || echo 1)"
+assert_eq "preview keeps the snapshot" "1" "$([ -f "$FP_SNAP" ] && echo 1 || echo 0)"
+
+echo ""
+echo "=== status: the installed VM and a finished second install are both reported ==="
+# The page reads status. With a working VM configured and a second install
+# finished in staging it said nothing at all, so the operator could not see
+# that a 42 GB install existed, and the only action offered was launching the
+# old one.
+SI_T="$(mktemp -d)"
+SI_HOME="$SI_T/home"
+SI_XDG="$SI_T/xdg"
+SI_CONF_DIR="$SI_T/config/phasezero"
+SI_DATA="$SI_T/data"
+SI_BIN="$SI_T/bin"
+SI_OP="op-20260601-000000-6"
+SI_VM="$SI_XDG/phasezero/windows-vm/vms/$SI_OP"
+SI_OLD_DISK="$SI_HOME/VirtualMachines/PhaseZero-Windows/phasezero-windows.qcow2"
+mkdir -p "$SI_XDG/phasezero/operations/$SI_OP" "$SI_VM" "$SI_CONF_DIR" "$SI_DATA" \
+    "$(dirname "$SI_OLD_DISK")" "$SI_BIN"
+truncate -s 2M "$SI_VM/golden-clean.qcow2"
+printf 'installed-windows\n' > "$SI_OLD_DISK"
+printf '%s\n' "$SI_VM/golden-clean.qcow2" > "$SI_XDG/phasezero/operations/$SI_OP/snapshot_path"
+printf '%s\n' "$SI_VM" > "$SI_XDG/phasezero/operations/$SI_OP/vm_dir"
+jq -n --arg id "$SI_OP" '{id:$id, state:"completed", updatedAt:"2026-06-01T00:00:00Z"}' \
+    > "$SI_XDG/phasezero/operations/$SI_OP/operation.json"
+cat > "$SI_CONF_DIR/windows-vm.conf" <<EOF
+PZ_WINDOWS_VM_NAME='PhaseZero-Windows'
+PZ_WINDOWS_VM_DIR='$(dirname "$SI_OLD_DISK")'
+PZ_WINDOWS_VM_DISK='$SI_OLD_DISK'
+PZ_WINDOWS_VM_RAM_MB='4096'
+PZ_WINDOWS_VM_CPUS='2'
+EOF
+cat > "$SI_BIN/qemu-img" <<'EOF'
+#!/usr/bin/env bash
+# Large enough for disk_looks_installed; the suite never opens a real qcow2.
+printf '{"virtual-size":68719476736,"actual-size":6442450944,"format":"qcow2","filename":"stub"}\n'
+EOF
+chmod +x "$SI_BIN/qemu-img"
+SI_STATUS="$(HOME="$SI_HOME" XDG_STATE_HOME="$SI_XDG" XDG_CONFIG_HOME="$SI_T/config" \
+    XDG_DATA_HOME="$SI_DATA" PATH="$SI_BIN:$PATH" \
+    bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" status 2>/dev/null || echo '{}')"
+assert_eq "status keeps reporting the configured VM" "$SI_OLD_DISK" "$(jq -r '.vm.disk // ""' <<< "$SI_STATUS")"
+assert_eq "status says the configured disk is installed" "true" "$(jq -r '.vm.installedLike // false' <<< "$SI_STATUS")"
+assert_eq "status also finds the pending install" "$SI_OP" "$(jq -r '.provision.pendingFinalize.operationId // ""' <<< "$SI_STATUS")"
+assert_eq "and warns that an install awaits activation" "1" \
+    "$(jq -r '[.health.findings[] | select(.id == "install-awaiting-activation" and .action == "windows.provision.finalize")] | length' <<< "$SI_STATUS")"
+assert_eq "without calling the configured VM broken" "0" \
+    "$(jq -r '[.health.findings[] | select(.id == "vm-not-configured" or .id == "disk-missing" or .id == "guest-not-installed")] | length' <<< "$SI_STATUS")"
+assert_eq "the pending record says which VM activation replaces" "$SI_OLD_DISK" \
+    "$(jq -r '.provision.pendingFinalize.replacesDisk // ""' <<< "$SI_STATUS")"
+rm -rf "$SI_T"
+
+echo ""
+echo "=== finalize: a swap that dies half-done rolls back, and retrying finishes ==="
+# adopt rewrites the config and installs the launcher. If the launcher step
+# fails, the config already points at the new disk while the VM is half
+# described: the old Windows becomes unlaunchable with no record of what was
+# there before. Failure injected where the real one lands — after the swap,
+# before the launcher.
+FE_BIN="$FP_T/bin"
+mkdir -p "$FE_BIN" "$FP_T/data"
+cat > "$FE_BIN/qemu-img" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+    convert)
+        prev=""; last=""
+        for arg in "$@"; do prev="$last"; last="$arg"; done
+        cp -- "$prev" "$last" || exit 1
+        ;;
+    check) : ;;
+    info) printf '{"virtual-size":68719476736,"actual-size":6442450944,"format":"qcow2","filename":"stub"}\n' ;;
+    *) : ;;
+esac
+EOF
+chmod +x "$FE_BIN/qemu-img"
+# A file where the applications directory must be: install -d fails for root
+# and for a user alike, so the injection does not depend on who runs the suite.
+printf 'not-a-directory\n' > "$FP_T/data/applications"
+set +e
+FE_ERR="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
+    XDG_DATA_HOME="$FP_T/data" PATH="$FE_BIN:$PATH" \
+    bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --json 2>&1)"
+FE_RC=$?
+set -e
+assert_eq "finalize reports the failed swap" "1" "$FE_RC"
+assert_eq "the previous config is restored" "0" "$(cmp -s "$FP_CONF_DIR/windows-vm.conf" "$FP_T/conf.before" && echo 0 || echo 1)"
+assert_contains "and says the config was restored" "$FE_ERR" "configuração restaurada"
+assert_eq "a readable backup of the replaced config is kept" "1" \
+    "$(ls "$FP_CONF_DIR"/windows-vm.conf.bak-* >/dev/null 2>&1 && echo 1 || echo 0)"
+assert_eq "the replaced VM's disk is untouched" "old-windows" "$(cat "$FP_OLD_DISK")"
+assert_eq "the disk left by a half swap is not kept" "0" "$([ -e "$FP_TARGET" ] && echo 1 || echo 0)"
+assert_eq "the operation is not marked finalized" "" "$(jq -r '.adoptedDisk // ""' "$FP_XDG/phasezero/operations/$FP_OP/operation.json")"
+
+rm -f "$FP_T/data/applications"
+mkdir -p "$FP_T/data/applications"
+set +e
+FE_RETRY="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
+    XDG_DATA_HOME="$FP_T/data" PATH="$FE_BIN:$PATH" \
+    bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --json 2>&1)"
+FE_RETRY_RC=$?
+set -e
+assert_eq "retrying after the injected failure succeeds" "0" "$FE_RETRY_RC"
+# pz_info writes to stdout, so the --json envelope is not the only line here;
+# the durable operation record is what the next command reads.
+assert_eq "the retry activates the new disk" "$FP_TARGET" "$(jq -r '.adoptedDisk // ""' "$FP_XDG/phasezero/operations/$FP_OP/operation.json")"
+assert_eq "the config now points at the new disk" "$FP_TARGET" \
+    "$(bash -c '. "$0"; printf "%s\n" "${PZ_WINDOWS_VM_DISK:-}"' "$FP_CONF_DIR/windows-vm.conf")"
+assert_eq "the old VM's disk survived the swap" "old-windows" "$(cat "$FP_OLD_DISK")"
+rm -rf "$FP_T"
+
 rm -rf "$SUITE_STATE_ROOT"
 
 echo ""
