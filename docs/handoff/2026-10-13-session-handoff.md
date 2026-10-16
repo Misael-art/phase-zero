@@ -1106,3 +1106,106 @@ instante **comitaria os mocks**. Consequência prática: commit só depois da
 suíte terminar, sempre por caminho explícito. Foi assim que este batch foi
 commitado; a asserção que fiz no meio da corrida (`windows-vm.sh` = 4203 linhas
 com `memoryMarginMb` em 2735) provou que o round-trip é lossless.
+
+## Atualização — 2026-10-16 (noite): o convidado para de instalar o que não consegue verificar
+
+Aceite: *"Fonte única de versão, URL e hash; reutilização verificada por SHA.
+Não aceitar o hash do cache sem validar sua origem."* A linha do host fechou em
+`ff00a98`/anterior; esta fecha o **lado do convidado**, que era a metade aberta.
+Commit `f7fcdf7`, PR #116 head `f7fcdf74fa8186b5f7dedc3206c21be3f1ad1fb5`.
+
+### O defeito, dito cru
+
+`Install-VirtioFS.ps1` baixava de um URL literal seu e instalava o resultado.
+Sem hash, sem comparação. Ou seja: o convidado aceitava **o que o download
+devolvesse** — MITM, redirect, artefato movido no upstream, tudo virava
+instalador executado como Administrador. O gap do cache (`4f43…` no disco vs.
+`e14c…` exigido) tinha a mesma raiz em miniatura do lado de lá.
+
+Por que o pino jamais se satisfaria por re-download ficou provado:
+`direct-downloads/stable-virtio/` é **diretório móvel**. Em 2026-10-16 ele
+servia `4f438846…`, enquanto o manifest pinna `fafd93cb…` do
+`archive-virtio/virtio-win-<versão>-1/`. Re-baixar do `stable` não recupera o
+pino — entrega outros bytes e, antes desta mudança, instalava-os mesmo assim.
+
+### O que mudou (quatro arquivos, comportamento não alargado)
+
+- `guest/PZ-Vendor.ps1` (novo): `Get-PZVendorManifest`, `Test-PZVendorHash`,
+  `Get-PZVerifiedMsi`. É o **único** lugar do código de convidado que faz
+  `Invoke-WebRequest`. Ordem de recusa: sem manifest → componente ausente →
+  `.file` ausente → byte vendorado divergente → `-Offline` sem vendor → `.url`
+  ausente (template que o host não resolveu) → hash malformado → download →
+  verificação, e divergente apaga o arquivo.
+- `Install-VirtioFS.ps1`: `Get-VendorMsi` e os três blocos de download
+  literais fora; três `Get-PZVerifiedMsi -Entry winfsp|virtiofs|spice-webdavd`.
+- `container-frontends.sh`: `vendor_component_version` /
+  `vendor_component_url` / `render_vendor_manifest`. O host resolve
+  `"version":"from-virtio-source"` + `urlTemplate` contra
+  `virtio-source.sh` e escreve o `vendor.json` **já concreto** na raiz do
+  bundle — o convidado lê JSON, não shell.
+- `virtio-source.sh`: passa a exportar `PZ_VIRTIO_WIN_GT_MSI_URL` derivado da
+  mesma versão.
+
+`vendor.json` fica na **raiz** do bundle, não em `vendor/`:
+`install_guest_bundle` faz `cp -a` da fonte, `rm -rf $bundle_dir/vendor`, e
+`vendor_msis` copia os MSIs para `$bundle_dir/$name`. Um `vendor.json` dentro de
+`vendor/` seria deletado. O `SHA256SUMS.txt` já o excluía
+(`-not -name 'vendor.json'`), então a soma do bundle não muda.
+
+Decisão de semântica: bytes vendorados divergentes são **recusados**, não
+re-baixados por cima. Re-baixar destruiria o ponto inteiro — o cache offline
+voltaria a ser confiança cega.
+
+### Evidência
+
+- `tests/test_provision.sh` **405 PASS / 0 FAIL** rc=0, com a seção nova
+  `=== virtio: o mesmo pino do lado do convidado ===` (15 asserções; RED antes
+  da produção). `green-virtio-guest-run2.log`.
+- 7 suítes adjacentes `SUITE OK`. `adjacent-virtio-guest.log`.
+- shellcheck 0.11 com as exclusões do CI: rc=0.
+- PSScriptAnalyzer: 0 warnings nos dois arquivos novos; `Install-VirtioFS.ps1`
+  com **8**, igual à baseline commitada — nenhuma dívida nova.
+- Pester 3.4.0 **não roda** em PowerShell 7 (precisa de `Get-WmiObject`), então
+  o `tests/windows-vm-guest-vendor.tests.ps1` foi parseado e analisado localmen-
+  te, e o comportamento foi provado por harness pwsh independente
+  (`pzvendor-local-check.ps1`: 15 PASS, `fails=0`). A execução real das asserções
+  fica com o job `pester` do CI — dito sem fingir que rodou aqui.
+- **Controle pré-push na árvore exportada** (o que pegou o stub `bd5de03`):
+  `git archive HEAD` → `test_provision.sh` 405/0, `linux-windows-vm.sh`
+  `SUITE OK`, `linux-windows-container-frontends.sh` `SUITE OK`.
+  `headexport-f7fcdf7.log`.
+
+Asserção não-vaciosa deliberada: o teste exige **exatamente um** portador de
+versão/hash virtio literal sob `linux/windows-vm/` e **exatamente um** ponto de
+fetch. Um zero num grep sem controle positivo não provaria nada, então o
+`Get-PZVerifiedMsi` conta 3 e o `Invoke-WebRequest` conta 1 no lugar certo.
+
+### Correção a uma afirmação minha anterior
+
+Escrevi que o staging estava "confirmado" com base num `find
+~/.local/share/phasezero` que **não devolveu nada**. As árvores vivem em
+`~/.local/state/phasezero/windows-vm/vms/`: `op-20260923-225352-18359` (40 G) e
+`op-20261015-224232-10324` (42 G), ambos presentes. A afirmação estava certa por
+acaso; a verificação estava errada.
+
+### Limites que permanecem
+
+- O **hash** continua pin manual copiado do `.sha256` publicado pelo upstream. O
+  que fechou foi a verificação dos bytes contra o pino, não a origem do pino.
+- Nada foi exercido **dentro de uma VM Windows real**: o bundle é montado no host
+  e a verificação provada em pwsh local. Rodar `Install-VirtioFS.ps1` no
+  convidado fica junto da verificação física de interação/SKU.
+- `rollup terminal do CI em f7fcdf7` pendente no momento do registro
+  (`ci-rollup-f7fcdf7.log`, watcher não-interativo).
+
+### Host (somente leitura)
+
+`qemu_procs=0` — a QEMU da instalação não está ativa desde o reboot do
+operador. MemAvailable 6 136 MiB, PSI io `some avg10=1.05`, memória `0.00`.
+`status` ainda com WARN da ISO morta em `~/Downloads/Win11_25H2_..._v2.iso` e o
+conf `PZ_WINDOWS_VM_RAM_MB=12288` re-baseado para 4096. Sem `finalize`, sem
+ativação, sem shutdown, sem reboot, sessão KDE intacta.
+
+**Próximo**: confirmar o rollup terminal de `f7fcdf7`; depois a sequência de
+merges (#114 → #116 → #113 → #105) que é do operador. Restam P1 de interação/SKU
+físico, P1 da ISO no conf instalado, e P2 de instrumentação do staging.
