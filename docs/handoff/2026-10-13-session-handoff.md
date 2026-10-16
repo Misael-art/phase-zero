@@ -526,3 +526,118 @@ aberta — a instalação pela janela GTK não fecha esses gates. WBR-009 foi
 4. Mergear #114 e depois #116 (head `c86df85`).
 5. Depois: fonte única do virtio, caminho da ISO no conf, política de memória,
    instrumentação do staging.
+
+## Atualização — 2026-10-16 (reboot do operador, o vermelho restante, e uma reprodução local que não valia)
+
+### Estado do host depois do reboot
+
+O operador reiniciou o host por outros motivos e pediu para prosseguir. A QEMU da
+instalação nova terminou por SIGTERM do systemd (shutdown orderly, não queda de
+energia); `qemu-img check` no `golden-clean.qcow2` de 23,8 GB não reporta erros
+(`postreboot-imgcheck-golden-clean.log`). Staging intactos:
+`op-20260923-225352-18359` (40 G) e `op-20261015-224232-10324` (42 G). O conf ainda
+aponta o disco antigo, sem `windows-vm.conf.bak-*` novo, sem `finalize`, sem
+ativação. MemAvailable 6 118 MiB, PSI `some avg10=0.12`, nenhuma QEMU.
+
+Consequência honesta para o aceite do P0-1: **"desligamento limpo da nova VM" não
+foi cumprido pelo reboot** — o convidado foi morto pelo systemd, não desligado
+dentro do Windows. A ativação continua sendo decisão do operador, com ele presente.
+
+Refinamento do achado P1 da ISO: o caminho exato do conf
+(`~/Downloads/Win11_25H2_BrazilianPortuguese_x64_v2.iso`) não existe, mas
+`~/Downloads/Win11_25H2_BrazilianPortuguese_x64_v2 (1).iso` existe com o mesmo
+tamanho (8 172 068 864) da cópia em `~/ISOs`. A validação da prévia não pode ser
+só "existe?": precisa conferir SHA-256 e nomear a candidata vizinha.
+
+### O que restava vermelho, e não era o SC2031 do aceite
+
+Em `c86df85` fecharam 3 jobs distintos: `shell-lint (0.9.0)`, `shell-lint (0.11.0)`
+e `windows-vm-shell-test`. O lint não era SC2031 — era **SC2015 meu**, criado na
+rodada anterior ao escrever `A && B || C` no teste do `USER`
+(`tests/linux-windows-vm.sh:1348`); o job fica vermelho para qualquer finding,
+inclusive de informação. No `windows-vm-shell-test`, as 5 assertions da seção de
+rollback falhavam com o conf intacto e nenhuma linha de "configuração restaurada"
+— assinatura de uma falha **anterior** ao backup, não da falha injetada.
+
+### Uma reprodução local que não provava nada (registrada para não repetir)
+
+A rodada anterior afirmou ter reproduzido o vermelho mascarando a firmware com
+`unshare -rm` + tmpfs sobre `/usr/share/edk2`. **Essa reprodução é inválida**, por
+dois motivos verificados agora:
+
+1. `/usr/share/OVMF` continuava visível, e é o 2º/3º caminho que
+   `ovmf_vars_template` sonda — a máscara não removia a dependência.
+2. Dentro de `unshare -r` o processo é root do namespace, então `cmd_adopt` cai no
+   ramo `runuser -u misael` / `setfacl -m u:misael:rw`; esses uid estão mapeados lá
+   fora e desmapeados lá dentro, e o `setfacl` morre com `Argumento inválido`. As
+   mesmas 5 falhas, por um motivo que não existe no runner.
+
+Mascarar a firmware continuando uid 1000 (`unshare -m --user --map-users=...`) não
+pegou neste host (`newgidmap: gid range [1000-1001) not allowed`), então o proxy
+local foi abandonado em favor de um teste direto do mecanismo.
+
+### O mecanismo, provado sem namespace
+
+`probe-ensure-vm-storage.sh` extrai `ensure_vm_storage` do script real e
+sobrescreve `ovmf_vars_template` para devolver vazio — que é o que um runner sem
+edk2 é — rodando como usuário normal:
+
+- sem `OVMF_VARS.fd` no destino → `ERROR: OVMF_VARS template missing`, rc=1,
+  **antes** de qualquer backup do conf;
+- com o arquivo presente → rc=0.
+
+Bate na assinatura do CI, e é consistente com `provision.sh:1422`, que cria
+`$vm_dir/OVMF_VARS.fd` em toda instalação real: o staging de verdade sempre traz o
+arquivo; o fixture não. **Comportamento de produção inalterado** — recusar
+ativação num host sem firmware é correto; quem mentia sobre o staging era o teste.
+
+### Correções (head novo: `c7ed0bc`)
+
+O fixture passa a carregar `OVMF_VARS.fd` e `tpm/tpm2-00.permall` no staging e a
+fixar `PZ_WINDOWS_VM_OVMF_CODE` nas duas chamadas de `finalize` (precedente já
+existia na linha 788). `tests/linux-windows-vm.sh` fica sem SC2015.
+
+### Controles na árvore commitada (`git archive HEAD`)
+
+- `test_provision.sh` 359/0; `linux-windows-vm.sh` exit 0 com "rescue scans survive
+  USER being unset"; suítes irmãs `test_windows_vm_remove.sh`,
+  `test_windows_vm_session.sh`, `test_provision_recovery.sh`,
+  `test_boot_runtime_notice.sh` exit 0.
+- Loop de lint do CI sobre os **253 scripts** da árvore exportada: 0 falhas.
+- No working tree, sem máscara: `test_provision.sh` 359/0 (`green-firmware-test_provision.log`).
+- Artefatos: `mechanism-ensure-vm-storage.log`, `blob-green-*.log`,
+  `blob-test_windows_vm_*.log`, `ci-rollup-c7ed0bc.log`,
+  `ci-terminal-c7ed0bc.log`.
+
+### Rollup terminal do CI em `c7ed0bc`: verde
+
+`ci-terminal-c7ed0bc.log`: **35 checks, 35 completed, 33 success, 2 skipped,
+0 failure**. Os três jobs que fecharam vermelhos em `c86df85` estão verdes —
+`shell-lint (0.9.0)`, `shell-lint (0.11.0)`, `windows-vm-shell-test` — e com eles
+`arch-clean-host` e `pester`, que a rodada anterior ainda precisava confirmar. O
+waiter (`ci-rollup-c7ed0bc.log`) estourou o teto de 30 passadas com 2 checks
+pendentes às 13:48Z; a leitura terminal acima é posterior e independente dele. Os
+dois `skipped` são condicionais por design (`Sourcery review`;
+`hosted-qemu-kvm-probe`, que neste mesmo SHA também aparece com `success` em outra
+run, porque o nome se repete entre re-runs). **O aceite "CI integralmente verde no
+SHA final antes da sequência de merges" está cumprido em `c7ed0bc`.**
+
+### O que ainda não está provado
+
+A ativação em si (achatar e trocar o disco de 19,5 GB) e a validação física de
+interação/SKU. O reboot também **não** conta como desligamento limpo. Seguem
+abertos os quatro P1 e o P2, e a matriz física de boot direto (WBR-005/006,
+teclado, GRUB).
+
+### Como continuar daqui (a partir de `c7ed0bc`)
+
+1. Merge liberado pelo CI: rollup terminal verde em `c7ed0bc`
+   (`ci-terminal-c7ed0bc.log`), incluindo `arch-clean-host` e `pester`. Isto
+   substitui o passo 1 da seção anterior, que apontava para `c86df85`.
+2. Desligar a nova VM **por dentro do Windows** para satisfazer o pré-requisito de
+   desligamento limpo; a janela que existia acabou com o reboot.
+3. `provision finalize --preview` e ativação com o operador presente; conferir o
+   `windows-vm.conf.bak-*` criado.
+4. Mergear #114 e depois #116 (head `c7ed0bc`), #113, #105.
+5. Depois: fonte única do virtio, caminho/SHA da ISO no conf, política de memória
+   por perfil, instrumentação do staging no repositório.
