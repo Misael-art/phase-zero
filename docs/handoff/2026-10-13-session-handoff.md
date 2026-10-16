@@ -941,3 +941,168 @@ backup no diretório real de configuração.
    (`4fca…`) ≠ confiado (`e14c…`), então um `--auto-fix` real agora recusa o
    cache e re-baixa o ISO pinado (~240 MB).
 7. P2: instrumentação do staging versionada no repositório.
+
+---
+
+## Atualização — 2026-10-16 (tarde): o `fits` que não provava nada, fechado no `memory.sh`
+
+Fecho o item 4 da lista acima. Aceite pedido: *"Política por perfil com margem e
+pressão observada; ensaios repetidos, incluindo host sem expansão automática de
+zram."* A política está no repositório e testada; **os ensaios repetidos com
+zram fixo continuam abertos** — ver o fim da seção, porque isso é alteração de
+host e depende do operador.
+
+### O que estava errado, lido no código
+
+Três defeitos distintos, todos no mesmo eixo:
+
+1. `windows_vm_memory_fit` respondia `fits` **sem verificar nada** no boot por
+   GRUB (`kiosk`). Não havia leitura de `MemTotal`, não havia reserva: qualquer
+   número virava `fits`.
+2. A reserva do perfil existia só na **derivada** (`default_ram_mb`: 3072 no
+   desktop, 2048 no kiosk). O veredito nunca a consultava. Um convidado de 4096
+   com `MemAvailable` 5300 era `fits`, embora sobrassem 1204 MiB para um host
+   que prometeu 3072 à sessão.
+3. PSI não era lido em lugar nenhum. `MemAvailable` é um instante; no Deck de
+   2026-10-16 ele chegou a 1166 MiB com `some avg10` em 15,12 enquanto o
+   veredito se mantinha `fits`.
+
+### A política agora em `linux/windows-vm/memory.sh`
+
+Dois eixos, um veredito, vocabulário preservado (`fits|tight|exceed`) para que
+nenhum consumidor precisasse mudar:
+
+- `windows_vm_profile_reserve_mb` (novo) — a reserva passa a ter **uma**
+  definição, usada pela derivada e pelo veredito. `default_ram_mb` perdeu os
+  dois literais.
+- `windows_vm_memory_margin_mb` (novo) — a base é por perfil: desktop mede
+  contra `MemAvailable`, GRUB/kiosk contra `MemTotal`. O que sobra depois do
+  convidado é a margem.
+- `windows_vm_psi_some_avg10` + `windows_vm_memory_pressure_high` (novo) — eixo
+  de pressão, limite `10.0`, ajustável por `PZ_WINDOWS_VM_PSI_SOME_MAX`.
+- `windows_vm_memory_fit` reescrito: `exceed` continua sendo o teto físico
+  (`MemAvailable + SwapFree`, ou `MemTotal` no kiosk); `tight` agora também
+  significa *margem abaixo da reserva do perfil* **ou** *pressão acima do
+  limite*. O `fits` só existe quando os dois eixos estão quietos.
+- `windows_vm_memory_notice` nomeia **qual** eixo falhou: mantém a frase de
+  swap, e acrescenta `"a folga depois do convidado é N MiB e a reserva do
+  perfil X é M MiB; o convidado cabe, o resto do host não"` e
+  `"pressão de memória no host: some avg10=… acima do limite …; adiar a
+  inicialização é o que protege a sessão"`.
+
+**Hermeticidade** (`windows_vm_pressure_file`, novo): `PZ_WINDOWS_VM_PRESSURE_FILE`
+descreve a pressão do host simulado; quando só o `meminfo` é fixture, a
+resolução cai em `/dev/null` — linha nenhuma lida, que lê como *"pressão não
+medida"*. Sem isso, a carga do runner do CI poderia mudar um veredito, o que é
+exatamente o tipo de teste que passa localmente e falha aleatoriamente.
+
+**Semântica do gate não mudou** — decisão consciente:
+`windows_vm_memory_guard` continua recusando apenas `exceed`. Em `tight` avisa
+com as duas contas. Endurecer para recusar `tight` mudaria o comportamento de
+inicializações que hoje funcionam, com o operador ausente; isso é decisão dele,
+com os números dele embaixo.
+
+### Onde a conta aparece
+
+`marginMb` e `reserveMb` viajam com o veredito em vez de serem rederivados em
+três lugares:
+
+- `linux/windows-vm/provision.sh` — `.memory` do plano em JSON.
+- `linux/windows-vm/windows-vm.sh:2735-2741` — `.memory` do `launch-check`.
+- Vocabulário antigo (`fit`, `availableMb`, `swapFreeMb`) intacto.
+
+Lacuna honesta descoberta ao ligar isso à UI: **`linux/ui_native/` não tem
+nenhum consumidor de `.memory`** (`grep` por `memoryFit|availableMb|marginMb|tight|exceed`
+não acha nada além de comentários sem relação). O veredito nunca apareceu no
+GTK, e continua não aparecendo. Não é regressão deste batch; é a mesma família
+do P0 de visibilidade (`windows_vm.py:624`).
+
+### Testes, incluindo os dois erros meus
+
+Seção nova `=== memória: margem por perfil e pressão observada, não só o
+instante ===` em `tests/test_provision.sh`, 20 asserções, TDD com 12 RED antes
+de qualquer mudança de produção. Cobre: margem cobrindo reserva → `fits`; o
+instante real de 2026-10-16 (total 14820 / avail 5432 / swap 3624, convidado
+4096) → `tight` **e** o texto de "reserva" no stderr; PSI 15,12 com margem boa →
+`tight` **e** o texto de "pressão"; PSI 0,40 → `fits`; reserva menor (`1024`) →
+`fits`; kiosk 12288 → `fits`, 14000 → `tight`, 15000 → `exceed`; hermeticidade
+do arquivo de pressão; plano com `fit=tight`, `reserveMb=3072`, `marginMb=1336`;
+`launch-check` carrying os mesmos números; e a asserção de que um `tight` **não
+gera blocker** — o guard mantém o significado.
+
+**Um pin virou de propósito.** `re-based to the floor: ... fits` virou
+`re-based to the floor: still inside the reserve, so tight`, com a aritmética no
+comentário (5300 − 4096 = 1204 < 3072). A asserção antiga era verdade sob a
+política velha e mentira sob a nova; mantê-la verde teria escondido exatamente o
+defeito que este batch fecha.
+
+**Dois erros meus no teste, ambos revelados por ferramenta, não por sorte:**
+
+1. `assert_eq ... "$(bash -c '... p="$(windows_vm_pressure_file)" ...')" )` —
+   as aspas duplas internas fechavam o contexto do `bash -c` aninhado:
+   `encontrado EOF inesperado enquanto procurava por '"'`. Corpo agora montado
+   por `printf` numa variável e passado como `bash -c "$MP_PF_BODY"`. A asserção
+   também parou de ser vacua: compara o caminho resolvido (`/dev/null`), não a
+   string "não é o /proc".
+2. A forma `VAR= bash -c` acendeu **SC1007** no shellcheck 0.11, e o
+   `tests/test_provision.sh` ficou vermelho no lint outra vez — o mesmo arquivo
+   do P0-para-merge. Corrigido com `env VAR= ...`, que tira a atribuição da
+   posição que o shellcheck interpreta.
+
+Verificação desta rodada: `tests/test_provision.sh` **PASS 390 FAIL 0** rc=0
+(`test_provision-memory-policy-20261016.log`), `tests/linux-windows-vm.sh` rc=0
+(`linux-windows-vm-memory-policy-20261016.log`), `bash -n` ok nos quatro
+arquivos, shellcheck 0.11.0 com os excludes do CI (`SC1090,SC1091,SC2034,SC2154,SC2155,SC2312`)
+limpo nos quatro. Suítes adjacentes que consomem `memory.sh`, todas rc=0 no log
+`adjacent-20261016-memory-policy.log`: `linux-audit-doctor`,
+`linux-autounattend`, `linux-guest-recovery`, `linux-windows-vm-graphics`,
+`linux-windows-vm`, `test_boot_runtime_notice`, `test_provision_recovery`,
+`test_windows_vm_session`.
+
+Commit do batch: `ff00a98` em `fix/winvm-ram-rebase` (head do PR #116),
+empurrado. O rollup terminal do CI para esse SHA ainda não foi confirmado — é
+item de checklist antes do merge, não algo que eu deva declarar verde antes da
+hora.
+
+### O que a política nova diz no host real, agora
+
+Somente leitura, `memory-policy-host-20261016.log`, 2026-10-16T15:15-03:00:
+
+```
+MemTotal 15176264 kB · MemAvailable 6097612 kB · SwapFree 3815904 kB
+psi_memory some avg10=0.01 · configured PZ_WINDOWS_VM_RAM_MB=12288
+boot_mode=desktop · reserve_mb=3072 · default_ram_mb=4096
+fit(default)=tight
+```
+
+Ou seja: a configuração instalada (12288, herdada de um boot GRUB) não cabe no
+desktop que está de pé; `windows_vm_configured_ram_mb` re-baseia para 4096 —
+e o 4096, que ontem era `fits`, agora é `tight` porque a folga (5954 − 4096 =
+1858) está abaixo da reserva prometida (3072). Continua **permitido**: o
+`tight` é aviso. **A decisão de recusar `tight` para de inicializar é do
+operador**, e este é o cenário exato em que ela aparece — ele consegue abrir a
+VM, e o aviso diria que a sessão paga por isso. Nota do mesmo log: ~5,9 GiB de
+swap já em uso com `qemu_procs=0`, ou seja, a pressão não é do convidado.
+
+### Continua aberto neste eixo
+
+- **Ensaios repetidos, incluindo host sem expansão automática de zram** — não
+  feito. `zram` dobrou de tamanho durante a instalação de 2026-10-15/16 e foi
+  exatamente isso que sustentou o `fits` errado. Repetir a corrida com
+  `zram-tools`/`zramswap` sem expansão automática é mexer no host, e o operador
+  pediu para isso acontecer com ele presente.
+- Recusar `tight`, se ele quiser o gate endurecido. Um `PZ_WINDOWS_VM_*` novo
+  seria a forma; sem ele, o comportamento fica como está.
+- A margem/reserva na superfície da UI, junto do P0 de visibilidade.
+
+### Risco de processo descoberto (vale para quem rodar suítes em paralelo)
+
+`tests/linux-audit-doctor.sh` **reescreve arquivos vivos do repositório**:
+`stub_repo_file` faz `cp $f $f.bak` e depois sobrescreve `$f` com um mock
+(`tests/linux-audit-doctor.sh:26-32`), restaurando no `trap EXIT`
+(`:15-24`). Durante a corrida, `git status` mostra ~20 arquivos modificados com
+milhares de deleções e `linux/*/..*.bak` soltos, e um `git add -A` feito nesse
+instante **comitaria os mocks**. Consequência prática: commit só depois da
+suíte terminar, sempre por caminho explícito. Foi assim que este batch foi
+commitado; a asserção que fiz no meio da corrida (`windows-vm.sh` = 4203 linhas
+com `memoryMarginMb` em 2735) provou que o round-trip é lossless.
