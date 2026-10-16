@@ -2236,6 +2236,22 @@ class Bridge:
         eligibility = self.eligibility(state)
         key = self.key_status(state)
         config = self.upstream_config() or {}
+        other_users = self.runner.other_users()
+        trusted_user = (record or {}).get("singleUserTrusted") == "yes"
+        if other_users == ["unknown"]:
+            user_detail = "não foi possível verificar as sessões de outras contas locais"
+        elif other_users:
+            user_detail = "há outra conta local com sessão neste host"
+        elif trusted_user:
+            user_detail = "verificado: somente a conta local atual tem sessão"
+        else:
+            user_detail = "confiança na conta local individual ainda não confirmada"
+        user_action = ("Nenhuma ação necessária." if trusted_user and not other_users
+                       else "Não ative ferramentas enquanto houver outra conta com sessão."
+                       if other_users and other_users != ["unknown"]
+                       else "Verifique as sessões locais antes de ativar ferramentas."
+                       if other_users == ["unknown"]
+                       else "Confirme a conta local individual no comando eligibility.")
         plan = str((record or {}).get("plan"))
         label = PLAN_LABELS.get(plan, "não informado")
         manager = "pz ai chatgpt-web"
@@ -2258,10 +2274,8 @@ class Bridge:
             ("tunnel-permission", (record or {}).get("tunnelPermission") in {"use", "manage"},
              "permissão de túnel na plataforma OpenAI",
              f"{manager} tunnel guide"),
-            ("single-user", (record or {}).get("singleUserTrusted") == "yes"
-             and not self.runner.other_users(),
-             "conta local individual e confiável, sem outros usuários com sessão",
-             "Use somente em conta local individual e registre de novo."),
+            ("single-user", trusted_user and not other_users,
+             user_detail, user_action),
             ("runtime-key", key["state"] == "stored",
              {"absent": "chave de runtime ainda não está no cofre",
               "rotation-overdue": "chave de runtime passou do prazo de rotação",
@@ -2275,9 +2289,9 @@ class Bridge:
             ("full-runtime", False, FULL_RUNTIME_BLOCKER, FULL_RUNTIME_ACTION),
             ("launcher-mode", config.get("mode") == "full",
              "launcher no modo com ferramentas" if config.get("mode") == "full"
-             else "launcher ainda no modo somente Web",
-             f"`{manager} tunnel key stage`, conclua a página MCP do launcher com o tunnel_id e "
-             f"rode `{manager} tunnel key unstage`."),
+             else "launcher mantido no modo somente Web enquanto Full está bloqueado",
+             "Mantenha browser-only. Não altere o launcher até resolver full-runtime e "
+             "provar uma chamada MCP real."),
         ]
         listed = [{"id": step, "ok": bool(ok), "detail": detail, "action": action}
                   for step, ok, detail, action in steps]

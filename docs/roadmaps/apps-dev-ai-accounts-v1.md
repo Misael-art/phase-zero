@@ -2937,6 +2937,16 @@ path traversal e ações de escrita; desconexão e revogação sem afetar o
 plano Pro. Fontes: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 e [permissões de apps MCP](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt).
 
+Rechecagem no host em 2026-10-16: `loginctl` mostrou só a conta `misael`
+(sessões `manager` e KDE da mesma UID). O gerenciador estável do atalho marcou
+`single-user: ok` e `full-runtime: bloqueado`; `launcher-mode: browser-only`
+é consequência deliberada desse bloqueio. O `pz` do pacote 1.22.5-1 ainda
+mostra o checklist anterior sem `full-runtime`, portanto não é fonte de
+verdade até atualizar o pacote. O checklist da árvore atual explicita o gate
+de conta atendido e deixa de sugerir mudar o launcher antes de uma chamada
+MCP real com sandbox restrito. Cópia estável dos atalhos atualizada; launcher
+e sessão KDE não foram reiniciados.
+
 ### PXA-010: atalho e autostart sobrevivem à remoção do worktree — 2026-10-16
 
 Incidente físico: clicar no menu mostrou “O gerenciador em
