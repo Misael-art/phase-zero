@@ -1815,6 +1815,15 @@ printf '%s\n' "$FP_VM" > "$FP_XDG/phasezero/operations/$FP_OP/vm_dir"
 jq -n --arg id "$FP_OP" '{id:$id, state:"completed", updatedAt:"2026-05-01T00:00:00Z"}' \
     > "$FP_XDG/phasezero/operations/$FP_OP/operation.json"
 jq -n '{graphics:"compat"}' > "$FP_XDG/phasezero/operations/$FP_OP/plan.json"
+# A staging directory left by a real install carries its own firmware variables
+# and TPM state, and finalize moves both into the target VM directory. Without
+# them adopt reaches for the host's edk2 VARS template, which is a file a CI
+# runner does not have — the swap then died before it ever touched the config.
+truncate -s 4k "$FP_VM/OVMF_VARS.fd"
+mkdir -p "$FP_VM/tpm"
+printf 'swtpm-state\n' > "$FP_VM/tpm/tpm2-00.permall"
+FP_OVMF_CODE="$FP_T/OVMF_CODE.fd"
+printf 'ovmf-code\n' > "$FP_OVMF_CODE"
 fp_conf() {
     cat > "$FP_CONF_DIR/windows-vm.conf" <<EOF
 PZ_WINDOWS_VM_NAME='PhaseZero-Windows'
@@ -1922,7 +1931,7 @@ chmod +x "$FE_BIN/qemu-img"
 printf 'not-a-directory\n' > "$FP_T/data/applications"
 set +e
 FE_ERR="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
-    XDG_DATA_HOME="$FP_T/data" PATH="$FE_BIN:$PATH" \
+    XDG_DATA_HOME="$FP_T/data" PZ_WINDOWS_VM_OVMF_CODE="$FP_OVMF_CODE" PATH="$FE_BIN:$PATH" \
     bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --json 2>&1)"
 FE_RC=$?
 set -e
@@ -1939,7 +1948,7 @@ rm -f "$FP_T/data/applications"
 mkdir -p "$FP_T/data/applications"
 set +e
 FE_RETRY="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
-    XDG_DATA_HOME="$FP_T/data" PATH="$FE_BIN:$PATH" \
+    XDG_DATA_HOME="$FP_T/data" PZ_WINDOWS_VM_OVMF_CODE="$FP_OVMF_CODE" PATH="$FE_BIN:$PATH" \
     bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --json 2>&1)"
 FE_RETRY_RC=$?
 set -e
