@@ -401,3 +401,128 @@ provisionamento.
 3. Mergear #114 e depois #116 (head `d761000`) com o rollup terminal do CI no SHA
    pinado.
 4. Rearmar o gravador LUX-033 depois do #113 e decidir o caminho de `PZ_WINDOWS_VM_ISO`.
+
+## Atualização — 2026-10-16 (os dois P0 da ativação, e um commit que carregava um stub)
+
+Os dois P0 da revisão do operador estão implementados no PR #116, head
+`c86df85ca417a19f50c59300ddf61f90f47bba5c`. Nada do host foi mutado nesta rodada:
+nenhum `finalize`, nenhum shutdown, nenhum reboot, sessão KDE ativa, QEMU da
+instalação nova ainda de pé (`pid 988752`), e os dois staging intactos
+(`op-20260923-225352-18359` 40 G, `op-20261015-224232-10324` 42 G).
+
+### P0 — a instalação pendente parou de ficar invisível
+
+`status --json` emitia `install-awaiting-activation` **só** quando a VM configurada
+estava quebrada. Com uma VM funcionando, a instalação concluída desaparecia da
+tela e a única ação oferecida era iniciar a antiga. Agora o finding sai
+independentemente da saúde da VM configurada, com a frase "Duas máquinas virtuais
+existem: a que está configurada segue em uso, e a instalação concluída
+`<op>` aguarda ativação", e o registro pendente carrega a prévia dentro de
+`.provision.pendingFinalize`. Na página, a instalação vira uma **segunda
+instância** com rótulo próprio e botão "Ativar instalação", visível apenas quando
+a operação não está rodando; o caminho antigo (uma única instalação pendente,
+nada configurado) continua igual.
+
+Prova no host real, somente leitura (`status-after-p0.json`,
+`preview-after-p0.txt`): `readyToLaunch:true` **junto** do finding, com
+`pendingFinalize{operationId:op-20261015-224232-10324, running:true,
+requiredBytes:23790485504, freeBytes:109038714880, fits:true}`, e
+`provision finalize --preview` imprimindo origem/destino/substitui/espaço
+("101 GiB livres para 22 GiB") e recusando porque a QEMU da instalação ainda está
+ligada — exatamente o aceite pedido.
+
+### P0 — ativação agora tem prévia e volta
+
+`adopt` (dono da troca) grava `windows-vm.conf.bak-<UTC>-<pid>` antes de reescrever
+o conf e restaura esse backup se a instalação do launcher falhar; `write_config`
+troca o arquivo por um único `mv` em vez de escrever em place. `finalize`
+(dono do achatamento) ganha `--preview`, calcula bytes necessários/livres no
+destino, nomeia o disco substituído, e limpa o disco órfão de uma meia-troca. O
+caminho do conf agora tem um único dono: `windows-vm.sh config-path`, consultado
+por `provision.sh` em vez de re-derivar.
+
+Teste com erro injetado: `install -d` do launcher derrubado por um arquivo onde a
+pasta deveria existir → conf restaurado byte a byte, `adoptedDisk` vazio no
+registro da operação, retry depois da correção ativa o disco novo. Ao escrever o
+teste apareceram dois defeitos reais de produção, corrigidos: `install_user_files`
+devolvia o status do `pz_info` final (uma adoção incompleta seria reportada como
+instalação completa — sem atalho na área de trabalho e sem unidade systemd), e o
+`2>&1` misturava INFO no envelope JSON (a asserção passou a ler o registro
+durável `operation.json`).
+
+### O CI vermelho não era teste — era o índice
+
+`bd5de03` commitou `linux/windows-vm/windows-vm.sh` como um **stub de duas
+linhas** (`#!/usr/bin/env bash` + `echo "{}"`), 4095 linhas a menos. O disco tinha
+o script inteiro, então `test_provision.sh` dava 359/0 localmente enquanto
+`windows-vm-shell-test` morria em 31 segundos e `python-test`/`shell-test`
+falhavam junto. Comparação `4a9e30c` (verde) → `cd6cde7` (vermelho) sem nenhum
+assertion quebrado no host apontou o índice, não o código. Corrigido em
+`80e93f1`.
+
+**Regra nova para os próximos agentes**: verificar o **blob commitado**, não só o
+arquivo em disco, e rodar as suítes contra a árvore exportada antes de fazer
+push. Controle feito nesta rodada: `git show HEAD:linux/windows-vm/windows-vm.sh |
+wc -l` = 4135, `bash -n` limpo, `config-path` e `config_backup` presentes no blob,
+e `git archive HEAD` extraído para um diretório vazio rodando com `env -i`
+(HOME vazio, `LANG=C.UTF-8`) → `test_provision.sh` **359/0** e
+`linux-windows-vm.sh` **exit 0** (`green-headexport-test_provision.log`,
+`green-headexport-linux-windows-vm.log`).
+
+### Shell-lint do aceite: verde
+
+O item "P0 para merge" (SC2031 em `tests/test_provision.sh`, 0.9.0 e 0.11.0) está
+resolvido: o `# shellcheck source=` dentro do subshell foi removido em `4a9e30c`,
+`shell-lint (0.9.0)` e `shell-lint (0.11.0)` completaram sem falha, e o
+ShellCheck local com as exclusões do CI dá 0 findings (SC2031 = 0).
+
+### Lacuna nova, no caminho de boot: `rescue.sh` precisava de `USER`
+
+`vm_rescue_scan_isos`/`vm_rescue_scan_disks` montavam as bases de mídia removível
+com `$USER`. A sessão de boot chama essas funções sob `set -u`, e um serviço
+systemd não exporta `USER` — o wizard abortava antes de listar ISO ou disco,
+justamente o caso para o qual existe. Reproduzido com o nome fora do ambiente
+(`red-rescue-user.log`: `rescue.sh: linha 59: USER: variável não associada`),
+corrigido com fallback `USER → LOGNAME → id -un` e preso por um teste que faz
+`unset USER` dentro da varredura (`green-rescue-user.log`, suite inteira exit 0).
+Nenhum outro uso de `$USER` no caminho do Windows VM: `windows-vm.sh:21` já usa
+`PZ_TARGET_USER → SUDO_USER → USER → misael`.
+
+### Números desta rodada
+
+`test_provision.sh` 359/0 (antes 355/5, depois 358/1); `test_windows_vm_ui.py` 34
+passed; `test_linux_native_ui.py + test_windows_vm_ui.py` 62 passed;
+`linux-windows-vm.sh`, `linux-windows-vm-graphics.sh`,
+`test_windows_vm_remove.sh`, `test_windows_vm_session.sh`,
+`test_provision_recovery.sh`, `test_boot_runtime_notice.sh`,
+`linux-autounattend.sh`, `linux-guest-recovery.sh` exit 0;
+`linux-audit-doctor.sh` 9/0; ShellCheck com as exclusões do CI 0 findings.
+
+### O que ainda não está provado
+
+A **ativação real** nunca rodou: achatar os 19,5 GB e trocar o disco em
+`~/VirtualMachines` é decisão do operador com ele presente. A prévia, o backup e o
+rollback são provados hermeticamente e a recusa está provada no host — isso não é
+evidência de que a troca completa funciona numa máquina real. Continuem em aberto
+os quatro P1 (fonte única de versão/URL/hash do virtio; `PZ_WINDOWS_VM_ISO`
+apontando para `~/Downloads` inexistente; política de memória por perfil com
+margem e pressão observada, porque `fits` sozinho não é limite seguro; teste físico
+de interação/SKU com captura e interação separadas) e o P2 (instrumentação
+versionada no repositório, mais fina que o poll de 30 s). A matriz física de boot
+direto (WBR-005/006, teclado, desligamento gracioso pelo GRUB) também segue
+aberta — a instalação pela janela GTK não fecha esses gates. WBR-009 foi
+**adicionado** à matriz (IDs nunca se reutilizam) como `in_progress`.
+
+### Como continuar daqui (2026-10-16)
+
+1. Confirmar o rollup terminal do CI em `c86df85…` no log
+   `~/.local/state/phasezero/homologation/winvm-20261013/ci-rollup-c86df85.log`
+   antes de qualquer merge — inclusive `arch-clean-host`.
+2. Validar interação na janela que já está de pé (teclado, áudio, resolução,
+   login persistente, edição do Windows), mantendo captura e interação como
+   evidências separadas.
+3. Desligar a nova VM de modo limpo, rodar `provision finalize --preview` e, com o
+   operador presente, a ativação; conferir o `windows-vm.conf.bak-*` criado.
+4. Mergear #114 e depois #116 (head `c86df85`).
+5. Depois: fonte única do virtio, caminho da ISO no conf, política de memória,
+   instrumentação do staging.
