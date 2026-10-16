@@ -1335,6 +1335,21 @@ iso_scan_result="$(
 grep -q 'Win11_24H2.iso' <<< "$iso_scan_result"
 echo "  vm_rescue_scan_isos: found fake ISO"
 
+# The boot session calls these scans under `set -u`, and a systemd-spawned boot
+# session has no USER in its environment. Dying on the unbound name would leave
+# the wizard with neither ISO nor disk to offer — the exact case it exists for.
+(
+    set -u
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/linux/windows-vm/rescue.sh" 2>/dev/null
+    unset USER LOGNAME
+    [ -n "$(vm_rescue_scan_isos)" ] || exit 1
+    vm_rescue_scan_disks >/dev/null
+) && echo "  rescue scans survive USER being unset" || {
+    echo "  FAIL: rescue scans abort when USER is unset"
+    exit 1
+}
+
 # vm_rescue_scan_disks
 mkdir -p "$RESCUE_TEST_DIR/VirtualMachines"
 # Create 32G qcow2 (passes disk_looks_installed virtual≥32G check) then write 1G data (passes actual≥1G check)

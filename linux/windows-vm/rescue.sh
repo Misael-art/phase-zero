@@ -14,6 +14,14 @@ fi
 
 RESCUE_LOG="${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/phasezero/windows-vm}/rescue.log"
 
+# Removable-media mounts are named after the logged-in account. A boot session
+# is spawned by systemd, which does not export USER, and its caller runs under
+# `set -u` — so reading $USER directly aborts the wizard before it lists
+# anything. Fall back through LOGNAME to the uid that actually owns the run.
+_rescue_user_name() {
+    printf '%s' "${USER:-${LOGNAME:-$(id -un 2>/dev/null || true)}}"
+}
+
 _vm_rescue_log() {
     local ts
     ts="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo "unknown")"
@@ -56,7 +64,7 @@ vm_rescue_should_run() {
 # ---------------------------------------------------------------------------
 vm_rescue_scan_isos() {
     local base found all=""
-    for base in "$HOME/Downloads" "$HOME" /mnt/sdcard "/run/media/$USER" "/media/$USER" /mnt; do
+    for base in "$HOME/Downloads" "$HOME" /mnt/sdcard "/run/media/$(_rescue_user_name)" "/media/$(_rescue_user_name)" /mnt; do
         [ -d "$base" ] || continue
         found="$(find "$base" -maxdepth 4 -type f \( -iname '*win*.iso' -o -iname '*windows*.iso' \) 2>/dev/null || true)"
         [ -n "$found" ] && all="$all$found"$'\n'
@@ -70,7 +78,7 @@ vm_rescue_scan_isos() {
 vm_rescue_scan_disks() {
     local base found all="" patterns
     patterns=( -iname '*win*.qcow2' -o -iname '*windows*.qcow2' -o -iname '*win*.img' -o -iname '*windows*.img' -o -iname '*win*.raw' -o -iname '*windows*.raw' -o -iname '*win*.vmdk' -o -iname '*windows*.vmdk' )
-    for base in "$HOME/VirtualMachines" "$HOME/.local/share/libvirt/images" "/var/lib/libvirt/images" "$HOME" /mnt/sdcard "/run/media/$USER" "/media/$USER" /mnt; do
+    for base in "$HOME/VirtualMachines" "$HOME/.local/share/libvirt/images" "/var/lib/libvirt/images" "$HOME" /mnt/sdcard "/run/media/$(_rescue_user_name)" "/media/$(_rescue_user_name)" /mnt; do
         [ -d "$base" ] || continue
         found="$(find "$base" -maxdepth 4 -type f \( "${patterns[@]}" \) 2>/dev/null || true)"
         [ -n "$found" ] || continue
