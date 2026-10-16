@@ -2936,3 +2936,27 @@ path traversal e ações de escrita; desconexão e revogação sem afetar o
 `browser-only`. Esta alternativa não libera `Full` upstream nem escrita no
 plano Pro. Fontes: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 e [permissões de apps MCP](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt).
+
+### PXA-010: atalho e autostart sobrevivem à remoção do worktree — 2026-10-16
+
+Incidente físico: clicar no menu mostrou “O gerenciador em
+`/mnt/sdcard/Projects/pz-product-apps-impl/linux/ai/chatgpt_web_bridge.py`
+não existe mais”. O `open.target` e o `autostart.target` apontavam para o
+worktree removido, mas `shortcuts status` ainda dizia `installed` porque só
+verificava se os arquivos de atalho e target existiam. O pacote instalado
+1.22.5-1 não era fallback funcional: seu `route verify` rejeitava o hook
+atual do upstream 6.1.8.
+
+Correção: `shortcuts install` e `autostart enable` instalam cópia privada do
+gerenciador e dos adapters do cofre em `~/.local/share/phasezero/chatgpt-web/manager`
+(diretório 0700, arquivos 0600). Targets apontam para essa localização
+persistente, não para um checkout. Status agora exige target exato, intérprete
+e scripts presentes; no Arch, o intérprete é `/usr/bin/python3`, não um venv
+descartável. Worktree ausente vira `inconsistent`. Testes de regressão
+simulam target apagado e re-instalação. No host, ambos foram reparados sem
+reboot/logout: menu `installed`, autostart `enabled`, `route verify ok:true`.
+Invocar o **mesmo wrapper do atalho** abriu o Codex Desktop no perfil dedicado
+(`--new-instance`, rc 0, processo ativo). Pacote do sistema e VM intactos.
+Após publicar pacote com esta correção, reinstalar os atalhos/autostart pelo
+gerenciador atualizado para renovar o snapshot privado. O modo Full segue
+bloqueado independentemente deste conserto.
