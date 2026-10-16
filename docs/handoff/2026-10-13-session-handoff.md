@@ -791,3 +791,153 @@ mas o que ele protege — imagem suja e escritor concorrente — não se aplica 
 origem desta ativação, que é um snapshot verificado hoje e mais novo que o disco
 vivo. Decidir com esse critério é do operador; a prévia está pronta e eu não
 ativei nada.
+
+## Atualização — 2026-10-16 (a linha da ISO fechada, e um `fits` que não provava nada)
+
+Dois commits no head do PR #116, cada um com seu teste primeiro.
+
+### 5. ISO do conf: `3a4e633`
+
+Aceite do P1 era "Atualizar caminho com backup e validar existência/hash na
+prévia". O que está no código (`linux/windows-vm/windows-vm.sh`):
+
+- `effective_config` só confia no `PZ_WINDOWS_VM_ISO` do conf enquanto o
+  arquivo existir. Não existindo, emite
+  `WARN: configured Windows ISO does not exist, ignoring it: <caminho>` — ou
+  seja, nomeia o caminho morto que foi descartado — e cai para a detecção. Um
+  `--iso` explícito continua acima de tudo.
+- `write_config` virou fail-closed com backup automático: `cp -p` da versão
+  atual para `<conf>.bak-<UTC>-<pid>` **antes** do rename, e recusa sobrescrever
+  se o backup falhar (`could not back up <conf>; refusing to overwrite it`).
+  Isso cobre toda reescrita de configuração, não só o finalize.
+- `plan --verify-iso` calcula o SHA-256 do caminho escolhido e nomeia o
+  candidato de mesmo hash (`verify_iso_preview`, que reutiliza o
+  `media-inspect.sh scan --json` em vez de varrer o disco de novo). O hash é
+  opt-in de caso pensado: 8 172 068 864 bytes custam ~30 s neste host, e o
+  `plan --json` é o envelope que a UI pergunta em poll — por isso `--verify-iso`
+  junto de `--json` emite
+  `WARN: --verify-iso applies to the text plan only; the JSON envelope does not hash the ISO`
+  em vez de virar um nada silencioso.
+
+Evidência no host, caminho durável
+(`~/.local/state/phasezero/homologation/winvm-20261013/plan-verify-iso-20261016.log`):
+
+```
+WARN:  configured Windows ISO does not exist, ignoring it: /home/misael/Downloads/Win11_25H2_BrazilianPortuguese_x64_v2.iso
+  iso: /home/misael/Downloads/Win11_25H2_BrazilianPortuguese_x64_v2 (1).iso (present)
+  iso_sha256: 50fe4703cf0df0072e093d1f5d58ed450e4c49d8ca960433bbe6278d5ef10107
+  iso_same_hash: /home/misael/ISOs/Win11_25H2_BrazilianPortuguese_x64_v2.iso
+plan rc=0
+```
+
+Os três pedidos da seção 3 — resolver o caminho, conferir o SHA, nomear o vizinho
+de mesmo hash — estão respondidos, e não houve re-download.
+
+Estreitamento honesto do aceite: a prévia **padrão** valida existência; o hash
+só vem com pedido explícito. Foi decisão registrada, não omissão — a razão é o
+custo de 30 s no caminho que a UI consulta.
+
+Consequência que precisa ser dita: um `adopt` sobre conf existente passa a
+deixar **dois** `<conf>.bak-*` — o do `cmd_adopt`, que já salvava e restaurava
+quando `install_user_files` falhava, e o do `write_config`. Mantive os dois:
+o do `adopt` protege a troca inteira e o do `write_config` protege o próprio
+rename. A leitura de `cmd_adopt` (windows-vm.sh:2990-3049, somente-leitura nesta
+sessão) é o que confirma a promessa que o finalize fazia por palavra sobre o
+adopt.
+
+Testes: `tests/linux-windows-vm.sh` casos 80–97 (caminho morto não é confiado,
+`--iso` explícito preservado, prévia diz `present`/`missing`, backup do
+`write_config`, hash só com pedido, vizinho nomeado, e o aviso no `--json`).
+O RED real foi `exit 97` — `--verify-iso ignorada no --json sem aviso`. Antes
+disso eu mesmo quebrei o teste duas vezes: `jq -e '.iso'` (o envelope não tem
+`iso` no topo, é `vm.iso`/`vm.isoExists`) e `.vm.isoExists == "yes"` quando o
+valor é booleano; isso era erro meu de teste, não lacuna do produto, e ficou
+registrado como tal.
+
+### 6. Prévia do finalize: `bcb5173`
+
+Achado na fila do P1 de memória ("`fits` sozinho não prova limite seguro"), mas
+em outro caminho de código. O `provision_finalize_preview` comparava
+`requiredBytes` contra o espaço livre do destino. Só que a origem mora em
+`$XDG_STATE_HOME/phasezero/windows-vm/vms/<op>/golden-clean.qcow2` e o destino
+em `$HOME/VirtualMachines/` — nada liga os dois, então o snapshot registrado
+pode simplesmente não existir mais na hora da decisão. Nesse estado o
+`requiredBytes` saía 0, o `fits` comparava 0 contra o espaço livre e a prévia
+respondia "há espaço" e "pronta para ativar" sobre uma cópia que o próprio
+`finalize` recusa ("verified snapshot missing").
+
+Agora `originExists` é campo do envelope e porta o `fits`; o texto diz
+`(AUSENTE)` na origem, "espaço: indeterminado sem a origem" e
+"status: a origem verificada não existe; finalize recusaria — nada foi
+copiado". O `rm -f` é no fixture, não no host: `tests/test_provision.sh` estende
+o bloco `FP_*` e afirma os dois estados (origem presente → `originExists:true`,
+`fits:true`; origem sumida → `originExists:false`, `fits:false`, texto com
+`AUSENTE`).
+
+Relido no host com o código corrigido, após a prévia (somente-leitura; o ramo
+`--preview` retorna antes do `provision_lock_acquire`, então não escreve), em
+`finalize-preview-origin-20261016.txt` e `.json` no mesmo diretório de
+evidências:
+
+```
+origem:   .../op-20261015-224232-10324/golden-clean.qcow2
+destino:  ~/VirtualMachines/PhaseZero-Windows-20261015-224232-10324/phasezero-windows.qcow2
+substitui: ~/VirtualMachines/PhaseZero-Windows-20260923-225352-18359/phasezero-windows.qcow2
+espaço:   95 GiB livres para 22 GiB
+status:   pronta para ativar
+```
+
+`originExists:true`, `requiredBytes:23809490944`, `freeBytes:102267215872`,
+`fits:true`, `running:false`. O `--latest` hoje resolve **esta** operação
+(`op-20261015-224232-10324`, `completed`, `adoptedDisk:null`). O `freeBytes`
+diverge da captura da seção 1 (108 271 542 272 → 102 267 215 872) porque o host
+gravou entre as duas; a diferença é de espaço livre, não da origem.
+
+### Dois erros meus, registrados para não se repetirem
+
+- `pgrep -c -f qemu-system-x86_64` devolveu 1 e eu disse que havia uma VM: o
+  `grep` casava com a própria linha de comando do wrapper. `ps -C
+  qemu-system-x86_64` não mostra nada — não havia.
+- Procurei o `golden-clean.qcow2` com `find ~/VirtualMachines`, não achei, e
+  chamei a origem da ativação de "sumida". Ela está em
+  `~/.local/state/phasezero/windows-vm/vms/<op>/`. Foi erro meu de escopo, não
+  defeito do host; a origem existe nas duas operações (set/23: 23 334 420 480
+  B; 15/10: 23 809 490 944 B).
+
+### Verificação desta rodada
+
+`tests/linux-windows-vm.sh` rc=0; `tests/test_provision.sh` PASS 371 FAIL 0;
+`shellcheck` 0.11.0 rc=0 com as exclusões do CI; 7 suítes adjacentes
+(`linux-windows-vm-graphics`, `linux-windows-vm-host-access`,
+`linux-windows-container-frontends`, `test_provision_recovery`,
+`test_windows_vm_remove`, `test_windows_vm_session`) rc=0, log em
+`adjacent-test_provision-20261016.log` e
+`adjacent-linux-windows-vm-graphics-20261016.log`.
+
+### Estado do host ao fechar
+
+`qemu_running=0`, MemAvailable 5 238 MiB, sessão KDE ativa, os dois staging
+intactos e o snapshot da operação pendente íntegro. Nenhum `finalize`,
+nenhum shutdown, nenhum reboot, nenhuma alteração no host, nenhuma
+senha/persistente de sudo criada. Os `windows-vm.conf.bak-20260811223635` e
+`bak-20260912144514` pré-existentes não são meus — minhas corridas não criaram
+backup no diretório real de configuração.
+
+### O que continua aberto
+
+1. Merge na ordem já avisada: **#116 antes de qualquer ativação**, senão a
+   troca roda sem o backup que este PR conserta. Head atual `bcb5173`.
+2. UI: confirmar `windows_vm.py:624` na superfície (o script já emite o
+   `install-awaiting-activation` junto de `readyToLaunch:true`).
+3. Finalize com o operador presente — tarefa #7. Evidência de desligamento
+   limpo continua sendo power-cycle, não algo que eu possa fabricar.
+4. P1 de memória: a política por perfil descida ao `memory.sh` (margem derivada
+   da reserva, `tight` reprovado, PSI como segundo eixo) com teste próprio.
+5. P1 de interação/SKU: `guestLoginVerified` segue `false`; QGA responde
+   "Windows 10 Home".
+6. Virtio: a fonte única está commitada (`5c8dc9f`, `382d43e`), mas
+   `guest/Install-VirtioFS.ps1:47` e `guest/vendor/vendor.json:12-13` ainda
+   buscam o `stable-virtio/virtio-win-gt-x64.msi` flutuante; e o cache do host
+   (`4fca…`) ≠ confiado (`e14c…`), então um `--auto-fix` real agora recusa o
+   cache e re-baixa o ISO pinado (~240 MB).
+7. P2: instrumentação do staging versionada no repositório.
