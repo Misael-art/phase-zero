@@ -114,9 +114,11 @@ def test_bridge_card_reports_state_and_why_tools_are_blocked(qapp, monkeypatch, 
     assert "ferramentas em verificação" in state.text()
 
     full_without_proof = {**STATUS, "upstreamMode": "full",
-                          "eligibility": {"blockers": []}}
+                          "eligibility": {"blockers": []},
+                          "toolsGate": {"next": {"id": "full-runtime",
+                                                 "detail": "Full 6.1.8 exige rede no turno"}}}
     page._on_status_ready("private.chatgpt-web.status", "", full_without_proof)
-    assert "não verificada" in tools.text()
+    assert "bloqueado" in tools.text() and "rede no turno" in tools.text()
 
     stopped = {**STATUS, "stage": "launcher-configured", "launcher": {"active": False},
                "route": {"active": False}, "daemonListening": False}

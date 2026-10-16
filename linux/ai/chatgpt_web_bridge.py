@@ -116,6 +116,18 @@ LOCKED_CAPABILITIES: dict[str, str] = {
     "catalog-listing": "A integração permanece fora do catálogo público.",
     "auto-approve-tool-calls": "Aprovação automática de ferramentas é recusada.",
 }
+# Observed on the pinned 6.1.8 runtime with a real tunnel and connector:
+# its Full resolver needs network access inside the Codex turn, while this
+# profile deliberately uses the read-only sandbox. The upstream doctor only
+# checks infrastructure; it cannot certify a working tool turn.
+FULL_RUNTIME_BLOCKER = (
+    f"Full {PIN['version']} falha no turno real: o upstream exige acesso de rede no contexto "
+    "Codex, indisponível no sandbox read-only deste perfil"
+)
+FULL_RUNTIME_ACTION = (
+    "Mantenha browser-only. Adaptar o transporte Full sem ampliar o sandbox; "
+    "depois provar uma chamada MCP real, aprovação por tarefa e rollback."
+)
 PENDING_GATES = (
     "real-account",
     "clean-host-arch",
@@ -931,6 +943,7 @@ class Bridge:
             "signedIn": self.session_present(self.paths.launcher_data),
             "daemonListening": self.runner.port_in_use(DEFAULT_PORT),
             "eligibility": self.eligibility(state), "runtimeKey": self.key_status(state),
+            "toolsGate": self.tools_steps() if state.get("optIn") else None,
             "lastSmoke": state.get("lastSmoke"), "autostart": self.autostart_status(),
             "lockedCapabilities": LOCKED_CAPABILITIES, "pendingGates": list(PENDING_GATES),
             "usageMeter": "local-estimate-not-official-quota",
@@ -2169,6 +2182,7 @@ class Bridge:
                 blockers.append("launcher não está no modo com ferramentas")
             if config.get("autoApproveToolCalls"):
                 blockers.append("aprovação automática ligada no upstream")
+            blockers.append(FULL_RUNTIME_BLOCKER)
         if blockers:
             raise BridgeError("modo com ferramentas indisponível: " + "; ".join(blockers),
                               "tools-not-ready")
@@ -2213,15 +2227,16 @@ class Bridge:
               "stored": "chave de runtime no cofre do sistema"}[key["state"]],
              f"Crie uma chave restrita a Tunnels Read + Use, com expiração, e rode "
              f"`{manager} tunnel key store` (entrada oculta)."),
+            ("auto-approve", not config.get("autoApproveToolCalls"),
+             "aprovação automática desligada no launcher" if not config.get("autoApproveToolCalls")
+             else "aprovação automática LIGADA no launcher",
+             "Desligue a aprovação automática na página MCP do launcher."),
+            ("full-runtime", False, FULL_RUNTIME_BLOCKER, FULL_RUNTIME_ACTION),
             ("launcher-mode", config.get("mode") == "full",
              "launcher no modo com ferramentas" if config.get("mode") == "full"
              else "launcher ainda no modo somente Web",
              f"`{manager} tunnel key stage`, conclua a página MCP do launcher com o tunnel_id e "
              f"rode `{manager} tunnel key unstage`."),
-            ("auto-approve", not config.get("autoApproveToolCalls"),
-             "aprovação automática desligada no launcher" if not config.get("autoApproveToolCalls")
-             else "aprovação automática LIGADA no launcher",
-             "Desligue a aprovação automática na página MCP do launcher."),
         ]
         listed = [{"id": step, "ok": bool(ok), "detail": detail, "action": action}
                   for step, ok, detail, action in steps]
@@ -2229,8 +2244,8 @@ class Bridge:
         return {"ready": pending is None, "steps": listed, "next": pending,
                 "webModelStillWorks": config.get("mode") == "browser-only",
                 "planSource": PLAN_SOURCE, "lockedCapabilities": LOCKED_CAPABILITIES,
-                "note": "Pronto aqui não prova conta real nem escrita: gates externos seguem "
-                        "pendentes."}
+                "note": "A infraestrutura pode estar saudável, mas Full 6.1.8 falhou em "
+                        "turno real sob sandbox read-only. Browser-only segue disponível."}
 
     def tools_check(self) -> dict[str, Any]:
         state = self.load_state()
@@ -2255,7 +2270,8 @@ class Bridge:
         return {"ready": not blockers, "blockers": blockers, "doctor": doctor,
                 "capability": self.eligibility(state)["tools"],
                 "lockedCapabilities": LOCKED_CAPABILITIES,
-                "note": "Pronto aqui não prova conta real nem escrita: gates externos seguem pendentes."}
+                "note": "Doctor saudável não prova turno MCP. Full 6.1.8 falhou em "
+                        "turno real sob sandbox read-only."}
 
     # ---- codex in the dedicated profile ----------------------------------
 
@@ -2291,12 +2307,12 @@ class Bridge:
         state = self.load_state()
         self.require_opt_in(state)
         tools = mode == "tools"
-        if tools:
-            self.require_tools_ready(state)
-        elif (self.upstream_config() or {}).get("mode") == "full":
+        if not tools and (self.upstream_config() or {}).get("mode") == "full":
             raise BridgeError("o launcher está no modo com ferramentas; use o atalho "
                               "\"com ferramentas\" (`desktop --mode tools`)", "full-mode")
         self.require_ready(state)
+        if tools:
+            self.require_tools_ready(state)
         launcher = shutil.which(DESKTOP_COMMAND, path=self.env.get("PATH"))
         if not launcher:
             raise BridgeError("Codex Desktop não encontrado no PATH", "desktop-missing")
