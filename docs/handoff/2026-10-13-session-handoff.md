@@ -354,7 +354,12 @@ grep -o 'btrfs_corr=[0-9]*' $L/guard-op-20261015-224232-10324.log | sort -u     
    disco **ativado**. Durante uma instalação ele mostra o disco velho congelado
    (38,6 GB constantes) enquanto o staging crescia. O número real desta corrida
    veio de `qemu-img info`/`du` direto em `$vm_dir`. O sampler precisa apontar
-   para o staging da operação.
+   para o staging da operação. **Corrigido no sampler** (2026-10-16, mesmo
+   diretório): `qcow_bytes()` agora prefere
+   `qemu-img info --output=json …/vms/$OP/disk.qcow2` e só cai no glob ativado
+   quando não há staging. Verificado fora do loop: função nova devolve
+   `19904008192` (o mesmo `actual-size` que o rollup do awaiter registrou), a
+   antiga devolve `38679740416` (o disco de setembro).
 5. Espaço: staging novo 19,5 GB somado ao `op-20260923-225352-18359` de 42,7 GB.
    `/home` foi de 147 GB para 128 GB livres. Nenhum dos dois removíveis antes de
    o operador confirmar que abre a VM pela interface.
