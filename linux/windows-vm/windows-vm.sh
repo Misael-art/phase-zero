@@ -81,6 +81,7 @@ EXCHANGE_DIR="${PZ_WINDOWS_VM_EXCHANGE_DIR:-$HOME/Shared/WindowsVM}"
 
 ISO_PATH=""
 ISO_EXPLICIT=0
+ISO_VERIFY=0
 VIRTIO_ISO=""
 VM_DIR=""
 DISK_PATH=""
@@ -131,7 +132,7 @@ Usage:
   pz windows-vm status
   pz windows-vm discover [--json]
   pz windows-vm adopt [--disk PATH] [--source provisioned|adopted-existing]
-  pz windows-vm plan --iso <windows.iso> [--json]
+  pz windows-vm plan --iso <windows.iso> [--json] [--verify-iso]
   pz windows-vm install --iso <windows.iso> [--disk-size 256G] [--ram 8192|8G] [--cpus N] [--dry-run]
   pz windows-vm remove [--dry-run] --yes [--json]
   pz windows-vm optimize [--dry-run]
@@ -187,6 +188,7 @@ parse_options() {
         case "$1" in
             --iso) ISO_PATH="${2:-}"; ISO_EXPLICIT=1; shift 2 ;;
             --iso=*) ISO_PATH="${1#*=}"; ISO_EXPLICIT=1; shift ;;
+            --verify-iso) ISO_VERIFY=1; shift ;;
             --virtio-iso) VIRTIO_ISO="${2:-}"; shift 2 ;;
             --virtio-iso=*) VIRTIO_ISO="${1#*=}"; shift ;;
             --vm-dir) VM_DIR="${2:-}"; shift 2 ;;
@@ -660,6 +662,41 @@ detect_windows_iso() {
     return 0
 }
 
+# Existence is a weak preview when one installation medium sits on the disk under
+# two names: the config can point at a third, dead one and detection still answers
+# "some ISO". The hash is what proves the substitute is the same media, so
+# re-pointing the config is a decision with evidence instead of a guess. Reading
+# 8 GiB is not free, so this runs only when it was asked for.
+iso_sha256_of() {
+    sha256sum "$1" 2>/dev/null | cut -d' ' -f1
+}
+
+verify_iso_preview() {
+    local resolved_sha iso_size candidate candidate_size
+    if [ -z "$ISO_PATH" ] || [ ! -f "$ISO_PATH" ]; then
+        echo "  iso_sha256: none (no readable ISO)"
+        return 0
+    fi
+    resolved_sha="$(iso_sha256_of "$ISO_PATH")"
+    echo "  iso_sha256: ${resolved_sha:-unreadable}"
+    [ -n "$resolved_sha" ] || return 0
+    iso_size="$(wc -c < "$ISO_PATH" | tr -d '[:space:]')"
+    # Same size first: hashing every ISO on the disk to find duplicates of one
+    # would read tens of gigabytes for a preview.
+    while read -r candidate; do
+        [ -n "$candidate" ] || continue
+        if [ "$candidate" = "$ISO_PATH" ]; then continue; fi
+        if [ ! -f "$candidate" ]; then continue; fi
+        candidate_size="$(wc -c < "$candidate" | tr -d '[:space:]')"
+        if [ "$candidate_size" != "$iso_size" ]; then continue; fi
+        if [ "$(iso_sha256_of "$candidate")" = "$resolved_sha" ]; then
+            echo "  iso_same_hash: $candidate"
+        fi
+    done < <(bash "$PZ_ROOT/linux/windows-vm/media-inspect.sh" scan --json 2>/dev/null \
+        | jq -r '.candidates[].path // empty' 2>/dev/null)
+    return 0
+}
+
 detect_virtio_iso() {
     local path
     for path in \
@@ -722,7 +759,15 @@ effective_config() {
         domain_bus="$(libvirt_domain_disk_bus "$LIBVIRT_DOMAIN")"
         [ -n "$domain_bus" ] && RAW_DISK_BUS="$domain_bus"
     fi
-    ISO_PATH="${ISO_PATH:-${PZ_WINDOWS_VM_ISO:-$(detect_windows_iso)}}"
+    # The installed config can outlive its media: a moved or deleted ISO leaves a
+    # path no run can act on, and every plan built from it fails at launch. Trust
+    # the configured path only while the file is there, and say which path was dropped.
+    local configured_iso="${PZ_WINDOWS_VM_ISO:-}"
+    if [ -n "$configured_iso" ] && [ ! -f "$configured_iso" ] && [ -z "$ISO_PATH" ]; then
+        pz_warn "configured Windows ISO does not exist, ignoring it: $configured_iso"
+        configured_iso=""
+    fi
+    ISO_PATH="${ISO_PATH:-${configured_iso:-$(detect_windows_iso)}}"
     VIRTIO_ISO="${VIRTIO_ISO:-${PZ_WINDOWS_VM_VIRTIO_ISO:-$(detect_virtio_iso)}}"
     RAM_MB="${RAM_MB:-$(windows_vm_configured_ram_mb "${PZ_WINDOWS_VM_RAM_MB:-}")}"
     CPUS="${CPUS:-${PZ_WINDOWS_VM_CPUS:-$(default_cpus)}}"
@@ -809,6 +854,17 @@ write_config() {
     # This file describes the VM the user is about to start. Writing it in place
     # means a failure halfway through leaves a truncated config behind, so the
     # new text is staged next to it and swapped in by one rename.
+    # The rename also replaces whatever the file said before, so the previous
+    # version is kept: the ISO and disk paths it recorded are the only way back
+    # when a re-point turns out to be wrong.
+    local config_backup=""
+    if [ -f "$CONFIG_FILE" ]; then
+        config_backup="$CONFIG_FILE.bak-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+        cp -p -- "$CONFIG_FILE" "$config_backup" || {
+            pz_error "could not back up $CONFIG_FILE; refusing to overwrite it"
+            return 1
+        }
+    fi
     local tmp="$CONFIG_FILE.tmp.$$"
     {
         printf '# PhaseZero managed Windows VM config\n'
@@ -842,7 +898,7 @@ write_config() {
     } > "$tmp" || { rm -f -- "$tmp"; pz_error "failed to write $CONFIG_FILE"; return 1; }
     if ! mv -f -- "$tmp" "$CONFIG_FILE"; then
         rm -f -- "$tmp"
-        pz_error "failed to install $CONFIG_FILE"
+        pz_error "failed to install $CONFIG_FILE${config_backup:+; the previous config is still at $config_backup}"
         return 1
     fi
     chown_target_user "$CONFIG_DIR" "$CONFIG_FILE"
@@ -3077,11 +3133,19 @@ print_plan() {
     parse_options "$@"
     effective_config
     if [ "$JSON_OUT" = "1" ]; then
+        # The status envelope is what the UI polls, so it never reads an 8 GiB ISO.
+        # Say that out loud rather than letting the request pass for nothing.
+        if [ "$ISO_VERIFY" = "1" ]; then
+            pz_warn "--verify-iso applies to the text plan only; the JSON envelope does not hash the ISO"
+        fi
         status_json
         return 0
     fi
     echo "PhaseZero Windows VM plan"
-    echo "  iso: ${ISO_PATH:-missing}"
+    local iso_verdict="missing"
+    [ -n "$ISO_PATH" ] && [ -f "$ISO_PATH" ] && iso_verdict="present"
+    echo "  iso: ${ISO_PATH:-none} ($iso_verdict)"
+    if [ "$ISO_VERIFY" = "1" ]; then verify_iso_preview; fi
     echo "  disk: $DISK_PATH ($DISK_SIZE)"
     echo "  disk_source: $DISK_SOURCE"
     echo "  disk_installed_like: $([ -f "$DISK_PATH" ] && disk_looks_installed "$DISK_PATH" && echo yes || echo no)"

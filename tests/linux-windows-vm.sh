@@ -1680,3 +1680,122 @@ awk '/^run_disk\(\)/,/^}/' linux/windows-vm/provision.sh |
     grep -B20 'qemu-img create' | grep -q 'provision_mark_nodatacow' ||
     { echo "FAIL: provision marca nodatacow depois de criar o disco (tarde demais)" >&2; exit 72; }
 echo "  nodatacow em todo criador ok"
+echo "=== ISO configurado: caminho morto nao engana a previa ==="
+# A configuracao instalada no host apontava para
+# ~/Downloads/Win11_25H2_BrazilianPortuguese_x64_v2.iso, que nao existe; a ISO
+# valida estava em ~/ISOs. effective_config aceitava o caminho configurado sem
+# conferir, entao todo plano iniciado pela UI partia de uma midia morta.
+ISO_FIXTURE_HOME="$TMP_ROOT/iso-stale/home"
+mkdir -p "$ISO_FIXTURE_HOME/ISOs"
+touch "$ISO_FIXTURE_HOME/ISOs/Win11_25H2_valid.iso"
+ISO_STALE_PATH="$ISO_FIXTURE_HOME/Downloads/Win11_25H2_missing.iso"
+ISO_STALE_CONF="$TMP_ROOT/iso-stale.conf"
+printf 'PZ_WINDOWS_VM_ISO=%q\n' "$ISO_STALE_PATH" > "$ISO_STALE_CONF"
+
+run_effective_config() {
+    HOME="$ISO_FIXTURE_HOME" PZ_WINDOWS_VM_CONFIG="$ISO_STALE_CONF" bash -c '
+        set -euo pipefail
+        source /dev/stdin
+        '"$1"'
+    ' <<< "$WV_SRC"
+}
+
+iso_resolved_err="$TMP_ROOT/iso-resolved.err"
+iso_resolved="$(run_effective_config '
+    effective_config
+    printf "%s\n" "$ISO_PATH"
+' 2>"$iso_resolved_err")"
+[ "$iso_resolved" != "$ISO_STALE_PATH" ] || {
+    echo "FAIL: effective_config confiou num ISO configurado que nao existe" >&2; exit 80; }
+[ -f "$iso_resolved" ] || {
+    echo "FAIL: o ISO resolvido ($iso_resolved) nao e um arquivo real" >&2; exit 81; }
+grep -qF "$ISO_STALE_PATH" "$iso_resolved_err" || {
+    echo "FAIL: nada avisa que o caminho configurado estava morto" >&2
+    sed -n '1,8p' "$iso_resolved_err" >&2; exit 82; }
+
+# Um --iso explicito continua valendo mesmo apontando para algo ausente: quem
+# digitou o caminho recebe o erro de sempre, nao uma substituicao silenciosa.
+iso_explicit="$(run_effective_config '
+    ISO_PATH="/definitely/not/here/win.iso"
+    ISO_EXPLICIT=1
+    effective_config
+    printf "%s\n" "$ISO_PATH"
+' 2>/dev/null)"
+[ "$iso_explicit" = "/definitely/not/here/win.iso" ] || {
+    echo "FAIL: --iso explicito foi substituido pela detecccao" >&2; exit 83; }
+
+plan_dead_iso="$TMP_ROOT/iso-preview/Win11_absent.iso"
+plan_missing_out="$("$REPO_ROOT/linux/pz" windows-vm plan --iso "$plan_dead_iso" 2>&1)"
+grep -Eq '^  iso: .*missing' <<< "$plan_missing_out" || {
+    echo "FAIL: a previa nao marca um ISO inexistente" >&2
+    grep -E '^  iso' <<< "$plan_missing_out" >&2; exit 84; }
+plan_valid_out="$("$REPO_ROOT/linux/pz" windows-vm plan --iso "$ISO_FIXTURE_HOME/ISOs/Win11_25H2_valid.iso" 2>&1)"
+grep -Eq '^  iso: .*present' <<< "$plan_valid_out" || {
+    echo "FAIL: a previa nao marca um ISO valido como presente" >&2
+    grep -E '^  iso' <<< "$plan_valid_out" >&2; exit 85; }
+echo "  previa recusa ler caminho morto como pronto"
+
+echo "=== regravar a configuracao preserva a versao anterior ==="
+ISO_WC_DIR="$TMP_ROOT/iso-write"
+mkdir -p "$ISO_WC_DIR/vm" "$ISO_WC_DIR/ISOs"
+touch "$ISO_WC_DIR/ISOs/Win11_current.iso"
+ISO_WC_CONF="$ISO_WC_DIR/windows-vm.conf"
+printf 'PZ_WINDOWS_VM_ISO=%q\n' "$ISO_WC_DIR/Win11_gone.iso" > "$ISO_WC_CONF"
+wc_log="$(HOME="$ISO_WC_DIR" PZ_WINDOWS_VM_CONFIG="$ISO_WC_CONF" bash -c '
+    set -euo pipefail
+    source /dev/stdin
+    VM_NAME="write-config-test"
+    effective_config
+    VM_DIR="'"$ISO_WC_DIR"'/vm"
+    DISK_PATH="'"$ISO_WC_DIR"'/vm/disk.qcow2"
+    write_config
+' <<< "$WV_SRC" 2>&1)" || { echo "FAIL: write_config falhou: $wc_log" >&2; exit 86; }
+grep -qF "$ISO_WC_DIR/Win11_gone.iso" "$ISO_WC_CONF" && {
+    echo "FAIL: a configuracao regravada ainda aponta para o ISO morto" >&2; exit 87; }
+wc_backups=("$ISO_WC_CONF".bak-*)
+[ -e "${wc_backups[0]:-}" ] || {
+    echo "FAIL: write_config substituiu a configuracao sem backup" >&2; exit 88; }
+grep -qF "$ISO_WC_DIR/Win11_gone.iso" "${wc_backups[0]}" || {
+    echo "FAIL: o backup nao preserva a configuracao anterior" >&2; exit 89; }
+echo "  troca de configuracao de ISO e recuperavel"
+
+echo "=== previa com --verify-iso confere o hash e nomeia o vizinho ==="
+# O aceite registrado estreitou o P1: no host ha duas ISOs de CONTEUDO IDENTICO
+# (mesmo SHA) e o conf nao nomeia nenhuma delas. Checar so existencia e fraco --
+# a previa precisa mostrar o hash do arquivo resolvido e nomear o vizinho de mesmo
+# hash, para regravar o caminho com evidencia e nao por chute.
+ISO_VERIFY_DIR="$TMP_ROOT/iso-verify"
+mkdir -p "$ISO_VERIFY_DIR/home/Downloads" "$ISO_VERIFY_DIR/home/ISOs"
+printf 'WINMEDIA-IDENTICAL' > "$ISO_VERIFY_DIR/home/Downloads/Win11_alpha.iso"
+cp "$ISO_VERIFY_DIR/home/Downloads/Win11_alpha.iso" "$ISO_VERIFY_DIR/home/ISOs/Win11_beta.iso"
+printf 'DIFFERENT-BYTES-XX' > "$ISO_VERIFY_DIR/home/ISOs/Win11_other.iso"
+plan_verify_out="$(HOME="$ISO_VERIFY_DIR/home" \
+    "$REPO_ROOT/linux/pz" windows-vm plan --iso "$ISO_VERIFY_DIR/home/Downloads/Win11_alpha.iso" --verify-iso 2>&1)"
+grep -Eq '^  iso_sha256: [0-9a-f]{64}$' <<< "$plan_verify_out" || {
+    echo "FAIL: --verify-iso nao registra o SHA-256 da ISO resolvida" >&2
+    grep -E '^  iso' <<< "$plan_verify_out" >&2; exit 91; }
+iso_alpha_sha="$(sha256sum "$ISO_VERIFY_DIR/home/Downloads/Win11_alpha.iso" | cut -d' ' -f1)"
+grep -q "^  iso_sha256: $iso_alpha_sha$" <<< "$plan_verify_out" || {
+    echo "FAIL: o SHA-256 da previa nao e o do arquivo resolvido" >&2; exit 92; }
+grep -q "iso_same_hash: $ISO_VERIFY_DIR/home/ISOs/Win11_beta.iso" <<< "$plan_verify_out" || {
+    echo "FAIL: a previa nao nomeia o vizinho de mesmo hash" >&2
+    grep -E '^  iso' <<< "$plan_verify_out" >&2; exit 93; }
+grep -q 'iso_same_hash.*Win11_other' <<< "$plan_verify_out" && {
+    echo "FAIL: a previa nomeou como igual um conteudo distinto" >&2; exit 94; }
+# Sem a flag, nada de hash: uma ISO de 8 GiB nao pode ser lida duas vezes por
+# simples curiosidade de preview.
+plan_plain_out="$("$REPO_ROOT/linux/pz" windows-vm plan --iso "$ISO_VERIFY_DIR/home/Downloads/Win11_alpha.iso" 2>&1)"
+grep -q 'iso_sha256' <<< "$plan_plain_out" && {
+    echo "FAIL: plan sem --verify-iso leu a ISO inteira" >&2; exit 95; }
+echo "  hash de ISO so com pedido explicito, e o vizinho aparece"
+
+# --json cai no envelope de status, que nunca calcula hash (a UI faz poll dele).
+# A flag ali seria um nada silencioso: quem pede tem de ouvir por que nao veio.
+plan_json_err="$TMP_ROOT/iso-verify-json.err"
+"$REPO_ROOT/linux/pz" windows-vm plan --iso "$ISO_VERIFY_DIR/home/Downloads/Win11_alpha.iso" \
+    --verify-iso --json 2>"$plan_json_err" | jq -e '.vm.isoExists == true' >/dev/null || {
+    echo "FAIL: plan --json --verify-iso quebrou o envelope" >&2; exit 96; }
+grep -q 'verify-iso' "$plan_json_err" || {
+    echo "FAIL: --verify-iso ignorada no --json sem aviso" >&2
+    cat "$plan_json_err" >&2; exit 97; }
+echo "  --verify-iso no --json avisa em vez de virar nada"
