@@ -2917,3 +2917,22 @@ transporte Full ao sandbox restrito, provar chamada MCP real com autorização
 por tarefa no plano Pro (leitura/fetch), testar desconexão/revogação e rollback,
 e só então remover o bloqueio. O gate Windows descartável e usabilidade G4
 continuam pendentes. A frente Windows VM não foi alterada nesta rodada.
+
+Alternativa executável para o plano Pro: manter inferência Codex em
+`browser-only` e criar **outro** servidor MCP local, read/fetch, ligado ao
+mesmo Secure MCP Tunnel por `tunnel-client` supervisionado pelo PhaseZero.
+O servidor deve publicar somente operações de leitura com entradas e saídas
+tipadas: estado sanitizado do host/PhaseZero e consultas a diretórios
+explicitamente escolhidos pelo usuário. Recusar comandos arbitrários, leitura
+fora dos diretórios, arquivos secretos, caminhos simbólicos que escapem da
+raiz, saída excessiva e chamadas sem escopo. Tool annotations são dicas ao
+cliente, não mecanismo de enforcement; impor escopo no servidor. Guardar a
+chave no cofre, materializar no máximo em tmpfs 0600 durante execução, manter
+o cliente sem porta pública e com saúde/rollback visíveis na UI. Opt-in e
+desligar/revogar devem ser operações separadas. Prova de aceite: `tools/list`
+e `tools/call` em fixture; túnel `readyz`; descoberta do conector no ChatGPT;
+chamada real read/fetch que retorne um marcador seguro do host; recusa de
+path traversal e ações de escrita; desconexão e revogação sem afetar o
+`browser-only`. Esta alternativa não libera `Full` upstream nem escrita no
+plano Pro. Fontes: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+e [permissões de apps MCP](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt).
