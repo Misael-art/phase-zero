@@ -1957,9 +1957,26 @@ assert_eq "preview reports the bytes the copy needs" "$FP_REQUIRED" "$(jq -r '.r
 assert_eq "preview reports free space at the destination" "true" "$(jq -r '(.freeBytes // 0) > 0' <<< "$FP_PREVIEW")"
 assert_eq "preview says the copy fits" "true" "$(jq -r '.fits' <<< "$FP_PREVIEW")"
 assert_eq "preview reports the staging VM as off" "false" "$(jq -r '.running' <<< "$FP_PREVIEW")"
+assert_eq "preview says the origin it names is actually there" "true" "$(jq -r '.originExists' <<< "$FP_PREVIEW")"
 assert_eq "preview writes no target directory" "0" "$([ -e "$FP_TARGET_DIR" ] && echo 1 || echo 0)"
 assert_eq "preview leaves the config alone" "0" "$(cmp -s "$FP_CONF_DIR/windows-vm.conf" "$FP_T/conf.before" && echo 0 || echo 1)"
 assert_eq "preview keeps the snapshot" "1" "$([ -f "$FP_SNAP" ] && echo 1 || echo 0)"
+
+# The snapshot is what the whole activation reads from, and it lives under
+# $XDG_STATE_HOME while the flattened disk lands under $HOME: nothing links the
+# two, so the recorded origin can simply stop existing between the install and
+# the decision. requiredBytes was 0 there and fits compared 0 against the free
+# space, so the preview answered "room enough" about a copy it could not make,
+# while finalize itself refuses with "verified snapshot missing".
+rm -f -- "$FP_SNAP"
+FP_GONE_PREVIEW="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
+    bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --preview --json 2>/dev/null)"
+FP_GONE_TEXT="$(HOME="$FP_HOME" XDG_STATE_HOME="$FP_XDG" XDG_CONFIG_HOME="$FP_T/config" \
+    bash "$PROVISION_SCRIPT" finalize --operation-id "$FP_OP" --preview 2>/dev/null)"
+assert_eq "a vanished origin is reported as vanished" "false" "$(jq -r '.originExists' <<< "$FP_GONE_PREVIEW")"
+assert_eq "a vanished origin never claims the copy fits" "false" "$(jq -r '.fits' <<< "$FP_GONE_PREVIEW")"
+assert_contains "the text preview says there is nothing to flatten" "$FP_GONE_TEXT" "AUSENTE"
+truncate -s 4M "$FP_SNAP"
 
 echo ""
 echo "=== status: the installed VM and a finished second install are both reported ==="

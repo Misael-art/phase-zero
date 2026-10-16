@@ -3078,7 +3078,7 @@ provision_free_bytes() {
 # the VM it replaces before anything is written.
 provision_finalize_preview() {
     local operation_id="$1" target_dir="$2"
-    local op_dir="$OPERATIONS_DIR/$operation_id" snapshot target_disk replaces required free vm_dir running=false
+    local op_dir="$OPERATIONS_DIR/$operation_id" snapshot target_disk replaces required free vm_dir origin_exists running=false
     snapshot="$(cat "$op_dir/snapshot_path" 2>/dev/null || true)"
     target_dir="$(readlink -m -- "$target_dir")"
     target_disk="$target_dir/phasezero-windows.qcow2"
@@ -3088,13 +3088,21 @@ provision_finalize_preview() {
         running=true
     fi
     required=0
+    origin_exists=false
     if [ -f "$snapshot" ]; then
+        origin_exists=true
         required="$(stat -c %s -- "$snapshot" 2>/dev/null || echo 0)"
     fi
     free="$(provision_free_bytes "$target_dir")"
+    # fits has to be about a copy that could actually happen. The origin lives
+    # under $XDG_STATE_HOME while the target lives under $HOME and nothing links
+    # the two, so the recorded snapshot can be gone long before the decision is
+    # made; comparing the resulting 0 required bytes against the free space used
+    # to answer "room enough" for a flatten that finalize then refuses.
     jq -n \
         --arg operationId "$operation_id" \
         --arg originSnapshot "$snapshot" \
+        --argjson originExists "$origin_exists" \
         --arg targetDir "$target_dir" \
         --arg targetDisk "$target_disk" \
         --arg replacesDisk "$replaces" \
@@ -3103,13 +3111,14 @@ provision_finalize_preview() {
         --argjson freeBytes "${free:-0}" \
         '{operationId: $operationId,
           originSnapshot: $originSnapshot,
+          originExists: $originExists,
           targetDir: $targetDir,
           targetDisk: $targetDisk,
           replacesDisk: (if $replacesDisk == "" then null else $replacesDisk end),
           running: $running,
           requiredBytes: ($requiredBytes // 0),
           freeBytes: ($freeBytes // 0),
-          fits: (($freeBytes // 0) >= ($requiredBytes // 0))}'
+          fits: ($originExists and (($freeBytes // 0) >= ($requiredBytes // 0)))}'
 }
 
 # The flattened disk is not the whole VM. The guest was installed against this
@@ -3165,11 +3174,16 @@ provision_finalize() {
             printf '%s\n' "$preview_json"
             return 0
         fi
-        jq -r '"origem:   " + (.originSnapshot // "—"),
+        jq -r '"origem:   " + (.originSnapshot // "—")
+                   + (if .originExists then "" else " (AUSENTE)" end),
                "destino:  " + (.targetDisk // "—"),
                "substitui: " + (.replacesDisk // "nenhuma VM configurada"),
-               "espaço:   " + ((.freeBytes // 0) / 1073741824 | floor | tostring) + " GiB livres para " + ((.requiredBytes // 0) / 1073741824 | floor | tostring) + " GiB",
-               (if .running then "status:   a VM da instalação ainda está ligada — desligue-a antes de ativar" else "status:   pronta para ativar" end)' <<< "$preview_json"
+               "espaço:   " + (if .originExists
+                               then ((.freeBytes // 0) / 1073741824 | floor | tostring) + " GiB livres para " + ((.requiredBytes // 0) / 1073741824 | floor | tostring) + " GiB"
+                               else "indeterminado sem a origem" end),
+               (if (.originExists | not) then "status:   a origem verificada não existe; finalize recusaria — nada foi copiado"
+                elif .running then "status:   a VM da instalação ainda está ligada — desligue-a antes de ativar"
+                else "status:   pronta para ativar" end)' <<< "$preview_json"
         return 0
     fi
     existing_adopted="$(jq -r '.adoptedDisk // ""' "$operation_file")"
