@@ -2732,11 +2732,13 @@ launch_check() {
             --argjson kvm "$kvm" --argjson disk "$disk" --argjson ovmf "$ovmf" \
             --argjson vars "$vars" --argjson qemu "$qemu" --argjson graphics "$graphics" \
             --argjson memoryRequestedMb "$mem_requested_mb" --arg memoryFit "$mem_fit" \
+            --argjson memoryMarginMb "$(windows_vm_memory_margin_mb "$mem_requested_mb")" \
+            --argjson memoryReserveMb "$(windows_vm_profile_reserve_mb)" \
             --argjson memoryAvailableMb "$(windows_vm_meminfo_mb MemAvailable)" \
             --argjson memorySwapFreeMb "$(windows_vm_meminfo_mb SwapFree)" \
             '{success:$success,graphicsProfile:$profile,diskPath:$diskPath,
               checks:{kvm:$kvm,disk:$disk,ovmf:$ovmf,ovmfVars:$vars,qemu:$qemu,graphics:$graphics},
-              memory:{requestedMb:$memoryRequestedMb,fit:$memoryFit,availableMb:$memoryAvailableMb,swapFreeMb:$memorySwapFreeMb},
+              memory:{requestedMb:$memoryRequestedMb,fit:$memoryFit,availableMb:$memoryAvailableMb,swapFreeMb:$memorySwapFreeMb,marginMb:$memoryMarginMb,reserveMb:$memoryReserveMb},
               blockers:(split("\n")|map(select(length>0)))}'
     else
         if $success; then

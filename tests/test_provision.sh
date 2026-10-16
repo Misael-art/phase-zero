@@ -1869,7 +1869,10 @@ printf 'PZ_WINDOWS_VM_RAM_MB=12288\n' > "$MEM_T/stale.conf"
 LC_REBASE="$(mem_lc_conf desktop "$MEM_T/stale.conf")"
 assert_eq "configured figure beyond the host becomes the host-aware size" "4096" "$(jq -r '.memory.requestedMb' <<< "$LC_REBASE")"
 assert_eq "re-based figure is not a memory blocker" "0" "$(jq -r '[.blockers[] | select(test("memória"))] | length' <<< "$LC_REBASE")"
-assert_eq "re-based figure fits" "fits" "$(jq -r '.memory.fit' <<< "$LC_REBASE")"
+# 5300 MiB available with a 4096 guest leaves 1204 MiB for the desktop, under
+# its 3072 reserve. Re-basing to the Windows floor is the best the host can do,
+# not a comfortable start: the verdict says so even though nothing blocks.
+assert_eq "re-based to the floor: still inside the reserve, so tight" "tight" "$(jq -r '.memory.fit' <<< "$LC_REBASE")"
 LC_REBASE_ERR="$(mem_lc_conf_err desktop "$MEM_T/stale.conf")"
 assert_contains "the re-base names the configured figure" "$LC_REBASE_ERR" "12288"
 assert_contains "the re-base names the size it chose instead" "$LC_REBASE_ERR" "a VM vai iniciar com 4096 MiB"
@@ -1898,6 +1901,106 @@ MEM_RESTORE="$(PATH="$MEM_T/bin:$PATH" bash -c '
     cat "'"$MEM_T"'/powerprofilesctl.log"' 2>/dev/null)"
 assert_eq "cleanup restores the previous power profile, once" "set balanced" "$MEM_RESTORE"
 rm -rf "$MEM_T"
+
+echo ""
+echo "=== memória: margem por perfil e pressão observada, não só o instante ==="
+# A successful install run does not prove `fits` is a safe limit. On this Deck
+# MemAvailable fell to 1166 MiB with PSI at 15,12 while the verdict for the
+# 4096 MiB guest stayed `fits` the whole time: the reserve that sizes the guest
+# never entered the verdict, and pressure was never read at all.
+MP_T="$(mktemp -d)"
+mkdir -p "$MP_T/home" "$MP_T/xdg" "$MP_T/config/phasezero"
+mp_meminfo() {
+    printf 'MemTotal: %s kB\nMemAvailable: %s kB\nSwapFree: %s kB\n' \
+        "$(( $1 * 1024 ))" "$(( $2 * 1024 ))" "$(( $3 * 1024 ))" > "$MP_T/meminfo"
+}
+mp_pressure() {
+    if [ -z "$1" ]; then
+        rm -f "$MP_T/pressure"
+    else
+        printf 'some avg10=%s avg60=0.50 avg300=0.20 total=99999\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' \
+            "$1" "$1" "$1" > "$MP_T/pressure"
+    fi
+}
+mp_sh() {
+    PZ_WINDOWS_VM_PROFILE="${MP_PROFILE:-desktop}" \
+        PZ_WINDOWS_VM_MEMINFO_FILE="$MP_T/meminfo" PZ_WINDOWS_VM_PRESSURE_FILE="$MP_T/pressure" \
+        PZ_WINDOWS_VM_HOST_RESERVE_MB="${MP_RESERVE:-}" \
+        bash -c '. "'"$PZ_ROOT"'/linux/lib/common.sh"; . "'"$PZ_ROOT"'/linux/windows-vm/memory.sh"; '"$1"
+}
+
+# The desktop profile keeps a reserve so the session stays usable. When the
+# margin above the guest is smaller than that reserve the host is already
+# over-subscribed, swap or no swap.
+mp_meminfo 14820 12000 4000
+mp_pressure ""
+assert_eq "margin covers the desktop reserve: fits" "fits" "$(mp_sh 'windows_vm_memory_fit 8192')"
+mp_meminfo 14820 5432 3624
+assert_eq "the instant the 2026-10-16 install ran at is not a comfortable limit" "tight" \
+    "$(mp_sh 'windows_vm_memory_fit 4096')"
+assert_contains "a short margin is reported as a margin problem" \
+    "$(mp_sh 'windows_vm_memory_notice 4096 2>&1')" "reserva"
+
+# Pressure is the second axis: enough free memory right now does not mean the
+# host is not already stalling.
+mp_meminfo 14820 12000 4000
+mp_pressure "15.12"
+assert_eq "memory pressure demotes fits to tight" "tight" "$(mp_sh 'windows_vm_memory_fit 8192')"
+assert_contains "pressure is reported as pressure" \
+    "$(mp_sh 'windows_vm_memory_notice 8192 2>&1')" "pressão"
+mp_pressure "0.40"
+assert_eq "a quiet host with room keeps fits" "fits" "$(mp_sh 'windows_vm_memory_fit 8192')"
+
+# The reserve belongs to the profile, not to a magic number.
+MP_RESERVE=1024
+mp_meminfo 14820 5432 3624
+assert_eq "a smaller reserve is a smaller requirement" "fits" "$(mp_sh 'windows_vm_memory_fit 4096')"
+MP_RESERVE=""
+
+# A GRUB boot has no desktop to protect, but it still cannot hand out more than
+# the machine has: the kiosk used to answer fits without checking anything.
+MP_PROFILE=kiosk
+mp_meminfo 14820 2100 1000
+assert_eq "kiosk: the sized figure keeps its own reserve" "fits" "$(mp_sh 'windows_vm_memory_fit 12288')"
+assert_eq "kiosk: a guest that eats the host reserve is tight" "tight" "$(mp_sh 'windows_vm_memory_fit 14000')"
+assert_eq "kiosk: a guest larger than the machine exceeds" "exceed" "$(mp_sh 'windows_vm_memory_fit 15000')"
+MP_PROFILE=desktop
+
+# A fixture describes a host. Reading the machine the suite happens to run on
+# would let CI load change a verdict, so pressure is unread unless described too.
+# The body lives in a variable: a `bash -c` payload with nested quotes inside a
+# command substitution is how this assert first broke.
+MP_PF_BODY="$(printf '. "%s/linux/lib/common.sh"; . "%s/linux/windows-vm/memory.sh"; windows_vm_pressure_file' "$PZ_ROOT" "$PZ_ROOT")"
+assert_eq "a described host reads no live pressure" "/dev/null" \
+    "$(env PZ_WINDOWS_VM_MEMINFO_FILE="$MP_T/meminfo" PZ_WINDOWS_VM_PRESSURE_FILE= bash -c "$MP_PF_BODY")"
+assert_eq "a real host reads the real pressure file" "/proc/pressure/memory" \
+    "$(env PZ_WINDOWS_VM_MEMINFO_FILE= PZ_WINDOWS_VM_PRESSURE_FILE= bash -c "$MP_PF_BODY")"
+
+# The arithmetic is what the UI and the watch both read, so it travels with the
+# verdict instead of being re-derived in three places.
+MP_ISO="$MP_T/dummy.iso"
+dd if=/dev/urandom bs=1M count=2 of="$MP_ISO" 2>/dev/null
+mp_meminfo 14820 5432 3624
+mp_pressure ""
+MP_PLAN="$(PZ_TEST_MODE=1 PZ_PREFLIGHT_JSON="$PREFLIGHT_PASS_FIXTURE" XDG_STATE_HOME="$MP_T/xdg" \
+    HOME="$MP_T/home" XDG_CONFIG_HOME="$MP_T/config" PZ_WINDOWS_VM_PROFILE=desktop \
+    PZ_WINDOWS_VM_MEMINFO_FILE="$MP_T/meminfo" PZ_WINDOWS_VM_PRESSURE_FILE="$MP_T/pressure" \
+    bash "$PROVISION_SCRIPT" plan --iso "$MP_ISO" --ram 4096 --json 2>/dev/null || true)"
+assert_eq "the plan reports the tightness the margin shows" "tight" "$(jq -r '.resources.memory.fit' <<< "$MP_PLAN")"
+assert_eq "the plan names the reserve it required" "3072" "$(jq -r '.resources.memory.reserveMb' <<< "$MP_PLAN")"
+assert_eq "the plan shows the margin it measured" "1336" "$(jq -r '.resources.memory.marginMb' <<< "$MP_PLAN")"
+
+MP_LC="$(PZ_TEST_MODE=1 HOME="$MP_T/home" XDG_CONFIG_HOME="$MP_T/config" \
+    XDG_STATE_HOME="$MP_T/xdg" PZ_WINDOWS_VM_PROFILE=desktop \
+    PZ_WINDOWS_VM_MEMINFO_FILE="$MP_T/meminfo" PZ_WINDOWS_VM_PRESSURE_FILE="$MP_T/pressure" \
+    PZ_WINDOWS_VM_CONFIG="$MP_T/config/phasezero/windows-vm.conf" \
+    bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch-check --ram 4096 --json 2>/dev/null || true)"
+assert_eq "launch-check carries the same margin" "1336" "$(jq -r '.memory.marginMb' <<< "$MP_LC")"
+assert_eq "launch-check carries the same reserve" "3072" "$(jq -r '.memory.reserveMb' <<< "$MP_LC")"
+assert_eq "launch-check still calls the tightness tight" "tight" "$(jq -r '.memory.fit' <<< "$MP_LC")"
+assert_eq "a tight margin is still not a blocker: the guard keeps its meaning" "0" \
+    "$(jq -r '[(.blockers // [])[] | select(test("memória"))] | length' <<< "$MP_LC")"
+rm -rf "$MP_T"
 
 echo ""
 echo "=== finalize: a preview names what the swap copies, where, and what it replaces ==="

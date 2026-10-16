@@ -237,12 +237,15 @@ provision_plan() {
     fi
 
     local json_ram json_cpus ram_source="auto" memory_fit mem_available_mb swap_free_mb
+    local memory_margin_mb memory_reserve_mb
     [ -n "$ram" ] && ram_source="explicit"
     json_ram="${ram:-$(default_ram_mb)}"
     json_cpus="${cpus:-$(default_cpus)}"
     memory_fit="$(windows_vm_memory_fit "$json_ram")"
     mem_available_mb="$(windows_vm_meminfo_mb MemAvailable)"
     swap_free_mb="$(windows_vm_meminfo_mb SwapFree)"
+    memory_margin_mb="$(windows_vm_memory_margin_mb "$json_ram")"
+    memory_reserve_mb="$(windows_vm_profile_reserve_mb)"
 
     local plan_id confirm_token timestamp
     plan_id="plan-$(date +%Y%m%d-%H%M%S)-${RANDOM}"
@@ -343,6 +346,8 @@ provision_plan() {
         --arg memoryFit "$memory_fit" \
         --argjson memAvailableMb "$mem_available_mb" \
         --argjson swapFreeMb "$swap_free_mb" \
+        --argjson memoryMarginMb "$memory_margin_mb" \
+        --argjson memoryReserveMb "$memory_reserve_mb" \
         --arg cpus "$json_cpus" \
         --arg diskSize "$disk_size" \
         --argjson imageIndex "$image_index" \
@@ -365,7 +370,8 @@ provision_plan() {
             resources: {
                 ramMb: ($ram|tonumber),
                 ramSource: $ramSource,
-                memory: {fit: $memoryFit, availableMb: $memAvailableMb, swapFreeMb: $swapFreeMb},
+                memory: {fit: $memoryFit, availableMb: $memAvailableMb, swapFreeMb: $swapFreeMb,
+                         marginMb: $memoryMarginMb, reserveMb: $memoryReserveMb},
                 cpus: ($cpus|tonumber),
                 diskSize: $diskSize
             },

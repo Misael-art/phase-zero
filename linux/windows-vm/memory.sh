@@ -20,6 +20,50 @@ windows_vm_meminfo_mb() {
     printf '%s' "$value"
 }
 
+# How much the host keeps for itself, per profile. One definition so the
+# sizing and the verdict cannot disagree: they used to, and the sizing was the
+# only one that honoured it.
+windows_vm_profile_reserve_mb() {
+    if [ "$(windows_vm_boot_mode)" = "kiosk" ]; then
+        printf '%s' "${PZ_WINDOWS_VM_HOST_RESERVE_MB:-2048}"
+    else
+        printf '%s' "${PZ_WINDOWS_VM_HOST_RESERVE_MB:-3072}"
+    fi
+}
+
+# Pressure Stall Information says what the memory figures cannot: whether the
+# host is already stalling. Overridable for the same reason as the meminfo
+# file, and unread when only the meminfo is described — a suite that
+# describes a host must not read the machine it happens to run on, or CI load
+# would decide a verdict.
+windows_vm_pressure_file() {
+    if [ -n "${PZ_WINDOWS_VM_PRESSURE_FILE:-}" ]; then
+        printf '%s' "$PZ_WINDOWS_VM_PRESSURE_FILE"
+        return 0
+    fi
+    if [ -n "${PZ_WINDOWS_VM_MEMINFO_FILE:-}" ]; then
+        # /dev/null yields no line, which reads as "no pressure measured".
+        printf '%s' "/dev/null"
+        return 0
+    fi
+    printf '%s' "/proc/pressure/memory"
+}
+
+# Empty means no reading. Absence of a reading is not evidence of pressure.
+windows_vm_psi_some_avg10() {
+    local value
+    value="$(awk '/^some /{for (i = 1; i <= NF; i++) if ($i ~ /^avg10=/) {split($i, p, "="); print p[2]; exit}}' \
+        "$(windows_vm_pressure_file)" 2>/dev/null || true)"
+    case "$value" in
+        *[0-9]*) printf '%s' "$value" ;;
+        *) printf '' ;;
+    esac
+}
+
+windows_vm_psi_some_max() {
+    printf '%s' "${PZ_WINDOWS_VM_PSI_SOME_MAX:-10.0}"
+}
+
 # The VM is sized for one of two very different hosts, and a single figure
 # cannot serve both.
 #
@@ -53,17 +97,16 @@ default_ram_mb() {
     # host has left. Going under it produces a guest that boots into thrashing.
     floor=4096
     mode="$(windows_vm_boot_mode)"
+    reserve="$(windows_vm_profile_reserve_mb)"
 
     if [ "$mode" = "kiosk" ]; then
         # Kernel, systemd, SDDM, gamescope, virtiofsd and swtpm all live in this
         # reserve. An OOM on the host side kills the VM outright, so it is not
         # squeezed further.
-        reserve="${PZ_WINDOWS_VM_HOST_RESERVE_MB:-2048}"
         ram=$(( total - reserve ))
     else
         # Leave the session responsive: take a share of what is actually free
         # right now, never more than 70% of the machine.
-        reserve="${PZ_WINDOWS_VM_HOST_RESERVE_MB:-3072}"
         ram=$(( avail - reserve ))
         [ "$ram" -gt $(( total * 70 / 100 )) ] && ram=$(( total * 70 / 100 ))
     fi
@@ -81,37 +124,69 @@ default_ram_mb() {
     echo "$ram"
 }
 
-# Can the host hand over this much right now?
-#   fits   - within MemAvailable
-#   tight  - above MemAvailable but covered by free swap: it runs, and the
-#            session pays for it in swapping
-#   exceed - above MemAvailable plus free swap: the kernel has nowhere to put
-#            it, and the OOM killer picks the victim. On a desktop that can be
-#            the browser, the terminal, or the VM in the middle of an install.
-# A dedicated GRUB boot is always "fits": MemAvailable there describes a host
-# that is about to stop running the desktop, and the sizing already kept a
-# reserve.
-windows_vm_memory_fit() {
-    local ram="${1:-0}" avail swap_free
-    case "$ram" in ''|*[!0-9]*) printf 'fits'; return 0 ;; esac
+# Can the host hand over this much and still run what the profile expects it to
+# run? Two axes, because the figure alone has never been enough:
+#   fits   - the guest fits and the profile's reserve is left intact, and the
+#            host is not already stalling
+#   tight  - it runs, and the session pays: the guest leans on swap, the margin
+#            under the reserve is too small, or pressure says it is stalling now
+#   exceed - above MemAvailable plus free swap (or above MemTotal on a GRUB
+#            boot): the kernel has nowhere to put it, and the OOM killer picks
+#            the victim. On a desktop that can be the browser, the terminal, or
+#            the VM in the middle of an install.
+# What the margin measures depends on the profile: a live desktop is judged by
+# MemAvailable, a GRUB boot that runs nothing but the VM by MemTotal.
+windows_vm_memory_margin_mb() {
+    local ram="${1:-0}" base
+    case "$ram" in ''|*[!0-9]*) printf '0'; return 0 ;; esac
     if [ "$(windows_vm_boot_mode)" = "kiosk" ]; then
-        printf 'fits'
-        return 0
-    fi
-    avail="$(windows_vm_meminfo_mb MemAvailable)"
-    # No reading at all is not evidence of a problem.
-    if [ "$avail" -le 0 ]; then
-        printf 'fits'
-        return 0
-    fi
-    swap_free="$(windows_vm_meminfo_mb SwapFree)"
-    if [ "$ram" -le "$avail" ]; then
-        printf 'fits'
-    elif [ "$ram" -le $(( avail + swap_free )) ]; then
-        printf 'tight'
+        base="$(windows_vm_meminfo_mb MemTotal)"
     else
-        printf 'exceed'
+        base="$(windows_vm_meminfo_mb MemAvailable)"
     fi
+    printf '%s' "$(( base - ram ))"
+}
+
+# PSI's "some" line is the share of time at least one task is stalled on
+# memory. An unreadable file is not a reading, so it never blocks a start.
+windows_vm_memory_pressure_high() {
+    local psi max
+    psi="$(windows_vm_psi_some_avg10)"
+    [ -n "$psi" ] || return 1
+    max="$(windows_vm_psi_some_max)"
+    awk -v got="$psi" -v limit="$max" 'BEGIN { exit !(got + 0 >= limit + 0) }'
+}
+
+windows_vm_memory_fit() {
+    local ram="${1:-0}" base swap_free reserve
+    case "$ram" in ''|*[!0-9]*) printf 'fits'; return 0 ;; esac
+    reserve="$(windows_vm_profile_reserve_mb)"
+    if [ "$(windows_vm_boot_mode)" = "kiosk" ]; then
+        base="$(windows_vm_meminfo_mb MemTotal)"
+    else
+        base="$(windows_vm_meminfo_mb MemAvailable)"
+    fi
+    # No reading at all is not evidence of a problem.
+    if [ "$base" -le 0 ]; then
+        printf 'fits'
+        return 0
+    fi
+    if [ "$ram" -gt "$base" ]; then
+        if [ "$(windows_vm_boot_mode)" = "kiosk" ]; then
+            printf 'exceed'
+            return 0
+        fi
+        swap_free="$(windows_vm_meminfo_mb SwapFree)"
+        if [ "$ram" -gt $(( base + swap_free )) ]; then
+            printf 'exceed'
+            return 0
+        fi
+    fi
+    if [ "$(( base - ram ))" -lt "$reserve" ] || windows_vm_memory_pressure_high; then
+        printf 'tight'
+        return 0
+    fi
+    printf 'fits'
 }
 
 # Say out loud what the host can do with this figure, and print the verdict.
@@ -119,7 +194,7 @@ windows_vm_memory_fit() {
 # deciding anything: it used to answer "success" for a VM the host could not
 # hold, because only launch_vm ever looked at memory.
 windows_vm_memory_notice() {
-    local ram="${1:-0}" fit avail swap_free
+    local ram="${1:-0}" fit avail swap_free margin reserve psi mode
     fit="$(windows_vm_memory_fit "$ram")"
     if [ "$fit" = "fits" ]; then
         printf 'fits'
@@ -127,12 +202,24 @@ windows_vm_memory_notice() {
     fi
     avail="$(windows_vm_meminfo_mb MemAvailable)"
     swap_free="$(windows_vm_meminfo_mb SwapFree)"
-    if [ "$fit" = "tight" ]; then
-        pz_warn "a VM pede ${ram} MiB e o host tem ${avail} MiB disponíveis agora; o resto sai da swap (${swap_free} MiB livres) e a sessão vai ficar lenta"
-    fi
+    margin="$(windows_vm_memory_margin_mb "$ram")"
+    reserve="$(windows_vm_profile_reserve_mb)"
+    mode="$(windows_vm_boot_mode)"
     if [ "$fit" = "exceed" ]; then
         pz_error "memória insuficiente: a VM pede ${ram} MiB, o host tem ${avail} MiB disponíveis e ${swap_free} MiB de swap livre"
         pz_error "feche aplicativos ou escolha um valor menor com --ram (mínimo do Windows 11: 4096)"
+        printf 'exceed'
+        return 0
+    fi
+    if [ "$mode" != "kiosk" ] && [ "$ram" -gt "$avail" ]; then
+        pz_warn "a VM pede ${ram} MiB e o host tem ${avail} MiB disponíveis agora; o resto sai da swap (${swap_free} MiB livres) e a sessão vai ficar lenta"
+    fi
+    if [ "$margin" -lt "$reserve" ]; then
+        pz_warn "a folga depois do convidado é ${margin} MiB e a reserva do perfil ${mode} é ${reserve} MiB; o convidado cabe, o resto do host não"
+    fi
+    psi="$(windows_vm_psi_some_avg10)"
+    if [ -n "$psi" ] && windows_vm_memory_pressure_high; then
+        pz_warn "pressão de memória no host: some avg10=${psi} acima do limite $(windows_vm_psi_some_max); adiar a inicialização é o que protege a sessão"
     fi
     printf '%s' "$fit"
 }
