@@ -641,3 +641,89 @@ teclado, GRUB).
 4. Mergear #114 e depois #116 (head `c7ed0bc`), #113, #105.
 5. Depois: fonte única do virtio, caminho/SHA da ISO no conf, política de memória
    por perfil, instrumentação do staging no repositório.
+
+## Atualização — 2026-10-16 (estado real da ativação e o gate de memória derivado do código)
+
+Duas correções materialmente relevantes para quem for mergear ou rodar o finalize.
+
+### 1. A instalação pendente não é mais a que este handoff descrevia
+
+`windows-vm.sh status --json` lido agora (somente-leitura) responde:
+
+- `pendingFinalize.operationId` = **`op-20261015-224232-10324`**, `completedAt`
+  `2026-10-16T02:20:27Z`, `running:false`.
+- origem: `~/.local/state/phasezero/windows-vm/vms/op-20261015-224232-10324/golden-clean.qcow2`
+- destino: `~/VirtualMachines/PhaseZero-Windows-20261015-224232-10324/phasezero-windows.qcow2`
+- **substitui** o disco `~/VirtualMachines/PhaseZero-Windows-20260923-225352-18359/phasezero-windows.qcow2`
+- `requiredBytes` 23 809 490 944, `freeBytes` 108 271 542 272, `allocatedBytes`
+  44 505 047 040, `fits:true`.
+
+Ou seja, o "disco de 19,5 GB" citado acima está superado: a operação hoje
+pendente é a de 15/10, e a VM **configurada** é a de 23/09 — 256 GiB virtual,
+36 GiB alocados, `corrupt:false`, sem backing file (`qemu-img info -U`, leitura
+sem writer). O `windows-vm.conf` não é escrito desde `2026-10-13T01:10:30-03:00`,
+anterior a qualquer ação desta sessão, e os únicos backups continuam sendo
+`bak-20260811223635` e `bak-20260912144514` (mais o `.pre-25h2`) — a troca com
+backup automático ainda não aconteceu porque o código que faz isso está no
+`c7ed0bc`, não mergeado.
+
+O aceite do P0-1 já está no produto deste PR: o mesmo `status --json` emite o
+finding `install-awaiting-activation` ("Duas máquinas virtuais existem: a que
+está configurada segue em uso, e a instalação concluída op-20261015-224232-10324
+aguarda ativação", `action: windows.provision.finalize`) junto de
+`readyToLaunch:true`. Falta conferir a superfície da UI (`windows_vm.py:624`),
+não a do script.
+
+### 2. O gate de vigília agora é a aritmética do próprio `memory.sh`
+
+`memory.sh` dimensiona o convidado subtraindo a reserva do perfil
+(`PZ_WINDOWS_VM_HOST_RESERVE_MB`: 3072 desktop, 2048 kiosk), mas julga o start
+por outra regra: `fits` se `ram <= MemAvailable`, `tight` se coberto por
+`SwapFree`, `exceed` só acima disso; e no kiosk devolve `fits` incondicional.
+A reserva entra no tamanho e nunca no veredito. Ensaios com
+`PZ_WINDOWS_VM_MEMINFO_FILE` (arquivo íntegro em
+`vigil-gate-derived.log`, gerado por `derive-vigil-gate.sh` sobre `c7ed0bc`):
+
+- piso observado do instalador (avail 1166, swap 5120, PSI 15,12): `fit(4096)` =
+  **`tight`**, headroom **−2930 MiB**. `windows_vm_memory_guard` retorna 0, isto
+  é, `tight` **aprova** o start.
+- instante do `launch-check` de hoje (avail 4304): `fit(4096)` = **`fits`**,
+  headroom **208 MiB**, e o `launch-check --json` respondeu `success:true`.
+- fronteira nua: avail 4096 com ram 4096 = `fits` (0 MiB para a sessão);
+  avail 4095 = `tight`; avail 4095 **sem swap** = `exceed`. A mesma demanda de
+  RAM muda de veredito conforme o backing de swap, não conforme a memória.
+- kiosk com avail 1166 e `SwapFree` 0: `fit(14000)` = **`fits`**. No GRUB o
+  veredito não verifica nada.
+
+Isso é a prova do aceite "uma corrida bem-sucedida não prova que `fits` sozinho
+seja limite seguro": ele é correto como *aritmética de instante* e incorreto
+como *limite*, porque não reserva, não olha pressão e, no kiosk, não olha nada.
+
+O `resource-monitor.sh` fora do repositório foi re-derivo no lugar de ajustar
+número: ele faz `source` do `memory.sh` do worktree, tira `GUEST_MB` do
+`default_ram_mb` e a reserva do perfil, e grava na mesma amostra o veredito do
+produto ao lado do gate. Amostra real após a mudança
+(`resource-samples.log`, formato novo a partir das linhas antigas):
+
+```
+2026-10-16T15:33:59Z gate=FAIL need_mb=7168 guest_mb=4096 reserve_mb=3072 mode=desktop avail_mb=5432 total_mb=14820 swap_free_mb=3624 product_fit=fits psi_some_avg10=0.00 ... reason=mem<7168,product-says-fits
+```
+
+`reason=product-says-fits` é a divergência sinalizada: o host não sustenta o
+convidado **mais** a reserva, e o produto ainda diz que cabe. As notas do próprio
+produto vão para `product-notices.log`. `shellcheck` com as exclusões do CI:
+rc=0 (corrigi também um SC2046 pré-existente no `set -- $(pgpg)`).
+
+### Consequência para a política por perfil (P1)
+
+A forma derivada, que já é a do produto sem inventar constante: aprovar start
+somente com `MemAvailable - ram >= reserva(perfil)`, tratar `tight` como
+reprovado sem margem, e exigir o PSI como segundo eixo — nada disso está no
+`memory.sh`, e por isso o gate de vigília hoje é mais estrito que o produto.
+Ficar só no monitor inverte quem protege quem: a correção tem que descer para
+`memory.sh` com teste próprio, na fila que o operador já definiu (depois do
+finalize, junto de virtio e ISO).
+
+Nada foi mutado no host nesta rodada: nenhum `finalize`, nenhuma ativação,
+nenhum shutdown, nenhuma VM em execução (`qemu=none` nas amostras), os dois
+staging intactos.
