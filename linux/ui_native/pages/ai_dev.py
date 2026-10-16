@@ -83,12 +83,12 @@ _BRIDGE_STAGES = {
 }
 _BRIDGE_BUTTONS = (
     # object name, label, command, mutable, what changes
-    ("chatgptWebOpen", "Abrir janela", ("desktop",), False, ""),
-    ("chatgptWebSetup", "Ligar ou reparar", ("setup", "--login-wait", "0"), True,
+    ("chatgptWebOpen", "Abrir Web", ("desktop",), False, ""),
+    ("chatgptWebSetup", "Preparar ou reparar", ("setup", "--login-wait", "0"), True,
      "Inicia o launcher isolado e o bridge local e religa a rota no perfil dedicado. "
      "O ~/.codex do seu Codex normal não é alterado."),
-    ("chatgptWebTools", "Com ferramentas…", ("tools", "status"), False, ""),
-    ("chatgptWebSmoke", "Testar (1 mensagem)", ("smoke",), True,
+    ("chatgptWebTools", "Ver requisitos", ("tools", "status"), False, ""),
+    ("chatgptWebSmoke", "Testar modelo (1 mensagem)", ("smoke",), True,
      "Envia um turno real pelo bridge. Gasta uma mensagem da sua conta ChatGPT."),
     ("chatgptWebDisable", "Desligar", ("disable",), True,
      "Restaura a rota do perfil dedicado e encerra o launcher. O ~/.codex do seu Codex "
@@ -295,8 +295,8 @@ class AiDevPage(BasePage):
         layout.setSpacing(8)
         layout.addWidget(SectionHeader(
             "ChatGPT Web no Codex (experimental)",
-            "Modelos ChatGPT Web numa janela separada do Codex, somente leitura. "
-            "Seu Codex normal não muda.",
+            "Modelo Web numa janela separada. O acesso às ferramentas depende do plano "
+            "e da verificação no host; seu Codex normal não muda.",
         ))
         self.bridge_state = QLabel("Verificando…")
         self.bridge_state.setObjectName("chatgptWebState")
@@ -309,8 +309,22 @@ class AiDevPage(BasePage):
         self.bridge_tools.setProperty("bridgeRole", "tools")
         self.bridge_tools.setWordWrap(True)
         layout.addWidget(self.bridge_tools)
-        row = QHBoxLayout()
-        for name, label, command, mutable, impact in _BRIDGE_BUTTONS:
+        self.bridge_account = QLabel("")
+        self.bridge_account.setObjectName("cardDescription")
+        self.bridge_account.setProperty("bridgeRole", "account")
+        self.bridge_account.setWordWrap(True)
+        self.bridge_account.setAccessibleName("Permissão da conta ChatGPT para ferramentas")
+        layout.addWidget(self.bridge_account)
+        self.bridge_next = QLabel("")
+        self.bridge_next.setObjectName("cardDescription")
+        self.bridge_next.setProperty("bridgeRole", "next")
+        self.bridge_next.setWordWrap(True)
+        self.bridge_next.setAccessibleName("Próximo passo do ChatGPT Web")
+        layout.addWidget(self.bridge_next)
+        actions = QGridLayout()
+        actions.setHorizontalSpacing(8)
+        actions.setVerticalSpacing(8)
+        for index, (name, label, command, mutable, impact) in enumerate(_BRIDGE_BUTTONS):
             action = ActionSpec(
                 id=f"private.chatgpt-web.{command[0]}", category="IA & Dev",
                 title=f"ChatGPT Web no Codex — {label}", description=impact or label,
@@ -325,14 +339,14 @@ class AiDevPage(BasePage):
             button.setProperty("bridgeRole", name)
             button.setToolTip(impact or {
                 "chatgptWebOpen": "Abre o Codex Desktop no perfil dedicado, em janela separada.",
-                "chatgptWebTools": "Mostra o que falta para o modo com ferramentas.",
+                "chatgptWebTools": "Mostra os requisitos e limites reais das ferramentas.",
             }[name])
             button.clicked.connect(
                 lambda _checked=False, spec=action: self.action_requested.emit(spec))
             self._bridge_buttons[name] = button
-            row.addWidget(button)
-        row.addStretch()
-        layout.addLayout(row)
+            actions.addWidget(button, index // 3, index % 3)
+        actions.setColumnStretch(2, 1)
+        layout.addLayout(actions)
         card.setVisible(_bridge_opted_in())
         self.bridge_card = card
         return card
@@ -357,6 +371,8 @@ class AiDevPage(BasePage):
         running = bool(node("launcher").get("active") and node("route").get("active")
                        and payload.get("daemonListening"))
         self._bridge_ready = running
+        self._bridge_buttons["chatgptWebSetup"].setText(
+            "Reparar" if running else "Preparar ou reparar")
         login = {"enabled": "inicia com o login", "off": "início no login desligado",
                  "inconsistent": "início no login inconsistente"}.get(
                      str(node("autostart").get("state")), "")
@@ -364,6 +380,9 @@ class AiDevPage(BasePage):
             self._set_bridge_state(
                 "● Atenção: o ~/.codex do seu Codex normal aponta para um bridge local. "
                 "A ponte nunca faz isso; confira a configuração.", "error")
+        elif running and payload.get("upstreamMode") == "full":
+            self._set_bridge_state("● Web ativo — ferramentas em verificação"
+                                   + (f"; {login}" if login else ""), "warning")
         elif running:
             self._set_bridge_state(f"● Pronto — {label}" + (f"; {login}" if login else ""),
                                    "success")
@@ -374,11 +393,45 @@ class AiDevPage(BasePage):
         else:
             self._set_bridge_state(f"● Parado — {label}. Use Ligar ou reparar.", "warning")
         blockers = node("eligibility").get("blockers")
+        pending = node("toolsGate").get("next")
+        if not isinstance(pending, dict):
+            pending = {}
+        gate_detail = str(pending.get("detail") or "")
+        gate_action = str(pending.get("action") or "")
+        gate_id = str(pending.get("id") or "")
+        capability = str(node("eligibility").get("planMcpCapability") or "")
+        if capability == "read":
+            self.bridge_account.setText(
+                "Conta Pro: o ChatGPT permite leitura/fetch pelo conector. Ações de "
+                "escrita exigem Business, Enterprise ou Edu.")
+        elif capability == "write-beta":
+            self.bridge_account.setText(
+                "Plano compatível com MCP completo (beta). Ferramentas exigem teste real.")
+        else:
+            self.bridge_account.setText("Permissão da conta ainda não confirmada.")
+        if gate_id == "plan-full":
+            self.bridge_next.setText(
+                "Para acesso completo: conta Business, Enterprise ou Edu; depois teste "
+                "real do launcher Full.")
+        else:
+            self.bridge_next.setText(f"Próximo passo: {gate_action}" if gate_action else "")
+        self.bridge_next.setVisible(bool(gate_action))
         if payload.get("upstreamMode") == "full":
-            self.bridge_tools.setText("Com ferramentas: ligado (experimental). Cada ação "
-                                      "local pede sua aprovação.")
+            if isinstance(blockers, list) and blockers:
+                self.bridge_tools.setText(f"Com ferramentas: configuração bloqueada — "
+                                          f"{blockers[0]}.")
+            elif gate_detail:
+                self.bridge_tools.setText(f"Com ferramentas: bloqueado — {gate_detail}.")
+            else:
+                self.bridge_tools.setText("Com ferramentas: configurado, mas chamada MCP "
+                                          "real ainda não verificada. Cada ação local exige "
+                                          "permissão do seu plano e aprovação.")
         elif isinstance(blockers, list) and blockers:
             self.bridge_tools.setText(f"Com ferramentas: bloqueado — {blockers[0]}.")
+        elif gate_id == "plan-full":
+            self.bridge_tools.setText("Acesso completo ao host: indisponível neste plano.")
+        elif gate_detail:
+            self.bridge_tools.setText(f"Com ferramentas: bloqueado — {gate_detail}.")
         else:
             self.bridge_tools.setText("Com ferramentas: ainda não configurado. Veja Com "
                                       "ferramentas… para o próximo passo.")
@@ -504,6 +557,10 @@ class AiDevPage(BasePage):
     def _on_status_failed(self, action_id: str, message: str) -> None:
         if action_id == _BRIDGE_STATUS_ID:
             self._set_bridge_state("● Não foi possível ler o estado. Use Atualizar.", "warning")
+            self.bridge_tools.setText("Estado das ferramentas indisponível.")
+            self.bridge_account.setText("")
+            self.bridge_next.setText("")
+            self.bridge_next.hide()
             return
         if action_id != "ai.status":
             return

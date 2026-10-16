@@ -91,6 +91,7 @@ def test_bridge_card_offers_the_everyday_commands_once_opted_in(qapp, monkeypatc
         assert action.mutable is True and action.impact
         assert action.preview_args == ("ai", "chatgpt-web", "status")
     assert "1 mensagem" in buttons["chatgptWebSmoke"].text()
+    assert buttons["chatgptWebTools"].text() == "Ver requisitos"
     assert "~/.codex" in by_name["chatgptWebDisable"].impact
 
 
@@ -108,11 +109,39 @@ def test_bridge_card_reports_state_and_why_tools_are_blocked(qapp, monkeypatch, 
     assert "bloqueado" in tools.text() and "Plus" in tools.text()
     assert buttons_of(card)["chatgptWebOpen"].isEnabled()
 
+    full_without_access = {**STATUS, "upstreamMode": "full"}
+    page._on_status_ready("private.chatgpt-web.status", "", full_without_access)
+    assert "bloqueada" in tools.text() and "Plus" in tools.text()
+    assert "ferramentas em verificação" in state.text()
+
+    full_without_proof = {**STATUS, "upstreamMode": "full",
+                          "eligibility": {"blockers": []},
+                          "toolsGate": {"next": {"id": "full-runtime",
+                                                 "detail": "Full 6.1.8 exige rede no turno"}}}
+    page._on_status_ready("private.chatgpt-web.status", "", full_without_proof)
+    assert "bloqueado" in tools.text() and "rede no turno" in tools.text()
+
+    pro_limited = {**STATUS, "eligibility": {"blockers": [],
+                                            "planMcpCapability": "read"},
+                   "toolsGate": {"next": {"id": "plan-full",
+                                          "detail": "plano Pro permite só leitura/fetch",
+                                          "action": "Use plano compatível."}}}
+    page._on_status_ready("private.chatgpt-web.status", "", pro_limited)
+    account = next(label for label in card.findChildren(QLabel)
+                   if label.property("bridgeRole") == "account")
+    next_step = next(label for label in card.findChildren(QLabel)
+                     if label.property("bridgeRole") == "next")
+    assert "Conta Pro" in account.text() and "Business" in account.text()
+    assert tools.text() == "Acesso completo ao host: indisponível neste plano."
+    assert "Para acesso completo" in next_step.text()
+    assert buttons_of(card)["chatgptWebSetup"].text() == "Reparar"
+
     stopped = {**STATUS, "stage": "launcher-configured", "launcher": {"active": False},
                "route": {"active": False}, "daemonListening": False}
     page._on_status_ready("private.chatgpt-web.status", "", stopped)
     assert "Ligar ou reparar" in state.text() and state.property("state") == "warning"
     assert not buttons_of(card)["chatgptWebOpen"].isEnabled()
+    assert buttons_of(card)["chatgptWebSetup"].text() == "Preparar ou reparar"
 
     touched = {**STATUS, "liveCodexRouteTouched": True}
     page._on_status_ready("private.chatgpt-web.status", "", touched)
@@ -120,6 +149,7 @@ def test_bridge_card_reports_state_and_why_tools_are_blocked(qapp, monkeypatch, 
 
     page._on_status_failed("private.chatgpt-web.status", "timed out")
     assert "Atualizar" in state.text() and state.property("state") == "warning"
+    assert not next_step.text() and not account.text()
 
 
 def test_bridge_card_follows_the_running_lock(qapp, monkeypatch, tmp_path):

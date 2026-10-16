@@ -2855,3 +2855,157 @@ real ("Pronto — modelo Web ativo…; inicia com o login", ferramentas bloquead
 pelo plano Plus) e o botão Com ferramentas… rodou pelo `CommandRunner` real
 (`/tmp/pz-evidence/pxa010/ui-page.png`). Não provado: clique real na janela
 do Control Center e a aparência do diálogo de resultado para saída em texto.
+
+## PXA-010 validação do hook e estado do modo ferramentas — 2026-10-16
+
+No host, `setup --login-wait 0` falhou com `config-drift` apesar da rota ativa.
+`route verify` apontou exclusivamente o hook de interrupção instalado pelo
+upstream 6.1.8: o validador aceitava `bin/codex-chatgpt-web`, mas o perfil real
+usa `runtime/bun app/cli.js` da mesma versão pinada. O validador agora aceita
+apenas essas duas formas exatas dentro do runtime gerenciado e continua a
+recusar executáveis, versões e comandos diferentes. Com a correção na árvore
+isolada, `route verify` retornou `ok:true` e `setup` concluiu; `smoke` real
+registrou `ok:true` para `chatgpt-web/light` em `state.json`. O pacote instalado
+continua 1.22.5-1, sem esta correção; não substituir enquanto a frente WinVM
+homologa outro pacote no mesmo host.
+
+O upstream preservou `autoApproveToolCalls:true` mesmo em `browser-only`, onde
+`doctor` reporta que não há broker nem túnel. O modo Web agora aceita esse estado
+legado somente enquanto `turn-broker.sock` não existir; `full` continua a
+recusar aprovação automática. A UI deixou de anunciar ferramentas como ligadas
+apenas porque o arquivo upstream diz `mode:full`: mostra bloqueios de elegibilidade
+ou indica que falta uma chamada MCP real. Testes focados: 97 passaram, incluindo
+hook atual e alterações hostis, ausência de broker e estados da UI.
+
+Conta Pro foi informada pelo operador e registrada como **atestado, não prova**;
+Developer Mode e confiança do host continuam não confirmados. A OpenAI Platform
+pede login no navegador integrado. Nenhuma chave, túnel ou plugin foi criado,
+e nenhum segredo foi lido. A assinatura ChatGPT não implica faturamento da API
+nem permissões Tunnels Read/Manage/Use; no Pro, o modo MCP do ChatGPT oferece
+leitura/fetch, não ferramentas locais de escrita. Próximo gate: autenticação
+do operador na Platform; conferir e reutilizar recursos existentes antes de
+criar outros; testar leitura MCP real no ChatGPT. Até lá, apenas Web-only está
+validado no host.
+
+### PXA-010: prova de conta/túnel e bloqueio real do Full — 2026-10-16
+
+Após autenticação/MFA do operador, a conta pessoal ChatGPT Pro e a organização
+Platform permitiram criar um túnel dedicado, uma chave de runtime restrita a
+Tunnels Read + Use com expiração em 30 dias e o
+conector pessoal `Codex Native2`. A chave foi guardada no SecretService; não
+entrou no repositório. O conector mostrou “conectado” no ChatGPT, com política
+de ações de baixo risco; `Allow all actions` e aprovação automática do launcher
+permaneceram desligados. Isto prova provisionamento, **não** uma chamada MCP
+funcional. O modo Full chegou a túnel/daemon saudáveis e `doctor.ok:true`, mas
+a verificação de turno do launcher expirou e o `smoke` real falhou com
+`ChatGPT web turn is missing network access in trusted Codex environment context`.
+
+Causa no runtime pinado 6.1.8: o resolver Full exige `statesNetworkAccess` no
+contexto do turno Codex. O perfil dedicado PhaseZero usa `sandbox_mode =
+"read-only"`, sem esse estado. Dar `danger-full-access` ou aprovação geral
+quebraria o contrato de isolamento; não foi feito. A configuração foi
+restaurada para `browser-only`, launcher reiniciado apenas em seu scope de
+usuário, sem KDE logout/reboot. `smoke` voltou a `PONG` por
+`chatgpt-web/light`, com `sandbox:read-only` e rota do Codex normal intocada.
+Túnel, chave e conector continuam cadastrados, mas o túnel fica offline em
+browser-only. Revogação externa segue disponível ao operador.
+
+Correção na ponte: `tools status`, `tools check`, janela com ferramentas e
+cartão da UI falham fechados com `full-runtime` e motivo específico. `doctor`
+saudável sozinho não sinaliza pronto. O próximo trabalho é adaptar o
+transporte Full ao sandbox restrito, provar chamada MCP real com autorização
+por tarefa no plano Pro (leitura/fetch), testar desconexão/revogação e rollback,
+e só então remover o bloqueio. O gate Windows descartável e usabilidade G4
+continuam pendentes. A frente Windows VM não foi alterada nesta rodada.
+
+Alternativa executável para o plano Pro: manter inferência Codex em
+`browser-only` e criar **outro** servidor MCP local, read/fetch, ligado ao
+mesmo Secure MCP Tunnel por `tunnel-client` supervisionado pelo PhaseZero.
+O servidor deve publicar somente operações de leitura com entradas e saídas
+tipadas: estado sanitizado do host/PhaseZero e consultas a diretórios
+explicitamente escolhidos pelo usuário. Recusar comandos arbitrários, leitura
+fora dos diretórios, arquivos secretos, caminhos simbólicos que escapem da
+raiz, saída excessiva e chamadas sem escopo. Tool annotations são dicas ao
+cliente, não mecanismo de enforcement; impor escopo no servidor. Guardar a
+chave no cofre, materializar no máximo em tmpfs 0600 durante execução, manter
+o cliente sem porta pública e com saúde/rollback visíveis na UI. Opt-in e
+desligar/revogar devem ser operações separadas. Prova de aceite: `tools/list`
+e `tools/call` em fixture; túnel `readyz`; descoberta do conector no ChatGPT;
+chamada real read/fetch que retorne um marcador seguro do host; recusa de
+path traversal e ações de escrita; desconexão e revogação sem afetar o
+`browser-only`. Esta alternativa não libera `Full` upstream nem escrita no
+plano Pro. Fontes: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+e [permissões de apps MCP](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt).
+
+Rechecagem no host em 2026-10-16: `loginctl` mostrou só a conta `misael`
+(sessões `manager` e KDE da mesma UID). O gerenciador estável do atalho marcou
+`single-user: ok` e `full-runtime: bloqueado`; `launcher-mode: browser-only`
+é consequência deliberada desse bloqueio. O `pz` do pacote 1.22.5-1 ainda
+mostra o checklist anterior sem `full-runtime`, portanto não é fonte de
+verdade até atualizar o pacote. O checklist da árvore atual explicita o gate
+de conta atendido e deixa de sugerir mudar o launcher antes de uma chamada
+MCP real com sandbox restrito. Cópia estável dos atalhos atualizada; launcher
+e sessão KDE não foram reiniciados.
+
+### PXA-010: contraprova de acesso completo e UX do bloqueio — 2026-10-16
+
+`loginctl list-users` no host mostrou somente UID 1000, mas a consulta D-Bus
+falhava ocasionalmente dentro do turno Codex. O gerenciador agora compara UIDs
+numéricas e, quando a consulta falha, lê os registros de sessão do próprio
+logind em `/run/systemd/sessions`. Só declara usuário único quando encontra a
+UID atual e consegue interpretar todos os registros; ausência, erro ou registro
+malformado continuam como `unknown`. Teste simulou a falha D-Bus e presença de
+outra UID; no host real, a mesma fallback encontrou apenas a UID atual.
+
+O limite do plano é independente do estado do launcher. A documentação OpenAI
+de [Developer Mode e apps MCP](https://help.openai.com/pt-br/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
+reserva ações MCP de gravação/modificação aos planos Business, Enterprise e Edu
+(beta); a conta Pro aceita somente leitura/fetch. O checklist agora expõe
+`plan-full` e a UI mostra permissão da conta, próxima ação e Web funcional sem
+confundir túnel conectado com acesso completo. O botão de requisitos descreve
+seu efeito real; a página foi conferida no tema dark em 800 px, sem corte de
+botões. O plano Pro **não** autoriza ampliar permissões via chave de API ou
+túnel.
+
+Contraprovas físicas, sem tocar a sessão KDE: um turno real
+`chatgpt-web/light` com `codex --sandbox workspace-write` respondeu que as
+ferramentas locais estavam indisponíveis; nenhum arquivo pedido apareceu no
+diretório descartável. `setup --full` no perfil principal recusou porta 17841
+ocupada e preservou os hashes de configuração/estado. Em perfil isolado e
+porta 17842, `setup --full` saiu 0, mas `doctor` apontou supervisor ausente e
+túnel parado; o subcomando upstream `tunnel start` recusou instalar serviço
+gerenciado no Linux. O perfil isolado foi removido e o serviço de prova
+parado. O launcher principal, a rota Web e o Codex normal ficaram inalterados.
+Esses resultados **não provam** chamada MCP funcional no modo Full.
+
+Gate remanescente: testar modo Full e política de aprovação em conta e ambiente
+compatíveis; até lá, `full-runtime` e `launcher-mode` permanecem bloqueados.
+No plano Pro, a alternativa separada de MCP local estritamente read/fetch,
+descrita acima, requer implementação e prova real antes de ser anunciada como
+disponível. A UI nova está na árvore/PR; o pacote 1.22.5-1 do host ainda não
+contém essa revisão. Homologação em host limpo, Windows descartável e teste de
+usabilidade seguem abertos.
+
+### PXA-010: atalho e autostart sobrevivem à remoção do worktree — 2026-10-16
+
+Incidente físico: clicar no menu mostrou “O gerenciador em
+`/mnt/sdcard/Projects/pz-product-apps-impl/linux/ai/chatgpt_web_bridge.py`
+não existe mais”. O `open.target` e o `autostart.target` apontavam para o
+worktree removido, mas `shortcuts status` ainda dizia `installed` porque só
+verificava se os arquivos de atalho e target existiam. O pacote instalado
+1.22.5-1 não era fallback funcional: seu `route verify` rejeitava o hook
+atual do upstream 6.1.8.
+
+Correção: `shortcuts install` e `autostart enable` instalam cópia privada do
+gerenciador e dos adapters do cofre em `~/.local/share/phasezero/chatgpt-web/manager`
+(diretório 0700, arquivos 0600). Targets apontam para essa localização
+persistente, não para um checkout. Status agora exige target exato, intérprete
+e scripts presentes; no Arch, o intérprete é `/usr/bin/python3`, não um venv
+descartável. Worktree ausente vira `inconsistent`. Testes de regressão
+simulam target apagado e re-instalação. No host, ambos foram reparados sem
+reboot/logout: menu `installed`, autostart `enabled`, `route verify ok:true`.
+Invocar o **mesmo wrapper do atalho** abriu o Codex Desktop no perfil dedicado
+(`--new-instance`, rc 0, processo ativo). Pacote do sistema e VM intactos.
+Após publicar pacote com esta correção, reinstalar os atalhos/autostart pelo
+gerenciador atualizado para renovar o snapshot privado. O modo Full segue
+bloqueado independentemente deste conserto.
