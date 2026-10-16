@@ -505,15 +505,15 @@ echo ""
 echo "=== provision: finalize carries the boot artifacts the guest was installed against ==="
 # The flatten step produces a disk, but the disk alone is not the VM: the
 # firmware variables and the swtpm state decide which machine Windows thinks it
-# is. Sourcing the seam keeps this hermetic — `finalize` itself ends in `adopt`,
-# which needs a real target user and a disk that looks installed.
+# is. The seam is called directly rather than through `finalize`, which ends in
+# `adopt` and needs a real target user and a disk that looks installed. The
+# function comes from the file-level source above; if that source ever fails,
+# the subshell returns 127 and the first assertion below fails rather than
+# passing on an undefined call.
 CARRY_T="$(mktemp -d)"
 carry() {
     local vm_dir="$1" target_dir="$2" _rc=0
     (
-        XDG_STATE_HOME="$CARRY_T"
-        # shellcheck source=linux/windows-vm/provision.sh
-        source "$PROVISION_SCRIPT" >/dev/null 2>&1 || true
         provision_finalize_carry_boot_artifacts "$vm_dir" "$target_dir"
     )
     _rc=$?
