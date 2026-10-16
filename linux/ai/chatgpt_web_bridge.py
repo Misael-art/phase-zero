@@ -528,10 +528,13 @@ class Paths:
         self.autostart_dir = config / "autostart"
         self.autostart_entry = self.autostart_dir / UPSTREAM_AUTOSTART_ENTRY
         self.managed_autostart = self.autostart_dir / MANAGED_AUTOSTART_ENTRY
-        # Stable-path wrapper for the opt-in login entry. The manager itself can
-        # live in a worktree that disappears; the wrapper survives and fails
-        # visibly (desktop notification) instead of silently not launching.
+        # Menu/login wrappers call a private manager snapshot. Neither target
+        # may depend on the source worktree remaining mounted or present.
         self.autostart_bin = self.root / "bin"
+        self.manager_dir = self.root / "manager"
+        self.manager_script = self.manager_dir / "chatgpt_web_bridge.py"
+        self.manager_secret_store = self.manager_dir / "secret_store.py"
+        self.manager_windows_secret_store = self.manager_dir / "windows_credential_store.py"
         self.autostart_wrapper = self.autostart_bin / "chatgpt-web-autostart.sh"
         self.autostart_target = self.autostart_bin / "chatgpt-web-autostart.target"
         self.open_wrapper = self.autostart_bin / "chatgpt-web-open.sh"
@@ -1657,8 +1660,44 @@ class Bridge:
             "início no login (opt-in)", self.paths.autostart_target.name, "não iniciou",
             "pz ai chatgpt-web autostart enable --acknowledge-autostart", "autostart run")
 
+    def install_managed_entrypoint(self) -> None:
+        """Snapshot this manager outside disposable worktrees for menu/login launch."""
+        if not self.managed_python().is_file() or not os.access(self.managed_python(), os.X_OK):
+            raise BridgeError("Python estável indisponível para o atalho", "manager-python")
+        source = Path(__file__).resolve()
+        helper = source.with_name("secret_store.py")
+        windows_helper = source.with_name("windows_credential_store.py")
+        try:
+            script_bytes = source.read_bytes()
+            helper_bytes = helper.read_bytes()
+            windows_helper_bytes = windows_helper.read_bytes()
+        except OSError as error:
+            raise BridgeError(f"gerenciador incompleto: {error}", "manager-source") from None
+        if self.paths.manager_dir.is_symlink():
+            raise BridgeError("diretório do gerenciador é um symlink", "manager-path")
+        private_dir(self.paths.manager_dir)
+        atomic_write(self.paths.manager_secret_store, helper_bytes)
+        atomic_write(self.paths.manager_windows_secret_store, windows_helper_bytes)
+        atomic_write(self.paths.manager_script, script_bytes)
+
+    def managed_python(self) -> Path:
+        system_python = Path("/usr/bin/python3")
+        return (system_python if os.name != "nt" and system_python.is_file()
+                else Path(getattr(sys, "_base_executable", sys.executable)))
+
     def autostart_target_text(self) -> str:
-        return f"{sys.executable}\n{Path(__file__).resolve()}\n"
+        return f"{self.managed_python()}\n{self.paths.manager_script}\n"
+
+    def entrypoint_ready(self, target: Path) -> bool:
+        try:
+            return (target.read_text(encoding="utf-8") == self.autostart_target_text()
+                    and self.paths.manager_script.is_file()
+                    and self.paths.manager_secret_store.is_file()
+                    and self.paths.manager_windows_secret_store.is_file()
+                    and self.managed_python().is_file()
+                    and os.access(self.managed_python(), os.X_OK))
+        except OSError:
+            return False
 
     def autostart_entry_text(self) -> str:
         return ("[Desktop Entry]\n"
@@ -1681,7 +1720,7 @@ class Bridge:
         state = ("off" if not record and current is None
                  else "enabled" if record and current == self.autostart_entry_text()
                  and self.paths.autostart_wrapper.is_file()
-                 and self.paths.autostart_target.is_file()
+                 and self.entrypoint_ready(self.paths.autostart_target)
                  else "inconsistent")
         return {"state": state, "entry": str(entry), "optedInAt": (record or {}).get("at"),
                 "startsUpstreamLauncherDirectly": False}
@@ -1695,6 +1734,7 @@ class Bridge:
         if self.package_state().get("unpacked") != "verified":
             raise BridgeError("conclua `setup` antes de ligar o início no login",
                               "install-unverified")
+        self.install_managed_entrypoint()
         self.paths.autostart_dir.mkdir(parents=True, exist_ok=True)
         atomic_write(self.paths.autostart_wrapper, self.autostart_wrapper_text().encode(), 0o755)
         atomic_write(self.paths.autostart_target, self.autostart_target_text().encode(), 0o600)
@@ -1779,7 +1819,7 @@ class Bridge:
         state = ("off" if not record and not present
                  else "installed" if record and all(intact(*item) for item in expected)
                  and len(present) == len(expected) and self.paths.open_wrapper.is_file()
-                 and self.paths.open_target.is_file()
+                 and self.entrypoint_ready(self.paths.open_target)
                  else "inconsistent")
         return {"state": state, "desktopCopy": desktop_copy if record else None,
                 "menu": str(self.paths.applications), "desktop": str(self.user_desktop_dir()),
@@ -1795,6 +1835,7 @@ class Bridge:
         if desktop_copy and not desktop.is_dir():
             raise BridgeError(f"pasta da área de trabalho não encontrada ({desktop}); use "
                               "`--no-desktop-copy`", "desktop-dir-missing")
+        self.install_managed_entrypoint()
         self.shortcuts_remove()
         state = self.load_state()
         private_dir(self.paths.autostart_bin)

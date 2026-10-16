@@ -502,8 +502,18 @@ def test_login_autostart_is_opt_in_and_never_starts_the_upstream_launcher_direct
     assert "autostart run" not in entry  # Exec is the stable wrapper, not the worktree
     assert bridge.paths.autostart_wrapper.is_file()
     assert bridge.paths.autostart_target.is_file()
+    assert bridge.paths.autostart_target.read_text().splitlines()[1] == str(
+        bridge.paths.manager_script)
+    assert bridge.paths.autostart_target.read_text().splitlines()[0] == str(
+        bridge.managed_python())
+    assert bridge.paths.manager_script.is_file()
     assert "codex-web-gpt-launcher" not in entry
     assert bridge.isolation()["upstreamAutostartEntry"] is None
+
+    bridge.paths.autostart_target.write_text(
+        f"{sys.executable}\n{bridge.paths.home / 'deleted-worktree' / 'bridge.py'}\n")
+    assert bridge.autostart_status()["state"] == "inconsistent"
+    assert bridge.autostart_enable(True)["state"] == "enabled"
 
     bridge.paths.managed_autostart.write_text(
         entry.replace("chatgpt-web-autostart.sh", "dev.codexwebgpt.launcher.desktop"))
@@ -1035,6 +1045,11 @@ def test_shortcuts_land_in_menu_and_localised_desktop_on_a_stable_path(host, mon
     status = bridge.shortcuts_install()
 
     assert status["state"] == "installed"
+    target = bridge.paths.open_target.read_text()
+    assert str(bridge.paths.manager_script) in target
+    assert str(Path(bridge_module.__file__).resolve()) not in target
+    assert bridge.paths.manager_secret_store.is_file()
+    assert bridge.paths.manager_windows_secret_store.is_file()
     menu = home / ".local/share/applications"
     desk = home / "Área de trabalho"
     names = {"phasezero-chatgpt-web.desktop": "web", "phasezero-chatgpt-web-tools.desktop": "tools"}
@@ -1051,6 +1066,13 @@ def test_shortcuts_land_in_menu_and_localised_desktop_on_a_stable_path(host, mon
     assert native.read_text() == "[Desktop Entry]\nExec=/usr/bin/codex-desktop %u\n"
     assert sorted(item.name for item in live.iterdir()) == ["config.toml"]
     assert (live / "config.toml").read_text() == 'model = "gpt-6-sol"\n'
+
+    # A stale worktree target must not be reported as a working shortcut.
+    bridge.paths.open_target.write_text(
+        f"{sys.executable}\n{home / 'deleted-worktree' / 'bridge.py'}\n")
+    assert bridge.shortcuts_status()["state"] == "inconsistent"
+    bridge.shortcuts_install()
+    assert bridge.shortcuts_status()["state"] == "installed"
 
     (desk / "phasezero-chatgpt-web.desktop").write_text("[Desktop Entry]\nExec=/bin/true\n")
     assert bridge.shortcuts_status()["state"] == "inconsistent"
