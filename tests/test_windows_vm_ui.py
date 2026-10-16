@@ -241,6 +241,28 @@ def test_windows_vm_shows_a_finished_install_as_a_second_instance(ws_page):
     assert "PhaseZero-Windows" in text
 
 
+def test_windows_vm_pending_label_names_the_instance_in_use_too(ws_page):
+    # "Show both as distinct instances" is only true if the page says which one
+    # is in use. Naming the pending directory is not enough: on this host the
+    # configured instance is a prefix of every timestamped one, so an assertion
+    # on a bare substring would pass even if both halves named the same VM.
+    page, _actions = ws_page
+    page._on_status_ready("windows.status", "", _ready_vm_with_pending_install())
+    text = page.pending_activation_label.text()
+    assert "Em uso:" in text
+    assert text.split("Em uso:")[1].strip() == "PhaseZero-Windows"
+
+
+def test_windows_vm_pending_label_omits_in_use_on_first_activation(ws_page):
+    page, _actions = ws_page
+    first = _ready_vm_with_pending_install()
+    del first["provision"]["pendingFinalize"]["replacesDisk"]
+    page._on_status_ready("windows.status", "", first)
+    text = page.pending_activation_label.text()
+    assert "op-20260501-000000-5" in text
+    assert "Em uso:" not in text
+
+
 def test_windows_vm_activation_is_explicit_and_previews_the_swap(ws_page):
     page, _actions = ws_page
     called: list[str] = []

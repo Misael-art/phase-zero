@@ -669,11 +669,21 @@ class WindowsVmPage(BasePage):
         target = str(pending.get("targetDisk") or "")
         instance = target.rsplit("/", 2)[-2] if target.count("/") >= 2 else ""
         if instance:
-            return (
+            text = (
                 f"Segunda instância: a instalação {operation} foi concluída em "
                 f"~/VirtualMachines/{instance} e aguarda ativação."
             )
-        return f"Há uma instalação concluída ({operation}) que ainda não foi ativada."
+        else:
+            text = f"Há uma instalação concluída ({operation}) que ainda não foi ativada."
+        # Naming only the waiting one leaves the page describing half of the
+        # situation: the user sees a new instance and no answer to which VM it
+        # would displace. On this host every timestamped directory starts with
+        # the configured one's name, so the in-use instance is named explicitly.
+        replaced = str(pending.get("replacesDisk") or "")
+        replaced_instance = replaced.rsplit("/", 2)[-2] if replaced.count("/") >= 2 else ""
+        if replaced_instance:
+            text += f" Em uso: {replaced_instance}"
+        return text
 
     def _activation_preview(self, pending: dict) -> str:
         lines = [
