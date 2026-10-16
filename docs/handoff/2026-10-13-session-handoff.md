@@ -635,7 +635,11 @@ teclado, GRUB).
    (`ci-terminal-c7ed0bc.log`), incluindo `arch-clean-host` e `pester`. Isto
    substitui o passo 1 da seção anterior, que apontava para `c86df85`.
 2. Desligar a nova VM **por dentro do Windows** para satisfazer o pré-requisito de
-   desligamento limpo; a janela que existia acabou com o reboot.
+   desligamento limpo; a janela que existia acabou com o reboot. **Superado pela
+   seção 4 desta atualização:** a origem do finalize é o `golden-clean.qcow2`, que
+   passou no `qemu-img check` hoje e é mais novo que a última escrita do
+   convidado, e o código só exige que nenhum `qemu-pid` esteja vivo. Ligue o
+   convidado de novo apenas se a decisão for validar interação primeiro.
 3. `provision finalize --preview` e ativação com o operador presente; conferir o
    `windows-vm.conf.bak-*` criado.
 4. Mergear #114 e depois #116 (head `c7ed0bc`), #113, #105.
@@ -727,3 +731,56 @@ finalize, junto de virtio e ISO).
 Nada foi mutado no host nesta rodada: nenhum `finalize`, nenhuma ativação,
 nenhum shutdown, nenhuma VM em execução (`qemu=none` nas amostras), os dois
 staging intactos.
+
+### 3. A ISO do conf: o problema é nome, não conteúdo
+
+`PZ_WINDOWS_VM_ISO` aponta para `~/Downloads/Win11_25H2_BrazilianPortuguese_x64_v2.iso`,
+e esse arquivo **não existe**. Existem dois outros, e os dois têm o **mesmo
+SHA-256** (`iso-candidate-hashes.log`):
+
+- `50fe4703cf0df0072e093d1f5d58ed450e4c49d8ca960433bbe6278d5ef10107`
+  `~/Downloads/Win11_25H2_BrazilianPortuguese_x64_v2 (1).iso` (8 172 068 864)
+- `50fe4703cf0df0072e093d1f5d58ed450e4c49d8ca960433bbe6278d5ef10107`
+  `~/ISOs/Win11_25H2_BrazilianPortuguese_x64_v2.iso` (8 172 068 864)
+
+Então o P1 se estreita: não falta ISO, falta o caminho apontar para uma, e o
+plano iniciado pela UI falharia por nome. Isso também muda o aceite da prévia —
+checar só existência é fraco aqui, porque há dois arquivos de conteúdo idêntico
+e o conf não corresponde a nenhum dos dois nomes; a prévia precisa resolver o
+caminho, conferir o SHA e nomear o candidato vizinho de mesmo hash. Não há
+motivo para re-download.
+
+### 4. A prévia do finalize está verde e a origem é íntegra
+
+`provision.sh finalize --preview --latest` (lido o despacho: o ramo `--preview`
+retorna antes do `provision_lock_acquire`, portanto não escreve; saída em
+`finalize-preview-20261016.json`):
+
+```
+origem:    ~/.local/state/phasezero/windows-vm/vms/op-20261015-224232-10324/golden-clean.qcow2
+destino:   ~/VirtualMachines/PhaseZero-Windows-20261015-224232-10324/phasezero-windows.qcow2
+substitui: ~/VirtualMachines/PhaseZero-Windows-20260923-225352-18359/phasezero-windows.qcow2
+espaço:    99 GiB livres para 22 GiB
+status:    pronta para ativar   (running:false, fits:true)
+```
+
+Sobre o pré-requisito de desligamento limpo, com os números na mão:
+
+- a origem que o finalize achata é o snapshot, não o disco do convidado.
+  `qemu-img check -U golden-clean.qcow2` → "No errors were found on the image",
+  rc=0, 23 809 490 944 bytes, 8,66% alocado — exatamente o `requiredBytes` da
+  prévia.
+- o `golden-clean.qcow2` tem mtime **2026-10-16 08:19 local** e o
+  `disk.qcow2` da instalação tem mtime **2026-10-15 23:19 local**: o snapshot é
+  **posterior** à última escrita do convidado, então ativar a partir dele não
+  descarta trabalho feito depois.
+- o código do finalize não exige histórico de desligamento gracioso: ele exige
+  que o `qemu-pid` do staging não esteja vivo (`kill -0`), e o `pid 988752` está
+  morto. O `session.lastGraceful:true` no `status --json` é do registro anterior
+  (2026-09-15), não prova nada sobre esta operação.
+
+Leitura honesta: o reboot do operador não deu desligamento limpo ao convidado,
+mas o que ele protege — imagem suja e escritor concorrente — não se aplica à
+origem desta ativação, que é um snapshot verificado hoje e mais novo que o disco
+vivo. Decidir com esse critério é do operador; a prévia está pronta e eu não
+ativei nada.
