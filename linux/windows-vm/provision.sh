@@ -9,6 +9,11 @@ source "$PZ_ROOT/linux/lib/common.sh"
 # shellcheck source=memory.sh
 source "$PZ_ROOT/linux/windows-vm/memory.sh"
 
+# PZ_VIRTIO_WIN_VERSION/URL/SHA256 and virtio_win_sha_matches: the only place the
+# trusted virtio-win artifact is written down.
+# shellcheck source=virtio-source.sh
+source "$PZ_ROOT/linux/windows-vm/virtio-source.sh"
+
 default_cpus() {
     local total cpus
     total="$(nproc 2>/dev/null || echo 2)"
@@ -245,8 +250,8 @@ provision_plan() {
     timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
     local virtio_source="auto"
-    local virtio_url="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.285-1/virtio-win-0.1.285.iso"
-    local virtio_sha_expected="e14cf2b94492c3e925f0070ba7fdfedeb2048c91eea9c5a5afb30232a3976331"
+    local virtio_url="$PZ_VIRTIO_WIN_URL"
+    local virtio_sha_expected="$PZ_VIRTIO_WIN_SHA256"
 
     local preflight_json preflight_status preflight_stderr
     if [ "${PZ_TEST_MODE:-0}" = "1" ] && [ -n "${PZ_PREFLIGHT_JSON:-}" ]; then

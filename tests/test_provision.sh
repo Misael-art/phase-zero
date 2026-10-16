@@ -653,6 +653,114 @@ assert_contains "Venus preflight explains provisioning boundary" \
 rm -rf "$GFX_PREFLIGHT_T"
 
 echo ""
+echo "=== virtio: one trusted source for version, URL and hash ==="
+# preflight followed the floating stable-virtio link while provision required the
+# pinned 0.1.285 hash, so --auto-fix could only ever hand over an ISO that
+# provisioning would refuse. On this host that is exactly what happened: the
+# cache holds 4fca… while the installer demands e14c….
+VT_T="$(mktemp -d)"
+VT_BIN="$VT_T/bin"
+mkdir -p "$VT_BIN"
+# The trusted URL is what the single source must derive from version 9.9.9.
+VT_TRUSTED_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-9.9.9-1/virtio-win-9.9.9.iso"
+VT_TRUSTED_SHA="$(printf 'trusted-iso-bytes' | sha256sum | cut -d' ' -f1)"
+VT_FLOATING_URL="https://example.invalid/archive-virtio/virtio-win-8.8.8-1/virtio-win-8.8.8.iso"
+cat > "$VT_BIN/curl" <<'VT_CURL'
+#!/usr/bin/env bash
+# Fake curl: a HEAD answers with the floating upstream redirect; a download
+# writes $VT_FAKE_BYTES to the -o target. Every argument is logged so the test
+# can see which URL the caller actually asked for.
+printf '%s\n' "$@" >> "$VT_CURL_LOG"
+for arg in "$@"; do
+    case "$arg" in
+        *-sI*) printf 'HTTP/1.1 302 Found\r\nlocation: %s\r\n' "$VT_FLOATING_URL"; exit 0 ;;
+    esac
+done
+prev=""
+for arg in "$@"; do
+    if [ "$prev" = "-o" ]; then
+        printf '%s' "$VT_FAKE_BYTES" > "$arg"
+        exit 0
+    fi
+    prev="$arg"
+done
+exit 0
+VT_CURL
+chmod +x "$VT_BIN/curl"
+
+# do_auto_fix runs its fixers as bare statements under set -e, and
+# swtpm_auto_fix fails on a host without the binary or without a reachable user
+# bus. Such a host therefore never reaches the virtio step, and the --auto-fix
+# the UI advertises silently does nothing for virtio. The cases below pin a
+# host shape: no swtpm socket, a swtpm binary that exists, and a systemctl that
+# cannot talk to a bus.
+cat > "$VT_BIN/swtpm" <<'VT_SWTPM'
+#!/usr/bin/env bash
+exit 0
+VT_SWTPM
+cat > "$VT_BIN/systemctl" <<'VT_SYSTEMCTL'
+#!/usr/bin/env bash
+printf '%s\n' 'Failed to connect to user scope bus via local transport: Host is down' >&2
+exit 1
+VT_SYSTEMCTL
+chmod +x "$VT_BIN/swtpm" "$VT_BIN/systemctl"
+
+VT_PLAN_OVERRIDE="$(PZ_TEST_MODE=1 PZ_PREFLIGHT_JSON="$PREFLIGHT_PASS_FIXTURE" XDG_STATE_HOME="$VT_T/plan-override" \
+    PZ_WINDOWS_VM_VIRTIO_VERSION="9.9.9" PZ_WINDOWS_VM_VIRTIO_SHA256="$VT_TRUSTED_SHA" \
+    bash "$PROVISION_SCRIPT" plan --iso "$DUMMY_ISO" --json 2>/dev/null || echo '{}')"
+assert_eq "plan carries the trusted virtio URL" "$VT_TRUSTED_URL" "$(jq -r '.virtio.url // ""' <<< "$VT_PLAN_OVERRIDE")"
+assert_eq "plan carries the trusted virtio SHA" "$VT_TRUSTED_SHA" "$(jq -r '.virtio.sha256 // ""' <<< "$VT_PLAN_OVERRIDE")"
+
+VT_PLAN_DEFAULT="$(PZ_TEST_MODE=1 PZ_PREFLIGHT_JSON="$PREFLIGHT_PASS_FIXTURE" XDG_STATE_HOME="$VT_T/plan-default" \
+    bash "$PROVISION_SCRIPT" plan --iso "$DUMMY_ISO" --json 2>/dev/null || echo '{}')"
+: > "$VT_T/log-check"
+VT_PREFLIGHT_JSON="$(PATH="$VT_BIN:$PATH" XDG_STATE_HOME="$VT_T/preflight" VT_CURL_LOG="$VT_T/log-check" \
+    VT_FLOATING_URL="$VT_FLOATING_URL" VT_FAKE_BYTES="anything" \
+    bash "$PREFLIGHT_SCRIPT" --json 2>/dev/null || echo '{}')"
+assert_eq "preflight pins the version the plan downloads" \
+    "$(jq -r '.virtio.pinned' <<< "$VT_PREFLIGHT_JSON")" \
+    "$(sed -n 's|.*virtio-win-\([0-9.]*\)-1/.*|\1|p' <<< "$(jq -r '.virtio.url // ""' <<< "$VT_PLAN_DEFAULT")")"
+
+# --auto-fix has to reach the virtio step at all.
+VT_FIX_ISO="$VT_T/fix-state/phasezero/windows-vm/vm/virtio-win.iso"
+VT_FIX_LOG="$VT_T/log-fix"
+: > "$VT_FIX_LOG"
+PATH="$VT_BIN:$PATH" HOME="$VT_T/home" XDG_RUNTIME_DIR="$VT_T/run" \
+    XDG_CONFIG_HOME="$VT_T/config-fix" XDG_DATA_HOME="$VT_T/data" \
+    XDG_STATE_HOME="$VT_T/fix-state" VT_CURL_LOG="$VT_FIX_LOG" \
+    VT_FLOATING_URL="$VT_FLOATING_URL" VT_FAKE_BYTES="trusted-iso-bytes" \
+    PZ_WINDOWS_VM_VIRTIO_VERSION="9.9.9" PZ_WINDOWS_VM_VIRTIO_SHA256="$VT_TRUSTED_SHA" \
+    bash "$PREFLIGHT_SCRIPT" --auto-fix --json >/dev/null 2>&1 || true
+assert_eq "auto-fix reaches the virtio step when swtpm cannot start" "1" "$([ -f "$VT_FIX_ISO" ] && echo 1 || echo 0)"
+assert_contains "auto-fix downloads the trusted URL, not the floating one" "$(cat "$VT_FIX_LOG")" "$VT_TRUSTED_URL"
+
+# The produced file must be verified before anything treats it as ready.
+VT_BAD_ISO="$VT_T/bad-state/phasezero/windows-vm/vm/virtio-win.iso"
+PATH="$VT_BIN:$PATH" HOME="$VT_T/home" XDG_RUNTIME_DIR="$VT_T/run" \
+    XDG_CONFIG_HOME="$VT_T/config-bad" XDG_DATA_HOME="$VT_T/data" \
+    XDG_STATE_HOME="$VT_T/bad-state" VT_CURL_LOG="$VT_T/log-bad" \
+    VT_FLOATING_URL="$VT_FLOATING_URL" VT_FAKE_BYTES="not-the-trusted-iso" \
+    PZ_WINDOWS_VM_VIRTIO_VERSION="9.9.9" PZ_WINDOWS_VM_VIRTIO_SHA256="$VT_TRUSTED_SHA" \
+    bash "$PREFLIGHT_SCRIPT" --auto-fix --json >/dev/null 2>&1 || true
+assert_eq "auto-fix refuses an ISO whose SHA does not match the trusted hash" "0" "$([ -f "$VT_BAD_ISO" ] && echo 1 || echo 0)"
+
+# "Single source" has to be checkable in the tree, not by reading every caller.
+# The drift this section exists to close happened because provisioning and
+# preflight each carried their own literal, so two artifacts were both "pinned".
+VT_COPY_HITS="$(grep -rl -e 'e14cf2b94492c3e925f0070ba7fdfedeb2048c91eea9c5a5afb30232a3976331' \
+    -e 'virtio-win-0\.1\.285-1' "$PZ_ROOT/linux/windows-vm" 2>/dev/null \
+    | grep -vc '/virtio-source\.sh$' | tr -d ' ' || true)"
+assert_eq "the trusted virtio version and hash live in virtio-source.sh only" "0" "$VT_COPY_HITS"
+# Positive control: the same pattern must still find the one file that carries
+# it, otherwise the check above passes because it searched for nothing.
+VT_SOURCE_HITS="$(grep -rl -e 'e14cf2b94492c3e925f0070ba7fdfedeb2048c91eea9c5a5afb30232a3976331' \
+    -e 'virtio-win-0\.1\.285-1' "$PZ_ROOT/linux/windows-vm" 2>/dev/null \
+    | grep -c '/virtio-source\.sh$' | tr -d ' ' || true)"
+assert_eq "virtio-source.sh carries the trusted version and hash" "1" "$VT_SOURCE_HITS"
+
+rm -rf "$VT_T"
+
+echo ""
 echo "=== preflight: the RAM it reports is memory the host can hand over ==="
 # A plan once showed 14820 MiB of "RAM" on a 14820 MiB machine that had 2100
 # MiB free. MemTotal is not a budget; the figure a caller can act on is what is

@@ -528,7 +528,7 @@ repair_qga() {
         pz_error "libguestfs Windows firstboot helper (rhsrvany.exe/pvvxsvc.exe) not found; install virt-v2v or set PZ_WINDOWS_VM_VIRT_TOOLS_DIR"
         return 1
     fi
-    virtio_sha_expected="${PZ_WINDOWS_VM_VIRTIO_SHA256:-e14cf2b94492c3e925f0070ba7fdfedeb2048c91eea9c5a5afb30232a3976331}"
+    virtio_sha_expected="$PZ_VIRTIO_WIN_SHA256"
     [[ "$virtio_sha_expected" =~ ^[a-fA-F0-9]{64}$ ]] || { pz_error "invalid trusted virtio-win SHA-256"; return 1; }
     virtio_sha_actual="$(sha256sum "$virtio_iso" | cut -d' ' -f1)"
     [ "${virtio_sha_actual,,}" = "${virtio_sha_expected,,}" ] || {
