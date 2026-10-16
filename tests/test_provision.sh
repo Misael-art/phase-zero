@@ -653,6 +653,22 @@ assert_contains "Venus preflight explains provisioning boundary" \
 rm -rf "$GFX_PREFLIGHT_T"
 
 echo ""
+echo "=== preflight: the RAM it reports is memory the host can hand over ==="
+# A plan once showed 14820 MiB of "RAM" on a 14820 MiB machine that had 2100
+# MiB free. MemTotal is not a budget; the figure a caller can act on is what is
+# actually available.
+PF_RAM_T="$(mktemp -d)"
+printf 'MemTotal: %s kB\nMemAvailable: %s kB\nSwapFree: %s kB\n' \
+    "$(( 14820 * 1024 ))" "$(( 2100 * 1024 ))" "$(( 1000 * 1024 ))" > "$PF_RAM_T/meminfo"
+PF_RAM_JSON="$(PZ_WINDOWS_VM_MEMINFO_FILE="$PF_RAM_T/meminfo" \
+    bash "$PREFLIGHT_SCRIPT" --graphics compat --json 2>/dev/null || true)"
+assert_eq "preflight reports available memory, not the whole machine" "2100" \
+    "$(jq -r '.resources.ramMb' <<< "$PF_RAM_JSON")"
+assert_eq "preflight still names the machine total" "14820" \
+    "$(jq -r '.resources.totalMb' <<< "$PF_RAM_JSON")"
+rm -rf "$PF_RAM_T"
+
+echo ""
 echo "=== graphics: unsupported virtio-gl becomes a plan blocker ==="
 GFX_BLOCK_BASE="$(mktemp -d)"
 GFX_BLOCK_FIXTURE='{"status":"fail","swtpm":{"binary":true,"running":true},"virtio":{"outdated":false},"graphics":{"profile":"wrong","supported":false,"fallback":"compat","failures":["no render node"]}}'

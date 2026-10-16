@@ -3,6 +3,7 @@ set -euo pipefail
 
 PZ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$PZ_ROOT/linux/lib/common.sh"
+source "$PZ_ROOT/linux/windows-vm/memory.sh"
 
 SWTPM_BIN=""
 SWTPM_RUNNING=false
@@ -22,6 +23,7 @@ GRAPHICS_CONTRACT="${PZ_WINDOWS_VM_GRAPHICS_CONTRACT:-$PZ_ROOT/linux/windows-vm/
 KVM_ACCESS=false
 OVMF_PRESENT=false
 RAM_MB=0
+TOTAL_MB=0
 CPUS=0
 DISK_GB=0
 
@@ -205,7 +207,11 @@ graphics_check() {
 }
 
 resource_check() {
-    RAM_MB="$(awk '/MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 0)"
+    # MemTotal is not a budget. This field is what a caller reads to decide
+    # whether the host can carry a guest, so it has to be the memory the host
+    # can actually hand over. The total stays next to it for context.
+    RAM_MB="$(windows_vm_meminfo_mb MemAvailable)"
+    TOTAL_MB="$(windows_vm_meminfo_mb MemTotal)"
     CPUS="$(nproc 2>/dev/null || echo 0)"
     local root_avail
     root_avail="$(df -BG / | awk 'NR==2 {print $4}' 2>/dev/null | tr -d 'G' || echo 0)"
@@ -242,6 +248,7 @@ emit_json() {
         --argjson kvmAccess "$KVM_ACCESS" \
         --argjson ovmfPresent "$OVMF_PRESENT" \
         --argjson ramMb "$RAM_MB" \
+        --argjson totalMb "$TOTAL_MB" \
         --argjson cpus "$CPUS" \
         --argjson diskGb "$DISK_GB" \
         --argjson graphicsFailures "$(if [ "${#GRAPHICS_FAILURES[@]}" -eq 0 ]; then echo '[]'; else printf '%s\n' "${GRAPHICS_FAILURES[@]}" | jq -R . | jq -s -c .; fi)" \
@@ -268,6 +275,7 @@ emit_json() {
             },
             resources: {
                 ramMb: $ramMb,
+                totalMb: $totalMb,
                 cpus: $cpus,
                 diskGb: $diskGb,
                 kvmAccess: $kvmAccess,
