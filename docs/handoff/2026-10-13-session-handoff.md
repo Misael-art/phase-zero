@@ -371,10 +371,25 @@ Artefatos novos em `~/.local/state/phasezero/homologation/winvm-20261013/`:
 `await-op-20261015-224232-10324.log`, `install-guard.sh`, `await-install.sh`,
 `dmesg-baseline-op-20261015-224232-10324.txt`.
 
+### O que a tela mostra
+
+`winvm-after-install.png` (e `-2.png`, dois instantes a ~1 min) foi capturado com
+`spectacle -n -b`, sem qualquer automação de ponteiro. Nela a janela GTK da QEMU
+mostra o **desktop do Windows já renderizado**: papel de parede do 25H2, ícones
+de Área de Reciclagem e Microsoft Edge, sem tela de login — ou seja, o
+`guestLogin: auto` do plano entregou sessão aberta. Continua sendo evidência de
+imagem, não de interação: nada nesta sessão clicou na VM.
+
+Um diálogo "Fatal Error — Unrecognized switch --help" aparece no canto da
+captura e **não é da VM**: o host roda Wine (`wineserver` pid 10318,
+`winedevice.exe`, e a ponte MT5 `mt5_bridge_server.py`), e o MetaEditor 5 está na
+área de trabalho. Registrado para o próximo agente não atribuir isso ao
+provisionamento.
+
 ### Como continuar daqui
 
-1. Abrir a VM nova na janela GTK já aberta (ou `pz windows-vm launch`) e registrar
-   o que a tela mostra — é a primeira vez que esta imagem instalada aparece na UI.
+1. Conferir na janela GTK já aberta o que só o operador valida: resolução, teclado
+   pt-BR, áudio e se a sessão está realmente logada (a captura mostra desktop sem login).
 2. Decidir o `finalize` com backup do conf já existente; depois verificar que o
    `tpm/` e o `OVMF_VARS.fd` foram carregados (o teste `6fd7c69` cobre a cópia, a
    UI ainda não cobre o resultado).
