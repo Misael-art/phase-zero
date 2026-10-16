@@ -2886,3 +2886,34 @@ leitura/fetch, não ferramentas locais de escrita. Próximo gate: autenticação
 do operador na Platform; conferir e reutilizar recursos existentes antes de
 criar outros; testar leitura MCP real no ChatGPT. Até lá, apenas Web-only está
 validado no host.
+
+### PXA-010: prova de conta/túnel e bloqueio real do Full — 2026-10-16
+
+Após autenticação/MFA do operador, a conta pessoal ChatGPT Pro e a organização
+Platform permitiram criar um túnel dedicado, uma chave de runtime restrita a
+Tunnels Read + Use com expiração em 30 dias e o
+conector pessoal `Codex Native2`. A chave foi guardada no SecretService; não
+entrou no repositório. O conector mostrou “conectado” no ChatGPT, com política
+de ações de baixo risco; `Allow all actions` e aprovação automática do launcher
+permaneceram desligados. Isto prova provisionamento, **não** uma chamada MCP
+funcional. O modo Full chegou a túnel/daemon saudáveis e `doctor.ok:true`, mas
+a verificação de turno do launcher expirou e o `smoke` real falhou com
+`ChatGPT web turn is missing network access in trusted Codex environment context`.
+
+Causa no runtime pinado 6.1.8: o resolver Full exige `statesNetworkAccess` no
+contexto do turno Codex. O perfil dedicado PhaseZero usa `sandbox_mode =
+"read-only"`, sem esse estado. Dar `danger-full-access` ou aprovação geral
+quebraria o contrato de isolamento; não foi feito. A configuração foi
+restaurada para `browser-only`, launcher reiniciado apenas em seu scope de
+usuário, sem KDE logout/reboot. `smoke` voltou a `PONG` por
+`chatgpt-web/light`, com `sandbox:read-only` e rota do Codex normal intocada.
+Túnel, chave e conector continuam cadastrados, mas o túnel fica offline em
+browser-only. Revogação externa segue disponível ao operador.
+
+Correção na ponte: `tools status`, `tools check`, janela com ferramentas e
+cartão da UI falham fechados com `full-runtime` e motivo específico. `doctor`
+saudável sozinho não sinaliza pronto. O próximo trabalho é adaptar o
+transporte Full ao sandbox restrito, provar chamada MCP real com autorização
+por tarefa no plano Pro (leitura/fetch), testar desconexão/revogação e rollback,
+e só então remover o bloqueio. O gate Windows descartável e usabilidade G4
+continuam pendentes. A frente Windows VM não foi alterada nesta rodada.

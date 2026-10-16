@@ -976,24 +976,21 @@ def test_tools_window_stays_closed_until_the_gate_is_met(host, monkeypatch):
     assert runner.spawned == []
 
 
-def test_tools_window_opens_on_the_dedicated_profile_once_the_gate_is_met(host, monkeypatch):
-    bridge, runner, home = ready_host(host, monkeypatch, mode="full")
+def test_tools_window_stays_closed_with_full_runtime_network_blocker(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch, mode="full")
     tools_gate_met(bridge)
 
-    result = bridge.desktop("tools")
-
-    args, env = runner.spawned[0]
-    assert args == ["/usr/bin/codex-desktop", "--new-instance"]
-    assert env["CODEX_HOME"] == str(bridge.paths.codex_home) != str(home / ".codex")
-    assert result["mode"] == "tools" and result["sandbox"] == "read-only"
-    body = runner.notifications[-1][1]
-    assert "aprovação" in body and "somente leitura" in body
+    with pytest.raises(BridgeError) as error:
+        bridge.desktop("tools")
+    assert error.value.code == "tools-not-ready"
+    assert "acesso de rede" in str(error.value) and "read-only" in str(error.value)
+    assert runner.spawned == []
 
     # The browser-only shortcut must not quietly become a tools window.
     with pytest.raises(BridgeError) as error:
         bridge.desktop("web")
     assert error.value.code == "full-mode"
-    assert len(runner.spawned) == 1
+    assert runner.spawned == []
 
 
 @pytest.mark.parametrize("line", ['approval_policy = "never"',
@@ -1273,7 +1270,7 @@ def test_tools_steps_explain_an_ineligible_plan_and_the_single_next_step(host, m
     assert runner.spawned == []
 
 
-def test_tools_steps_walk_to_ready_one_action_at_a_time(host, monkeypatch):
+def test_tools_steps_report_runtime_blocker_after_other_requirements(host, monkeypatch):
     bridge, runner, _ = ready_host(host, monkeypatch)
     bridge.record_eligibility("pro", "yes", "use", "yes")
     assert bridge.tools_steps()["next"]["id"] == "runtime-key"
@@ -1282,7 +1279,7 @@ def test_tools_steps_walk_to_ready_one_action_at_a_time(host, monkeypatch):
     bridge._secret_store = FakeVault()
     bridge.key_store("runtime-key-material", 30)
     step = bridge.tools_steps()["next"]
-    assert step["id"] == "launcher-mode" and "tunnel key stage" in step["action"]
+    assert step["id"] == "full-runtime" and "browser-only" in step["action"]
 
     config = bridge.paths.core_home / "config.json"
     config.write_text(json.dumps({**json.loads(config.read_text()), "mode": "full",
@@ -1292,8 +1289,21 @@ def test_tools_steps_walk_to_ready_one_action_at_a_time(host, monkeypatch):
     config.write_text(json.dumps({**json.loads(config.read_text()),
                                   "autoApproveToolCalls": False}))
     done = bridge.tools_steps()
-    assert done["ready"] is True and done["next"] is None
+    assert done["ready"] is False and done["next"]["id"] == "full-runtime"
     assert "runtime-key-material" not in json.dumps(done)
+
+
+def test_tools_check_rejects_healthy_doctor_without_a_working_turn(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch, mode="full")
+    tools_gate_met(bridge)
+    runner.upstream["doctor --json"] = (0, json.dumps({"ok": True}), "")
+
+    result = bridge.tools_check()
+
+    assert result["ready"] is False
+    assert result["doctor"] == {"ok": True}
+    assert any("acesso de rede" in blocker for blocker in result["blockers"])
+    assert bridge.status()["toolsGate"]["next"]["id"] == "full-runtime"
 
 
 DESKTOP_REWRITTEN = (

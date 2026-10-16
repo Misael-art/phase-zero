@@ -377,16 +377,24 @@ class AiDevPage(BasePage):
         else:
             self._set_bridge_state(f"● Parado — {label}. Use Ligar ou reparar.", "warning")
         blockers = node("eligibility").get("blockers")
+        pending = node("toolsGate").get("next")
+        if not isinstance(pending, dict):
+            pending = {}
+        gate_detail = str(pending.get("detail") or "")
         if payload.get("upstreamMode") == "full":
             if isinstance(blockers, list) and blockers:
                 self.bridge_tools.setText(f"Com ferramentas: configuração bloqueada — "
                                           f"{blockers[0]}.")
+            elif gate_detail:
+                self.bridge_tools.setText(f"Com ferramentas: bloqueado — {gate_detail}.")
             else:
                 self.bridge_tools.setText("Com ferramentas: configurado, mas chamada MCP "
                                           "real ainda não verificada. Cada ação local exige "
                                           "permissão do seu plano e aprovação.")
         elif isinstance(blockers, list) and blockers:
             self.bridge_tools.setText(f"Com ferramentas: bloqueado — {blockers[0]}.")
+        elif gate_detail:
+            self.bridge_tools.setText(f"Com ferramentas: bloqueado — {gate_detail}.")
         else:
             self.bridge_tools.setText("Com ferramentas: ainda não configurado. Veja Com "
                                       "ferramentas… para o próximo passo.")
