@@ -246,6 +246,53 @@ def test_diff_accepts_interrupt_hook_only_for_the_managed_runtime(host):
     assert bridge.classify_diff(OWNED_CONFIG, OWNED_CONFIG + 'model_provider = "x"\n')["unexpected"]
 
 
+def test_route_accepts_current_upstream_bun_hook_without_trusting_other_commands(host):
+    bridge, _, _ = host
+    version = bridge.paths.core_home / "versions/6.1.8-linux-x64"
+    core = bridge.paths.core_home
+    managed = (f"command = \"'{version}/runtime/bun' '{version}/app/cli.js' "
+               f"'--home' '{core}' 'hook' 'interrupt'\"")
+    text = (OWNED_CONFIG + "\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\n"
+            "type = \"command\"\n" + managed + "\ntimeout = 3\n")
+
+    assert bridge.classify_diff(OWNED_CONFIG, text)["unexpected"] == []
+    assert bridge.policy_violations(text) == []
+
+    for changed in (managed.replace("/app/cli.js", "/app/other.js"),
+                    managed.replace("/runtime/bun", "/runtime/other"),
+                    managed.replace("6.1.8-linux-x64", "6.1.9-linux-x64"),
+                    managed.replace("'hook' 'interrupt'", "'hook' 'restart'")):
+        hostile = text.replace(managed, changed)
+        assert bridge.classify_diff(OWNED_CONFIG, hostile)["unexpected"] == ["+" + changed]
+        assert bridge.policy_violations(hostile) == ["hook fora do runtime gerenciado"]
+
+
+def test_browser_only_ignores_inert_auto_approve_flag_but_full_mode_refuses(host):
+    bridge, runner, _ = host
+    configure(bridge, runner, route_active=True)
+    runner.unit_active = True
+    config_path = bridge.paths.core_home / "config.json"
+    config = json.loads(config_path.read_text())
+    config["autoApproveToolCalls"] = True
+    config_path.write_text(json.dumps(config))
+
+    bridge.require_ready(bridge.load_state())
+
+    broker = bridge.paths.core_home / "runtime/turn-broker.sock"
+    broker.parent.mkdir(parents=True)
+    broker.touch()
+    with pytest.raises(BridgeError) as unexpected:
+        bridge.require_ready(bridge.load_state())
+    assert unexpected.value.code == "unexpected-broker"
+    broker.unlink()
+
+    config["mode"] = "full"
+    config_path.write_text(json.dumps(config))
+    with pytest.raises(BridgeError) as error:
+        bridge.require_ready(bridge.load_state())
+    assert error.value.code == "auto-approve"
+
+
 def test_legacy_approval_policy_is_migrated_in_config_and_baseline(host):
     bridge, _, _ = host
     legacy = OWNED_CONFIG.replace(APPROVAL_LINE, LEGACY_APPROVAL_LINE)

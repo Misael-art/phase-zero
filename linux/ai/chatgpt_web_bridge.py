@@ -1211,14 +1211,17 @@ class Bridge:
 
     def managed_hook_lines(self) -> tuple[re.Pattern[str], ...]:
         """The interrupt hook upstream installs, accepted only when it runs the managed runtime."""
-        root = re.escape(str(self.paths.root))
+        version = re.escape(str(self.paths.core_home / "versions"
+                                / f"{PIN['version']}-linux-x64"))
         core = re.escape(str(self.paths.core_home))
         config = re.escape(str(self.paths.codex_config))
         return tuple(re.compile(pattern) for pattern in (
             r"\[\[hooks\.Interrupt(\.hooks)?\]\]",
             r'type = "command"',
             r"timeout = \d{1,2}",
-            rf"command = \"'{root}/[^'\"]*/bin/codex-chatgpt-web' '--home' '{core}' "
+            rf"command = \"'{version}/bin/codex-chatgpt-web' '--home' '{core}' "
+            r"'hook' 'interrupt'\"",
+            rf"command = \"'{version}/runtime/bun' '{version}/app/cli\.js' '--home' '{core}' "
             r"'hook' 'interrupt'\"",
             rf'\[hooks\.state\."{config}:interrupt:\d+:\d+"\]',
             r'trusted_hash = "sha256:[0-9a-f]{64}"',
@@ -1260,6 +1263,21 @@ class Bridge:
             "baseline": state.get("routeBaseline"), "route": self.route_status(),
         }
 
+    def ensure_approval_safety(self, config: dict[str, Any]) -> None:
+        if not config.get("autoApproveToolCalls"):
+            return
+        if config.get("mode") == "full":
+            raise BridgeError("aprovação automática ligada no upstream; desligue antes",
+                              "auto-approve")
+        if config.get("mode") == "browser-only":
+            broker = self.paths.core_home / "runtime/turn-broker.sock"
+            if broker.exists():
+                raise BridgeError("broker local inesperado no modo somente Web; interrompa o "
+                                  "launcher e revise a configuração", "unexpected-broker")
+            return
+        raise BridgeError("modo do launcher desconhecido com aprovação automática ligada",
+                          "auto-approve")
+
     def desktop_dir(self) -> Path | None:
         """Install directory of Codex Desktop; its command may be a one-line exec wrapper."""
         launcher = shutil.which(DESKTOP_COMMAND, path=self.env.get("PATH"))
@@ -1293,7 +1311,7 @@ class Bridge:
         route = config.get("openai_base_url")
         if route is not None and route != f"http://127.0.0.1:{DEFAULT_PORT}/v1":
             found.append("openai_base_url aponta para fora do bridge local")
-        hook_command = self.managed_hook_lines()[3]
+        hook_commands_allowed = self.managed_hook_lines()[3:5]
 
         def hook_commands(node: Any) -> list[str]:
             if isinstance(node, dict):
@@ -1305,8 +1323,9 @@ class Bridge:
             return []
 
         for command in hook_commands(config.get("hooks", {})):
-            if not hook_command.fullmatch(f"command = {json.dumps(command)}"):
-                found.append(f"hook fora do runtime gerenciado: {command[:80]}")
+            if not any(pattern.fullmatch(f"command = {json.dumps(command)}")
+                       for pattern in hook_commands_allowed):
+                found.append("hook fora do runtime gerenciado")
         desktop = self.desktop_dir()
         for name, server in (config.get("mcp_servers") or {}).items():
             server = server if isinstance(server, dict) else {}
@@ -1340,9 +1359,9 @@ class Bridge:
             raise BridgeError("launcher parado; a rota apontaria para serviço ausente",
                               "launcher-inactive")
         config = self.upstream_config() or {}
-        if config.get("autoApproveToolCalls"):
-            raise BridgeError("aprovação automática ligada no upstream; desligue antes",
-                              "auto-approve")
+        # Upstream can persist this flag in browser-only mode. Permit that
+        # legacy state only while its local tools broker is absent.
+        self.ensure_approval_safety(config)
         if config.get("mode") == "full":
             self.require_tools_ready(state)
         before = self._config_text()
@@ -2250,8 +2269,7 @@ class Bridge:
             raise BridgeError("configuração do perfil tem mudanças inesperadas; rode `route verify`",
                               "config-drift")
         config = self.upstream_config() or {}
-        if config.get("autoApproveToolCalls"):
-            raise BridgeError("aprovação automática ligada no upstream", "auto-approve")
+        self.ensure_approval_safety(config)
         if config.get("mode") == "full":
             self.require_tools_ready(state)
 

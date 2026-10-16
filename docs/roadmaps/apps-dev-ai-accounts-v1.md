@@ -2855,3 +2855,34 @@ real ("Pronto — modelo Web ativo…; inicia com o login", ferramentas bloquead
 pelo plano Plus) e o botão Com ferramentas… rodou pelo `CommandRunner` real
 (`/tmp/pz-evidence/pxa010/ui-page.png`). Não provado: clique real na janela
 do Control Center e a aparência do diálogo de resultado para saída em texto.
+
+## PXA-010 validação do hook e estado do modo ferramentas — 2026-10-16
+
+No host, `setup --login-wait 0` falhou com `config-drift` apesar da rota ativa.
+`route verify` apontou exclusivamente o hook de interrupção instalado pelo
+upstream 6.1.8: o validador aceitava `bin/codex-chatgpt-web`, mas o perfil real
+usa `runtime/bun app/cli.js` da mesma versão pinada. O validador agora aceita
+apenas essas duas formas exatas dentro do runtime gerenciado e continua a
+recusar executáveis, versões e comandos diferentes. Com a correção na árvore
+isolada, `route verify` retornou `ok:true` e `setup` concluiu; `smoke` real
+registrou `ok:true` para `chatgpt-web/light` em `state.json`. O pacote instalado
+continua 1.22.5-1, sem esta correção; não substituir enquanto a frente WinVM
+homologa outro pacote no mesmo host.
+
+O upstream preservou `autoApproveToolCalls:true` mesmo em `browser-only`, onde
+`doctor` reporta que não há broker nem túnel. O modo Web agora aceita esse estado
+legado somente enquanto `turn-broker.sock` não existir; `full` continua a
+recusar aprovação automática. A UI deixou de anunciar ferramentas como ligadas
+apenas porque o arquivo upstream diz `mode:full`: mostra bloqueios de elegibilidade
+ou indica que falta uma chamada MCP real. Testes focados: 97 passaram, incluindo
+hook atual e alterações hostis, ausência de broker e estados da UI.
+
+Conta Pro foi informada pelo operador e registrada como **atestado, não prova**;
+Developer Mode e confiança do host continuam não confirmados. A OpenAI Platform
+pede login no navegador integrado. Nenhuma chave, túnel ou plugin foi criado,
+e nenhum segredo foi lido. A assinatura ChatGPT não implica faturamento da API
+nem permissões Tunnels Read/Manage/Use; no Pro, o modo MCP do ChatGPT oferece
+leitura/fetch, não ferramentas locais de escrita. Próximo gate: autenticação
+do operador na Platform; conferir e reutilizar recursos existentes antes de
+criar outros; testar leitura MCP real no ChatGPT. Até lá, apenas Web-only está
+validado no host.
