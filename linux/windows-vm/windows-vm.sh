@@ -3367,6 +3367,8 @@ $PZ_ROOT/linux/windows-vm/rescue.sh|$RUNTIME_ROOT/linux/windows-vm/rescue.sh|064
 $PZ_ROOT/linux/windows-vm/guest-login.sh|$RUNTIME_ROOT/linux/windows-vm/guest-login.sh|0755
 $PZ_ROOT/linux/windows-vm/guest-login.ps1|$RUNTIME_ROOT/linux/windows-vm/guest-login.ps1|0644
 $PZ_ROOT/linux/windows-vm/provision.sh|$RUNTIME_ROOT/linux/windows-vm/provision.sh|0644
+$PZ_ROOT/linux/windows-vm/memory.sh|$RUNTIME_ROOT/linux/windows-vm/memory.sh|0644
+$PZ_ROOT/linux/windows-vm/virtio-source.sh|$RUNTIME_ROOT/linux/windows-vm/virtio-source.sh|0644
 $PZ_ROOT/linux/windows-vm/graphics-profiles.json|$RUNTIME_ROOT/linux/windows-vm/graphics-profiles.json|0644
 $PZ_ROOT/linux/lib/common.sh|$RUNTIME_COMMON|0644
 $PZ_ROOT/linux/lib/ledger.sh|$RUNTIME_ROOT/linux/lib/ledger.sh|0644

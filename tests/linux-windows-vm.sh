@@ -155,6 +155,20 @@ for runtime_dep in windows-vm.sh graphics.sh rescue.sh guest-login.sh guest-logi
     grep -Fq "linux/windows-vm/$runtime_dep" <<< "$gfx_specs" || {
         echo "runtime_artifact_specs sem $runtime_dep" >&2; exit 1; }
 done
+# Os proprios scripts instalados carregam outros arquivos de linux/windows-vm/
+# com `source`. Cada um desses tem o mesmo gate de tela preta: se nao estiver na
+# arvore, o launcher aborta na primeira linha. A lista acima so cobre o que se
+# lembra de listar, entao aqui a dependencia e lida do codigo.
+while read -r src_dep; do
+    [ -n "$src_dep" ] || continue
+    grep -Fq "linux/windows-vm/$src_dep" <<< "$runtime_specs" || {
+        echo "runtime_file_specs sem $src_dep (carregado por um script instalado)" >&2; exit 1; }
+    grep -Fq "linux/windows-vm/$src_dep" <<< "$gfx_specs" || {
+        echo "runtime_artifact_specs sem $src_dep (carregado por um script instalado)" >&2; exit 1; }
+done < <(sed -n 's#^source "$PZ_ROOT/linux/windows-vm/\([a-z_-]*\.sh\)"#\1#p' \
+    "$REPO_ROOT/linux/windows-vm/provision.sh" \
+    "$REPO_ROOT/linux/windows-vm/guest-login.sh" \
+    "$REPO_ROOT/linux/windows-vm/windows-vm.sh" | sort -u)
 echo "  runtime manifests cobrem as dependencias de source"
 
 "$REPO_ROOT/linux/pz" windows-vm status | jq -e '(.host | (has("qemu") and has("kvm"))) and (.libvirt | (has("domain") and has("preferred"))) and (.access | (has("sambaManaged") and has("usbRedirChannels") and has("usbUdevManaged")))' >/dev/null
