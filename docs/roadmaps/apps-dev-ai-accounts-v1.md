@@ -2947,6 +2947,45 @@ de conta atendido e deixa de sugerir mudar o launcher antes de uma chamada
 MCP real com sandbox restrito. Cópia estável dos atalhos atualizada; launcher
 e sessão KDE não foram reiniciados.
 
+### PXA-010: contraprova de acesso completo e UX do bloqueio — 2026-10-16
+
+`loginctl list-users` no host mostrou somente UID 1000, mas a consulta D-Bus
+falhava ocasionalmente dentro do turno Codex. O gerenciador agora compara UIDs
+numéricas e, quando a consulta falha, lê os registros de sessão do próprio
+logind em `/run/systemd/sessions`. Só declara usuário único quando encontra a
+UID atual e consegue interpretar todos os registros; ausência, erro ou registro
+malformado continuam como `unknown`. Teste simulou a falha D-Bus e presença de
+outra UID; no host real, a mesma fallback encontrou apenas a UID atual.
+
+O limite do plano é independente do estado do launcher. A documentação OpenAI
+de [Developer Mode e apps MCP](https://help.openai.com/pt-br/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
+reserva ações MCP de gravação/modificação aos planos Business, Enterprise e Edu
+(beta); a conta Pro aceita somente leitura/fetch. O checklist agora expõe
+`plan-full` e a UI mostra permissão da conta, próxima ação e Web funcional sem
+confundir túnel conectado com acesso completo. O botão de requisitos descreve
+seu efeito real; a página foi conferida no tema dark em 800 px, sem corte de
+botões. O plano Pro **não** autoriza ampliar permissões via chave de API ou
+túnel.
+
+Contraprovas físicas, sem tocar a sessão KDE: um turno real
+`chatgpt-web/light` com `codex --sandbox workspace-write` respondeu que as
+ferramentas locais estavam indisponíveis; nenhum arquivo pedido apareceu no
+diretório descartável. `setup --full` no perfil principal recusou porta 17841
+ocupada e preservou os hashes de configuração/estado. Em perfil isolado e
+porta 17842, `setup --full` saiu 0, mas `doctor` apontou supervisor ausente e
+túnel parado; o subcomando upstream `tunnel start` recusou instalar serviço
+gerenciado no Linux. O perfil isolado foi removido e o serviço de prova
+parado. O launcher principal, a rota Web e o Codex normal ficaram inalterados.
+Esses resultados **não provam** chamada MCP funcional no modo Full.
+
+Gate remanescente: testar modo Full e política de aprovação em conta e ambiente
+compatíveis; até lá, `full-runtime` e `launcher-mode` permanecem bloqueados.
+No plano Pro, a alternativa separada de MCP local estritamente read/fetch,
+descrita acima, requer implementação e prova real antes de ser anunciada como
+disponível. A UI nova está na árvore/PR; o pacote 1.22.5-1 do host ainda não
+contém essa revisão. Homologação em host limpo, Windows descartável e teste de
+usabilidade seguem abertos.
+
 ### PXA-010: atalho e autostart sobrevivem à remoção do worktree — 2026-10-16
 
 Incidente físico: clicar no menu mostrou “O gerenciador em
