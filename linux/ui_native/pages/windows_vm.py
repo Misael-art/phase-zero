@@ -362,6 +362,22 @@ class WindowsVmPage(BasePage):
         self.maintenance_health.setObjectName("cardDescription")
         self.maintenance_health.setWordWrap(True)
         copy.addWidget(self.maintenance_health)
+        # A finished install that was never activated is a second, real VM. It
+        # gets its own row here instead of only surfacing when no other VM is
+        # ready, so 40+ GB of Windows is never invisible.
+        self.pending_activation_label = QLabel("")
+        self.pending_activation_label.setObjectName("cardDescription")
+        self.pending_activation_label.setWordWrap(True)
+        self.pending_activation_label.setVisible(False)
+        copy.addWidget(self.pending_activation_label)
+        self.activate_install_button = QPushButton("Ativar instalação concluída")
+        self.activate_install_button.setObjectName("secondaryButton")
+        self.activate_install_button.setToolTip(
+            "Troca a máquina virtual em uso pela instalação concluída, com prévia e backup da configuração"
+        )
+        self.activate_install_button.setVisible(False)
+        self.activate_install_button.clicked.connect(self._activate_install)
+        copy.addWidget(self.activate_install_button)
         self._setup_copy = QWidget()
         self._setup_copy.setLayout(copy)
         self._setup_grid.addWidget(self._setup_copy, 0, 0)
@@ -520,6 +536,12 @@ class WindowsVmPage(BasePage):
         self.power_button.setEnabled(
             running or (configured and disk_ready) or self._pending_finalize() is not None
         )
+        pending = self._pending_finalize()
+        activation_ready = pending is not None and not running
+        self.activate_install_button.setVisible(activation_ready)
+        self.pending_activation_label.setVisible(activation_ready)
+        if pending is not None:
+            self.pending_activation_label.setText(self._pending_activation_text(pending))
         boot_block = parsed.get("boot") or {}
         if hasattr(self, "dock_entry_button"):
             self.dock_entry_button.setChecked(bool(boot_block.get("dockEntryInstalled")))
@@ -622,16 +644,70 @@ class WindowsVmPage(BasePage):
         return box.clickedButton() is confirm
 
     def _pending_finalize(self) -> dict | None:
-        """A completed install awaiting activation, when no VM is ready."""
+        """A completed install awaiting activation, whether or not a VM works.
+
+        The configured VM being launchable is not a reason to hide the pending
+        one: a second install sitting in the staging directory is real disk the
+        user paid an hour for, and it stays reachable until it is activated.
+        """
         payload = self._payload if isinstance(self._payload, dict) else {}
-        health = payload.get("health") if isinstance(payload.get("health"), dict) else {}
-        if health.get("readyToLaunch"):
-            return None
         provision = payload.get("provision") if isinstance(payload.get("provision"), dict) else {}
         pending = provision.get("pendingFinalize")
         if isinstance(pending, dict) and pending.get("operationId") and not pending.get("running"):
             return pending
         return None
+
+    @staticmethod
+    def _gib(value: object) -> str:
+        try:
+            return f"{int(value) / 1024 ** 3:.1f} GB"
+        except (TypeError, ValueError):
+            return "—"
+
+    def _pending_activation_text(self, pending: dict) -> str:
+        operation = str(pending.get("operationId") or "")
+        target = str(pending.get("targetDisk") or "")
+        instance = target.rsplit("/", 2)[-2] if target.count("/") >= 2 else ""
+        if instance:
+            return (
+                f"Segunda instância: a instalação {operation} foi concluída em "
+                f"~/VirtualMachines/{instance} e aguarda ativação."
+            )
+        return f"Há uma instalação concluída ({operation}) que ainda não foi ativada."
+
+    def _activation_preview(self, pending: dict) -> str:
+        lines = [
+            f"Origem: {pending.get('originSnapshot') or '—'}",
+            f"Destino: {pending.get('targetDisk') or '—'}",
+            f"VM substituída: {pending.get('replacesDisk') or 'nenhuma — esta é a primeira ativação'}",
+            f"Espaço necessário: {self._gib(pending.get('requiredBytes'))} "
+            f"(livre: {self._gib(pending.get('freeBytes'))})",
+        ]
+        if pending.get("fits") is False:
+            lines.append("Espaço livre insuficiente para o disco da instalação.")
+        lines.append(
+            "O disco da VM atual não é apagado; a configuração atual é copiada para um backup "
+            "antes da troca e restaurada se a ativação falhar."
+        )
+        return "\n".join(lines)
+
+    def _confirm_activation(self, preview: str) -> bool:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Ativar a instalação concluída")
+        box.setText("Esta ação troca a máquina virtual em uso. Confirma?")
+        box.setInformativeText(preview)
+        confirm = box.addButton("Ativar", QMessageBox.AcceptRole)
+        box.addButton("Cancelar", QMessageBox.RejectRole)
+        box.exec()
+        return box.clickedButton() is confirm
+
+    def _activate_install(self) -> None:
+        pending = self._pending_finalize()
+        if pending is None:
+            return
+        if self._confirm_activation(self._activation_preview(pending)):
+            self.run_action("windows.provision.finalize")
 
     def _power_action(self) -> None:
         libvirt = self._payload.get("libvirt") if isinstance(self._payload.get("libvirt"), dict) else {}

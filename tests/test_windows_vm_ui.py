@@ -202,6 +202,91 @@ def test_windows_vm_offers_activation_instead_of_reinstall_for_a_finished_instal
     assert not page.power_button.isEnabled()
 
 
+def _ready_vm_with_pending_install() -> dict:
+    """The real host state after a second install: an old VM works, a new one waits."""
+    return {
+        "status": "ok",
+        "health": {"readyToLaunch": True, "findings": [{"id": "install-awaiting-activation"}]},
+        "provision": {"pendingFinalize": {
+            "operationId": "op-20260501-000000-5",
+            "running": False,
+            "originSnapshot": "/state/vms/op-20260501-000000-5/golden-clean.qcow2",
+            "targetDisk": "/home/u/VirtualMachines/PhaseZero-Windows-20260501-000000-5/phasezero-windows.qcow2",
+            "replacesDisk": "/home/u/VirtualMachines/PhaseZero-Windows/phasezero-windows.qcow2",
+            "freeBytes": 200_000_000_000,
+            "requiredBytes": 40_000_000_000,
+            "fits": True,
+        }},
+        "config": {"installed": True},
+        "vm": {"diskExists": True, "installedLike": True, "ramMb": 8192, "cpus": 4},
+        "libvirt": {"state": "shut off"},
+        "host": {"qemu": "/usr/bin/qemu"},
+        "access": {},
+        "boot": {},
+    }
+
+
+def test_windows_vm_shows_a_finished_install_as_a_second_instance(ws_page):
+    # readyToLaunch used to blind the page to the pending install: the only
+    # affordance offered was launching the old VM, and 42 GB of new Windows
+    # was invisible.
+    page, _actions = ws_page
+    page._on_status_ready("windows.status", "", _ready_vm_with_pending_install())
+    assert page.state_label.text() == "● Parado"
+    assert page.power_button.text() == "▶ Iniciar VM"
+    assert page.power_button.isEnabled()
+    assert not page.activate_install_button.isHidden()
+    text = page.pending_activation_label.text()
+    assert "op-20260501-000000-5" in text
+    assert "PhaseZero-Windows" in text
+
+
+def test_windows_vm_activation_is_explicit_and_previews_the_swap(ws_page):
+    page, _actions = ws_page
+    called: list[str] = []
+    page.run_action = called.append
+    previews: list[str] = []
+
+    def approve(preview: str) -> bool:
+        previews.append(preview)
+        return False
+
+    page._confirm_activation = approve
+    page._on_status_ready("windows.status", "", _ready_vm_with_pending_install())
+    page.activate_install_button.click()
+    assert called == []
+    assert len(previews) == 1
+    preview = previews[0]
+    assert "/state/vms/op-20260501-000000-5/golden-clean.qcow2" in preview
+    assert "/home/u/VirtualMachines/PhaseZero-Windows-20260501-000000-5/phasezero-windows.qcow2" in preview
+    assert "/home/u/VirtualMachines/PhaseZero-Windows/phasezero-windows.qcow2" in preview
+    assert "GB" in preview
+
+    page._confirm_activation = lambda preview: True
+    page.activate_install_button.click()
+    assert called == ["windows.provision.finalize"]
+
+
+def test_windows_vm_hides_activation_while_a_vm_is_running(ws_page):
+    page, _actions = ws_page
+    running = _ready_vm_with_pending_install()
+    running["libvirt"] = {"state": "running"}
+    page._on_status_ready("windows.status", "", running)
+    assert page.activate_install_button.isHidden()
+
+    staging = _ready_vm_with_pending_install()
+    staging["provision"]["pendingFinalize"]["running"] = True
+    page._on_status_ready("windows.status", "", staging)
+    assert page.activate_install_button.isHidden()
+
+    none_pending = _ready_vm_with_pending_install()
+    none_pending["provision"] = {"pendingFinalize": None}
+    none_pending["health"] = {"readyToLaunch": True, "findings": []}
+    page._on_status_ready("windows.status", "", none_pending)
+    assert page.activate_install_button.isHidden()
+    assert page.pending_activation_label.isHidden()
+
+
 def test_windows_vm_pending_sync_and_unclean_shutdown_drive_repair_cards(ws_page):
     page, _actions = ws_page
     page._on_status_ready("windows.status", "", {
