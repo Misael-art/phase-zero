@@ -87,6 +87,9 @@ and release delivery receipt; they must pass before publication/install claims.
 Local harness pitfalls encountered: the existing shell suite rejects `/home/`
 inside a fixture path, reproduced on clean main; long TMPDIR also exceeds Unix
 socket limits. Use short disk-backed `/var/tmp/pzi`, not the live runtime tmpfs.
+The graphics suite also read the host USB tree: a real Deck controller changed
+the dry-run from expected fake virtio input to USB passthrough. Reproduced on
+clean main; the fixture now explicitly uses an empty USB sysfs directory.
 An intervening host session interruption left SD-card directory entries that
 list but fail lookup and some unpersisted writes. Cause is not established.
 Eleven known task files were preserved on SSD with a checksum manifest at

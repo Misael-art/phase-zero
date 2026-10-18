@@ -6,6 +6,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
+# Never let a physical Deck controller change the fake-input launch contract
+# into USB passthrough. Reproduced on clean main on a Steam Deck host.
+export PZ_WINDOWS_VM_USB_SYSFS_DIR="$TMP_ROOT/usb"
+mkdir -p "$PZ_WINDOWS_VM_USB_SYSFS_DIR"
+
 export HOME="$TMP_ROOT/home"
 export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/.local/share"
