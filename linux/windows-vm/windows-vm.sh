@@ -171,6 +171,7 @@ Usage:
   pz windows-vm provision finalize --operation-id ID [--target-dir PATH] [--json]
   pz windows-vm provision shutdown --operation-id ID [--json]
   pz windows-vm provision inventory [--json]
+  pz windows-vm provision integrity --operation-id ID [--guest-files] [--json]
   pz windows-vm provision remove --operation-id ID [--trash|--purge --confirm-operation ID] --yes [--json]
 
 Access:
@@ -949,7 +950,7 @@ ensure_vm_storage() {
             pz_info "dry-run: would create qcow2 disk: $DISK_PATH ($DISK_SIZE)"
         else
             mark_vm_dir_nodatacow
-            qemu-img create -f qcow2 "$DISK_PATH" "$DISK_SIZE"
+            qemu-img create -f qcow2 -o preallocation=off "$DISK_PATH" "$DISK_SIZE"
             pz_info "created qcow2 disk: $DISK_PATH"
         fi
     fi

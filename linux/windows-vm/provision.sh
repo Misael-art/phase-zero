@@ -1373,7 +1373,7 @@ run_disk() {
     disk_size="$(jq -r '.resources.diskSize // "256G"' "$plan_file")"
     log_operation "$op" "creating disk: $disk_path ($disk_size)"
     provision_mark_nodatacow "$op" "$vm_dir"
-    qemu-img create -f qcow2 "$disk_path" "$disk_size"
+    qemu-img create -f qcow2 -o preallocation=off "$disk_path" "$disk_size"
     log_operation "$op" "disk created"
     return 0
 }
@@ -2751,7 +2751,7 @@ provision_inventory() {
         jq -n --argjson instances "$instances" --argjson total "$total" \
             '{schemaVersion:1, operation:"windows-vm-inventory",
               instances:$instances, count:($instances|length),
-              totalAllocatedBytes:$total}'
+              totalAllocatedBytes:$total}' | python3 "$PZ_ROOT/linux/windows-vm/storage.py" inventory
     else
         if [ "$(jq 'length' <<< "$instances")" = "0" ]; then
             echo "Nenhuma instalação Windows ocupa espaço no staging do PhaseZero."
@@ -2760,6 +2760,24 @@ provision_inventory() {
         jq -r '.[] | "\(.id)  edição \(.imageIndex)  \(.allocatedBytes) bytes  \(.vmDir)"' \
             <<< "$instances"
     fi
+}
+
+provision_integrity() {
+    local operation_id="" guest_files=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --operation-id) operation_id="${2:-}"; shift 2 ;;
+            --guest-files) guest_files=1; shift ;;
+            --json) shift ;;
+            *) pz_error "unknown integrity option: $1"; return 1 ;;
+        esac
+    done
+    [[ "$operation_id" =~ ^op-[A-Za-z0-9._-]+$ ]] && [[ "$operation_id" != *..* ]] || {
+        pz_error "valid --operation-id required"; return 1;
+    }
+    local args=(check --operation-id "$operation_id")
+    [ "$guest_files" = "0" ] || args+=(--guest-files)
+    provision_inventory --json | python3 "$PZ_ROOT/linux/windows-vm/storage.py" "${args[@]}"
 }
 
 mark_operation_vm_removed() {
@@ -3188,6 +3206,7 @@ Usage:
   provision cancel --operation-id <id> [--remove-staging]
   provision shutdown --operation-id <id> [--json]
   provision inventory [--json]
+  provision integrity --operation-id ID [--guest-files] [--json]
   provision remove --operation-id <id> [--trash|--purge --confirm-operation <id>] --yes [--json]
 
 Options:
@@ -3226,6 +3245,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
         finalize|adopt) provision_finalize "$@" ;;
         shutdown) provision_shutdown "$@" ;;
         inventory|list) provision_inventory "$@" ;;
+        integrity) provision_integrity "$@" ;;
         remove|delete) provision_remove "$@" ;;
         help|--help|-h|"") usage ;;
         *) pz_error "unknown provision action: $ACTION"; usage; exit 1 ;;
