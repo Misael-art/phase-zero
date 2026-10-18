@@ -4,9 +4,9 @@ import argparse
 import json
 import os
 from pathlib import Path
-import shlex
 import shutil
 import subprocess
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 REPAIRS = {"microfone": ("Reparar microfone", "audio-input-microphone"), "entrada": ("Reparar entrada", "input-touchpad")}
@@ -26,10 +26,20 @@ def install_shortcuts():
             content = ("[Desktop Entry]\nType=Application\nName=" + label + "\nIcon=" + icon +
                        '\nExec=python3 "' + str(ROOT / "linux/repairs/manager.py") + '" run ' + key +
                        " --confirm\nTerminal=false\nCategories=System;Utility;\nX-PhaseZero-Managed=true\n")
+            if target.is_symlink():
+                raise RuntimeError("Atalho symlink preservado: " + str(target))
             if target.exists() and "X-PhaseZero-Managed=true" not in target.read_text():
                 raise RuntimeError("Atalho não gerenciado preservado: " + str(target))
-            target.write_text(content)
-            target.chmod(0o755)
+            if target.is_file() and target.read_text() == content and target.stat().st_mode & 0o777 == 0o755:
+                continue
+            fd, staging = tempfile.mkstemp(prefix=".phasezero-repair-", dir=directory)
+            try:
+                with os.fdopen(fd, "w") as handle:
+                    handle.write(content)
+                    os.fchmod(handle.fileno(), 0o755)
+                os.replace(staging, target)
+            finally:
+                Path(staging).unlink(missing_ok=True)
     return {"installed": True, "automaticRepair": False, "desktop": str(desktop)}
 
 

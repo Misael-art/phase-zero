@@ -13,7 +13,10 @@ def test_install_shortcuts_is_idempotent_and_never_runs_repair(tmp_path, monkeyp
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     with patch.object(repairs.Path, "home", return_value=tmp_path), patch.object(repairs.shutil, "which", return_value=None), patch.object(repairs.subprocess, "run", side_effect=AssertionError("install cannot execute")):
         first = repairs.install_shortcuts()
+        before = {str(path): (path.read_bytes(), path.stat().st_mtime_ns) for path in tmp_path.rglob("*.desktop")}
         assert first == repairs.install_shortcuts()
+        after = {str(path): (path.read_bytes(), path.stat().st_mtime_ns) for path in tmp_path.rglob("*.desktop")}
+        assert before == after
     for directory in (tmp_path / "Desktop", tmp_path / "data/applications"):
         entries = list(directory.glob("*.desktop"))
         assert len(entries) == 2
@@ -53,3 +56,16 @@ def test_microphone_refuses_unobserved_capture_profile(tmp_path, monkeypatch):
     result = subprocess.run(["bash", str(ROOT / "linux/repairs/reparo-microfone.sh")], text=True, capture_output=True)
     assert result.returncode == 69
     assert "Nenhum perfil de captura disponível" in result.stdout
+
+
+def test_shortcut_symlink_cannot_overwrite_another_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    directory = tmp_path / "data/applications"
+    directory.mkdir(parents=True)
+    victim = tmp_path / "valuable"
+    victim.write_text("X-PhaseZero-Managed=true\nkeep")
+    (directory / "phasezero-reparo-microfone.desktop").symlink_to(victim)
+    import pytest
+    with patch.object(repairs.Path, "home", return_value=tmp_path), patch.object(repairs.shutil, "which", return_value=None), pytest.raises(RuntimeError, match="symlink preservado"):
+        repairs.install_shortcuts()
+    assert victim.read_text() == "X-PhaseZero-Managed=true\nkeep"

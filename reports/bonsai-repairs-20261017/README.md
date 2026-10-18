@@ -88,3 +88,28 @@ e ter reproduzido expectativa antiga de uma única sonda na página IA & Dev.
 Teste de lifecycle atualizado comprova duas sondas somente ao abrir a página.
 
 Continuação: teste de entrada autorizado e executado, exit 0, sem reboot/logout. Operador informou não poder testar resposta física agora. CI anterior revelou timeout no restyle global do teste UI e SC2015 no ShellCheck 0.9; teste temático foi isolado em subprocesso com MainWindow 800×600 e clique público do modo avançado, guard de entrada reescrito com if explícito.
+
+## Revisão posterior e limites do diagnóstico
+
+Revisão do PR identificou que a sondagem WorkOS criava tentativas de login
+órfãs. Essa sondagem foi removida. Diagnóstico atual não faz POST de autorização,
+não visita URL de dispositivo e não segue redirects de autenticação. Preserva a
+observação histórica `upstream-auth-disabled` com origem/data, marca cache após
+15 minutos como antigo e disponibilidade atual como desconhecida. Sem contrato
+oficial de disponibilidade passiva, login permanece indisponível; atualizar
+diagnóstico não promete revalidar login. Recuperação depende de canal suportado
+pelo Bonsai. Cache de provedor não recebe escritores automáticos, eliminando
+substituição concorrente de resultado novo por antigo.
+
+Status não depende mais da rede: registry só atualiza no diagnóstico explícito;
+resultado de npm cacheado tem validade de 15 minutos. Registry codificado
+`https://registry.npmjs.org/@bonsai-ai%2Fcli/latest` também retornou HTTP 404 no
+host. Nenhuma versão inventada. CLI instalado continua 0.4.19.
+
+Fluxo interativo futuro, quando gates externos permitirem, usa terminal privado
+`/dev/tty` para instruções, nunca stdout/stderr do ledger da UI. Sem terminal,
+falha com próximo passo explícito. Não foi executado com provedor desativado.
+Atalhos rejeitam symlinks, usam substituição atômica e instalação idempotente
+preserva bytes/mtime; testes adicionados. Wrapper sem argumentos já retorna pelo
+case `status` com exec antes de shift; revisão que alegou shift sem args não se
+aplica ao fluxo atual.

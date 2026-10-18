@@ -49,8 +49,6 @@ SECRET_FILE_RE = re.compile(
     re.IGNORECASE,
 )
 KNOWN_SHELL_BUILTINS = {".", ":", "source", "test", "[", "printf", "echo", "true", "false"}
-BONSAI_WORKOS_CLIENT_ID = "client_01K2ZG07ZTYR0FQNERK3PS2CB0"
-BONSAI_WORKOS_DEVICE_URL = "https://api.workos.com/user_management/authorize/device"
 BONSAI_ROUTER_URL = "https://go.trybons.ai"
 TRANSIENT_NETWORK_CODES = {
     "EAI_AGAIN",
@@ -638,66 +636,52 @@ function probeHttp() {
         }
 
     def bonsai_auth_probe(self) -> dict[str, Any]:
-        """Probe device login without exposing code/URL and without opening a browser."""
-        request = urllib.request.Request(
-            BONSAI_WORKOS_DEVICE_URL,
-            data=json.dumps({"client_id": BONSAI_WORKOS_CLIENT_ID, "scope": "openid email profile"}).encode(),
-            headers={"Content-Type": "application/json", "User-Agent": "phasezero-bonsai-auth-probe/1"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=8) as response:
-                http_status = response.status
-                payload = json.loads(response.read(256 * 1024))
-            verification = str(payload.get("verification_uri_complete") or "") if isinstance(payload, dict) else ""
-            parsed = urllib.parse.urlparse(verification)
-            if parsed.scheme != "https" or not parsed.hostname or not parsed.hostname.endswith(".authkit.app"):
-                result = {"available": False, "class": "upstream-auth-invalid-response", "httpStatus": http_status, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
-            else:
-                page_request = urllib.request.Request(verification, headers={"User-Agent": "phasezero-bonsai-auth-probe/1"})
-                with urllib.request.urlopen(page_request, timeout=8) as page:
-                    body = page.read(256 * 1024).decode("utf-8", errors="replace").lower()
-                    page_status = page.status
-                disabled = "authentication is disabled for this application" in body
-                valid_page = "<form" in body and ("sign in" in body or "log in" in body)
-                result = {
-                    "available": not disabled and valid_page and page_status == 200,
-                    "class": "upstream-auth-disabled" if disabled else "available" if valid_page and page_status == 200 else "upstream-auth-invalid-response",
-                    "httpStatus": page_status,
-                    "provider": "workos-authkit",
-                    "checkedAt": now_iso(),
-                    "secretsRedacted": True,
-                }
-        except urllib.error.HTTPError as exc:
-            result = {"available": False, "class": "upstream-auth-http", "httpStatus": exc.code, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
-        except (ValueError, UnicodeError):
-            result = {"available": False, "class": "upstream-auth-invalid-response", "httpStatus": None, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
-        except (OSError, urllib.error.URLError, TimeoutError) as exc:
-            timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
-            result = {"available": False, "class": "upstream-auth-timeout" if timed_out else "upstream-auth-unreachable", "httpStatus": None, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
-        self._record_bonsai_auth_probe(result)
+        """Passive only: no supported availability API is documented by Bonsai.
+
+        A device authorization POST creates a real login attempt. Never use it
+        as a status probe or persist its code/verification URL.
+        """
+        result = self._cached_bonsai_auth_probe()
+        result["passiveProbeSupported"] = False
+        result["nextAction"] = "Aguarde canal oficial Bonsai para verificação passiva de login."
+        result["available"] = False
         return result
 
     def _record_bonsai_auth_probe(self, result: dict[str, Any]) -> None:
-        self.data_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.data_root, 0o700)
-        atomic_json(self.bonsai_auth_probe_state, result, 0o600)
+        # No current automatic writer: historical observations stay read-only.
+        raise RuntimeError("Provider cache writes require a supported passive observation contract")
 
     def _cached_bonsai_auth_probe(self) -> dict[str, Any]:
+        unknown = {"available": None, "class": "not-probed", "httpStatus": None,
+                   "provider": "workos-authkit", "checkedAt": None,
+                   "source": "historical-provider-observation", "secretsRedacted": True}
         try:
             value = json.loads(self.bonsai_auth_probe_state.read_text(encoding="utf-8"))
-            if isinstance(value, dict) and value.get("secretsRedacted") is True:
-                known = {"available", "upstream-auth-disabled", "upstream-auth-timeout", "upstream-auth-invalid-response", "upstream-auth-http", "upstream-auth-unreachable"}
-                if value.get("class") not in known:
-                    raise ValueError("invalid provider cache")
-                checked = dt.datetime.fromisoformat(value["checkedAt"]).isoformat()
-                return {"available": value.get("available") is True,
-                        "class": value["class"], "checkedAt": checked,
-                        "httpStatus": value.get("httpStatus") if type(value.get("httpStatus")) is int else None,
-                        "provider": "workos-authkit", "secretsRedacted": True}
+            known = {"available", "upstream-auth-disabled", "upstream-auth-timeout",
+                     "upstream-auth-invalid-response", "upstream-auth-http", "upstream-auth-unreachable"}
+            if not isinstance(value, dict) or value.get("secretsRedacted") is not True or value.get("class") not in known:
+                return unknown
+            checked = dt.datetime.fromisoformat(value["checkedAt"])
+            age = (dt.datetime.now(dt.timezone.utc) - checked).total_seconds()
+            fresh = 0 <= age <= 900
+            return {**unknown, "available": False, "class": value["class"],
+                    "checkedAt": checked.isoformat(), "fresh": fresh,
+                    "httpStatus": value.get("httpStatus") if type(value.get("httpStatus")) is int else None,
+                    "lastObservedAvailable": value.get("available") is True,
+                    "currentAvailability": "unknown", "passiveProbeSupported": False}
         except (OSError, ValueError, KeyError, TypeError):
-            pass
-        return {"available": None, "class": "not-probed", "httpStatus": None, "provider": "workos-authkit", "checkedAt": None, "secretsRedacted": True}
+            return unknown
+
+    def _cached_bonsai_update(self) -> dict[str, Any]:
+        try:
+            value = json.loads((self.data_root / "bonsai-update.json").read_text())
+            checked = dt.datetime.fromisoformat(value["observedAt"])
+            age = (dt.datetime.now(dt.timezone.utc) - checked).total_seconds()
+            if not isinstance(value.get("state"), str) or not 0 <= age <= 900:
+                raise ValueError("stale")
+            return {key: value[key] for key in ("available", "state", "source", "observedAt", "httpStatus", "version") if key in value}
+        except (OSError, ValueError, KeyError, TypeError):
+            return {"available": False, "state": "not-probed-or-stale", "source": "npm-registry-cache"}
 
     def bonsai_credential_status(self) -> dict[str, Any]:
         if not self.bonsai_config.is_file():
@@ -718,7 +702,7 @@ try {
   const access=typeof value.accessToken==="string"&&value.accessToken.length>0;
   const refresh=typeof value.refreshToken==="string"&&value.refreshToken.length>0;
   const unexpired=access&&typeof value.expiresAt==="number"&&Date.now()<value.expiresAt;
-  console.log(JSON.stringify({authenticated:unexpired,state:unexpired?"valid-local-token":refresh?"expired-refresh-required":"expired-no-refresh",refreshPresent:refresh,apiKeyPresent:typeof value.apiKey==="string"&&value.apiKey.length>0,secretsRedacted:true}));
+  console.log(JSON.stringify({authenticated:unexpired?null:false,state:unexpired?"valid-local-token":refresh?"expired-refresh-required":"expired-no-refresh",refreshPresent:refresh,apiKeyPresent:typeof value.apiKey==="string"&&value.apiKey.length>0,secretsRedacted:true}));
 } catch (_) { console.log(JSON.stringify({authenticated:false,state:"invalid-store",refreshPresent:null,apiKeyPresent:null,secretsRedacted:true})); }
 '''
         rc, out, _ = run_capture([node, "-e", script, str(self.bonsai_config)], timeout=8)
@@ -732,7 +716,7 @@ try {
         return {"authenticated": False, "state": "probe-failed", "refreshPresent": None, "apiKeyPresent": None, "secretsRedacted": True}
 
     def bonsai_update_observation(self) -> dict[str, Any]:
-        result = {"available": False, "state": "unavailable", "source": "https://registry.npmjs.org/@bonsai-ai/cli/latest", "observedAt": now_iso()}
+        result = {"available": False, "state": "unavailable", "source": "https://registry.npmjs.org/@bonsai-ai%2Fcli/latest", "observedAt": now_iso()}
         try:
             with urllib.request.urlopen(result["source"], timeout=3) as response:
                 payload = json.loads(response.read(65536))
@@ -762,7 +746,7 @@ try {
                 pass
         credential = self.bonsai_credential_status()
         provider = self._cached_bonsai_auth_probe()
-        update = self.bonsai_update_observation()
+        update = self._cached_bonsai_update()
         store_dir = self.bonsai_config.parent
         store_present = self.bonsai_config.is_file() and self.bonsai_config.stat().st_size > 0
         directory_mode = stat.S_IMODE(store_dir.stat().st_mode) if store_dir.is_dir() else None
@@ -795,7 +779,7 @@ try {
             "proxyGate": "official-api-auth-contract-unverified",
             "observedAt": now_iso(),
             "source": "phasezero-manager/local-credential-metadata/provider-cache",
-            "loginAvailable": provider.get("available") is True and update["available"] and update_check != "forged",
+            "loginAvailable": bool(path) and provider.get("available") is True and update["available"] and update_check != "forged",
             "snapshotConsent": "explicit-directory-and-per-execution-consent-required",
             "managerPath": str(Path(__file__).resolve()),
             "commandPath": str(self.local_bin / "bonsai"),
@@ -1900,9 +1884,12 @@ esac
             if existed:
                 shutil.copy2(self.bonsai_config, backup)
             try:
-                # Device codes and authentication output must never enter UI logs.
-                rc = subprocess.run([bonsai, "login"], check=False, stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL, timeout=180).returncode
+                # Private controlling terminal only, never the UI result ledger.
+                if not sys.stdin.isatty() or not sys.stdout.isatty():
+                    raise RuntimeError("Login Bonsai exige terminal privado; execute bonsai login no terminal. Credenciais preservadas.")
+                with open("/dev/tty", "r+") as terminal:
+                    rc = subprocess.run([bonsai, "login"], check=False, stdin=terminal,
+                                        stdout=terminal, stderr=terminal, timeout=180).returncode
             except BaseException:
                 if existed:
                     shutil.copy2(backup, self.bonsai_config)
@@ -1995,7 +1982,9 @@ def main(argv: list[str] | None = None) -> int:
             print(package["version"])
             return 0
         elif command == "bonsai-probe":
-            manager.bonsai_auth_probe()
+            # Only registry metadata is refreshed; provider observation is passive.
+            update = manager.bonsai_update_observation()
+            atomic_json(manager.data_root / "bonsai-update.json", update, 0o600)
             result = manager.bonsai_info()
         elif command == "bonsai-status":
             result = manager.bonsai_info()

@@ -364,29 +364,39 @@ echo "bonsai:$*"
         self.assertEqual(str(self.home / ".local/bin/bonsai"), observed.stdout.strip())
         with mock.patch.object(manager, "bonsai_update_observation", return_value={"available": False, "state": "registry-http-error", "httpStatus": 404}), mock.patch.object(CC.subprocess, "run", side_effect=AssertionError("status cannot execute Bonsai")):
             state = manager.bonsai_info()
-        self.assertFalse(state["authenticated"])
+        self.assertIs(state["authenticated"], False)
         self.assertFalse(state["sessionUsable"])
         self.assertFalse(state["proxyAvailable"])
 
-    def test_provider_disabled_invalid_and_timeout_are_classified_without_codes(self):
+    def test_provider_diagnosis_is_passive_and_preserves_historical_observation(self):
         manager = CC.Manager()
-        def response(body):
-            item = mock.MagicMock()
-            item.__enter__.return_value.status = 200
-            item.__enter__.return_value.read.return_value = body
-            return item
-        device = response(b'{"verification_uri_complete":"https://example.authkit.app/device?code=DO-NOT-LOG"}')
-        with mock.patch.object(CC.urllib.request, "urlopen", side_effect=[device, response(b"Authentication is disabled for this application")]):
+        manager.data_root.mkdir(parents=True, exist_ok=True)
+        observed = {"available": False, "class": "upstream-auth-disabled", "httpStatus": 200,
+                    "checkedAt": "2026-01-01T00:00:00+00:00", "secretsRedacted": True,
+                    "ignoredSecret": "DO-NOT-LOG"}
+        manager.bonsai_auth_probe_state.write_text(json.dumps(observed))
+        before = manager.bonsai_auth_probe_state.read_bytes()
+        with mock.patch.object(CC.urllib.request, "urlopen", side_effect=AssertionError("no login attempt")):
             result = manager.bonsai_auth_probe()
-            self.assertEqual("upstream-auth-disabled", result["class"])
-            self.assertNotIn("DO-NOT-LOG", json.dumps(result))
-            self.assertNotIn("DO-NOT-LOG", manager.bonsai_auth_probe_state.read_text())
-        with mock.patch.object(CC.urllib.request, "urlopen", return_value=response(b'{"verification_uri_complete":"http://untrusted.test"}')):
-            self.assertEqual("upstream-auth-invalid-response", manager.bonsai_auth_probe()["class"])
-        with mock.patch.object(CC.urllib.request, "urlopen", side_effect=TimeoutError()):
-            self.assertEqual("upstream-auth-timeout", manager.bonsai_auth_probe()["class"])
-        with mock.patch.object(CC.urllib.request, "urlopen", return_value=response(b"invalid json")):
-            self.assertEqual("upstream-auth-invalid-response", manager.bonsai_auth_probe()["class"])
+        self.assertIs(result["available"], False)
+        self.assertFalse(result["fresh"])
+        self.assertEqual("unknown", result["currentAvailability"])
+        self.assertEqual("upstream-auth-disabled", result["class"])
+        self.assertNotIn("DO-NOT-LOG", json.dumps(result))
+        self.assertEqual(before, manager.bonsai_auth_probe_state.read_bytes())
+        with self.assertRaisesRegex(RuntimeError, "supported passive"):
+            manager._record_bonsai_auth_probe(observed)
+
+    def test_registry_success_uses_encoded_scoped_package_and_status_is_local(self):
+        manager = CC.Manager()
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"version":"0.4.19"}'
+        with mock.patch.object(CC.urllib.request, "urlopen", return_value=response) as fetch:
+            result = manager.bonsai_update_observation()
+        self.assertTrue(result["available"])
+        self.assertIn("@bonsai-ai%2Fcli/latest", fetch.call_args.args[0])
+        with mock.patch.object(CC.urllib.request, "urlopen", side_effect=AssertionError("status stays local")):
+            self.assertFalse(manager.bonsai_info()["loginAvailable"])
 
     def test_expired_local_credential_is_not_authentication(self):
         import shutil
@@ -414,11 +424,11 @@ fs.writeFileSync(process.argv[1],Buffer.concat([iv,Buffer.from(':'),cipher.updat
         manager = CC.Manager()
         before = manager.bonsai_config.read_bytes()
         def fail(*args, **kwargs):
-            self.assertEqual(CC.subprocess.DEVNULL, kwargs["stdout"])
-            self.assertEqual(CC.subprocess.DEVNULL, kwargs["stderr"])
+            self.assertIs(kwargs["stdout"], kwargs["stderr"])
+            self.assertIs(kwargs["stdin"], kwargs["stdout"])
             manager.bonsai_config.write_text("corrupted")
             return mock.Mock(returncode=1)
-        with mock.patch.object(manager, "bonsai_auth_probe", return_value={"available": True}), mock.patch.object(manager, "bonsai_update_observation", return_value={"available": True}), mock.patch.object(CC.subprocess, "run", side_effect=fail):
+        with mock.patch.object(manager, "bonsai_auth_probe", return_value={"available": True}), mock.patch.object(manager, "bonsai_update_observation", return_value={"available": True}), mock.patch.object(CC.subprocess, "run", side_effect=fail), mock.patch.object(CC.sys.stdin, "isatty", return_value=True), mock.patch.object(CC.sys.stdout, "isatty", return_value=True), mock.patch.object(CC, "open", mock.mock_open(), create=True):
             with self.assertRaisesRegex(RuntimeError, "Credenciais preservadas"):
                 manager.login("bonsai")
         self.assertEqual(before, manager.bonsai_config.read_bytes())
