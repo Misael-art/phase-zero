@@ -3,6 +3,18 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 As versões seguem a data de build em `version.json`.
 
+## [Unreleased]
+
+### Corrigido
+- **Login Bonsai bloqueado por diagnóstico antigo.** Estado histórico vencido deixa de representar indisponibilidade atual. Tentativa explícita usa CLI oficial, após verificar metadados npm; HTTP 404, timeout e resposta inválida continuam bloqueando sem inventar versão ou apagar credenciais. Disponibilidade para tentar não comprova autenticação, sessão utilizável ou proxy.
+- **Botão de login sem terminal.** Ação passa a abrir o mesmo gerenciador em terminal privado quando os gates permitem; códigos não passam pelo painel. Logins gerenciados ficam serializados, interrupções têm restauração e journal de recuperação; consultas npm também são serializadas.
+
+### Adicionado
+- **Reparar terminal e sessão sob demanda.** Atalho padrão no menu e área de trabalho recupera falta de espaço no runtime da sessão arquivando somente fixtures inativas verificadas, com backup. Novos temporários de agentes/testes passam ao disco; aplicações abertas, sessão KDE e host permanecem ativos.
+
+### Limitações
+- Bonsai ainda retorna HTTP 404 no npm; credencial local vencida e disponibilidade atual do provedor não comprovada. Nenhum login real bem-sucedido, inferência ou proxy genérico declarado funcional.
+
 ## [1.22.5] - 2026-10-11
 
 ### Adicionado

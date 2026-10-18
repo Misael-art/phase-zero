@@ -52,6 +52,9 @@ correção. Checkout principal e demais worktrees preservados.
   terminal/journal/locks: 114 passed, 19 subtests passed incluindo catálogo web,
   registro de contas, inventário, reparos, concorrência, interrupção e recuperação.
   Smoke shell Claude: 46 testes OK. Gates finais/CI: consultar PR.
+- Integração do reparo de terminal do PR #119, mantendo commit `5f65155` como
+  ancestral: regressão conjunta 124 passed, 19 subtests passed. Sem conflito ou
+  alteração dos worktrees paralelos. Publicação corretiva planejada 1.22.7 beta.
 - UI real XCB/KDE, temas claro/escuro, 800×600 lógicos: helper
   `tests/helpers/bonsai_ui_probe.py`; controles públicos acionados, login
   bloqueado no HTTP 404 e habilitado somente na fixture de gates recuperados,
