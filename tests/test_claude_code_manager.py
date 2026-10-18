@@ -216,7 +216,7 @@ echo "bonsai:$*"
         for launcher in launchers[:3]:
             with self.subTest(launcher=launcher.name):
                 probe = subprocess.run(
-                    [str(launcher), "--probe"], text=True, stdout=subprocess.PIPE,
+                    [str(launcher), *(["--cwd", str(self.home)] if launcher.name == "claude-bonsai" else []), "--probe"], text=True, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, env=env, check=False,
                 )
                 self.assertNotEqual(0, probe.returncode)
