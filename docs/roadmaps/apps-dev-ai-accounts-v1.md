@@ -3009,3 +3009,38 @@ Invocar o **mesmo wrapper do atalho** abriu o Codex Desktop no perfil dedicado
 Após publicar pacote com esta correção, reinstalar os atalhos/autostart pelo
 gerenciador atualizado para renovar o snapshot privado. O modo Full segue
 bloqueado independentemente deste conserto.
+
+### PXA-010: corrigir diagnóstico de plano Pro — 2026-10-18
+
+A afirmação acima de que Pro permite **somente** `read/fetch` veio do fluxo
+anterior de Developer Mode. Ela não pode servir como proibição universal:
+a [documentação atual de plugins MCP personalizados](https://developers.openai.com/api/docs/guides/custom-mcp-server)
+diz que o ChatGPT aceita ferramentas de leitura **e escrita**, sujeitas às
+permissões e confirmações da conta/workspace. A [documentação do túnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+descreve o vínculo do mesmo plugin a um Secure MCP Tunnel. Essas fontes não
+atestam que a conta Pro deste host recebeu a permissão. O código deixa de
+mostrar “faça upgrade para Business” como fato e marca Pro como
+`write-unverified`; `plan-full` deixa de ser o primeiro bloqueio. Teste de
+chamada real de escrita reversível continua obrigatório antes de liberar
+ferramentas.
+
+O host ainda falha em `full-runtime`: o launcher 6.1.8 não completou turno
+com MCP sob o sandbox read-only do perfil isolado. `launcher-mode` permanece
+browser-only. O presente ajuste corrige diagnóstico e copy, não declara
+Full funcional. Chrome da conta não estava exposto ao controle desta sessão;
+permissão real de plugin não foi observada. Reavaliar o plano de MCP local
+read/fetch após essa prova: a restrição por plano que o motivou foi
+superada pela documentação atual, embora o escopo restrito continue opção.
+
+Prova hermética: `tests/test_chatgpt_web_bridge.py` e
+`tests/test_chatgpt_web_card.py`: 62 passaram; caso Pro confirma próximo gate
+`full-runtime` depois da chave e nunca retorna `ready:true` sem turno real.
+No host `misael-jupiter`, `shortcuts install` renovou apenas a cópia estável
+do gerenciador/atalhos; hash do gerenciador instalado igual ao da árvore.
+`shortcuts status: installed`, `autostart status: enabled` e o próprio
+gerenciador instalado apontam `full-runtime` como primeiro gate. Backup do
+manager anterior em
+`~/.local/share/phasezero/chatgpt-web/manager/chatgpt_web_bridge.py.pre-20261018`.
+Pacote instalado 1.22.8-1 não contém a
+copy nova da UI; publicar pacote depois da revisão. Sem reiniciar ou mudar
+launcher, túnel, credenciais, VM, KDE ou boot.

@@ -400,10 +400,10 @@ class AiDevPage(BasePage):
         gate_action = str(pending.get("action") or "")
         gate_id = str(pending.get("id") or "")
         capability = str(node("eligibility").get("planMcpCapability") or "")
-        if capability == "read":
+        if capability == "write-unverified":
             self.bridge_account.setText(
-                "Conta Pro: o ChatGPT permite leitura/fetch pelo conector. Ações de "
-                "escrita exigem Business, Enterprise ou Edu.")
+                "Conta Pro: plugins MCP podem expor escrita. Permissão desta conta "
+                "e chamada real ainda não verificadas.")
         elif capability == "write-beta":
             self.bridge_account.setText(
                 "Plano compatível com MCP completo (beta). Ferramentas exigem teste real.")
@@ -411,8 +411,8 @@ class AiDevPage(BasePage):
             self.bridge_account.setText("Permissão da conta ainda não confirmada.")
         if gate_id == "plan-full":
             self.bridge_next.setText(
-                "Para acesso completo: conta Business, Enterprise ou Edu; depois teste "
-                "real do launcher Full.")
+                "Confira permissões do plugin MCP nesta conta e faça teste real "
+                "antes de ativar ferramentas.")
         else:
             self.bridge_next.setText(f"Próximo passo: {gate_action}" if gate_action else "")
         self.bridge_next.setVisible(bool(gate_action))
@@ -429,7 +429,7 @@ class AiDevPage(BasePage):
         elif isinstance(blockers, list) and blockers:
             self.bridge_tools.setText(f"Com ferramentas: bloqueado — {blockers[0]}.")
         elif gate_id == "plan-full":
-            self.bridge_tools.setText("Acesso completo ao host: indisponível neste plano.")
+            self.bridge_tools.setText("Acesso completo ao host: permissão MCP não comprovada.")
         elif gate_detail:
             self.bridge_tools.setText(f"Com ferramentas: bloqueado — {gate_detail}.")
         else:

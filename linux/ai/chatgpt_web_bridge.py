@@ -137,21 +137,21 @@ PENDING_GATES = (
     "rollback",
 )
 
-# Plan capability map from the OpenAI developer-mode article, re-read on
-# 2026-10-12: full MCP for Business and Enterprise/Edu, read/fetch for Pro, no
-# developer mode for Free, Go or Plus. An operator attestation is not proof.
+# The older Developer Mode article described Pro as read/fetch-only. Current
+# custom MCP plugin documentation explicitly includes write tools, subject to
+# account/workspace permissions. A plan label alone never verifies those grants.
 PLAN_MCP_CAPABILITY = {
     "free": "none",
     "go": "none",
     "plus": "none",
-    "pro": "read",
+    "pro": "write-unverified",
     "business": "write-beta",
     "enterprise": "write-beta",
     "edu": "write-beta",
 }
 PLAN_LABELS = {"free": "Free", "go": "Go", "plus": "Plus", "pro": "Pro", "business": "Business",
                "enterprise": "Enterprise", "edu": "Edu"}
-PLAN_SOURCE = "https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt"
+PLAN_SOURCE = "https://developers.openai.com/api/docs/guides/custom-mcp-server"
 ELIGIBILITY_MAX_AGE_DAYS = 30
 KEY_ROTATION_DEFAULT_DAYS = 30
 KEY_ROTATION_MAX_DAYS = 90
@@ -881,15 +881,16 @@ class Bridge:
         if plan_cap == "none":
             blockers.append(
                 f"o plano {PLAN_LABELS.get(str(record.get('plan')), 'informado')} não oferece MCP "
-                "de desenvolvedor (a OpenAI libera em Pro, só leitura, e em Business, Enterprise "
-                "e Edu)")
+                "de desenvolvedor confirmado nesta integração; confira as permissões "
+                "atuais da conta e do workspace")
         if record.get("developerMode") != "yes":
             blockers.append("Developer Mode do workspace não confirmado")
         if record.get("tunnelPermission") not in {"use", "manage"}:
             blockers.append("permissão Tunnels Read + Use não confirmada")
         if record.get("singleUserTrusted") != "yes":
             blockers.append("conta local individual e confiável não confirmada")
-        tools = "none" if blockers else ("read-only" if plan_cap == "read" else "read-only-write-locked")
+        tools = "none" if blockers else ("unverified" if plan_cap == "write-unverified"
+                                          else "read-only-write-locked")
         return {**base, "state": "stale" if stale else "recorded", "plan": record.get("plan"),
                 "recordedAt": record.get("recordedAt"), "planMcpCapability": plan_cap,
                 "webModel": "requires-sign-in", "tools": tools, "blockers": blockers}
@@ -2252,10 +2253,7 @@ class Bridge:
             blockers.append("há outros usuários com sessão neste host")
         if need_broker:
             capability = self.eligibility(state).get("planMcpCapability")
-            if capability == "read":
-                blockers.append("o plano Pro permite apenas leitura/fetch pelo conector MCP; "
-                                "escrita exige Business, Enterprise ou Edu")
-            elif capability != "write-beta":
+            if capability not in {"write-unverified", "write-beta"}:
                 blockers.append("acesso completo pelo conector MCP não comprovado no plano informado")
             config = self.upstream_config() or {}
             if config.get("mode") != "full":
@@ -2301,21 +2299,20 @@ class Bridge:
              f"{manager} eligibility --plan … --developer-mode … --tunnel-permission … "
              "--single-user-trusted …"),
             ("plan", bool(record) and eligibility["planMcpCapability"] != "none",
-             f"plano {label}: " + ("MCP de desenvolvedor disponível"
+             f"plano {label}: " + ("permissão MCP sujeita à conta/workspace"
                                    if record and eligibility["planMcpCapability"] != "none" else
-                                   "sem modo desenvolvedor. A OpenAI libera conectores MCP próprios "
-                                   "em Pro (só leitura) e em Business, Enterprise e Edu"),
-             f"Mude para um plano com modo desenvolvedor e registre de novo. Fonte: {PLAN_SOURCE}"),
-            ("plan-full", eligibility.get("planMcpCapability") == "write-beta",
-             "acesso completo a ferramentas MCP disponível no plano informado"
+                                   "permissão MCP não confirmada nesta integração"),
+             f"Confira MCP no workspace e registre a elegibilidade. Fonte: {PLAN_SOURCE}"),
+            ("plan-full", eligibility.get("planMcpCapability") in
+             {"write-unverified", "write-beta"},
+             "sem exclusão comprovada pelo plano Pro; escrita na conta ainda "
+             "não verificada por chamada MCP real"
+             if eligibility.get("planMcpCapability") == "write-unverified" else
+             "plano informado admite MCP completo; chamada real ainda necessária"
              if eligibility.get("planMcpCapability") == "write-beta" else
-             f"plano {label} permite só leitura/fetch; acesso completo exige "
-             "Business, Enterprise ou Edu"
-             if eligibility.get("planMcpCapability") == "read" else
              "acesso completo não disponível ou não comprovado no plano informado",
-             "Mantenha o modo Web. Para escrita pelo conector, use um plano compatível "
-             "e registre a nova elegibilidade; a assinatura Pro e a chave de túnel "
-             "não ampliam as permissões do ChatGPT."),
+             "Confira permissões do plugin MCP nesta conta. Mantenha o modo Web até "
+             "uma chamada real de escrita reversível ser aprovada e concluída."),
             ("developer-mode", (record or {}).get("developerMode") == "yes",
              "modo desenvolvedor do ChatGPT " + ("confirmado" if (record or {}).get("developerMode")
                                                  == "yes" else "não confirmado"),
