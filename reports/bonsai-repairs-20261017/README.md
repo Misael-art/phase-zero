@@ -16,7 +16,7 @@
 | UI pública | PySide6 na sessão real XCB/KDE, tema claro/escuro, janela MainWindow 800×600 lógicos, página 748 px, scroll horizontal máximo 0 | capturas anexas; controles impossíveis desabilitados; detalhe técnico recolhido |
 | Não iniciar inferência | status lê package.json/metadados locais e registry; login só autenticação após gates; start gerenciado bloqueado | testes; nenhuma inferência iniciada |
 | Microfone | `PZ_REPAIR_NONINTERACTIVE=1 python3 linux/repairs/manager.py run microfone --yes` exit 0; perfil `HiFi (Mic, Speaker)`, fonte `mic-biglinux` | presença real verificada; áudio não gravado, sinal acústico não comprovado |
-| Entrada | `timeout 50 python3 linux/repairs/manager.py run entrada --yes` exit 124 aguardando autorização administrativa gráfica | bloqueado; reassociação e resposta física não comprovadas |
+| Entrada | Nova execução `timeout 55 python3 linux/repairs/manager.py run entrada --yes` exit 0: barramento ativo, nós presentes | execução real comprovada; operador não consegue testar agora, resposta física de toque/trackpads pendente |
 | Atalhos padrão reparos | instalação de usuário, primeira abertura da UI e convenience-launchers criam desktop/menu, sem executar reparos; confirmação em cada execução | testes isolados; migração do host pendente pacote |
 
 ## Contrato Bonsai e consentimento
@@ -86,3 +86,5 @@ Nenhuma versão do pacote ou tag foi alterada. CI integral permanece gate extern
 execução local integral anterior foi interrompida após ficar obsoleta pelas correções
 e ter reproduzido expectativa antiga de uma única sonda na página IA & Dev.
 Teste de lifecycle atualizado comprova duas sondas somente ao abrir a página.
+
+Continuação: teste de entrada autorizado e executado, exit 0, sem reboot/logout. Operador informou não poder testar resposta física agora. CI anterior revelou timeout no restyle global do teste UI e SC2015 no ShellCheck 0.9; teste temático foi isolado em subprocesso com MainWindow 800×600 e clique público do modo avançado, guard de entrada reescrito com if explícito.

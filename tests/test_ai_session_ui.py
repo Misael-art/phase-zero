@@ -645,46 +645,17 @@ def test_routing_status_text_reports_provider_availability():
 
 
 @pytest.mark.parametrize("theme", ["dark", "light"])
-def test_bonsai_observed_state_public_controls_and_theme_at_800x600(ai_dev_page, qapp, theme, tmp_path):
-    from linux.ui_native.app import apply_theme
-    from PySide6.QtCore import Qt
-    from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QScrollArea
-    page, _ = ai_dev_page
-    apply_theme(qapp, theme)
-    requested = []
-    page.request_action = requested.append
-    page.resize(800, 600)
-    page.show()
-    page._on_status_ready("private.bonsai.status", "", {
-        "installed": True, "authenticated": False, "sessionUsable": False,
-        "proxyAvailable": False, "loginAvailable": False,
-        "credentialStatus": {"state": "expired-refresh-required"},
-        "authProvider": {"class": "upstream-auth-disabled", "source": "provider-cache"},
-        "updateObservation": {"state": "registry-http-error", "httpStatus": 404},
-    })
-    qapp.processEvents()
-    assert page.bonsai_state.text() == "Login indisponível no provedor"
-    assert "vencida" in page.bonsai_reason.text()
-    assert "Próximo passo" in page.bonsai_next.text()
-    assert not page.bonsai_login.isEnabled()
-    scroll = page.bonsai_login.parentWidget().parentWidget()
-    areas = page.findChildren(QScrollArea)
-    areas[0].ensureWidgetVisible(page.bonsai_login)
-    qapp.processEvents()
-    assert page.bonsai_login.isVisible()
-    assert areas[0].horizontalScrollBar().maximum() == 0
-    QTest.mouseClick(page.bonsai_login, Qt.LeftButton)
-    assert not requested
-    diagnose = next(button for button in page.findChildren(QPushButton) if button.text() == "Atualizar diagnóstico")
-    areas[0].ensureWidgetVisible(diagnose)
-    qapp.processEvents()
-    QTest.mouseClick(diagnose, Qt.LeftButton)
-    assert [action.id for action in requested] == ["ai.bonsai-diagnose"]
-    assert not page.bonsai_details.isVisible()
-    page.set_advanced_mode(True)
-    qapp.processEvents()
-    assert "provider-cache" in page.bonsai_details.text()
-    assert "bonsai/direct" in page.bonsai_details.text()
-    page.grab().save(str(tmp_path / ("bonsai-" + theme + ".png")))
-    page.close()
+def test_bonsai_observed_state_public_controls_and_theme_at_800x600(theme, tmp_path):
+    # Global QApplication restyling must not traverse widgets retained by the
+    # rest of the full suite. Exercise the same real UI in an isolated process.
+    import os
+    import subprocess
+    import sys
+    env = os.environ.copy()
+    env.update(HOME=str(tmp_path / "home"), XDG_CONFIG_HOME=str(tmp_path / "config"),
+               XDG_DATA_HOME=str(tmp_path / "data"), XDG_STATE_HOME=str(tmp_path / "state"))
+    result = subprocess.run([sys.executable, str(ROOT / "tests/helpers/bonsai_ui_probe.py"),
+                             theme, str(tmp_path / ("bonsai-" + theme + ".png"))],
+                            cwd=ROOT, env=env, capture_output=True, text=True, timeout=45)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / ("bonsai-" + theme + ".png")).is_file()

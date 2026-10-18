@@ -23,7 +23,10 @@ command -v phasezero-admin >/dev/null || { echo "Ponte admin ausente: execute li
 phasezero-admin bash "$(readlink -f "${BASH_SOURCE[0]}")" --root
 status=$(cat "$I2CBUS/power/runtime_status")
 nodes=$(grep -cE 'FTS3528|Steam Deck' /proc/bus/input/devices || true)
-[ "$status" = active ] && [ "$nodes" -ge 2 ] || { echo "Reparo não confirmado; consulte diagnóstico de entrada" >&2; exit 1; }
+if [ "$status" != active ] || [ "$nodes" -lt 2 ]; then
+    echo "Reparo não confirmado; consulte diagnóstico de entrada" >&2
+    exit 1
+fi
 echo "Barramento ativo e nós presentes; teste toque e controles para confirmar resposta."
 if command -v kdialog >/dev/null && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
     kdialog --passivepopup "Drivers de entrada reassociados. Teste toque e trackpads." 8
