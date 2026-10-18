@@ -497,6 +497,12 @@ Adicionar IDs, nunca reutilizar ID para requisito diferente. Estados permitidos:
 
 ## Estado vivo
 
+2026-10-18 — Bonsai follow-up: `codex/bonsai-observation-age`, base `241f84b`;
+pacote host 1.22.6-1. Histórico vencido estava apresentado como falha atual e
+impedia futuras tentativas. Correção e limites em
+`reports/bonsai-login-followup-20261018/README.md`; npm HTTP 404 real ainda bloqueia
+login. Sem autenticação real comprovada, inferência ou deploy manual de runtime.
+
 Bonsai/reparos 2026-10-17: worktree `codex/bonsai-repairs`; evidência em
 `reports/bonsai-repairs-20261017/README.md`. Pacote host 1.22.5-1 preservado;
 nenhum workload Homelab iniciado. Release pendente CI e gate de teste host.
@@ -576,6 +582,11 @@ sem evidência.
 | Fase 5 auditoria host limpo | PZ-AUD-028 verified em `codex/aud-fase5`; job arch-clean-host, gates de manifesto/exatidão, matriz de evidência | Arch descartável real (15 perfis, asset, entrypoints); CI estendido; sem mutação no host | 2026-09-07 |
 
 ## Ledger de execução
+
+2026-10-18 — Codex, `codex/bonsai-observation-age`: separa histórico de estado
+atual; tentativa explícita CLI após gates, UI exige terminal privado. Regressão
+66 testes; helper real KDE/XCB claro/escuro 800×600; host confirma HTTP 404 e
+credencial preservada. Próximo: CI/PR, pacote publicado e recuperação Bonsai.
 
 2026-10-17 — Codex, `codex/bonsai-repairs`, base fa91c09: Bonsai sem
 mascaramento de latest, observações separadas e reparos sob demanda; ver relatório.

@@ -346,7 +346,7 @@ echo "bonsai:$*"
     def test_disabled_provider_blocks_login_before_process_and_preserves_credentials(self):
         manager = CC.Manager()
         before = manager.bonsai_config.read_bytes()
-        with mock.patch.object(manager, "bonsai_auth_probe", return_value={"available": False, "class": "upstream-auth-disabled"}), mock.patch.object(CC.subprocess, "run", side_effect=AssertionError("no process allowed")):
+        with mock.patch.object(manager, "bonsai_auth_probe", return_value={"available": False, "class": "upstream-auth-disabled", "fresh": True, "checkedAt": "2026-10-17T21:43:34-03:00"}), mock.patch.object(CC.subprocess, "run", side_effect=AssertionError("no process allowed")), mock.patch.object(manager, "bonsai_update_observation", side_effect=AssertionError("disabled provider must block first")):
             with self.assertRaisesRegex(RuntimeError, "Login indisponível no provedor"):
                 manager.login("bonsai")
         self.assertEqual(before, manager.bonsai_config.read_bytes())
@@ -386,6 +386,60 @@ echo "bonsai:$*"
         self.assertEqual(before, manager.bonsai_auth_probe_state.read_bytes())
         with self.assertRaisesRegex(RuntimeError, "supported passive"):
             manager._record_bonsai_auth_probe(observed)
+
+        # The same stale observation must not be presented as a current outage.
+        with mock.patch.object(CC.subprocess, "run", side_effect=AssertionError("no process allowed")), mock.patch.object(manager, "bonsai_update_observation", return_value={"available": False, "state": "registry-http-error", "httpStatus": 404}):
+            state = manager.bonsai_info()
+            with self.assertRaises(RuntimeError) as failure:
+                manager.login("bonsai")
+        self.assertIn("disponibilidade atual do provedor não confirmada", str(failure.exception))
+        self.assertIn("HTTP 404", str(failure.exception))
+        self.assertIn(observed["checkedAt"], str(failure.exception))
+        self.assertIn("não comprova estado atual", state["nextAction"])
+        self.assertNotIn("aguarde recuperação", state["nextAction"])
+        self.assertEqual(before, manager.bonsai_auth_probe_state.read_bytes())
+        self.assertEqual(b"credential-store", manager.bonsai_config.read_bytes())
+
+    def test_missing_provider_observation_is_unknown_not_disabled(self):
+        manager = CC.Manager()
+        for update in ({"available": False, "state": "timeout"}, {"available": False, "state": "invalid-response"}):
+            with self.subTest(update=update["state"]), mock.patch.object(CC.subprocess, "run", side_effect=AssertionError("no process allowed")), mock.patch.object(manager, "bonsai_update_observation", return_value=update):
+                state = manager.bonsai_info()
+                with self.assertRaises(RuntimeError) as failure:
+                    manager.login("bonsai")
+                self.assertIn("disponibilidade atual do provedor não confirmada", str(failure.exception))
+                self.assertIn(update["state"], str(failure.exception))
+        self.assertEqual("unknown", state["authProvider"]["currentAvailability"])
+        self.assertFalse(state["authProvider"]["fresh"])
+        self.assertFalse(state["loginAvailable"])
+        self.assertNotIn("upstream-auth-disabled", state["nextAction"])
+
+    def test_stale_outage_does_not_permanently_block_explicit_official_login(self):
+        manager = CC.Manager()
+        manager.data_root.mkdir(parents=True, exist_ok=True)
+        manager.bonsai_auth_probe_state.write_text(json.dumps({
+            "available": False, "class": "upstream-auth-disabled", "httpStatus": 200,
+            "checkedAt": "2026-01-01T00:00:00+00:00", "secretsRedacted": True,
+        }))
+        before = manager.bonsai_config.read_bytes()
+        update = {"available": True, "state": "available", "version": "0.4.19"}
+        with mock.patch.object(manager, "_cached_bonsai_update", return_value=update):
+            state = manager.bonsai_info()
+        self.assertTrue(state["loginAvailable"])
+        self.assertFalse(state["authenticated"])
+        self.assertFalse(state["sessionUsable"])
+        self.assertFalse(state["proxyAvailable"])
+        with mock.patch.object(manager, "bonsai_update_observation", return_value=update), mock.patch.object(CC.subprocess, "run", return_value=mock.Mock(returncode=0)) as run, mock.patch.object(CC.sys.stdin, "isatty", return_value=True), mock.patch.object(CC.sys.stdout, "isatty", return_value=True), mock.patch.object(CC, "open", mock.mock_open(), create=True):
+            self.assertEqual(0, manager.login("bonsai"))
+        run.assert_called_once()
+        self.assertEqual([str(self.bonsai), "login"], run.call_args.args[0])
+        self.assertIs(run.call_args.kwargs["stdin"], run.call_args.kwargs["stdout"])
+        self.assertIs(run.call_args.kwargs["stdout"], run.call_args.kwargs["stderr"])
+        self.assertEqual(before, manager.bonsai_config.read_bytes())
+        with mock.patch.object(manager, "bonsai_update_observation", return_value=update), mock.patch.object(CC.subprocess, "run", side_effect=AssertionError("no process without private TTY")), mock.patch.object(CC.sys.stdin, "isatty", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "terminal privado"):
+                manager.login("bonsai")
+        self.assertEqual(before, manager.bonsai_config.read_bytes())
 
     def test_registry_success_uses_encoded_scoped_package_and_status_is_local(self):
         manager = CC.Manager()

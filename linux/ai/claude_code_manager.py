@@ -643,7 +643,7 @@ function probeHttp() {
         """
         result = self._cached_bonsai_auth_probe()
         result["passiveProbeSupported"] = False
-        result["nextAction"] = "Aguarde canal oficial Bonsai para verificação passiva de login."
+        result["nextAction"] = "Confirme disponibilidade no suporte oficial Bonsai; diagnóstico passivo não testa login."
         result["available"] = False
         return result
 
@@ -654,6 +654,7 @@ function probeHttp() {
     def _cached_bonsai_auth_probe(self) -> dict[str, Any]:
         unknown = {"available": None, "class": "not-probed", "httpStatus": None,
                    "provider": "workos-authkit", "checkedAt": None,
+                   "fresh": False, "currentAvailability": "unknown", "passiveProbeSupported": False,
                    "source": "historical-provider-observation", "secretsRedacted": True}
         try:
             value = json.loads(self.bonsai_auth_probe_state.read_text(encoding="utf-8"))
@@ -671,6 +672,27 @@ function probeHttp() {
                     "currentAvailability": "unknown", "passiveProbeSupported": False}
         except (OSError, ValueError, KeyError, TypeError):
             return unknown
+
+    @staticmethod
+    def _bonsai_provider_recently_disabled(provider: dict[str, Any]) -> bool:
+        return provider.get("class") == "upstream-auth-disabled" and provider.get("fresh") is True
+
+    @staticmethod
+    def _bonsai_login_block_reason(provider: dict[str, Any], update: dict[str, Any]) -> str:
+        # A cached failure cannot prove that an external provider is still down.
+        if Manager._bonsai_provider_recently_disabled(provider):
+            observation = ("Login indisponível no provedor: upstream-auth-disabled "
+                           f"(última observação: {provider.get('checkedAt')}). ")
+        else:
+            observation = "Login gerenciado indisponível: disponibilidade atual do provedor não confirmada. "
+            if provider.get("checkedAt"):
+                observation += (f"Última observação histórica: {provider['checkedAt']} "
+                                f"({provider.get('class')}); não comprova estado atual. ")
+        if update.get("available") is False:
+            http = f" (HTTP {update['httpStatus']})" if update.get("httpStatus") else ""
+            observation += f"Atualização CLI indisponível: {update.get('state')}{http}. "
+        return (observation + "Sem verificação passiva suportada; consulte https://docs.trybons.ai/bonsai-cli e suporte Bonsai. "
+                "Atualizar diagnóstico consulta npm, não testa login. Credenciais preservadas.")
 
     def _cached_bonsai_update(self) -> dict[str, Any]:
         try:
@@ -762,12 +784,10 @@ try {
             "version": version,
             "updateCheck": update_check,
             "nextAction": (
-                "Login indisponível no provedor; aguarde recuperação do Bonsai. Credenciais preservadas."
-                if provider.get("class") == "upstream-auth-disabled" else
-                "Atualização indisponível: " + update["state"] + " HTTP " + str(update.get("httpStatus", "n/a")) + "; consulte https://www.trybons.ai. Credenciais preservadas."
-                if not update["available"] else
+                self._bonsai_login_block_reason(provider, update)
+                if self._bonsai_provider_recently_disabled(provider) or not update["available"] else
                 "Runner mascara atualização; repare atalhos pelo PhaseZero e use canal oficial."
-                if update_check == "forged" else "Atualize diagnóstico antes de login."
+                if update_check == "forged" else "Execute bonsai login em terminal privado para tentar autenticação; disponibilidade do provedor ainda não comprovada."
             ),
             "credentialStorePresent": store_present,
             "authenticated": None if credential.get("state") in {"missing", "valid-local-token"} else False,
@@ -779,7 +799,10 @@ try {
             "proxyGate": "official-api-auth-contract-unverified",
             "observedAt": now_iso(),
             "source": "phasezero-manager/local-credential-metadata/provider-cache",
-            "loginAvailable": bool(path) and provider.get("available") is True and update["available"] and update_check != "forged",
+            # Readiness for an explicit CLI attempt, never proof of authentication.
+            "loginAvailable": (bool(path) and not self._bonsai_provider_recently_disabled(provider)
+                               and update["available"] and update_check != "forged"),
+            "loginRequiresPrivateTerminal": True,
             "snapshotConsent": "explicit-directory-and-per-execution-consent-required",
             "managerPath": str(Path(__file__).resolve()),
             "commandPath": str(self.local_bin / "bonsai"),
@@ -1870,11 +1893,11 @@ esac
                 raise RuntimeError("Claude Code missing")
             return subprocess.run([claude, "/login"], check=False).returncode
         provider = self.bonsai_auth_probe()
-        if not provider["available"]:
-            raise RuntimeError("Login indisponível no provedor: " + provider["class"] + "; aguarde recuperação do Bonsai. Credenciais preservadas.")
+        if self._bonsai_provider_recently_disabled(provider):
+            raise RuntimeError(self._bonsai_login_block_reason(provider, self._cached_bonsai_update()))
         update = self.bonsai_update_observation()
         if not update["available"]:
-            raise RuntimeError("Atualização Bonsai indisponível: " + update["state"] + " HTTP " + str(update.get("httpStatus", "n/a")) + "; contate Bonsai; credenciais preservadas.")
+            raise RuntimeError(self._bonsai_login_block_reason(provider, update))
         bonsai = self._bonsai_upstream()
         if not bonsai or self._bonsai_update_check(bonsai) == "forged":
             raise RuntimeError("Runner Bonsai inválido; reinstale pelo canal oficial. Credenciais preservadas.")

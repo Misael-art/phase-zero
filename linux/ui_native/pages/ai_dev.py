@@ -478,12 +478,36 @@ class AiDevPage(BasePage):
     def _on_status_ready(self, action_id: str, _stdout: str, parsed: object) -> None:
         if action_id == "private.bonsai.status" and isinstance(parsed, dict):
             provider = parsed.get("authProvider", {})
-            disabled = provider.get("class") == "upstream-auth-disabled"
-            self.bonsai_state.setText("Login indisponível no provedor" if disabled else "Bonsai indisponível para execução")
-            self.bonsai_login.setEnabled(parsed.get("loginAvailable") is True)
+            disabled = provider.get("class") == "upstream-auth-disabled" and provider.get("fresh") is True
+            unknown = provider.get("currentAvailability", "unknown") == "unknown" and not disabled
+            attempt_ready = parsed.get("loginAvailable") is True
+            if attempt_ready:
+                label = "Login disponível para tentativa no terminal"
+            elif disabled:
+                label = "Login indisponível no provedor"
+            elif unknown:
+                label = "Login indisponível; provedor sem verificação atual"
+            else:
+                label = "Bonsai indisponível para execução"
+            self.bonsai_state.setText(label)
+            self.bonsai_login.setEnabled(attempt_ready and parsed.get("loginRequiresPrivateTerminal", True) is False)
+            self.bonsai_login.setToolTip("Execute bonsai login em terminal privado; códigos não passam pelo painel.")
             expired = str(parsed.get("credentialStatus", {}).get("state", "")).startswith("expired")
-            self.bonsai_reason.setText("Credencial vencida; renovação necessária." if expired else "Autenticação ainda não comprovada.")
-            self.bonsai_next.setText("Próximo passo: aguarde recuperação do Bonsai e atualize diagnóstico. Credenciais preservadas." if disabled else "Próximo passo: consulte diagnóstico; confirme disponibilidade no canal oficial Bonsai.")
+            reason = "Credencial vencida; renovação necessária." if expired else "Autenticação ainda não comprovada."
+            if unknown:
+                reason += " Observação anterior não comprova disponibilidade atual."
+            update = parsed.get("updateObservation", {})
+            if update.get("available") is False or update.get("state") == "registry-http-error":
+                http = f" (HTTP {update['httpStatus']})" if update.get("httpStatus") else ""
+                reason += f" Atualização indisponível{http}."
+            self.bonsai_reason.setText(reason)
+            next_step = (
+                "Próximo passo: execute bonsai login em terminal privado. Tentativa explícita não inicia inferência."
+                if attempt_ready else
+                "Próximo passo: confirme disponibilidade no suporte oficial Bonsai. "
+                "Diagnóstico consulta npm, não testa login. Credenciais preservadas."
+            )
+            self.bonsai_next.setText(next_step)
             self.bonsai_details.setText(json.dumps({"route": "bonsai/direct", **parsed}, ensure_ascii=False, indent=2))
             return
         if action_id == _BRIDGE_STATUS_ID and isinstance(parsed, dict):

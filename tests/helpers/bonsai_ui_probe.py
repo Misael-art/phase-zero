@@ -22,18 +22,27 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     page = window.registry.page_for("IA & Dev")
     requested = []
     page.request_action = requested.append
-    page._on_status_ready("private.bonsai.status", "", {
+    observed = {
         "installed": True, "authenticated": False, "sessionUsable": False,
         "proxyAvailable": False, "loginAvailable": False,
         "credentialStatus": {"state": "expired-refresh-required"},
-        "authProvider": {"class": "upstream-auth-disabled", "source": "provider-cache"},
+        "authProvider": {"class": "upstream-auth-disabled", "source": "provider-cache", "fresh": True, "currentAvailability": "unknown"},
         "updateObservation": {"state": "registry-http-error", "httpStatus": 404},
-    })
+    }
+    page._on_status_ready("private.bonsai.status", "", observed)
     app.processEvents()
     assert (window.width(), window.height()) == (800, 600)
     assert page.bonsai_state.text() == "Login indisponível no provedor"
     assert "vencida" in page.bonsai_reason.text()
     assert "Próximo passo" in page.bonsai_next.text()
+    assert not page.bonsai_login.isEnabled()
+    observed["authProvider"]["fresh"] = False
+    page._on_status_ready("private.bonsai.status", "", observed)
+    app.processEvents()
+    assert page.bonsai_state.text() == "Login indisponível; provedor sem verificação atual"
+    assert "não comprova disponibilidade atual" in page.bonsai_reason.text()
+    assert "HTTP 404" in page.bonsai_reason.text()
+    assert "não testa login" in page.bonsai_next.text()
     assert not page.bonsai_login.isEnabled()
     area = page.findChildren(QScrollArea)[0]
     area.ensureWidgetVisible(page.bonsai_login)
@@ -48,6 +57,20 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     QTest.mouseClick(diagnose, Qt.LeftButton)
     assert [action.id for action in requested] == ["ai.bonsai-diagnose"]
     assert not page.bonsai_details.isVisible()
+    # Registry recovery permits a CLI attempt, but this panel has no private TTY.
+    observed["loginAvailable"] = True
+    observed["loginRequiresPrivateTerminal"] = True
+    observed["updateObservation"] = {"available": True, "state": "available"}
+    page._on_status_ready("private.bonsai.status", "", observed)
+    app.processEvents()
+    assert page.bonsai_state.text() == "Login disponível para tentativa no terminal"
+    assert "terminal privado" in page.bonsai_next.text()
+    assert not page.bonsai_login.isEnabled()
+    QTest.mouseClick(page.bonsai_login, Qt.LeftButton)
+    assert [action.id for action in requested] == ["ai.bonsai-diagnose"]
+    observed["loginAvailable"] = False
+    observed["updateObservation"] = {"state": "registry-http-error", "httpStatus": 404}
+    page._on_status_ready("private.bonsai.status", "", observed)
     QTest.mouseClick(window.mode_switch, Qt.LeftButton)
     app.processEvents()
     assert page.bonsai_details.isVisible()
