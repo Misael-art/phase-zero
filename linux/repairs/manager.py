@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-REPAIRS = {"microfone": ("Reparar microfone", "audio-input-microphone"), "entrada": ("Reparar entrada", "input-touchpad")}
+REPAIRS = {"microfone": ("Reparar microfone", "audio-input-microphone"), "entrada": ("Reparar entrada", "input-touchpad"), "terminal": ("Reparar terminal e sessão", "utilities-terminal")}
 
 
 def install_shortcuts():
@@ -25,7 +25,7 @@ def install_shortcuts():
             target = directory / ("phasezero-reparo-" + key + ".desktop")
             content = ("[Desktop Entry]\nType=Application\nName=" + label + "\nIcon=" + icon +
                        '\nExec=python3 "' + str(ROOT / "linux/repairs/manager.py") + '" run ' + key +
-                       " --confirm\nTerminal=false\nCategories=System;Utility;\nX-PhaseZero-Managed=true\n")
+                       " --confirm\nTerminal=false\nCategories=System;\nX-PhaseZero-Managed=true\n")
             if target.is_symlink():
                 raise RuntimeError("Atalho symlink preservado: " + str(target))
             if target.exists() and "X-PhaseZero-Managed=true" not in target.read_text():
@@ -46,7 +46,8 @@ def install_shortcuts():
 def status():
     return {"schemaVersion": 1, "automaticRepair": False,
             "microfone": {"available": bool(shutil.which("pactl") and shutil.which("systemctl"))},
-            "entrada": {"available": Path("/sys/devices/platform/AMDI0010:01").is_dir(), "adminRequired": True}}
+            "entrada": {"available": Path("/sys/devices/platform/AMDI0010:01").is_dir(), "adminRequired": True},
+            "terminal": {"available": bool(shutil.which("systemctl")), "adminRequired": False}}
 
 
 def main():
@@ -62,11 +63,12 @@ def main():
     if args.action == "status":
         print(json.dumps(observed)); return 0
     if not args.repair:
-        parser.error("Selecione microfone ou entrada")
+        parser.error("Selecione microfone, entrada ou terminal")
     if not observed[args.repair]["available"]:
         print("Reparo indisponível: hardware ou dependência ausente", file=__import__("sys").stderr); return 69
-    message = ("Reparo sob demanda pode interromper áudio." if args.repair == "microfone" else
-               "Reparo sob demanda pode interromper touch e controles; exige autorização administrativa.")
+    message = {"microfone": "Reparo sob demanda pode interromper áudio.",
+               "entrada": "Reparo sob demanda pode interromper touch e controles; exige autorização administrativa.",
+               "terminal": "Arquiva fixtures de testes inativas com backup e direciona novos temporários para disco. Preserva aplicações abertas."}[args.repair]
     if not args.yes:
         if not args.confirm or not shutil.which("kdialog"):
             print(message + " Execute com --confirm (gráfico) ou --yes."); return 2

@@ -19,7 +19,7 @@ def test_install_shortcuts_is_idempotent_and_never_runs_repair(tmp_path, monkeyp
         assert before == after
     for directory in (tmp_path / "Desktop", tmp_path / "data/applications"):
         entries = list(directory.glob("*.desktop"))
-        assert len(entries) == 2
+        assert len(entries) == 3
         for entry in entries:
             text = entry.read_text()
             assert " --confirm" in text
