@@ -87,6 +87,8 @@ CI exposed a Qt test isolation issue: changing the application stylesheet in the
 shared pytest process repolished widgets retained by unrelated tests and hung.
 The themed public-control test now runs in a fresh bounded subprocess with
 isolated HOME/XDG; production behavior and test assertions are retained.
+ShellCheck 0.9 also required an explicit `if` for operation-ID validation;
+changed shell files passed both 0.9.0 and 0.11.0 locally after that correction.
 
 Local harness pitfalls encountered: the existing shell suite rejects `/home/`
 inside a fixture path, reproduced on clean main; long TMPDIR also exceeds Unix

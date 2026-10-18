@@ -2772,9 +2772,10 @@ provision_integrity() {
             *) pz_error "unknown integrity option: $1"; return 1 ;;
         esac
     done
-    [[ "$operation_id" =~ ^op-[A-Za-z0-9._-]+$ ]] && [[ "$operation_id" != *..* ]] || {
-        pz_error "valid --operation-id required"; return 1;
-    }
+    if [[ ! "$operation_id" =~ ^op-[A-Za-z0-9._-]+$ || "$operation_id" == *..* ]]; then
+        pz_error "valid --operation-id required"
+        return 1
+    fi
     local args=(check --operation-id "$operation_id")
     [ "$guest_files" = "0" ] || args+=(--guest-files)
     provision_inventory --json | python3 "$PZ_ROOT/linux/windows-vm/storage.py" "${args[@]}"
