@@ -40,3 +40,16 @@ def test_unmanaged_desktop_is_preserved(tmp_path, monkeypatch):
     with patch.object(repairs.Path, "home", return_value=tmp_path), patch.object(repairs.shutil, "which", return_value=None), pytest.raises(RuntimeError, match="preservado"):
         repairs.install_shortcuts()
     assert target.read_text() == "user work"
+
+
+def test_microphone_refuses_unobserved_capture_profile(tmp_path, monkeypatch):
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    pactl = binary / "pactl"
+    pactl.write_text("#!/bin/sh\nprintf '%s' '[{\"name\":\"output-only\",\"profiles\":{\"off\":{\"sources\":0,\"available\":true}}}]'\n")
+    pactl.chmod(0o755)
+    monkeypatch.setenv("PATH", str(binary) + ":/usr/bin:/bin")
+    monkeypatch.setenv("PZ_REPAIR_NONINTERACTIVE", "1")
+    result = subprocess.run(["bash", str(ROOT / "linux/repairs/reparo-microfone.sh")], text=True, capture_output=True)
+    assert result.returncode == 69
+    assert "Nenhum perfil de captura disponível" in result.stdout
