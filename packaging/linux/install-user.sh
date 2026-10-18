@@ -94,3 +94,6 @@ echo "Versão:  $VERSION"
 echo "Runtime: $RELEASE_DIR"
 echo "Comando: $BIN_HOME/phasezero-control-center"
 echo "Desktop: $APP_DIR/io.phasezero.ControlCenter.desktop"
+
+# Default on-demand repair launchers; never execute repairs during install.
+python3 "$CURRENT_LINK/linux/repairs/manager.py" install

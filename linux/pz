@@ -1076,6 +1076,7 @@ main() {
     shift 2>/dev/null || true
     case "$cmd" in
         install)       cmd_install "$@" ;;
+        repair)        exec python3 "$PZ_ROOT/linux/repairs/manager.py" "$@" ;;
         steamdeck)     cmd_steamdeck "$@" ;;
         flatpak)       cmd_flatpak "$@" ;;
         windows-vm|windows|winvm|win-vm) cmd_windows_vm "$@" ;;

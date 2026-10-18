@@ -66,6 +66,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if not args.smoke_test:
+        from linux.repairs.manager import install_shortcuts
+        try:
+            install_shortcuts()
+        except (OSError, RuntimeError) as exc:
+            print(f"PhaseZero: atalhos de reparo indisponíveis: {exc}", file=sys.stderr)
     _init_icon_theme()
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)

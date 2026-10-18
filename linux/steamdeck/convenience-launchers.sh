@@ -10,6 +10,7 @@ BIN_DIR="${PZ_LOCAL_BIN:-$HOME/.local/bin}"
 APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 
 write_launchers() {
+    python3 "$PZ_ROOT/linux/repairs/manager.py" install
     local old_selector
     install -d "$BIN_DIR" "$APP_DIR"
     pz_write_managed_file "$BIN_DIR/phasezero-return" user <<EOF
