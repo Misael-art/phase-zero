@@ -3133,3 +3133,25 @@ gerenciador; nenhuma ação entrou no catálogo público. Release e promoção d
 cartão para pronto dependem desse gate. O gerenciador recusa configuração
 incompleta e arquitetura diferente de Linux x86_64; Windows exige binário
 próprio e gate G2.
+
+### PXA-010: confirmação do plugin na conta real — 2026-10-18
+
+No Chrome já autenticado pelo operador, foi criado e conectado o plugin privado
+**PhaseZero Projeto** ao túnel ativo, separado do plugin preexistente **Codex
+Native2**. A interface descobriu `project_status`, `project_list_files`,
+`project_read_file` e `project_write_file` (Write1/Read3). No chat de teste,
+`project_status` e `project_read_file` de `README.md` retornaram a branch
+`codex/chatgpt-project-mcp` e árvore inicialmente limpa. Em seguida,
+`project_write_file` criou `docs/chatgpt-tool-proof-20261018.txt` com 26 bytes;
+o arquivo e seu SHA-256 foram conferidos no host, e o gerenciador passou a
+`toolCallProven:true`. O arquivo descartável foi removido. Nenhum outro
+arquivo do repositório foi alterado pelo teste.
+
+O plugin usa a permissão de conta **Permitir ações de baixo risco**. A criação
+solicitada explicitamente no chat não exibiu um segundo diálogo de aprovação.
+Logo, esta prova confirma chamada real de leitura e escrita pela conta, mas
+**não** comprova confirmação interativa separada para toda gravação. Testar
+substituição de arquivo e política de aprovação antes de marcar esse requisito
+como aceito. Também faltam teste de parada/retomada do túnel, revalidação após
+reinício e verificação independente do plugin antigo. Sem promoção ao catálogo
+público ou release por esta prova isolada.
