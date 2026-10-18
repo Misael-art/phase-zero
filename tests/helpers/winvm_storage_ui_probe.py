@@ -33,7 +33,8 @@ def read(self, request_id, args, *, timeout_ms):
         QTimer.singleShot(50, lambda: self.finished_ok.emit(request_id, json.dumps(observations[request_id])))
 
 with patch.object(_PzReader, "run", read):
-    dialog = ImageManagerDialog(root, CommandRunner(root), {a.id: a for a in build_catalog(root)})
+    advanced = "--advanced" in sys.argv
+    dialog = ImageManagerDialog(root, CommandRunner(root), {a.id: a for a in build_catalog(root)}, advanced=advanced)
     dialog.resize(800, min(600, app.primaryScreen().availableGeometry().height()))
     dialog.show()
     app.processEvents()
@@ -47,8 +48,12 @@ with patch.object(_PzReader, "run", read):
             def finish():
                 try:
                     assert check.isEnabled()
-                    assert any("Estrutura e arquivos essenciais verificados" in lab.text()
-                               for lab in modal.findChildren(QLabel))
+                    text = "\n".join(lab.text() for lab in modal.findChildren(QLabel))
+                    expected = payload["instances"][0]["integrity"]["message"]
+                    assert expected in text
+                    assert "256.0 GB" in text and "snapshot" in text
+                    if advanced:
+                        assert '"bootVerified": false' in text
                     for button in modal.findChildren(QPushButton):
                         if button.isVisible():
                             assert modal.contentsRect().contains(button.mapTo(modal, button.rect().bottomRight())), button.text()

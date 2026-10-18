@@ -83,6 +83,10 @@ availability), inventory 780×540, light/dark, no horizontal overflow or clipped
 actions. No screen resolution or KDE session change was made by this task.
 Other shell/package/CI gates and installed-package evidence accompany the PR
 and release delivery receipt; they must pass before publication/install claims.
+CI exposed a Qt test isolation issue: changing the application stylesheet in the
+shared pytest process repolished widgets retained by unrelated tests and hung.
+The themed public-control test now runs in a fresh bounded subprocess with
+isolated HOME/XDG; production behavior and test assertions are retained.
 
 Local harness pitfalls encountered: the existing shell suite rejects `/home/`
 inside a fixture path, reproduced on clean main; long TMPDIR also exceeds Unix
