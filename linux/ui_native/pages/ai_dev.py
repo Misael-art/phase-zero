@@ -28,6 +28,7 @@ _PRIMARY_IDS = {
     "ai.claude-install",
     "ai.claude-verify",
     "ai.claude-bonsai-login",
+    "ai.bonsai-diagnose",
     "ai.mcp-sync",
     "ai.compat",
     "ai.memory",
@@ -153,12 +154,12 @@ class AiDevPage(BasePage):
         ), 0, 0)
         cards.addWidget(self._agent_card(
             "Claude",
-            "Claude Code com rota Bonsai isolada",
+            "Cliente Claude Code",
             "claude",
             "ai.claude-install",
             "Reparar",
-            "ai.claude-bonsai-login",
-            "Login Bonsai",
+            "ai.claude-verify",
+            "Verificar",
         ), 0, 1)
         cards.addWidget(self._tool_card(
             "MCPs",
@@ -181,6 +182,7 @@ class AiDevPage(BasePage):
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
         layout.addLayout(cards)
+        layout.addWidget(self._build_bonsai_card())
         layout.addWidget(self._build_bridge_card())
         layout.addWidget(self._build_advanced_connections())
         layout.addWidget(self._build_shortcuts())
@@ -189,6 +191,34 @@ class AiDevPage(BasePage):
         self._layout.addWidget(scroll, 1)
         self.status_loader.status_ready.connect(self._on_status_ready)
         self.status_loader.status_failed.connect(self._on_status_failed)
+
+    def _build_bonsai_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        layout = QVBoxLayout(card)
+        layout.addWidget(SectionHeader("Bonsai", "Serviço externo · uso e proxy sujeitos a gates"))
+        self.bonsai_state = QLabel("Estado ainda não observado")
+        self.bonsai_state.setWordWrap(True)
+        layout.addWidget(self.bonsai_state)
+        diagnose = self._action_button("ai.bonsai-diagnose", "Atualizar diagnóstico", primary=True)
+        if diagnose:
+            layout.addWidget(diagnose)
+        self.bonsai_login = self._action_button("ai.claude-bonsai-login", "Login Bonsai", primary=False)
+        if self.bonsai_login:
+            self.bonsai_login.setEnabled(False)
+            layout.addWidget(self.bonsai_login)
+        self.bonsai_reason = QLabel("Aguarde diagnóstico. Presença de credencial não comprova autenticação.")
+        self.bonsai_reason.setWordWrap(True)
+        layout.addWidget(self.bonsai_reason)
+        self.bonsai_next = QLabel("Próximo passo: atualizar diagnóstico. Execução e proxy indisponíveis.")
+        self.bonsai_next.setWordWrap(True)
+        layout.addWidget(self.bonsai_next)
+        self.bonsai_details = QLabel("")
+        self.bonsai_details.setWordWrap(True)
+        self.bonsai_details.setTextFormat(Qt.PlainText)
+        self._technical_widgets.append(self.bonsai_details)
+        layout.addWidget(self.bonsai_details)
+        return card
 
     def _install_context_status(self) -> None:
         return
@@ -435,6 +465,7 @@ class AiDevPage(BasePage):
         self.state_label.setText("● Verificando…")
         self._set_state("info")
         self.status_loader.fetch_action(action)
+        self.status_loader.fetch("private.bonsai.status", ["ai", "claude", "bonsai-status"])
         self.bridge_card.setVisible(_bridge_opted_in())
         if not self.bridge_card.isHidden() and not self.status_loader.running(_BRIDGE_STATUS_ID):
             self.status_loader.fetch(_BRIDGE_STATUS_ID, [*_BRIDGE_ARGS, "--json", "status"])
@@ -445,6 +476,16 @@ class AiDevPage(BasePage):
         self.state_label.style().polish(self.state_label)
 
     def _on_status_ready(self, action_id: str, _stdout: str, parsed: object) -> None:
+        if action_id == "private.bonsai.status" and isinstance(parsed, dict):
+            provider = parsed.get("authProvider", {})
+            disabled = provider.get("class") == "upstream-auth-disabled"
+            self.bonsai_state.setText("Login indisponível no provedor" if disabled else "Bonsai indisponível para execução")
+            self.bonsai_login.setEnabled(parsed.get("loginAvailable") is True)
+            expired = str(parsed.get("credentialStatus", {}).get("state", "")).startswith("expired")
+            self.bonsai_reason.setText("Credencial vencida; renovação necessária." if expired else "Autenticação ainda não comprovada.")
+            self.bonsai_next.setText("Próximo passo: aguarde recuperação do Bonsai e atualize diagnóstico. Credenciais preservadas." if disabled else "Próximo passo: consulte diagnóstico; confirme disponibilidade no canal oficial Bonsai.")
+            self.bonsai_details.setText(json.dumps({"route": "bonsai/direct", **parsed}, ensure_ascii=False, indent=2))
+            return
         if action_id == _BRIDGE_STATUS_ID and isinstance(parsed, dict):
             self._on_bridge_status(parsed)
             return
@@ -502,6 +543,11 @@ class AiDevPage(BasePage):
             self._set_state("info")
 
     def _on_status_failed(self, action_id: str, message: str) -> None:
+        if action_id == "private.bonsai.status":
+            self.bonsai_login.setEnabled(False)
+            self.bonsai_state.setText("Estado Bonsai indisponível")
+            self.bonsai_next.setText("Próximo passo: atualizar diagnóstico.")
+            return
         if action_id == _BRIDGE_STATUS_ID:
             self._set_bridge_state("● Não foi possível ler o estado. Use Atualizar.", "warning")
             return

@@ -49,6 +49,8 @@ SECRET_FILE_RE = re.compile(
     re.IGNORECASE,
 )
 KNOWN_SHELL_BUILTINS = {".", ":", "source", "test", "[", "printf", "echo", "true", "false"}
+BONSAI_WORKOS_CLIENT_ID = "client_01K2ZG07ZTYR0FQNERK3PS2CB0"
+BONSAI_WORKOS_DEVICE_URL = "https://api.workos.com/user_management/authorize/device"
 BONSAI_ROUTER_URL = "https://go.trybons.ai"
 TRANSIENT_NETWORK_CODES = {
     "EAI_AGAIN",
@@ -413,6 +415,7 @@ class Manager:
         self.router_settings = self.xdg_config / "phasezero/9router/settings.json"
         self.repo_root = Path(__file__).resolve().parents[2]
         self.router_manager = Path(os.environ.get("PZ_9ROUTER_MANAGER", self.repo_root / "linux/ai/9router-manager.sh"))
+        self.bonsai_auth_probe_state = self.data_root / "bonsai-auth-provider.json"
         self.preflight_log = self.data_root / "preflight-events.jsonl"
 
     @staticmethod
@@ -634,13 +637,122 @@ function probeHttp() {
             "auth": auth,
         }
 
+    def bonsai_auth_probe(self) -> dict[str, Any]:
+        """Probe device login without exposing code/URL and without opening a browser."""
+        request = urllib.request.Request(
+            BONSAI_WORKOS_DEVICE_URL,
+            data=json.dumps({"client_id": BONSAI_WORKOS_CLIENT_ID, "scope": "openid email profile"}).encode(),
+            headers={"Content-Type": "application/json", "User-Agent": "phasezero-bonsai-auth-probe/1"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=8) as response:
+                http_status = response.status
+                payload = json.loads(response.read(256 * 1024))
+            verification = str(payload.get("verification_uri_complete") or "") if isinstance(payload, dict) else ""
+            parsed = urllib.parse.urlparse(verification)
+            if parsed.scheme != "https" or not parsed.hostname or not parsed.hostname.endswith(".authkit.app"):
+                result = {"available": False, "class": "upstream-auth-invalid-response", "httpStatus": http_status, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
+            else:
+                page_request = urllib.request.Request(verification, headers={"User-Agent": "phasezero-bonsai-auth-probe/1"})
+                with urllib.request.urlopen(page_request, timeout=8) as page:
+                    body = page.read(256 * 1024).decode("utf-8", errors="replace").lower()
+                    page_status = page.status
+                disabled = "authentication is disabled for this application" in body
+                valid_page = "<form" in body and ("sign in" in body or "log in" in body)
+                result = {
+                    "available": not disabled and valid_page and page_status == 200,
+                    "class": "upstream-auth-disabled" if disabled else "available" if valid_page and page_status == 200 else "upstream-auth-invalid-response",
+                    "httpStatus": page_status,
+                    "provider": "workos-authkit",
+                    "checkedAt": now_iso(),
+                    "secretsRedacted": True,
+                }
+        except urllib.error.HTTPError as exc:
+            result = {"available": False, "class": "upstream-auth-http", "httpStatus": exc.code, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
+        except (OSError, urllib.error.URLError, TimeoutError, ValueError, UnicodeError):
+            result = {"available": False, "class": "upstream-auth-unreachable", "httpStatus": None, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
+        self._record_bonsai_auth_probe(result)
+        return result
+
+    def _record_bonsai_auth_probe(self, result: dict[str, Any]) -> None:
+        self.data_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(self.data_root, 0o700)
+        atomic_json(self.bonsai_auth_probe_state, result, 0o600)
+
+    def _cached_bonsai_auth_probe(self) -> dict[str, Any]:
+        try:
+            value = json.loads(self.bonsai_auth_probe_state.read_text(encoding="utf-8"))
+            if isinstance(value, dict) and value.get("secretsRedacted") is True:
+                return value
+        except (OSError, json.JSONDecodeError):
+            pass
+        return {"available": None, "class": "not-probed", "httpStatus": None, "provider": "workos-authkit", "checkedAt": None, "secretsRedacted": True}
+
+    def bonsai_credential_status(self) -> dict[str, Any]:
+        if not self.bonsai_config.is_file():
+            return {"authenticated": None, "state": "missing", "refreshPresent": False, "apiKeyPresent": False, "secretsRedacted": True}
+        node = os.environ.get("PZ_BONSAI_NODE_BIN") or str(self.data_root / "runtime/node-lts/bin/node")
+        if not Path(node).is_file():
+            return {"authenticated": False, "state": "runtime-unavailable", "refreshPresent": None, "apiKeyPresent": None, "secretsRedacted": True}
+        script = r'''
+const fs=require("node:fs"), crypto=require("node:crypto");
+try {
+  const raw=fs.readFileSync(process.argv[1]);
+  const iv=raw.subarray(0,16);
+  if (raw[16]!==58) throw new Error("invalid-store");
+  const encryptionKey=crypto.scryptSync("bonsai-cli","salt",32).toString("hex").slice(0,32);
+  const key=crypto.pbkdf2Sync(encryptionKey,iv.toString(),10000,32,"sha512");
+  const decipher=crypto.createDecipheriv("aes-256-cbc",key,iv);
+  const value=JSON.parse(Buffer.concat([decipher.update(raw.subarray(17)),decipher.final()]).toString("utf8"));
+  const access=typeof value.accessToken==="string"&&value.accessToken.length>0;
+  const refresh=typeof value.refreshToken==="string"&&value.refreshToken.length>0;
+  const unexpired=access&&typeof value.expiresAt==="number"&&Date.now()<value.expiresAt;
+  console.log(JSON.stringify({authenticated:unexpired,state:unexpired?"valid-local-token":refresh?"expired-refresh-required":"expired-no-refresh",refreshPresent:refresh,apiKeyPresent:typeof value.apiKey==="string"&&value.apiKey.length>0,secretsRedacted:true}));
+} catch (_) { console.log(JSON.stringify({authenticated:false,state:"invalid-store",refreshPresent:null,apiKeyPresent:null,secretsRedacted:true})); }
+'''
+        rc, out, _ = run_capture([node, "-e", script, str(self.bonsai_config)], timeout=8)
+        if rc == 0:
+            try:
+                value = json.loads(out)
+                if isinstance(value, dict) and value.get("secretsRedacted") is True:
+                    return value
+            except json.JSONDecodeError:
+                pass
+        return {"authenticated": False, "state": "probe-failed", "refreshPresent": None, "apiKeyPresent": None, "secretsRedacted": True}
+
+    def bonsai_update_observation(self) -> dict[str, Any]:
+        result = {"available": False, "state": "unavailable", "source": "https://registry.npmjs.org/@bonsai-ai/cli/latest", "observedAt": now_iso()}
+        try:
+            with urllib.request.urlopen(result["source"], timeout=3) as response:
+                payload = json.loads(response.read(65536))
+            version = payload.get("version") if isinstance(payload, dict) else None
+            if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", version):
+                result["state"] = "invalid-response"
+            else:
+                result.update(available=True, state="available", version=version)
+        except urllib.error.HTTPError as exc:
+            result.update(state="registry-http-error", httpStatus=exc.code)
+        except (TimeoutError, OSError, urllib.error.URLError):
+            result["state"] = "timeout-or-unreachable"
+        except (ValueError, UnicodeError):
+            result["state"] = "invalid-response"
+        return result
+
     def bonsai_info(self) -> dict[str, Any]:
-        path = command_path("bonsai")
+        path = self._bonsai_upstream()
         version = ""
         if path:
-            rc, out, _ = run_capture([path, "--version"], timeout=8)
-            if rc == 0:
-                version = out.strip().splitlines()[0] if out.strip() else ""
+            manifest = Path(path).resolve().parent.parent / "package.json"
+            try:
+                package = json.loads(manifest.read_text())
+                if package.get("name") == "@bonsai-ai/cli":
+                    version = str(package.get("version", ""))
+            except (OSError, ValueError):
+                pass
+        credential = self.bonsai_credential_status()
+        provider = self._cached_bonsai_auth_probe()
+        update = self.bonsai_update_observation()
         store_dir = self.bonsai_config.parent
         store_present = self.bonsai_config.is_file() and self.bonsai_config.stat().st_size > 0
         directory_mode = stat.S_IMODE(store_dir.stat().st_mode) if store_dir.is_dir() else None
@@ -656,12 +768,24 @@ function probeHttp() {
             "version": version,
             "updateCheck": update_check,
             "nextAction": (
-                "remova o runner que fixa a versão e reinstale pelo canal oficial (https://www.trybons.ai)"
-                if update_check == "forged"
-                else ""
+                "Login indisponível no provedor; aguarde recuperação do Bonsai. Credenciais preservadas."
+                if provider.get("class") == "upstream-auth-disabled" else
+                "Atualização indisponível: HTTP " + str(update.get("httpStatus", "n/a")) + "; consulte https://www.trybons.ai. Credenciais preservadas."
+                if not update["available"] else
+                "Runner mascara atualização; repare atalhos pelo PhaseZero e use canal oficial."
+                if update_check == "forged" else "Atualize diagnóstico antes de login."
             ),
             "credentialStorePresent": store_present,
-            "authenticated": True if store_present else None,
+            "authenticated": False if store_present else None,
+            "credentialStatus": credential,
+            "authProvider": provider,
+            "updateObservation": update,
+            "sessionUsable": False,
+            "proxyAvailable": False,
+            "proxyGate": "official-api-auth-contract-unverified",
+            "observedAt": now_iso(),
+            "source": "phasezero-manager/local-credential-metadata/provider-cache",
+            "loginAvailable": provider.get("available") is True and update["available"] and update_check != "forged",
             "snapshotConsent": "interactive-upstream",
             "credentialStorePermissions": {
                 "directoryMode": f"{directory_mode:04o}" if directory_mode is not None else None,
@@ -889,7 +1013,7 @@ function probeHttp() {
         if claude["auth"]["loggedIn"] and claude["auth"]["apiProvider"] == "firstParty":
             return "subscription"
         bonsai = self.bonsai_info()
-        if bonsai["installed"] and bonsai["credentialStorePresent"]:
+        if bonsai["installed"] and bonsai["authenticated"]:
             return "bonsai"
         if self.router_status()["healthy"]:
             return "proxy"
@@ -945,7 +1069,7 @@ function probeHttp() {
                     "claudeAiConnectors": True,
                 },
                 "bonsai": {
-                    "ready": bool(bonsai["installed"] and bonsai["credentialStorePresent"]),
+                    "ready": bool(bonsai["installed"] and bonsai["authenticated"]),
                     "authentication": "external-bearer-injected-by-bonsai",
                     "claudeAiConnectors": False,
                     "connectorsWarningExpected": False,
@@ -1321,6 +1445,10 @@ function probeHttp() {
         bonsai_real = str(Path(bonsai).resolve())
         pz_cli = self.repo_root / "linux/pz"
         wrappers: dict[str, str] = {
+            "phasezero-ai-bonsai": f"""#!/usr/bin/env bash
+set -euo pipefail
+exec bash {shlex.quote(str(pz_cli))} ai claude bonsai-status
+""",
             "claude-subscription": f"""#!/usr/bin/env bash
 set -euo pipefail
 exec bash {shlex.quote(str(pz_cli))} ai claude run subscription --cwd "$PWD" -- "$@"
@@ -1337,11 +1465,17 @@ exec bash {shlex.quote(str(pz_cli))} ai claude run bonsai --cwd "$PWD" -- "$@"
 set -euo pipefail
 upstream={shlex.quote(bonsai_real)}
 pz={shlex.quote(str(pz_cli))}
-if [ "${{1:-}}" != "start" ]; then
-  exec "$upstream" "$@"
+if [ "${{1:-}}" = "login" ]; then
+  exec bash "$pz" ai claude login bonsai
 fi
+case "${{1:-status}}" in
+  --version|version) exec bash "$pz" ai claude bonsai-version ;;
+  status) exec bash "$pz" ai claude bonsai-status ;;
+  start) ;;
+  *) echo "PhaseZero Bonsai: use status, login ou start --cwd <diretório>." >&2; exit 2 ;;
+esac
 shift
-cwd="$PWD"
+cwd=""
 route="${{BONSAI_ROUTE:-direct}}"
 allow_sensitive=false
 args=()
@@ -1360,6 +1494,7 @@ while [ "$#" -gt 0 ]; do
     *) args+=("$1"); shift ;;
   esac
 done
+[ -n "$cwd" ] || {{ echo "Bonsai exige --cwd <diretório escolhido>. Pode acessar/enviar dados do workspace: https://www.trybons.ai/terms. Execução indisponível sem concessão por consumidor." >&2; exit 2; }}
 case "$route" in
   direct|bonsai)
     command=(bash "$pz" ai claude run bonsai --cwd "$cwd")
@@ -1385,6 +1520,10 @@ esac
                 continue
             tx.backup(target)
             atomic_text(target, content, 0o700)
+        desktop = self.xdg_data / "applications/phasezero-ai-bonsai.desktop"
+        if not desktop.exists() or "X-PhaseZero-Managed=true" in desktop.read_text():
+            tx.backup(desktop)
+            atomic_text(desktop, "[Desktop Entry]\nType=Application\nName=PhaseZero — Bonsai\nComment=Diagnóstico Bonsai; execução exige diretório e consentimento\nExec=\"" + str(self.local_bin / "phasezero-ai-bonsai") + "\"\nTerminal=true\nIcon=phasezero-bonsai\nCategories=Development;\nX-PhaseZero-Managed=true\n", 0o644)
         return sorted(wrappers)
 
     def _ensure_router_model(self, tx: Transaction) -> str | None:
@@ -1712,16 +1851,50 @@ esac
                 tx.log(f"rollback failure: {rollback_exc}")
             raise
 
+    def repair_bonsai(self) -> dict[str, Any]:
+        """Repair only entrypoints/PATH; never install, login or restart services."""
+        tx = Transaction(self.data_root, "repair-bonsai")
+        upstream = self._bonsai_upstream() or "/nonexistent/bonsai"
+        try:
+            wrappers = self._write_launchers(tx, upstream)
+            profiles = self._ensure_shim_path_precedence(tx)
+            tx.manifest["status"] = "complete"
+            tx.save()
+            return {"ok": True, "wrappers": wrappers, "profiles": profiles, "manifest": str(tx.manifest_path)}
+        except Exception:
+            tx.save()
+            restore_manifest(tx.manifest_path, force=True)
+            raise
+
     def login(self, route: str) -> int:
         if route == "subscription":
             claude = command_path("claude")
             if not claude:
                 raise RuntimeError("Claude Code missing")
             return subprocess.run([claude, "/login"], check=False).returncode
-        bonsai = command_path("bonsai")
-        if not bonsai:
-            raise RuntimeError("Bonsai missing")
-        return subprocess.run([bonsai, "login"], check=False).returncode
+        provider = self.bonsai_auth_probe()
+        if not provider["available"]:
+            raise RuntimeError("Login indisponível no provedor: " + provider["class"] + "; aguarde recuperação do Bonsai. Credenciais preservadas.")
+        update = self.bonsai_update_observation()
+        if not update["available"]:
+            raise RuntimeError("Atualização Bonsai indisponível: " + update["state"] + " HTTP " + str(update.get("httpStatus", "n/a")) + "; contate Bonsai; credenciais preservadas.")
+        bonsai = self._bonsai_upstream()
+        if not bonsai or self._bonsai_update_check(bonsai) == "forged":
+            raise RuntimeError("Runner Bonsai inválido; reinstale pelo canal oficial. Credenciais preservadas.")
+        with tempfile.TemporaryDirectory(prefix="pz-bonsai-login-") as raw:
+            backup = Path(raw) / "config"
+            existed = self.bonsai_config.is_file()
+            if existed:
+                shutil.copy2(self.bonsai_config, backup)
+            try:
+                rc = subprocess.run([bonsai, "login"], check=False).returncode
+            except BaseException:
+                if existed:
+                    shutil.copy2(backup, self.bonsai_config)
+                raise
+            if rc != 0 and existed:
+                shutil.copy2(backup, self.bonsai_config)
+            return rc
 
     def run_route(self, route: str, args: list[str], cwd: str | None = None, allow_sensitive: bool = False) -> int:
         if route not in {"subscription", "bonsai", "proxy"}:
@@ -1757,6 +1930,10 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--allow-sensitive-upload", action="store_true")
     login = sub.add_parser("login")
     login.add_argument("route", choices=("subscription", "bonsai"))
+    sub.add_parser("repair-bonsai")
+    sub.add_parser("bonsai-status")
+    sub.add_parser("bonsai-probe")
+    sub.add_parser("bonsai-version")
     run = sub.add_parser("run")
     run.add_argument("route", choices=("subscription", "bonsai", "proxy"))
     run.add_argument("--proxy", choices=("9router",))
@@ -1784,7 +1961,24 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         manager = Manager()
         command = args.command or "status"
-        if command == "status":
+        if command == "repair-bonsai":
+            result = manager.repair_bonsai()
+        elif command == "bonsai-version":
+            upstream = manager._bonsai_upstream()
+            if not upstream:
+                raise RuntimeError("Bonsai CLI não instalado")
+            manifest = Path(upstream).resolve().parent.parent / "package.json"
+            package = json.loads(manifest.read_text())
+            if package.get("name") != "@bonsai-ai/cli":
+                raise RuntimeError("Versão Bonsai não observada; consulte bonsai status")
+            print(package["version"])
+            return 0
+        elif command == "bonsai-probe":
+            manager.bonsai_auth_probe()
+            result = manager.bonsai_info()
+        elif command == "bonsai-status":
+            result = manager.bonsai_info()
+        elif command == "status":
             result = manager.status(getattr(args, "auth", None))
         elif command in {"install", "setup", "repair"}:
             result = manager.install(args.auth, args.proxy, args.dry_run, args.yes, args.verbose)

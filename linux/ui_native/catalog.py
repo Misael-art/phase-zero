@@ -640,6 +640,7 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
         ("claude-status", "Claude + Bonsai", "Audita OAuth, rotas isoladas, hooks e conflitos com proxies.", ("ai", "claude", "status"), None),
         ("claude-install", "Reparar Claude + Bonsai", "Aplica instalação transacional com backup e rollback automático.", ("ai", "claude", "install", "--yes"), ("ai", "claude", "install", "--dry-run")),
         ("claude-verify", "Verificar rotas Claude", "Valida assinatura, Bonsai e 9Router sem expor credenciais.", ("ai", "claude", "verify"), None),
+        ("bonsai-diagnose", "Atualizar diagnóstico Bonsai", "Observa provedor de login e atualização; não inicia inferência nem exibe códigos.", ("ai", "claude", "bonsai-probe"), None),
         ("claude-bonsai-login", "Login Bonsai", "Inicia autenticação interativa; sessões continuam com consentimento de upload.", ("ai", "claude", "login", "bonsai"), ("ai", "claude", "status")),
         ("9router-status", "Status 9Router", "Serviço, providers, combos e watchdog.", ("ai", "9router", "status"), None),
         ("9router-tui", "Abrir painel técnico do 9Router", "Abre a tela técnica avançada; para o dia a dia use os cards acima.", ("ai", "9router", "tui"), None),

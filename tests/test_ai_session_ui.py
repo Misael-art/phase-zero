@@ -76,17 +76,7 @@ def test_registry_uses_dedicated_ai_pages():
 
 def test_bonsai_run_waits_for_account_bound_grant(routing_page):
     page, _actions = routing_page
-    button = next(
-        child for child in page.findChildren(QPushButton)
-        if child.text().startswith("Executar Claude via Bonsai")
-    )
-    assert not button.isEnabled()
-    assert "grant por conexão" in button.toolTip()
-    warning = next(
-        child for child in page.findChildren(QLabel)
-        if "consentimento de upload não autoriza inferência" in child.text()
-    )
-    assert "indisponível" in warning.text()
+    assert not any("Executar Claude via Bonsai" in child.text() for child in page.findChildren(QPushButton))
 
 
 def test_main_window_previews_every_mutable_action():
@@ -652,3 +642,44 @@ def test_routing_status_text_reports_provider_availability():
     assert routing_status_text(degraded) == "Online, 1 de 16 provedores disponíveis"
     down = {"health": True, "providerAvailability": {"state": "down", "ready": 0, "total": 3}}
     assert "sem provedor disponível" in routing_status_text(down)
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_bonsai_observed_state_public_controls_and_theme_at_800x600(ai_dev_page, qapp, theme, tmp_path):
+    from linux.ui_native.app import apply_theme
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QScrollArea
+    page, _ = ai_dev_page
+    apply_theme(qapp, theme)
+    requested = []
+    page.request_action = requested.append
+    page.resize(800, 600)
+    page.show()
+    page._on_status_ready("private.bonsai.status", "", {
+        "installed": True, "authenticated": False, "sessionUsable": False,
+        "proxyAvailable": False, "loginAvailable": False,
+        "credentialStatus": {"state": "expired-refresh-required"},
+        "authProvider": {"class": "upstream-auth-disabled", "source": "provider-cache"},
+        "updateObservation": {"state": "registry-http-error", "httpStatus": 404},
+    })
+    qapp.processEvents()
+    assert page.bonsai_state.text() == "Login indisponível no provedor"
+    assert "vencida" in page.bonsai_reason.text()
+    assert "Próximo passo" in page.bonsai_next.text()
+    assert not page.bonsai_login.isEnabled()
+    scroll = page.bonsai_login.parentWidget().parentWidget()
+    areas = page.findChildren(QScrollArea)
+    areas[0].ensureWidgetVisible(page.bonsai_login)
+    qapp.processEvents()
+    assert page.bonsai_login.isVisible()
+    assert areas[0].horizontalScrollBar().maximum() == 0
+    QTest.mouseClick(page.bonsai_login, Qt.LeftButton)
+    assert not requested
+    assert not page.bonsai_details.isVisible()
+    page.set_advanced_mode(True)
+    qapp.processEvents()
+    assert "provider-cache" in page.bonsai_details.text()
+    assert "bonsai/direct" in page.bonsai_details.text()
+    page.grab().save(str(tmp_path / ("bonsai-" + theme + ".png")))
+    page.close()

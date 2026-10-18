@@ -43,7 +43,7 @@ _APP_NAMES = {item.id: item.title for item in CAPABILITIES}
 _AI_APPS = {
     "opencode": "opencode", "omo": "omo", "memory": "ai-memory",
     "ollama": "ollama", "webui": "open-webui", "usagebar": "usagebar",
-    "codexbar": "codexbar", "claude": "claude-code", "9router": "9router",
+    "codexbar": "codexbar", "bonsai": "claude-code", "claude": "claude-code", "9router": "9router",
     "odysseus": "odysseus", "hermes": "hermes", "omniroute": "omniroute",
 }
 _PROXIES = {"kimi": "kimiproxy", "qwen": "qwen-proxy", "deeps": "deepseek-proxy", "mimo": "mimo-proxy"}

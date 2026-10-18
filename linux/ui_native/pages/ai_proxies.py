@@ -654,7 +654,7 @@ class AiProxiesPage(BasePage):
             self.auth_summary.setText("Verificação parcial · " + self.auth_summary.text())
 
         groups = {
-            "core": [entry for entry in entries if entry.get("id") in {"gateway:9router", "client:opencode", "client:claude", "client:bonsai"}],
+            "core": [entry for entry in entries if entry.get("id") in {"gateway:9router", "client:opencode", "client:claude"}],
             "providers": [entry for entry in entries if str(entry.get("id", "")).startswith("provider:")],
             "proxies": [entry for entry in entries if str(entry.get("id", "")).startswith("proxy:")],
             "workspaces": [entry for entry in entries if str(entry.get("id", "")).startswith("workspace:")],

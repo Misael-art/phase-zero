@@ -254,36 +254,6 @@ class AiRoutingPage(BasePage):
         editor_layout.addLayout(list_row)
         layout.addWidget(editor_box)
 
-        bonsai_box = QGroupBox("Bonsai — rota experimental separada")
-        self._technical_widgets.append(bonsai_box)
-        bonsai_layout = QVBoxLayout(bonsai_box)
-        warn = QLabel(
-            "Rota explícita e isolada do 9Router: sem token Bonsai no roteador, "
-            "sem fallback silencioso. Preflight verifica workspace e rede; "
-            "consentimento de upload não autoriza inferência. Execução fica "
-            "indisponível até haver grant verificável por conexão.")
-        warn.setWordWrap(True)
-        warn.setObjectName("cardDescription")
-        bonsai_layout.addWidget(warn)
-        bonsai_actions = QHBoxLayout()
-        bonsai_action = self.by_id.get("ai.claude-bonsai-run") if self.by_id else None
-        if bonsai_action is not None:
-            button = QPushButton("Executar Claude via Bonsai (consentimento)")
-            button.setObjectName("primaryButton")
-            button.setEnabled(False)
-            button.setToolTip("Aguardando enforcement de grant por conexão; login não autoriza execução.")
-            button.clicked.connect(lambda: self.request_action(bonsai_action))
-            bonsai_actions.addWidget(button)
-        preflight = self.by_id.get("ai.claude-bonsai-preflight") if self.by_id else None
-        if preflight is not None:
-            button = QPushButton("Preflight")
-            button.setObjectName("secondaryButton")
-            button.clicked.connect(lambda: self.request_action(preflight))
-            bonsai_actions.addWidget(button)
-        bonsai_actions.addStretch()
-        bonsai_layout.addLayout(bonsai_actions)
-        layout.addWidget(bonsai_box)
-
         rollback_box = QGroupBox("Rollback transacional")
         self._technical_widgets.append(rollback_box)
         rollback_layout = QHBoxLayout(rollback_box)

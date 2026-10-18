@@ -154,11 +154,11 @@ registry="$(jq -cn \
     },{
       id:"client:bonsai",label:"Bonsai",kind:"client",scope:"external-provider",required:false,
       installed:($c.bonsai.installed == true),configured:($c.bonsai.credentialStorePresent == true),
-      authenticated:($c.bonsai.authenticated == true),ready:($c.bonsai.installed == true and $c.bonsai.authenticated == true and $c.bonsai.credentialStorePermissions.secure == true),
+      authenticated:($c.bonsai.authenticated == true),ready:($c.bonsai.sessionUsable == true),
       status:(if ($c.bonsai.installed == true and $c.bonsai.authenticated == true and $c.bonsai.credentialStorePermissions.secure == true) then "ready" elif $c.bonsai.installed then "attention" else "missing" end),
       method:"external-session",accountCount:null,expiresAt:null,
       lastVerifiedAt:null,observedAt:$observedAt,
-      nextAction:"linux/pz ai claude login bonsai",secretsRedacted:true
+      nextAction:($c.bonsai.nextAction // "Aguarde recuperação do Bonsai"),diagnostic:$c.bonsai,secretsRedacted:true
     },{
       id:"workspace:hermes",label:"Hermes",kind:"workspace",scope:"agent",required:false,
       installed:($h.installed == true),configured:($h.configured == true),

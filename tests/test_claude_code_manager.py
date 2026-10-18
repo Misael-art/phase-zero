@@ -262,7 +262,7 @@ echo "bonsai:$*"
         self.assertFalse(receipt.exists(), "no Bonsai client process may start without a grant")
         parsed = CC.build_parser().parse_args(["run", "bonsai", "--cwd", str(project)])
         self.assertEqual(str(project), parsed.cwd)
-        self.assertTrue(manager.preflight("bonsai", str(project))["ok"])
+        self.assertFalse(manager.preflight("bonsai", str(project))["ok"], "credential presence is not authentication")
         self.assertFalse(manager.preflight("bonsai", str(self.home))["ok"])
         (project / ".env").write_text("fixture-only\n", encoding="utf-8")
         blocked = manager.preflight("bonsai", str(project))
@@ -284,6 +284,10 @@ echo "bonsai:$*"
         manager = CC.Manager()
         manager.install("subscription", None, dry_run=False, yes=True, verbose=False)
         shim = self.home / ".local/bin/bonsai"
+        manifest = self.bin.parent / "package.json"
+        # Fixture executable resolves one directory below package root.
+        manifest = self.bonsai.resolve().parent.parent / "package.json"
+        manifest.write_text(json.dumps({"name": "@bonsai-ai/cli", "version": "0.4.19"}))
         version = subprocess.run([str(shim), "--version"], text=True, stdout=subprocess.PIPE, check=True)
         self.assertEqual("0.4.19", version.stdout.strip())
 
@@ -324,6 +328,95 @@ echo "bonsai:$*"
         self.assertTrue(enotimp["transient"])
         self.assertEqual("rate-limit", CC.Manager.classify_network_failure(None, 429)["class"])
         self.assertEqual("upstream-gateway", CC.Manager.classify_network_failure(None, 503)["class"])
+
+    def test_update_registry_failures_are_explicit_without_forging_version(self):
+        manager = CC.Manager()
+        for error, expected in ((CC.urllib.error.HTTPError("https://registry.npmjs.org", 404, "missing", {}, None), "registry-http-error"), (TimeoutError(), "timeout-or-unreachable")):
+            with self.subTest(expected=expected), mock.patch.object(CC.urllib.request, "urlopen", side_effect=error):
+                result = manager.bonsai_update_observation()
+                self.assertFalse(result["available"])
+                self.assertEqual(expected, result["state"])
+                self.assertNotIn("version", result)
+        for body in (b"not-json", b"{}", b'{"version":42}', b'[]'):
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = body
+            with mock.patch.object(CC.urllib.request, "urlopen", return_value=response):
+                self.assertEqual("invalid-response", manager.bonsai_update_observation()["state"])
+
+    def test_disabled_provider_blocks_login_before_process_and_preserves_credentials(self):
+        manager = CC.Manager()
+        before = manager.bonsai_config.read_bytes()
+        with mock.patch.object(manager, "bonsai_auth_probe", return_value={"available": False, "class": "upstream-auth-disabled"}), mock.patch.object(CC.subprocess, "run", side_effect=AssertionError("no process allowed")):
+            with self.assertRaisesRegex(RuntimeError, "Login indisponível no provedor"):
+                manager.login("bonsai")
+        self.assertEqual(before, manager.bonsai_config.read_bytes())
+
+    def test_path_repair_wins_over_npm_in_interactive_bash_and_is_idempotent(self):
+        profile = self.home / ".bashrc"
+        profile.write_text('export PATH="$HOME/.npm-global/bin:$PATH"\n')
+        manager = CC.Manager()
+        result = manager.repair_bonsai()
+        self.assertTrue(result["ok"])
+        content = profile.read_text()
+        manager.repair_bonsai()
+        self.assertEqual(content, profile.read_text())
+        observed = subprocess.run(["bash", "--noprofile", "--rcfile", str(profile), "-ic", "command -v bonsai"], text=True, capture_output=True, check=True)
+        self.assertEqual(str(self.home / ".local/bin/bonsai"), observed.stdout.strip())
+        with mock.patch.object(manager, "bonsai_update_observation", return_value={"available": False, "state": "registry-http-error", "httpStatus": 404}), mock.patch.object(CC.subprocess, "run", side_effect=AssertionError("status cannot execute Bonsai")):
+            state = manager.bonsai_info()
+        self.assertFalse(state["authenticated"])
+        self.assertFalse(state["sessionUsable"])
+        self.assertFalse(state["proxyAvailable"])
+
+    def test_provider_disabled_invalid_and_timeout_are_classified_without_codes(self):
+        manager = CC.Manager()
+        def response(body):
+            item = mock.MagicMock()
+            item.__enter__.return_value.status = 200
+            item.__enter__.return_value.read.return_value = body
+            return item
+        device = response(b'{"verification_uri_complete":"https://example.authkit.app/device?code=DO-NOT-LOG"}')
+        with mock.patch.object(CC.urllib.request, "urlopen", side_effect=[device, response(b"Authentication is disabled for this application")]):
+            result = manager.bonsai_auth_probe()
+            self.assertEqual("upstream-auth-disabled", result["class"])
+            self.assertNotIn("DO-NOT-LOG", json.dumps(result))
+            self.assertNotIn("DO-NOT-LOG", manager.bonsai_auth_probe_state.read_text())
+        with mock.patch.object(CC.urllib.request, "urlopen", return_value=response(b'{"verification_uri_complete":"http://untrusted.test"}')):
+            self.assertEqual("upstream-auth-invalid-response", manager.bonsai_auth_probe()["class"])
+        with mock.patch.object(CC.urllib.request, "urlopen", side_effect=TimeoutError()):
+            self.assertFalse(manager.bonsai_auth_probe()["available"])
+
+    def test_expired_local_credential_is_not_authentication(self):
+        import shutil
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node needed for encrypted upstream-format credential fixture")
+        manager = CC.Manager()
+        script = r"""
+const fs=require('node:fs'),c=require('node:crypto');
+const iv=Buffer.from('0123456789abcdef');
+const ek=c.scryptSync('bonsai-cli','salt',32).toString('hex').slice(0,32);
+const key=c.pbkdf2Sync(ek,iv.toString(),10000,32,'sha512');
+const cipher=c.createCipheriv('aes-256-cbc',key,iv);
+const raw=JSON.stringify({accessToken:'fixture',refreshToken:'fixture',expiresAt:1});
+fs.writeFileSync(process.argv[1],Buffer.concat([iv,Buffer.from(':'),cipher.update(raw),cipher.final()]));
+"""
+        subprocess.run([node, "-e", script, str(manager.bonsai_config)], check=True)
+        with mock.patch.dict(os.environ, {"PZ_BONSAI_NODE_BIN": node}):
+            result = manager.bonsai_credential_status()
+        self.assertEqual("expired-refresh-required", result["state"])
+        self.assertFalse(result["authenticated"])
+        self.assertNotIn("fixture", json.dumps(result))
+
+    def test_failed_upstream_login_restores_credential(self):
+        manager = CC.Manager()
+        before = manager.bonsai_config.read_bytes()
+        def fail(*args, **kwargs):
+            manager.bonsai_config.write_text("corrupted")
+            return mock.Mock(returncode=1)
+        with mock.patch.object(manager, "bonsai_auth_probe", return_value={"available": True}), mock.patch.object(manager, "bonsai_update_observation", return_value={"available": True}), mock.patch.object(CC.subprocess, "run", side_effect=fail):
+            self.assertEqual(1, manager.login("bonsai"))
+        self.assertEqual(before, manager.bonsai_config.read_bytes())
 
     def test_bonsai_absent_is_reported_without_touching_claude(self) -> None:
         self.bonsai.unlink()
