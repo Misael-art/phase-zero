@@ -670,8 +670,11 @@ function probeHttp() {
                 }
         except urllib.error.HTTPError as exc:
             result = {"available": False, "class": "upstream-auth-http", "httpStatus": exc.code, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
-        except (OSError, urllib.error.URLError, TimeoutError, ValueError, UnicodeError):
-            result = {"available": False, "class": "upstream-auth-unreachable", "httpStatus": None, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
+        except (ValueError, UnicodeError):
+            result = {"available": False, "class": "upstream-auth-invalid-response", "httpStatus": None, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
+        except (OSError, urllib.error.URLError, TimeoutError) as exc:
+            timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+            result = {"available": False, "class": "upstream-auth-timeout" if timed_out else "upstream-auth-unreachable", "httpStatus": None, "provider": "workos-authkit", "checkedAt": now_iso(), "secretsRedacted": True}
         self._record_bonsai_auth_probe(result)
         return result
 
@@ -684,8 +687,15 @@ function probeHttp() {
         try:
             value = json.loads(self.bonsai_auth_probe_state.read_text(encoding="utf-8"))
             if isinstance(value, dict) and value.get("secretsRedacted") is True:
-                return value
-        except (OSError, json.JSONDecodeError):
+                known = {"available", "upstream-auth-disabled", "upstream-auth-timeout", "upstream-auth-invalid-response", "upstream-auth-http", "upstream-auth-unreachable"}
+                if value.get("class") not in known:
+                    raise ValueError("invalid provider cache")
+                checked = dt.datetime.fromisoformat(value["checkedAt"]).isoformat()
+                return {"available": value.get("available") is True,
+                        "class": value["class"], "checkedAt": checked,
+                        "httpStatus": value.get("httpStatus") if type(value.get("httpStatus")) is int else None,
+                        "provider": "workos-authkit", "secretsRedacted": True}
+        except (OSError, ValueError, KeyError, TypeError):
             pass
         return {"available": None, "class": "not-probed", "httpStatus": None, "provider": "workos-authkit", "checkedAt": None, "secretsRedacted": True}
 
@@ -733,8 +743,8 @@ try {
                 result.update(available=True, state="available", version=version)
         except urllib.error.HTTPError as exc:
             result.update(state="registry-http-error", httpStatus=exc.code)
-        except (TimeoutError, OSError, urllib.error.URLError):
-            result["state"] = "timeout-or-unreachable"
+        except (TimeoutError, OSError, urllib.error.URLError) as exc:
+            result["state"] = "timeout" if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError) else "unreachable"
         except (ValueError, UnicodeError):
             result["state"] = "invalid-response"
         return result
@@ -1461,7 +1471,7 @@ exec bash {shlex.quote(str(pz_cli))} ai claude run proxy --cwd "$PWD" -- "$@"
 """,
             "claude-bonsai": f"""#!/usr/bin/env bash
 set -euo pipefail
-exec bash {shlex.quote(str(pz_cli))} ai claude run bonsai --cwd "$PWD" -- "$@"
+exec {shlex.quote(str(self.local_bin / "bonsai"))} start "$@"
 """,
             "bonsai": f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -1890,7 +1900,9 @@ esac
             if existed:
                 shutil.copy2(self.bonsai_config, backup)
             try:
-                rc = subprocess.run([bonsai, "login"], check=False).returncode
+                # Device codes and authentication output must never enter UI logs.
+                rc = subprocess.run([bonsai, "login"], check=False, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, timeout=180).returncode
             except BaseException:
                 if existed:
                     shutil.copy2(backup, self.bonsai_config)
@@ -1902,6 +1914,7 @@ esac
                     shutil.copy2(backup, self.bonsai_config)
                 else:
                     self.bonsai_config.unlink(missing_ok=True)
+                raise RuntimeError(f"Login Bonsai não concluído (exit {rc}); tente diagnóstico e contate provedor. Credenciais preservadas.")
             return rc
 
     def run_route(self, route: str, args: list[str], cwd: str | None = None, allow_sensitive: bool = False) -> int:
@@ -2006,7 +2019,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result.get("ok", True) else 1
-    except (RuntimeError, OSError, json.JSONDecodeError, urllib.error.URLError) as exc:
+    except (RuntimeError, OSError, json.JSONDecodeError, urllib.error.URLError, subprocess.TimeoutExpired) as exc:
         print(json.dumps({"schemaVersion": SCHEMA_VERSION, "status": "error", "error": str(exc), "secretsRedacted": True}, indent=2), file=sys.stderr)
         return 1
 

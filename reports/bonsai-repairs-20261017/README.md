@@ -67,7 +67,7 @@ Branch/worktree: codex/bonsai-repairs, diretório dedicado acima.
 HEAD inicial: fa91c09. HEAD final/commits/CI: consultar Git/PR desta branch.
 Arquivos: gerenciador Claude/Bonsai, registro auth, páginas IA, catálogo/inventário,
 manager/scripts repairs, pz, instalador usuário e atalhos, testes.
-Testes: baseline Claude 21 passed/15 subtests; suíte focada posterior 90 passed/17
+Testes: baseline Claude 21 passed/15 subtests; suíte focada final 109 passed/17
 subtests; shell Claude 34 testes OK; ShellCheck com excludes do CI; diff-check.
 Host antes/depois: pacote 1.22.5-1 mantido, sem deploy manual em /usr/lib; sem
 inferência, reboot, logout KDE ou alteração de workloads Homelab.
@@ -76,3 +76,13 @@ Limites: login/proxy externos bloqueados; entrada depende autorização OS e tes
 físico; sinal de microfone exige consentimento específico.
 Próximo passo: CI verde, concluir teste entrada autorizado, merge e release canônica;
 instalar pacote verificado e migrar wrappers/atalhos, preservando backups.
+
+Revisão final: timeouts e respostas inválidas do provedor/registry têm classes
+separadas. stdout/stderr do CLI de login são descartados para impedir códigos de
+dispositivo em logs da UI; erro público continua acionável, com restauração de
+credencial em falha. Perfil de microfone só é escolhido entre perfis de captura
+observados e disponíveis (quatro testes próprios, novo teste de recusa sem captura).
+Nenhuma versão do pacote ou tag foi alterada. CI integral permanece gate externo;
+execução local integral anterior foi interrompida após ficar obsoleta pelas correções
+e ter reproduzido expectativa antiga de uma única sonda na página IA & Dev.
+Teste de lifecycle atualizado comprova duas sondas somente ao abrir a página.

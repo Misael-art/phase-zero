@@ -235,7 +235,7 @@ echo "bonsai:$*"
         project = self.root / "safe-project"
         project.mkdir()
         proc = subprocess.run(
-            [str(self.home / ".local/bin/claude-bonsai"), "--probe"],
+            [str(self.home / ".local/bin/claude-bonsai"), "--cwd", str(project), "--", "--probe"],
             cwd=project,
             text=True,
             stdout=subprocess.PIPE,
@@ -331,7 +331,7 @@ echo "bonsai:$*"
 
     def test_update_registry_failures_are_explicit_without_forging_version(self):
         manager = CC.Manager()
-        for error, expected in ((CC.urllib.error.HTTPError("https://registry.npmjs.org", 404, "missing", {}, None), "registry-http-error"), (TimeoutError(), "timeout-or-unreachable")):
+        for error, expected in ((CC.urllib.error.HTTPError("https://registry.npmjs.org", 404, "missing", {}, None), "registry-http-error"), (TimeoutError(), "timeout")):
             with self.subTest(expected=expected), mock.patch.object(CC.urllib.request, "urlopen", side_effect=error):
                 result = manager.bonsai_update_observation()
                 self.assertFalse(result["available"])
@@ -384,7 +384,9 @@ echo "bonsai:$*"
         with mock.patch.object(CC.urllib.request, "urlopen", return_value=response(b'{"verification_uri_complete":"http://untrusted.test"}')):
             self.assertEqual("upstream-auth-invalid-response", manager.bonsai_auth_probe()["class"])
         with mock.patch.object(CC.urllib.request, "urlopen", side_effect=TimeoutError()):
-            self.assertFalse(manager.bonsai_auth_probe()["available"])
+            self.assertEqual("upstream-auth-timeout", manager.bonsai_auth_probe()["class"])
+        with mock.patch.object(CC.urllib.request, "urlopen", return_value=response(b"invalid json")):
+            self.assertEqual("upstream-auth-invalid-response", manager.bonsai_auth_probe()["class"])
 
     def test_expired_local_credential_is_not_authentication(self):
         import shutil
@@ -412,10 +414,13 @@ fs.writeFileSync(process.argv[1],Buffer.concat([iv,Buffer.from(':'),cipher.updat
         manager = CC.Manager()
         before = manager.bonsai_config.read_bytes()
         def fail(*args, **kwargs):
+            self.assertEqual(CC.subprocess.DEVNULL, kwargs["stdout"])
+            self.assertEqual(CC.subprocess.DEVNULL, kwargs["stderr"])
             manager.bonsai_config.write_text("corrupted")
             return mock.Mock(returncode=1)
         with mock.patch.object(manager, "bonsai_auth_probe", return_value={"available": True}), mock.patch.object(manager, "bonsai_update_observation", return_value={"available": True}), mock.patch.object(CC.subprocess, "run", side_effect=fail):
-            self.assertEqual(1, manager.login("bonsai"))
+            with self.assertRaisesRegex(RuntimeError, "Credenciais preservadas"):
+                manager.login("bonsai")
         self.assertEqual(before, manager.bonsai_config.read_bytes())
 
     def test_bonsai_absent_is_reported_without_touching_claude(self) -> None:

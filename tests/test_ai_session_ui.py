@@ -676,6 +676,11 @@ def test_bonsai_observed_state_public_controls_and_theme_at_800x600(ai_dev_page,
     assert areas[0].horizontalScrollBar().maximum() == 0
     QTest.mouseClick(page.bonsai_login, Qt.LeftButton)
     assert not requested
+    diagnose = next(button for button in page.findChildren(QPushButton) if button.text() == "Atualizar diagnóstico")
+    areas[0].ensureWidgetVisible(diagnose)
+    qapp.processEvents()
+    QTest.mouseClick(diagnose, Qt.LeftButton)
+    assert [action.id for action in requested] == ["ai.bonsai-diagnose"]
     assert not page.bonsai_details.isVisible()
     page.set_advanced_mode(True)
     qapp.processEvents()
