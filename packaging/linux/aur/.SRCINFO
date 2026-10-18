@@ -1,6 +1,6 @@
 pkgbase = phasezero-control-center
 	pkgdesc = PhaseZero native Linux control center
-	pkgver = 1.22.7
+	pkgver = 1.22.8
 	pkgrel = 1
 	url = https://github.com/Misael-art/PhaseZero
 	arch = any
@@ -13,7 +13,7 @@ pkgbase = phasezero-control-center
 	optdepends = flatpak: Flatpak management
 	optdepends = bigsudo: graphical admin bridge
 	optdepends = libguestfs: offline Windows VM repair and host disk access
-	source = PhaseZero-1.22.7.tar.gz
+	source = PhaseZero-1.22.8.tar.gz
 	sha256sums = SKIP
 
 pkgname = phasezero-control-center
