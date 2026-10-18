@@ -2769,6 +2769,17 @@
       "input_label": ""
     },
     {
+      "name": "ai.bonsai-diagnose",
+      "label": "Atualizar diagnóstico Bonsai",
+      "command": "linux/pz ai claude bonsai-probe",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
       "name": "ai.claude-bonsai-login",
       "label": "Login Bonsai",
       "command": "linux/pz ai claude login bonsai",
