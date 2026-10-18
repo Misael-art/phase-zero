@@ -117,16 +117,17 @@ LOCKED_CAPABILITIES: dict[str, str] = {
     "auto-approve-tool-calls": "Aprovação automática de ferramentas é recusada.",
 }
 # Observed on the pinned 6.1.8 runtime with a real tunnel and connector:
-# its Full resolver needs network access inside the Codex turn, while this
-# profile deliberately uses the read-only sandbox. The upstream doctor only
-# checks infrastructure; it cannot certify a working tool turn.
+# its Full resolver requires a network declaration in the trusted Codex turn.
+# Codex 0.163 omitted it even with workspace-write + network_access=true.
+# The upstream doctor checks infrastructure, not a working tool turn.
 FULL_RUNTIME_BLOCKER = (
-    f"Full {PIN['version']} falha no turno real: o upstream exige acesso de rede no contexto "
-    "Codex, indisponível no sandbox read-only deste perfil"
+    f"Full {PIN['version']} ainda sem prova de ferramenta real; no host de referência, "
+    "Codex 0.163 não declarou rede no contexto confiável mesmo com "
+    "workspace-write e network_access=true"
 )
 FULL_RUNTIME_ACTION = (
-    "Mantenha browser-only. Adaptar o transporte Full sem ampliar o sandbox; "
-    "depois provar uma chamada MCP real, aprovação por tarefa e rollback."
+    "Mantenha browser-only. Corrija a compatibilidade do runtime ou use um conector MCP "
+    "restrito ao projeto; prove leitura, escrita reversível, aprovação e rollback reais."
 )
 PENDING_GATES = (
     "real-account",
@@ -2346,7 +2347,8 @@ class Bridge:
                 "webModelStillWorks": config.get("mode") == "browser-only",
                 "planSource": PLAN_SOURCE, "lockedCapabilities": LOCKED_CAPABILITIES,
                 "note": "A infraestrutura pode estar saudável, mas Full 6.1.8 falhou em "
-                        "turno real sob sandbox read-only. Browser-only segue disponível."}
+                        "turno real no host de referência até com workspace-write e rede "
+                        "habilitada. Browser-only segue disponível."}
 
     def tools_check(self) -> dict[str, Any]:
         state = self.load_state()
@@ -2372,7 +2374,8 @@ class Bridge:
                 "capability": self.eligibility(state)["tools"],
                 "lockedCapabilities": LOCKED_CAPABILITIES,
                 "note": "Doctor saudável não prova turno MCP. Full 6.1.8 falhou em "
-                        "turno real sob sandbox read-only."}
+                        "turno real no host de referência até com workspace-write e rede "
+                        "habilitada."}
 
     # ---- codex in the dedicated profile ----------------------------------
 
