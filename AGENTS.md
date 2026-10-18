@@ -180,3 +180,12 @@ every project, save it to ai-memory's reserved global scope.
 This block is maintained by ai-memory. Re-run
 `ai-memory install-instructions --target AGENTS.md` to refresh.
 <!-- ai-memory:end -->
+
+## Local test temporary storage
+
+Before local pytest or artifact-heavy test runs, ensure `TMPDIR` and
+`PYTEST_DEBUG_TEMPROOT` use writable per-user directories on disk, outside
+`XDG_RUNTIME_DIR`. Keep each derived shell export in its own statement.
+Do not sweep `/run/user`, terminate agents, or reset desktop services to recover
+space. Use the on-demand terminal repair: archive only inactive, verified test
+fixtures with backup; preserve live locks, ambiguous locks and current fixtures.
