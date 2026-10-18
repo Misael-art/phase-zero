@@ -497,6 +497,14 @@ Adicionar IDs, nunca reutilizar ID para requisito diferente. Estados permitidos:
 
 ## Estado vivo
 
+2026-10-18 — WinVM integrity/storage: base `bbee41c`, pacote host 1.22.7-1;
+`codex/winvm-integrity-sparse`. Diagnóstico somente leitura das duas operações
+encontrou QCOW2 limpos e arquivos essenciais presentes; boot não comprovado.
+Staging ocupa 39,8/41,4 GiB; capacidade virtual 256 GiB, já dinâmica.
+Worktree migrado para SSD após inconsistência de lookup no cartão durante
+interrupção da sessão. Original e WIP paralelo preservados. Evidência e gates:
+`reports/winvm-integrity-20261018/README.md`. Nenhum workload Homelab iniciado.
+
 2026-10-18 — Bonsai follow-up: `codex/bonsai-observation-age`, base `241f84b`;
 pacote host 1.22.6-1. Histórico vencido estava apresentado como falha atual e
 impedia futuras tentativas. Correção e limites em
@@ -584,6 +592,12 @@ sem evidência.
 | Fase 5 auditoria host limpo | PZ-AUD-028 verified em `codex/aud-fase5`; job arch-clean-host, gates de manifesto/exatidão, matriz de evidência | Arch descartável real (15 perfis, asset, entrypoints); CI estendido; sem mutação no host | 2026-09-07 |
 
 ## Ledger de execução
+
+2026-10-18 — Codex, `codex/winvm-integrity-sparse`: inventário honesto,
+verificação offline sem reparo, explicação de alocação dinâmica e UI temática.
+Baseline Qt 55/55; regressão direcionada 84/84; provisionamento 259/0;
+demais gates locais/CI e pacote registrados no relatório/PR. Nenhum disco real
+convertido, removido, compactado ou inicializado; sessão KDE preservada pela tarefa.
 
 2026-10-18 — Codex, `codex/bonsai-observation-age`: separa histórico de estado
 atual; tentativa explícita CLI após gates, UI abre terminal privado. Regressão

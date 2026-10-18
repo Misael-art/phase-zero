@@ -71,6 +71,8 @@ Evidência coletada em diagnóstico read-only do host:
 | WBR-006 | Tela cheia, controles e teclado virtual no boot GRUB | Entregue no main (PR #60); valida somente com runtime sincronizado (depende de WBR-004 física) | — | boot físico com evidência pendente | pending |
 | WBR-007 | Escalada de recuperação guiada | Após 2 reparos sem sucesso, wizard encadeia `pz windows-vm recover` → WinRE guiado | Estado `repairFailed>=2` ainda não existe | hermética; físico opcional | pending |
 | WBR-008 | Telemetria de sessão alimenta status | `session-state.json` versionado (graceful, reason, duração, display) gravado em todo fim de launch; `status --json` expõe `session` + findings por severidade | Suíte de sessão cobre os cinco motivos e o schema; status real no host devolve o bloco | hermética verde + host | in_progress |
+| WBR-009 | Inventário distingue conclusão e integridade observada | `provision integrity --operation-id ID [--guest-files] --json`; QCOW2 sem reparo e guestfish somente leitura; nenhum descarte automático | `test_windows_vm_storage.py`, clique público temático em `test_image_manager_dialog.py`; duas operações reais verificadas | CI/PR e entrega em `reports/winvm-integrity-20261018/README.md`; boot continua não verificado | in_progress |
+| WBR-010 | Capacidade virtual não aparece como reserva física | Criação QCOW2 com `preallocation=off`; inventário separa base/snapshot/mídias/cópia ativada | QCOW2 real 256 GiB inicia abaixo de 1 MiB e cresce após escrita de fixture; UI claro/escuro | host 39,8/41,4 GiB de staging, não 256 GiB reservados; CI/PR na entrega | in_progress |
 
 Adicionar IDs, nunca reutilizar. Estados: `pending`, `in_progress`, `verified`,
 `deferred`.
@@ -119,6 +121,15 @@ Adicionar IDs, nunca reutilizar. Estados: `pending`, `in_progress`, `verified`,
 
 ## Estado vivo
 
+2026-10-18 — WBR-009/010, `codex/winvm-integrity-sparse` sobre `bbee41c`:
+duas operações reais passaram em `qemu-img check` e presença de arquivos
+essenciais via appliance libguestfs somente leitura. Isso não prova boot,
+consistência NTFS, todos os arquivos ou saúde funcional do Windows. Nenhuma VM
+inicializada, disco modificado, reboot ou logout executado pela tarefa.
+UI troca “Concluída” por “Instalador concluído · integridade não verificada”
+até observação explícita. Ver relatório de integridade para armazenamento,
+testes temáticos e gates de publicação. WBR físicos anteriores permanecem abertos.
+
 ### Incidente físico 1.20.8 — 2026-09-15
 
 Validação do usuário **falhou**: janela QEMU pequena em Handheld e Dock,
@@ -141,6 +152,14 @@ o bloqueio de armazenamento registrado em agosto.
 | Remediação REV-009..013 | defeitos de contrato gráfico/runtime/dev registrados pela revisão de 2026-09-07; plano R3 e matriz da frente em `docs/roadmaps/rev-remediation-v1.md` (REV-009/010 herméticos antes de qualquer gate físico; REV-011/012/013 permanecem bloqueios de operador/hardware) | branch `codex/rev-remediation` sobre `9d6be9d`; ACHADOS.md em `codex/review-remediation-winvm-ux` | 2026-09-07 |
 
 ## Ledger de execução
+
+2026-10-18 — Codex, worktree SSD
+`/home/misael/.cache/phasezero/worktrees/pz-winvm-integrity-sparse`:
+baseline Qt 55; regressão direcionada 84; provisionamento 259/0. Diagnóstico
+host preservou assinaturas dos discos e recusou comprovar boot. UI 800×600
+em Xvfb; KDE atual 800×568 disponível, inventário 780×540 em ambos os temas.
+Relatório: `reports/winvm-integrity-20261018/README.md`; release/CI por gates
+normais, sem fechar WBR-005/006 nem mudar seleção da VM principal.
 
 | Data | Agente | Branch/worktree | Fase | Commits | Gates | Resultado |
 |---|---|---|---|---|---|---|
