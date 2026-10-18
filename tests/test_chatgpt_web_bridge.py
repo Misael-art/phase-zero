@@ -1016,7 +1016,8 @@ def test_tools_window_stays_closed_with_full_runtime_network_blocker(host, monke
     with pytest.raises(BridgeError) as error:
         bridge.desktop("tools")
     assert error.value.code == "tools-not-ready"
-    assert "acesso de rede" in str(error.value) and "read-only" in str(error.value)
+    assert "contexto confiável" in str(error.value)
+    assert "workspace-write" in str(error.value)
     assert runner.spawned == []
 
     # The browser-only shortcut must not quietly become a tools window.
@@ -1369,7 +1370,7 @@ def test_pro_cannot_unlock_full_host_tools_without_a_working_turn(host, monkeypa
     with pytest.raises(BridgeError) as error:
         bridge.require_tools_ready(bridge.load_state())
 
-    assert "falha no turno real" in str(error.value)
+    assert "sem prova de ferramenta real" in str(error.value)
     assert "plano Pro permite apenas leitura/fetch" not in str(error.value)
     assert bridge.tools_steps()["next"]["id"] == "full-runtime"
 
@@ -1383,7 +1384,7 @@ def test_tools_check_rejects_healthy_doctor_without_a_working_turn(host, monkeyp
 
     assert result["ready"] is False
     assert result["doctor"] == {"ok": True}
-    assert any("acesso de rede" in blocker for blocker in result["blockers"])
+    assert any("não declarou rede" in blocker for blocker in result["blockers"])
     assert bridge.status()["toolsGate"]["next"]["id"] == "full-runtime"
 
 
