@@ -502,6 +502,8 @@ pacote host 1.22.6-1. Histórico vencido estava apresentado como falha atual e
 impedia futuras tentativas. Correção e limites em
 `reports/bonsai-login-followup-20261018/README.md`; npm HTTP 404 real ainda bloqueia
 login. Sem autenticação real comprovada, inferência ou deploy manual de runtime.
+Revisão: botão usa terminal privado explícito após gates, catálogo acompanha;
+login serializado, recuperação de credencial e cache npm serializado.
 
 Bonsai/reparos 2026-10-17: worktree `codex/bonsai-repairs`; evidência em
 `reports/bonsai-repairs-20261017/README.md`. Pacote host 1.22.5-1 preservado;
@@ -584,8 +586,8 @@ sem evidência.
 ## Ledger de execução
 
 2026-10-18 — Codex, `codex/bonsai-observation-age`: separa histórico de estado
-atual; tentativa explícita CLI após gates, UI exige terminal privado. Regressão
-66 testes; helper real KDE/XCB claro/escuro 800×600; host confirma HTTP 404 e
+atual; tentativa explícita CLI após gates, UI abre terminal privado. Regressão
+114 testes +19 subtests; helper real KDE/XCB claro/escuro 800×600; host confirma HTTP 404 e
 credencial preservada. Próximo: CI/PR, pacote publicado e recuperação Bonsai.
 
 2026-10-17 — Codex, `codex/bonsai-repairs`, base fa91c09: Bonsai sem

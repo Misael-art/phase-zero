@@ -2782,14 +2782,14 @@
     {
       "name": "ai.claude-bonsai-login",
       "label": "Login Bonsai",
-      "command": "linux/pz ai claude login bonsai",
+      "command": "linux/pz ai claude login bonsai --terminal",
       "mutable": true,
       "require_plan": true,
       "module": "IA & Dev",
       "elevated": false,
       "input_kind": "",
       "input_label": "",
-      "plan_command": "linux/pz ai claude status"
+      "plan_command": "linux/pz ai claude bonsai-status"
     },
     {
       "name": "ai.9router-status",

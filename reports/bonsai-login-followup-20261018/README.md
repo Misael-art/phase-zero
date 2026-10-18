@@ -21,9 +21,17 @@ permanentemente novas tentativas, mesmo após recuperação upstream.
   após consulta npm válida e verificação de runner sem versão latest forjada.
 - Status continua local/passivo. `bonsai-probe` consulta somente metadados npm;
   não verifica disponibilidade de autenticação nem cria autorização de dispositivo.
-- `loginAvailable` significa prontidão para tentar pelo CLI, não autenticação.
-  `loginRequiresPrivateTerminal=true`: UI mantém botão desabilitado e indica
-  comando no terminal privado. Nenhum código passa pelo ledger da UI.
+- `loginAttemptAvailable` significa prontidão para tentar pelo CLI, não autenticação.
+  `loginTerminalAvailable` habilita botão somente com gates e terminal disponível;
+  ação `login bonsai --terminal` abre o mesmo gerenciador em Konsole/Ashyterm/xterm.
+  Campo legado `loginAvailable=false` impede UI antiga de usar pipes sem TTY.
+  Nenhum código passa pelo ledger da UI; `terminal-requested` não significa autenticado.
+- Lock de login impede duas tentativas gerenciadas de sobrescrever credenciais.
+  SIGTERM/HUP/INT restauram backup; journal privado recupera tentativa interrompida
+  na próxima execução explícita. Backup mantém bytes já cifrados do arquivo original,
+  modo 0600, diretório 0700. CLI filho herda lock até encerrar.
+- Refresh npm serializa observação e gravação para evitar cache antigo sobrescrito
+  fora de ordem. Cache ausente/vencido é não verificado, não falha observada.
 - Erro de login restaura credencial anterior. Login/status não chamam `start`.
 - Sessão utilizável, inferência e proxy continuam bloqueados por seus gates.
 
@@ -40,11 +48,14 @@ correção. Checkout principal e demais worktrees preservados.
 
 - Baseline: `python3 -m pytest -q tests/test_claude_code_manager.py`:
   28 passed, 17 subtests passed.
-- Regressão final manager/UI: 66 passed, 19 subtests passed, incluindo
-  timeout/JSON inválido/TTY. Manager isolado: 30 passed, 19 subtests passed.
+- Primeira regressão manager/UI: 66 passed, 19 subtests passed. Após fluxo de
+  terminal/journal/locks: 114 passed, 19 subtests passed incluindo catálogo web,
+  registro de contas, inventário, reparos, concorrência, interrupção e recuperação.
+  Smoke shell Claude: 46 testes OK. Gates finais/CI: consultar PR.
 - UI real XCB/KDE, temas claro/escuro, 800×600 lógicos: helper
   `tests/helpers/bonsai_ui_probe.py`; controles públicos acionados, login
-  bloqueado, diagnóstico despachado, detalhe avançado acessível, scroll horizontal
+  bloqueado no HTTP 404 e habilitado somente na fixture de gates recuperados,
+  dispatch `--terminal` conferido, diagnóstico despachado, detalhe avançado, scroll horizontal
   zero. Capturas locais em `~/.local/state/phasezero/bonsai-followup-20261018/`.
 - Consulta real em 2026-10-18 06:06 -03:
   `python3 /usr/lib/phasezero/linux/ai/claude_code_manager.py bonsai-probe`
@@ -56,6 +67,13 @@ correção. Checkout principal e demais worktrees preservados.
   intactos. Nenhum código, token ou hash de credencial publicado.
 - Sucesso após recuperação upstream é teste simulado de dispatch exclusivo
   `[bonsai, login]` em TTY privado; **não comprova login real**.
+- Smoke real do launcher abriu Konsole com programa inofensivo substituto:
+  stdin/stdout/stderr todos TTY; argumentos `login bonsai`. Receipt local
+  `~/.local/state/phasezero/bonsai-followup-20261018/private-terminal-smoke.json`.
+  Nenhuma autenticação real ou inferência nessa prova.
+- Captura enviada pelo usuário ainda mostra UI 1.22.6; atualizar diagnósticos não
+  instala correção nem restaura registry/provedor. Aviso `starship scan_timeout`
+  pertence ao prompt, separado do retorno JSON do gerenciador.
 
 ## Handoff e próximo gate
 
@@ -71,3 +89,7 @@ foi comprovada. Próximo gate externo: Bonsai restaurar metadata oficial e permi
 login pelo CLI. Só então testar autenticação real em terminal privado, sem
 inferência. Reversão: reverter commit; nenhum segredo/cache de provedor foi
 reescrito. Apenas cache de metadata npm foi atualizado pela sondagem explícita.
+
+Memória MCP consultada; leitura voltou a resolver escopo de outro projeto
+(`MISA_MT5-Extra-o-de-Dados`). Nenhuma escrita de aprendizado feita nesse escopo;
+este relatório mantém contexto durável até wiring de sessão estar confiável.

@@ -57,20 +57,31 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     QTest.mouseClick(diagnose, Qt.LeftButton)
     assert [action.id for action in requested] == ["ai.bonsai-diagnose"]
     assert not page.bonsai_details.isVisible()
-    # Registry recovery permits a CLI attempt, but this panel has no private TTY.
-    observed["loginAvailable"] = True
+    # Registry recovery enables the explicit private-terminal action.
+    observed["loginAvailable"] = False
+    observed["loginAttemptAvailable"] = True
+    observed["loginTerminalAvailable"] = True
     observed["loginRequiresPrivateTerminal"] = True
     observed["updateObservation"] = {"available": True, "state": "available"}
     page._on_status_ready("private.bonsai.status", "", observed)
     app.processEvents()
-    assert page.bonsai_state.text() == "Login disponível para tentativa no terminal"
+    assert page.bonsai_state.text() == "Login disponível no terminal privado"
     assert "terminal privado" in page.bonsai_next.text()
-    assert not page.bonsai_login.isEnabled()
+    assert page.bonsai_login.isEnabled()
+    area.ensureWidgetVisible(page.bonsai_login)
+    app.processEvents()
     QTest.mouseClick(page.bonsai_login, Qt.LeftButton)
-    assert [action.id for action in requested] == ["ai.bonsai-diagnose"]
+    assert [action.id for action in requested] == ["ai.bonsai-diagnose", "ai.claude-bonsai-login"]
+    assert requested[-1].args == ("ai", "claude", "login", "bonsai", "--terminal")
+    observed["loginTerminalAvailable"] = False
+    page._on_status_ready("private.bonsai.status", "", observed)
+    assert not page.bonsai_login.isEnabled()
+    assert "execute bonsai login" in page.bonsai_next.text()
+    observed["loginAttemptAvailable"] = False
     observed["loginAvailable"] = False
     observed["updateObservation"] = {"state": "registry-http-error", "httpStatus": 404}
     page._on_status_ready("private.bonsai.status", "", observed)
+    assert not page.bonsai_login.isEnabled()
     QTest.mouseClick(window.mode_switch, Qt.LeftButton)
     app.processEvents()
     assert page.bonsai_details.isVisible()

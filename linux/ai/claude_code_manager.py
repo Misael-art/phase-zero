@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
@@ -23,6 +24,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -157,19 +159,23 @@ def path_kind(path: Path) -> str:
     return "absent"
 
 
-def atomic_text(path: Path, text: str, mode: int = 0o600) -> None:
+def atomic_bytes(path: Path, data: bytes, mode: int = 0o600) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     tmp = Path(raw_tmp)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            handle.write(text)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(tmp, mode)
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def atomic_text(path: Path, text: str, mode: int = 0o600) -> None:
+    atomic_bytes(path, text.encode("utf-8"), mode)
 
 
 def atomic_json(path: Path, value: Any, mode: int = 0o600) -> None:
@@ -651,6 +657,29 @@ function probeHttp() {
         # No current automatic writer: historical observations stay read-only.
         raise RuntimeError("Provider cache writes require a supported passive observation contract")
 
+    @contextmanager
+    def _bonsai_lock(self, name: str, *, blocking: bool = True):
+        root = self.data_root / "locks"
+        if root.is_symlink():
+            raise RuntimeError("Diretório de locks Bonsai inseguro")
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(root, 0o700)
+        fd = os.open(root / (name + ".lock"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "r+b") as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            except BlockingIOError:
+                raise RuntimeError("Login Bonsai já em andamento; conclua tentativa no terminal privado.") from None
+            # Closing the descriptor releases the lock; a login child inherits it
+            # so killing this supervisor cannot allow an overlapping writer.
+            yield handle
+
+    def refresh_bonsai_update(self) -> dict[str, Any]:
+        with self._bonsai_lock("update"):
+            result = self.bonsai_update_observation()
+            atomic_json(self.data_root / "bonsai-update.json", result, 0o600)
+            return result
+
     def _cached_bonsai_auth_probe(self) -> dict[str, Any]:
         unknown = {"available": None, "class": "not-probed", "httpStatus": None,
                    "provider": "workos-authkit", "checkedAt": None,
@@ -688,7 +717,9 @@ function probeHttp() {
             if provider.get("checkedAt"):
                 observation += (f"Última observação histórica: {provider['checkedAt']} "
                                 f"({provider.get('class')}); não comprova estado atual. ")
-        if update.get("available") is False:
+        if update.get("state") == "not-probed-or-stale":
+            observation += "Disponibilidade de atualização ainda não verificada; atualize diagnóstico. "
+        elif update.get("available") is False:
             http = f" (HTTP {update['httpStatus']})" if update.get("httpStatus") else ""
             observation += f"Atualização CLI indisponível: {update.get('state')}{http}. "
         return (observation + "Sem verificação passiva suportada; consulte https://docs.trybons.ai/bonsai-cli e suporte Bonsai. "
@@ -778,6 +809,9 @@ try {
                 if item.is_file() and not item.is_symlink() and stat.S_IMODE(item.stat().st_mode) != 0o600:
                     insecure_files += 1
         update_check = self._bonsai_update_check(path)
+        attempt_ready = (bool(path) and not self._bonsai_provider_recently_disabled(provider)
+                         and update["available"] and update_check != "forged")
+        terminal = self._bonsai_terminal()
         return {
             "installed": bool(path),
             "path": path,
@@ -799,9 +833,12 @@ try {
             "proxyGate": "official-api-auth-contract-unverified",
             "observedAt": now_iso(),
             "source": "phasezero-manager/local-credential-metadata/provider-cache",
-            # Readiness for an explicit CLI attempt, never proof of authentication.
-            "loginAvailable": (bool(path) and not self._bonsai_provider_recently_disabled(provider)
-                               and update["available"] and update_check != "forged"),
+            # Legacy panels dispatch login through captured pipes. Keep their
+            # action off; current panels explicitly launch a private terminal.
+            "loginAvailable": False,
+            "loginAttemptAvailable": attempt_ready,
+            "loginTerminalAvailable": attempt_ready and terminal is not None,
+            "loginTerminalInstalled": terminal is not None,
             "loginRequiresPrivateTerminal": True,
             "snapshotConsent": "explicit-directory-and-per-execution-consent-required",
             "managerPath": str(Path(__file__).resolve()),
@@ -1892,40 +1929,103 @@ esac
             if not claude:
                 raise RuntimeError("Claude Code missing")
             return subprocess.run([claude, "/login"], check=False).returncode
+        with self._bonsai_lock("login", blocking=False) as lock:
+            self._recover_bonsai_login()
+            return self._login_bonsai(lock)
+
+    def _check_bonsai_login(self) -> str:
         provider = self.bonsai_auth_probe()
         if self._bonsai_provider_recently_disabled(provider):
             raise RuntimeError(self._bonsai_login_block_reason(provider, self._cached_bonsai_update()))
-        update = self.bonsai_update_observation()
+        update = self.refresh_bonsai_update()
         if not update["available"]:
             raise RuntimeError(self._bonsai_login_block_reason(provider, update))
         bonsai = self._bonsai_upstream()
         if not bonsai or self._bonsai_update_check(bonsai) == "forged":
             raise RuntimeError("Runner Bonsai inválido; reinstale pelo canal oficial. Credenciais preservadas.")
-        with tempfile.TemporaryDirectory(prefix="pz-bonsai-login-") as raw:
-            backup = Path(raw) / "config"
-            existed = self.bonsai_config.is_file()
-            if existed:
-                shutil.copy2(self.bonsai_config, backup)
-            try:
-                # Private controlling terminal only, never the UI result ledger.
-                if not sys.stdin.isatty() or not sys.stdout.isatty():
-                    raise RuntimeError("Login Bonsai exige terminal privado; execute bonsai login no terminal. Credenciais preservadas.")
-                with open("/dev/tty", "r+") as terminal:
-                    rc = subprocess.run([bonsai, "login"], check=False, stdin=terminal,
-                                        stdout=terminal, stderr=terminal, timeout=180).returncode
-            except BaseException:
-                if existed:
-                    shutil.copy2(backup, self.bonsai_config)
-                else:
-                    self.bonsai_config.unlink(missing_ok=True)
-                raise
+        return bonsai
+
+    @staticmethod
+    def _bonsai_terminal() -> list[str] | None:
+        for name, args in (("konsole", ["--separate", "--hold", "-e"]),
+                           ("ashyterm", ["--new-window", "-e"]), ("xterm", ["-hold", "-e"])):
+            path = command_path(name)
+            if path:
+                return [path, *args]
+        return None
+
+    def login_in_terminal(self) -> dict[str, Any]:
+        # A catalog invocation must obey the same gates as the card and CLI.
+        self._check_bonsai_login()
+        terminal = self._bonsai_terminal()
+        if not terminal or not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            raise RuntimeError("Terminal gráfico indisponível; execute bonsai login em terminal privado.")
+        argv = [*terminal, sys.executable, str(Path(__file__).resolve()), "login", "bonsai"]
+        child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
+        try:
+            rc = child.wait(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            rc = None
+        if rc is not None and rc != 0:
+            raise RuntimeError("Terminal de login não abriu; execute bonsai login em terminal privado.")
+        return {"ok": True, "schemaVersion": SCHEMA_VERSION, "state": "terminal-requested",
+                "authenticated": None, "sessionUsable": False, "secretsRedacted": True}
+
+    def _bonsai_recovery_paths(self) -> tuple[Path, Path]:
+        root = self.data_root / "bonsai-login-recovery"
+        if root.is_symlink() or self.bonsai_config.is_symlink():
+            raise RuntimeError("Armazenamento Bonsai inseguro; credenciais preservadas.")
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(root, 0o700)
+        return root / "pending.json", root / "config.backup"
+
+    def _recover_bonsai_login(self) -> None:
+        pending, backup = self._bonsai_recovery_paths()
+        if pending.is_symlink() or backup.is_symlink():
+            raise RuntimeError("Backup de login Bonsai inseguro; recuperação manual necessária.")
+        if not pending.exists():
+            return
+        value = json.loads(pending.read_text())
+        if not isinstance(value, dict) or value.get("schemaVersion") != SCHEMA_VERSION or type(value.get("existed")) is not bool:
+            raise RuntimeError("Journal de login Bonsai inválido; recuperação manual necessária.")
+        if value["existed"]:
+            atomic_bytes(self.bonsai_config, backup.read_bytes())
+        else:
+            self.bonsai_config.unlink(missing_ok=True)
+        pending.unlink()
+        backup.unlink(missing_ok=True)
+
+    def _login_bonsai(self, lock) -> int:
+        bonsai = self._check_bonsai_login()
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            raise RuntimeError("Login Bonsai exige terminal privado; execute bonsai login no terminal. Credenciais preservadas.")
+        pending, backup = self._bonsai_recovery_paths()
+        existed = self.bonsai_config.is_file()
+        if existed:
+            atomic_bytes(backup, self.bonsai_config.read_bytes())
+        atomic_json(pending, {"schemaVersion": SCHEMA_VERSION, "existed": existed})
+        previous = {}
+        def interrupted(signum, _frame):
+            raise RuntimeError("Login Bonsai interrompido (" + signal.Signals(signum).name + "); credenciais preservadas.")
+        try:
+            for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                previous[signum] = signal.signal(signum, interrupted)
+            with open("/dev/tty", "r+") as terminal:
+                rc = subprocess.run([bonsai, "login"], check=False, stdin=terminal,
+                                    stdout=terminal, stderr=terminal, timeout=180,
+                                    pass_fds=(lock.fileno(),)).returncode
             if rc != 0:
-                if existed:
-                    shutil.copy2(backup, self.bonsai_config)
-                else:
-                    self.bonsai_config.unlink(missing_ok=True)
                 raise RuntimeError(f"Login Bonsai não concluído (exit {rc}); tente diagnóstico e contate provedor. Credenciais preservadas.")
+            pending.unlink()
+            backup.unlink(missing_ok=True)
             return rc
+        except BaseException:
+            self._recover_bonsai_login()
+            raise
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
 
     def run_route(self, route: str, args: list[str], cwd: str | None = None, allow_sensitive: bool = False) -> int:
         if route not in {"subscription", "bonsai", "proxy"}:
@@ -1961,6 +2061,7 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--allow-sensitive-upload", action="store_true")
     login = sub.add_parser("login")
     login.add_argument("route", choices=("subscription", "bonsai"))
+    login.add_argument("--terminal", action="store_true")
     sub.add_parser("repair-bonsai")
     sub.add_parser("bonsai-status")
     sub.add_parser("bonsai-probe")
@@ -2006,8 +2107,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         elif command == "bonsai-probe":
             # Only registry metadata is refreshed; provider observation is passive.
-            update = manager.bonsai_update_observation()
-            atomic_json(manager.data_root / "bonsai-update.json", update, 0o600)
+            manager.refresh_bonsai_update()
             result = manager.bonsai_info()
         elif command == "bonsai-status":
             result = manager.bonsai_info()
@@ -2020,7 +2120,12 @@ def main(argv: list[str] | None = None) -> int:
         elif command == "preflight":
             result = manager.preflight(args.route, args.cwd, args.allow_sensitive_upload)
         elif command == "login":
-            return manager.login(args.route)
+            if args.terminal:
+                if args.route != "bonsai":
+                    raise RuntimeError("Terminal privado gerenciado disponível somente para Bonsai")
+                result = manager.login_in_terminal()
+            else:
+                return manager.login(args.route)
         elif command == "run":
             route_args = [*args.args, *passthrough]
             return manager.run_route(args.route, route_args, args.cwd, args.allow_sensitive_upload)

@@ -425,7 +425,8 @@ echo "bonsai:$*"
         update = {"available": True, "state": "available", "version": "0.4.19"}
         with mock.patch.object(manager, "_cached_bonsai_update", return_value=update):
             state = manager.bonsai_info()
-        self.assertTrue(state["loginAvailable"])
+        self.assertFalse(state["loginAvailable"], "legacy panels cannot dispatch private-terminal login")
+        self.assertTrue(state["loginAttemptAvailable"])
         self.assertFalse(state["authenticated"])
         self.assertFalse(state["sessionUsable"])
         self.assertFalse(state["proxyAvailable"])
@@ -486,6 +487,104 @@ fs.writeFileSync(process.argv[1],Buffer.concat([iv,Buffer.from(':'),cipher.updat
             with self.assertRaisesRegex(RuntimeError, "Credenciais preservadas"):
                 manager.login("bonsai")
         self.assertEqual(before, manager.bonsai_config.read_bytes())
+
+    def test_login_lock_blocks_overlapping_attempt_and_survives_in_child(self):
+        manager = CC.Manager()
+        with manager._bonsai_lock("login", blocking=False) as lock:
+            child = subprocess.Popen(
+                [CC.sys.executable, "-c", "import sys; print('ready',flush=True); sys.stdin.read()"],
+                pass_fds=(lock.fileno(),), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+            )
+            self.assertEqual("ready", child.stdout.readline().strip())
+        try:
+            with mock.patch.object(manager, "_check_bonsai_login", side_effect=AssertionError("no overlapping login")):
+                with self.assertRaisesRegex(RuntimeError, "já em andamento"):
+                    manager.login("bonsai")
+        finally:
+            child.communicate(timeout=5)
+        with manager._bonsai_lock("login", blocking=False):
+            pass
+
+    def test_terminated_login_restores_credential_and_signal_handler(self):
+        manager = CC.Manager()
+        before = manager.bonsai_config.read_bytes()
+        old_handler = CC.signal.getsignal(CC.signal.SIGTERM)
+        def interrupted(*args, **kwargs):
+            manager.bonsai_config.write_bytes(b"partial-write")
+            pending, backup = manager._bonsai_recovery_paths()
+            self.assertTrue(pending.is_file())
+            self.assertEqual(0o600, stat.S_IMODE(backup.stat().st_mode))
+            CC.signal.raise_signal(CC.signal.SIGTERM)
+        with mock.patch.object(manager, "_check_bonsai_login", return_value=str(self.bonsai)), mock.patch.object(CC.subprocess, "run", side_effect=interrupted), mock.patch.object(CC.sys.stdin, "isatty", return_value=True), mock.patch.object(CC.sys.stdout, "isatty", return_value=True), mock.patch.object(CC, "open", mock.mock_open(), create=True):
+            with self.assertRaisesRegex(RuntimeError, "SIGTERM"):
+                manager.login("bonsai")
+        self.assertEqual(before, manager.bonsai_config.read_bytes())
+        self.assertEqual(old_handler, CC.signal.getsignal(CC.signal.SIGTERM))
+        self.assertFalse(manager._bonsai_recovery_paths()[0].exists())
+
+    def test_interrupted_login_journal_recovers_before_next_attempt(self):
+        manager = CC.Manager()
+        before = manager.bonsai_config.read_bytes()
+        pending, backup = manager._bonsai_recovery_paths()
+        CC.atomic_bytes(backup, before)
+        CC.atomic_json(pending, {"schemaVersion": 1, "existed": True})
+        manager.bonsai_config.write_bytes(b"interrupted-write")
+        # Fresh process/manager, no original supervisor cleanup available.
+        recovered = CC.Manager()
+        with mock.patch.object(recovered, "_check_bonsai_login", side_effect=RuntimeError("registry unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "registry unavailable"):
+                recovered.login("bonsai")
+        self.assertEqual(before, manager.bonsai_config.read_bytes())
+        self.assertFalse(pending.exists())
+        self.assertFalse(backup.exists())
+
+    def test_terminal_login_launches_same_manager_without_capturing_codes(self):
+        manager = CC.Manager()
+        with mock.patch.object(manager, "_check_bonsai_login", return_value=str(self.bonsai)), mock.patch.object(manager, "_bonsai_terminal", return_value=["/fixture/konsole", "--separate", "--hold", "-e"]), mock.patch.dict(os.environ, {"DISPLAY": ":fixture"}), mock.patch.object(CC.subprocess, "Popen") as launch:
+            launch.return_value.wait.side_effect = subprocess.TimeoutExpired("terminal", 0.2)
+            result = manager.login_in_terminal()
+        self.assertEqual("terminal-requested", result["state"])
+        self.assertIsNone(result["authenticated"])
+        self.assertFalse(result["sessionUsable"])
+        self.assertEqual(["/fixture/konsole", "--separate", "--hold", "-e", CC.sys.executable,
+                          str(MODULE_PATH), "login", "bonsai"], launch.call_args.args[0])
+        for stream in ("stdin", "stdout", "stderr"):
+            self.assertEqual(subprocess.DEVNULL, launch.call_args.kwargs[stream])
+        with mock.patch.object(manager, "_check_bonsai_login", side_effect=RuntimeError("HTTP 404")), mock.patch.object(CC.subprocess, "Popen", side_effect=AssertionError("no terminal when blocked")):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 404"):
+                manager.login_in_terminal()
+
+    def test_registry_unknown_is_not_described_as_observed_failure(self):
+        text = CC.Manager._bonsai_login_block_reason(
+            {"class": "upstream-auth-disabled", "fresh": True},
+            {"available": False, "state": "not-probed-or-stale"},
+        )
+        self.assertIn("ainda não verificada", text)
+        self.assertNotIn("Atualização CLI indisponível", text)
+
+    def test_registry_refresh_serializes_observation_and_cache_write(self):
+        import concurrent.futures
+        import threading
+        manager = CC.Manager()
+        entered = threading.Event()
+        release = threading.Event()
+        calls = []
+        def probe():
+            calls.append(len(calls))
+            if len(calls) == 1:
+                entered.set()
+                self.assertTrue(release.wait(5))
+                return {"available": False, "state": "timeout"}
+            return {"available": True, "state": "available", "version": "0.4.19"}
+        with mock.patch.object(manager, "bonsai_update_observation", side_effect=probe):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(manager.refresh_bonsai_update)
+                self.assertTrue(entered.wait(5))
+                second = pool.submit(manager.refresh_bonsai_update)
+                release.set()
+                self.assertFalse(first.result(5)["available"])
+                self.assertTrue(second.result(5)["available"])
+        self.assertEqual("available", json.loads((manager.data_root / "bonsai-update.json").read_text())["state"])
 
     def test_bonsai_absent_is_reported_without_touching_claude(self) -> None:
         self.bonsai.unlink()

@@ -480,8 +480,11 @@ class AiDevPage(BasePage):
             provider = parsed.get("authProvider", {})
             disabled = provider.get("class") == "upstream-auth-disabled" and provider.get("fresh") is True
             unknown = provider.get("currentAvailability", "unknown") == "unknown" and not disabled
-            attempt_ready = parsed.get("loginAvailable") is True
-            if attempt_ready:
+            attempt_ready = parsed.get("loginAttemptAvailable") is True
+            terminal_ready = parsed.get("loginTerminalAvailable") is True
+            if terminal_ready:
+                label = "Login disponível no terminal privado"
+            elif attempt_ready:
                 label = "Login disponível para tentativa no terminal"
             elif disabled:
                 label = "Login indisponível no provedor"
@@ -490,18 +493,22 @@ class AiDevPage(BasePage):
             else:
                 label = "Bonsai indisponível para execução"
             self.bonsai_state.setText(label)
-            self.bonsai_login.setEnabled(attempt_ready and parsed.get("loginRequiresPrivateTerminal", True) is False)
-            self.bonsai_login.setToolTip("Execute bonsai login em terminal privado; códigos não passam pelo painel.")
+            self.bonsai_login.setEnabled(terminal_ready)
+            self.bonsai_login.setToolTip("Abre terminal privado para login; códigos não passam pelo painel.")
             expired = str(parsed.get("credentialStatus", {}).get("state", "")).startswith("expired")
             reason = "Credencial vencida; renovação necessária." if expired else "Autenticação ainda não comprovada."
             if unknown:
                 reason += " Observação anterior não comprova disponibilidade atual."
             update = parsed.get("updateObservation", {})
-            if update.get("available") is False or update.get("state") == "registry-http-error":
+            if update.get("state") == "not-probed-or-stale":
+                reason += " Atualização ainda não verificada; atualize diagnóstico."
+            elif update.get("available") is False or update.get("state") == "registry-http-error":
                 http = f" (HTTP {update['httpStatus']})" if update.get("httpStatus") else ""
                 reason += f" Atualização indisponível{http}."
             self.bonsai_reason.setText(reason)
             next_step = (
+                "Próximo passo: clique Login Bonsai para abrir terminal privado. Login não inicia inferência."
+                if terminal_ready else
                 "Próximo passo: execute bonsai login em terminal privado. Tentativa explícita não inicia inferência."
                 if attempt_ready else
                 "Próximo passo: confirme disponibilidade no suporte oficial Bonsai. "
