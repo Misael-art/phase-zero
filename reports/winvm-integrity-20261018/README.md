@@ -61,6 +61,8 @@ disabled while checking or when a VM is running. Existing trash/typed purge
 confirmations remain; an inconclusive result explicitly discourages disposal.
 New image creation explicitly uses `preallocation=off`; existing images need
 no migration to become dynamic.
+Both boot-runtime manifests include the new Python dependency, so a packaged
+runtime remains self-contained when the development checkout is unavailable.
 
 ## Evidence and limits
 

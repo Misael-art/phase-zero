@@ -149,7 +149,7 @@ while read -r lib_dep; do
     grep -Fq "linux/lib/$lib_dep" <<< "$gfx_specs" || {
         echo "runtime_artifact_specs sem dependencia dura de common.sh: lib/$lib_dep" >&2; exit 1; }
 done < <(sed -n 's#^source "$PZ_ROOT/linux/lib/\([a-z_-]*\.sh\)"#\1#p' "$REPO_ROOT/linux/lib/common.sh")
-for runtime_dep in windows-vm.sh graphics.sh rescue.sh guest-login.sh guest-login.ps1 provision.sh graphics-profiles.json; do
+for runtime_dep in windows-vm.sh graphics.sh rescue.sh guest-login.sh guest-login.ps1 provision.sh storage.py graphics-profiles.json; do
     grep -Fq "linux/windows-vm/$runtime_dep" <<< "$runtime_specs" || {
         echo "runtime_file_specs sem $runtime_dep" >&2; exit 1; }
     grep -Fq "linux/windows-vm/$runtime_dep" <<< "$gfx_specs" || {
