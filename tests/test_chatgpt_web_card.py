@@ -17,8 +17,9 @@ STATUS = {
     "launcher": {"active": True}, "route": {"active": True}, "daemonListening": True,
     "signedIn": True, "liveCodexRouteTouched": False, "upstreamMode": "browser-only",
     "autostart": {"state": "enabled"},
-    "eligibility": {"blockers": ["o plano Plus não oferece MCP de desenvolvedor (a OpenAI "
-                                 "libera em Pro, só leitura, e em Business, Enterprise e Edu)"]},
+    "eligibility": {"blockers": ["o plano Plus não oferece MCP de desenvolvedor confirmado "
+                                 "nesta integração; confira as permissões atuais da conta "
+                                 "e do workspace"]},
 }
 
 
@@ -121,19 +122,19 @@ def test_bridge_card_reports_state_and_why_tools_are_blocked(qapp, monkeypatch, 
     page._on_status_ready("private.chatgpt-web.status", "", full_without_proof)
     assert "bloqueado" in tools.text() and "rede no turno" in tools.text()
 
-    pro_limited = {**STATUS, "eligibility": {"blockers": [],
-                                            "planMcpCapability": "read"},
-                   "toolsGate": {"next": {"id": "plan-full",
-                                          "detail": "plano Pro permite só leitura/fetch",
-                                          "action": "Use plano compatível."}}}
-    page._on_status_ready("private.chatgpt-web.status", "", pro_limited)
+    pro_unverified = {**STATUS, "eligibility": {"blockers": [],
+                                               "planMcpCapability": "write-unverified"},
+                      "toolsGate": {"next": {"id": "full-runtime",
+                                             "detail": "Full exige turno MCP real",
+                                             "action": "Teste o runtime Full."}}}
+    page._on_status_ready("private.chatgpt-web.status", "", pro_unverified)
     account = next(label for label in card.findChildren(QLabel)
                    if label.property("bridgeRole") == "account")
     next_step = next(label for label in card.findChildren(QLabel)
                      if label.property("bridgeRole") == "next")
-    assert "Conta Pro" in account.text() and "Business" in account.text()
-    assert tools.text() == "Acesso completo ao host: indisponível neste plano."
-    assert "Para acesso completo" in next_step.text()
+    assert "Conta Pro" in account.text() and "ainda não verificadas" in account.text()
+    assert "Full exige turno MCP real" in tools.text()
+    assert "Teste o runtime Full" in next_step.text()
     assert buttons_of(card)["chatgptWebSetup"].text() == "Reparar"
 
     stopped = {**STATUS, "stage": "launcher-configured", "launcher": {"active": False},

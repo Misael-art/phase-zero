@@ -1297,8 +1297,8 @@ def test_tools_steps_explain_an_ineligible_plan_and_the_single_next_step(host, m
     assert status["ready"] is False and status["webModelStillWorks"] is True
     step = status["next"]
     assert step["id"] == "plan" and step["ok"] is False
-    assert "Plus" in step["detail"] and "Pro" in step["detail"] and "Business" in step["detail"]
-    assert "help.openai.com" in step["action"]
+    assert "Plus" in step["detail"] and "não confirmada" in step["detail"]
+    assert "developers.openai.com" in step["action"]
     # Later steps are listed but never offered before the plan is resolved.
     assert [item["id"] for item in status["steps"]][:3] == ["eligibility", "plan", "plan-full"]
 
@@ -1310,7 +1310,7 @@ def test_tools_steps_explain_an_ineligible_plan_and_the_single_next_step(host, m
     assert error.value.code == "tools-not-ready"
     title, body, critical = runner.notifications[-1]
     assert "com ferramentas" in title and critical is True
-    assert "Plus" in body and "Business" in body
+    assert "Plus" in body and "permissão MCP" in body
     assert "ChatGPT Web no Codex" in body  # the browser-only shortcut still works
     assert runner.spawned == []
 
@@ -1318,8 +1318,10 @@ def test_tools_steps_explain_an_ineligible_plan_and_the_single_next_step(host, m
 def test_tools_steps_report_runtime_blocker_after_other_requirements(host, monkeypatch):
     bridge, runner, _ = ready_host(host, monkeypatch)
     bridge.record_eligibility("pro", "yes", "use", "yes")
-    pro_step = bridge.tools_steps()["next"]
-    assert pro_step["id"] == "plan-full" and "só leitura/fetch" in pro_step["detail"]
+    pro_status = bridge.tools_steps()
+    pro_plan = next(item for item in pro_status["steps"] if item["id"] == "plan-full")
+    assert pro_plan["ok"] is True and "chamada MCP real" in pro_plan["detail"]
+    assert pro_status["next"]["id"] == "runtime-key"
     bridge.record_eligibility("business", "yes", "use", "yes")
     single_user = next(item for item in bridge.tools_steps()["steps"]
                        if item["id"] == "single-user")
@@ -1358,7 +1360,7 @@ def test_tools_steps_report_runtime_blocker_after_other_requirements(host, monke
     assert "runtime-key-material" not in json.dumps(done)
 
 
-def test_pro_cannot_unlock_full_host_tools_by_setting_launcher_mode(host, monkeypatch):
+def test_pro_cannot_unlock_full_host_tools_without_a_working_turn(host, monkeypatch):
     bridge, runner, _ = ready_host(host, monkeypatch, mode="full")
     bridge.record_eligibility("pro", "yes", "use", "yes")
     bridge._secret_store = FakeVault()
@@ -1367,8 +1369,9 @@ def test_pro_cannot_unlock_full_host_tools_by_setting_launcher_mode(host, monkey
     with pytest.raises(BridgeError) as error:
         bridge.require_tools_ready(bridge.load_state())
 
-    assert "plano Pro permite apenas leitura/fetch" in str(error.value)
-    assert bridge.tools_steps()["next"]["id"] == "plan-full"
+    assert "falha no turno real" in str(error.value)
+    assert "plano Pro permite apenas leitura/fetch" not in str(error.value)
+    assert bridge.tools_steps()["next"]["id"] == "full-runtime"
 
 
 def test_tools_check_rejects_healthy_doctor_without_a_working_turn(host, monkeypatch):
