@@ -3086,3 +3086,47 @@ não foi verificada para essa ação. Não promover `toolsGate.ready` antes dess
 prova. A release upstream 6.1.10 corrige raízes de workspace e handshakes do
 conector, mas suas notas não afirmam corrigir esta recusa de rede; qualquer
 upgrade exige nova auditoria e teste real antes de mudar o pin.
+
+### PXA-010: conector privado de ferramentas por repositório — 2026-10-18
+
+Alternativa experimental ao Full upstream bloqueado. `linux/ai/chatgpt_project_mcp.py`
+implementa MCP stdio apenas com biblioteca padrão. Operador escolhe **uma**
+raiz Git canônica; ferramentas expostas: estado Git, listagem de arquivos
+versionados, leitura UTF-8 e gravação atômica de um arquivo. Gravação exige
+SHA-256 atual ou ausência esperada. Caminhos absolutos, `..`, symlinks de
+arquivo/diretório e nomes comuns de credenciais são recusados. Sem shell,
+porta local pública, instalação de pacote, acesso a VM/boot ou chave no JSON
+MCP. Nome de arquivo comum não garante ausência de segredo: revisar conteúdo
+antes da chamada remota.
+
+`linux/ai/chatgpt_project_mcp_manager.py` fixa o cliente oficial
+`openai/tunnel-client` v0.0.12 para Linux x64 por checksum do ZIP
+`2bb693bd7b5cd28da7ce09cd9e309529dbb33b7cc9dc0058e62a064688f92c81`
+e do binário `ee9d4a75bc0b42f36f345aa96231e0db1ab00488122f34ebc99d6db055b6603e`.
+Instala no diretório privado do usuário, usa chave já guardada no cofre do
+ChatGPT Web, materializada temporariamente em `XDG_RUNTIME_DIR` modo 0600, e
+inicia `pz-chatgpt-project-mcp.service` via systemd de usuário. `stop`
+encerra unidade e apaga cópia temporária da chave; `remove` preserva
+repositório, túnel e plugin externos. Autostart desligado.
+Comando oculto do catálogo: `pz ai chatgpt-project-mcp install --repo CAMINHO
+--tunnel-id tunnel_...`, seguido de `start|status|stop|remove`. Pacote público
+instalado 1.22.8-1 ainda não contém esse comando; nesta prova, gerenciador
+também está em cópia privada estável.
+
+Provas locais: 109 testes focais pytest, `py_compile`, `bash -n` e diff-check verdes.
+`tunnel-client doctor` passou; execução temporária do túnel retornou `/readyz`
+HTTP 200 e foi encerrada. No host, asset oficial baixado e hash conferido;
+cópia estável em `~/.local/share/phasezero/chatgpt-project-mcp` íntegra;
+`status` mostrou `active:true`, `tunnelReady:true`, `integrity:true`, escopo
+fixado na worktree `/mnt/sdcard/Projects/pz-chatgpt-project-mcp`,
+`toolCallProven:false`. Launcher ChatGPT Web segue browser-only e rota ativa;
+KDE/boot/VM intactos. **Ready do túnel não é ready do produto.** Falta
+vincular ou atualizar plugin privado no ChatGPT da conta, provar `tools/list`,
+leitura de arquivo aleatório e escrita reversível com confirmação da conta,
+depois desativar/reativar e observar rollback. O cartão privado de IA & Dev
+aparece apenas com instalação local e separa integridade, saúde do túnel e falta
+de prova pela conta. Comandos de ligar, desligar e consultar estado usam o
+gerenciador; nenhuma ação entrou no catálogo público. Release e promoção do
+cartão para pronto dependem desse gate. O gerenciador recusa configuração
+incompleta e arquitetura diferente de Linux x86_64; Windows exige binário
+próprio e gate G2.

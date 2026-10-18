@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from linux.ai import chatgpt_project_mcp_manager as module
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    return root
+
+
+def test_install_is_private_pinned_and_never_stages_a_key(repo: Path, tmp_path: Path,
+                                                           monkeypatch) -> None:
+    manager = module.Manager(tmp_path / "data", tmp_path / "run")
+    binary = b"verified fixture binary"
+    monkeypatch.setattr(module, "BINARY_SHA256", hashlib.sha256(binary).hexdigest())
+    monkeypatch.setattr(manager, "_active", lambda: False)
+    monkeypatch.setattr(manager, "_install_binary", lambda: module._atomic(manager.binary,
+                                                                          binary, 0o700))
+
+    result = manager.install(str(repo), "tunnel_" + "a" * 32)
+
+    assert result["installed"] and result["repo"] == str(repo)
+    assert manager.server.read_bytes() == Path(module.__file__).with_name(
+        "chatgpt_project_mcp.py").read_bytes()
+    assert manager.manager.read_bytes() == Path(module.__file__).read_bytes()
+    assert json.loads(manager.config.read_text())["serverSha256"] == module._digest(manager.server)
+    assert manager.home.stat().st_mode & 0o777 == 0o700
+    assert manager.server.stat().st_mode & 0o777 == 0o600
+    assert manager.binary.stat().st_mode & 0o777 == 0o700
+    assert not manager.runtime.exists()
+
+    with pytest.raises(module.ManagerError, match="outro repositório/túnel"):
+        manager.install(str(repo), "tunnel_" + "b" * 32)
+
+
+def test_start_uses_secret_file_not_argv_and_stop_removes_it(repo: Path, tmp_path: Path,
+                                                              monkeypatch) -> None:
+    manager = module.Manager(tmp_path / "data", tmp_path / "run")
+    binary = b"verified fixture binary"
+    monkeypatch.setattr(module, "BINARY_SHA256", hashlib.sha256(binary).hexdigest())
+    monkeypatch.setattr(manager, "_active", lambda: False)
+    monkeypatch.setattr(manager, "_install_binary", lambda: module._atomic(manager.binary,
+                                                                          binary, 0o700))
+    manager.install(str(repo), "tunnel_" + "a" * 32)
+
+    class Vault:
+        def lookup(self, reference):
+            assert reference == "vault-ref"
+            return "synthetic-runtime-secret"
+
+    class Bridge:
+        def load_state(self):
+            return {"runtimeKey": {"ref": "vault-ref"}}
+
+        def key_status(self, state):
+            return {"state": "stored"}
+
+        def secret_store(self):
+            return Vault()
+
+    monkeypatch.setattr(manager, "_bridge", lambda: Bridge())
+    commands = []
+    active = False
+
+    def run(args, timeout=30):
+        nonlocal active
+        commands.append(args)
+        if args[0] == "systemd-run":
+            active = True
+        if args[:3] == ["systemctl", "--user", "stop"]:
+            active = False
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(manager, "_run", run)
+    monkeypatch.setattr(manager, "_active", lambda: active)
+    monkeypatch.setattr(manager, "status", lambda: {"tunnelReady": active, "active": active})
+
+    assert manager.start()["tunnelReady"] is True
+    key = manager.runtime / "runtime-key"
+    assert key.is_file() and key.stat().st_mode & 0o777 == 0o600
+    assert all("synthetic-runtime-secret" not in " ".join(args) for args in commands)
+    assert any("file:" + str(key) in args for args in commands)
+    assert manager.stop() == {"active": False, "tunnelReady": False,
+                              "runtimeKeyStaged": False}
+    assert not key.exists()
+
+
+def test_start_rejects_modified_server_before_retrieving_secret(repo: Path, tmp_path: Path,
+                                                                 monkeypatch) -> None:
+    manager = module.Manager(tmp_path / "data", tmp_path / "run")
+    binary = b"verified fixture binary"
+    monkeypatch.setattr(module, "BINARY_SHA256", hashlib.sha256(binary).hexdigest())
+    monkeypatch.setattr(manager, "_active", lambda: False)
+    monkeypatch.setattr(manager, "_install_binary", lambda: module._atomic(manager.binary,
+                                                                          binary, 0o700))
+    manager.install(str(repo), "tunnel_" + "a" * 32)
+    manager.server.write_text("tampered")
+    monkeypatch.setattr(manager, "_bridge", lambda: pytest.fail("secret must not be retrieved"))
+
+    with pytest.raises(module.ManagerError, match="servidor ausente ou alterado"):
+        manager.start()
+    assert not manager.runtime.exists()
+
+
+def test_malformed_config_fails_without_starting_or_reading_secret(
+        repo: Path, tmp_path: Path, monkeypatch) -> None:
+    manager = module.Manager(tmp_path / "data", tmp_path / "run")
+    manager.home.mkdir()
+    manager.config.write_text(json.dumps({"tunnelId": "tunnel_" + "a" * 32,
+                                          "repo": "relative/path", "serverSha256": "invalid"}))
+    monkeypatch.setattr(manager, "_active", lambda: False)
+    monkeypatch.setattr(manager, "_bridge", lambda: pytest.fail("secret must not be retrieved"))
+
+    with pytest.raises(module.ManagerError, match="configuração do projeto inválida"):
+        manager.start()

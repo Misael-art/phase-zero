@@ -74,6 +74,8 @@ _REPRESENTED_ELSEWHERE = {
 # manager: its actions are built here and never registered in the catalog.
 _BRIDGE_STATUS_ID = "private.chatgpt-web.status"
 _BRIDGE_ARGS = ("ai", "chatgpt-web")
+_PROJECT_MCP_STATUS_ID = "private.chatgpt-project-mcp.status"
+_PROJECT_MCP_ARGS = ("ai", "chatgpt-project-mcp")
 _BRIDGE_STAGES = {
     "opted-in": "aceito, ainda não instalado",
     "package-verified": "instalado, ainda não configurado",
@@ -106,6 +108,11 @@ def _bridge_opted_in() -> bool:
     return isinstance(state, dict) and bool(state.get("optIn"))
 
 
+def _project_mcp_installed() -> bool:
+    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    return (data / "phasezero/chatgpt-project-mcp/config.json").is_file()
+
+
 def _cli_available(payload: dict, name: str) -> bool:
     clis = payload.get("clis") if isinstance(payload.get("clis"), dict) else {}
     node = clis.get(name)
@@ -124,6 +131,9 @@ class AiDevPage(BasePage):
         self._technical_widgets: list[QWidget] = []
         self._bridge_buttons: dict[str, QPushButton] = {}
         self._bridge_ready = False
+        self._project_mcp_buttons: list[QPushButton] = []
+        self._project_mcp_active: bool | None = None
+        self._project_mcp_integrity = False
 
     def build(self) -> None:
         for action_id in _PRIMARY_IDS | _REPRESENTED_ELSEWHERE:
@@ -182,6 +192,7 @@ class AiDevPage(BasePage):
         cards.setColumnStretch(1, 1)
         layout.addLayout(cards)
         layout.addWidget(self._build_bridge_card())
+        layout.addWidget(self._build_project_mcp_card())
         layout.addWidget(self._build_advanced_connections())
         layout.addWidget(self._build_shortcuts())
         layout.addStretch()
@@ -357,6 +368,91 @@ class AiDevPage(BasePage):
         self.bridge_state.style().unpolish(self.bridge_state)
         self.bridge_state.style().polish(self.bridge_state)
 
+    def _build_project_mcp_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("chatgptProjectMcpCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        layout.addWidget(SectionHeader(
+            "Ferramentas do projeto no ChatGPT (experimental)",
+            "Conector privado para um repositório Git. Leia e altere arquivos com confirmação "
+            "na conta; não oferece comandos livres nem acesso ao restante do host.",
+        ))
+        self.project_mcp_state = QLabel("Verificando túnel…")
+        self.project_mcp_state.setObjectName("chatgptProjectMcpState")
+        self.project_mcp_state.setWordWrap(True)
+        layout.addWidget(self.project_mcp_state)
+        self.project_mcp_detail = QLabel("")
+        self.project_mcp_detail.setObjectName("cardDescription")
+        self.project_mcp_detail.setWordWrap(True)
+        layout.addWidget(self.project_mcp_detail)
+        row = QHBoxLayout()
+        for label, command, mutable, impact in (
+            ("Ver estado", "status", False, ""),
+            ("Ligar túnel", "start", True, "Inicia o túnel privado nesta sessão."),
+            ("Desligar túnel", "stop", True, "Encerra o túnel e apaga a chave temporária."),
+        ):
+            action = ActionSpec(
+                id=f"private.chatgpt-project-mcp.{command}", category="IA & Dev",
+                title=f"Ferramentas do projeto — {label}", description=impact or label,
+                args=(*_PROJECT_MCP_ARGS, command), icon="applications-development",
+                mutable=mutable, preview_args=(*_PROJECT_MCP_ARGS, "status") if mutable else None,
+                preview_kind_override="state" if mutable else "", impact=impact,
+                visibility="advanced", timeout_s=120 if mutable else 0,
+            )
+            button = QPushButton(label)
+            button.setObjectName("secondaryButton")
+            button.setProperty("projectMcpRole", command)
+            button.clicked.connect(
+                lambda _checked=False, spec=action: self.action_requested.emit(spec))
+            self._project_mcp_buttons.append(button)
+            row.addWidget(button)
+        row.addStretch()
+        layout.addLayout(row)
+        self._apply_project_mcp_buttons()
+        card.setVisible(_project_mcp_installed())
+        self.project_mcp_card = card
+        return card
+
+    def _on_project_mcp_status(self, payload: dict) -> None:
+        integrity = payload.get("integrity") is True
+        active = payload.get("active") is True
+        ready = payload.get("tunnelReady") is True
+        proven = payload.get("toolCallProven") is True
+        if not integrity:
+            label, state = "● Arquivos do conector alterados — reinstale antes de ligar", "error"
+        elif not active:
+            label, state = "● Túnel desligado", "warning"
+        elif not ready:
+            label, state = "● Túnel iniciado, conexão ainda indisponível", "warning"
+        elif not proven:
+            label, state = "● Túnel conectado; uso pela conta ainda não comprovado", "warning"
+        else:
+            label, state = "● Ferramentas do projeto verificadas", "success"
+        self.project_mcp_state.setText(label)
+        self.project_mcp_state.setProperty("state", state)
+        self.project_mcp_state.style().unpolish(self.project_mcp_state)
+        self.project_mcp_state.style().polish(self.project_mcp_state)
+        repo = str(payload.get("repo") or "")
+        self.project_mcp_detail.setText(
+            (f"Projeto: {repo}. " if repo else "")
+            + "No ChatGPT, selecione o plugin privado e confirme uma leitura e uma escrita "
+              "reversível antes de considerar as ferramentas prontas."
+        )
+        self._project_mcp_active = active
+        self._project_mcp_integrity = integrity
+        self._apply_project_mcp_buttons()
+
+    def _apply_project_mcp_buttons(self, running: bool = False) -> None:
+        for button in self._project_mcp_buttons:
+            role = button.property("projectMcpRole")
+            button.setEnabled(not running and (
+                role == "status" or
+                (role == "start" and self._project_mcp_active is False
+                 and self._project_mcp_integrity) or
+                (role == "stop" and self._project_mcp_active is True)))
+
     def _apply_bridge_buttons(self, running: bool = False) -> None:
         for name, button in self._bridge_buttons.items():
             button.setEnabled(not running and (name != "chatgptWebOpen" or self._bridge_ready))
@@ -491,6 +587,9 @@ class AiDevPage(BasePage):
         self.bridge_card.setVisible(_bridge_opted_in())
         if not self.bridge_card.isHidden() and not self.status_loader.running(_BRIDGE_STATUS_ID):
             self.status_loader.fetch(_BRIDGE_STATUS_ID, [*_BRIDGE_ARGS, "--json", "status"])
+        self.project_mcp_card.setVisible(_project_mcp_installed())
+        if not self.project_mcp_card.isHidden() and not self.status_loader.running(_PROJECT_MCP_STATUS_ID):
+            self.status_loader.fetch(_PROJECT_MCP_STATUS_ID, [*_PROJECT_MCP_ARGS, "status"])
 
     def _set_state(self, state: str) -> None:
         self.state_label.setProperty("state", state)
@@ -500,6 +599,9 @@ class AiDevPage(BasePage):
     def _on_status_ready(self, action_id: str, _stdout: str, parsed: object) -> None:
         if action_id == _BRIDGE_STATUS_ID and isinstance(parsed, dict):
             self._on_bridge_status(parsed)
+            return
+        if action_id == _PROJECT_MCP_STATUS_ID and isinstance(parsed, dict):
+            self._on_project_mcp_status(parsed)
             return
         if action_id != "ai.status" or not isinstance(parsed, dict):
             return
@@ -562,6 +664,13 @@ class AiDevPage(BasePage):
             self.bridge_next.setText("")
             self.bridge_next.hide()
             return
+        if action_id == _PROJECT_MCP_STATUS_ID:
+            self.project_mcp_state.setText("● Estado indisponível — use Ver estado")
+            self.project_mcp_state.setProperty("state", "warning")
+            self.project_mcp_detail.setText("")
+            self._project_mcp_active = None
+            self._apply_project_mcp_buttons()
+            return
         if action_id != "ai.status":
             return
         self.refresh_button.setEnabled(True)
@@ -585,5 +694,6 @@ class AiDevPage(BasePage):
         self.refresh_button.setEnabled(not running)
         self.repair_button.setEnabled(not running)
         self._apply_bridge_buttons(running)
+        self._apply_project_mcp_buttons(running)
         if not running and self.isVisible():
             self.reload()

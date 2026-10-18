@@ -29,8 +29,9 @@ def qapp():
 
 
 def build_page(monkeypatch, tmp_path, opted_in: bool):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     root = tmp_path / "chatgpt-web"
-    root.mkdir()
+    root.mkdir(exist_ok=True)
     state = {"schemaVersion": 1}
     if opted_in:
         state["optIn"] = {"at": "2026-10-12T00:00:00Z"}
@@ -160,3 +161,46 @@ def test_bridge_card_follows_the_running_lock(qapp, monkeypatch, tmp_path):
 
     page.block_while_running(True)
     assert not any(button.isEnabled() for button in card.findChildren(QPushButton))
+
+
+def test_project_tools_card_is_private_and_never_claims_proof_from_tunnel_health(
+        qapp, monkeypatch, tmp_path):
+    page, catalog = build_page(monkeypatch, tmp_path, opted_in=False)
+    card = page.findChild(QFrame, "chatgptProjectMcpCard")
+    assert card.isHidden()
+    assert not any("chatgpt-project-mcp" in " ".join(action.args) for action in catalog)
+
+    config = tmp_path / "data/phasezero/chatgpt-project-mcp/config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{}")
+    page, _ = build_page(monkeypatch, tmp_path, opted_in=False)
+    card = page.findChild(QFrame, "chatgptProjectMcpCard")
+    assert not card.isHidden()
+    requested = []
+    page.action_requested.connect(requested.append)
+    buttons = {button.property("projectMcpRole"): button
+               for button in card.findChildren(QPushButton)}
+    assert set(buttons) == {"status", "start", "stop"}
+
+    page._on_status_ready("private.chatgpt-project-mcp.status", "", {
+        "active": True, "tunnelReady": True, "integrity": True,
+        "repo": "/tmp/fixture-repo", "toolCallProven": False,
+    })
+    state = card.findChild(QLabel, "chatgptProjectMcpState")
+    assert "ainda não comprovado" in state.text()
+    assert state.property("state") == "warning"
+    assert not buttons["start"].isEnabled() and buttons["stop"].isEnabled()
+    assert "/tmp/fixture-repo" in page.project_mcp_detail.text()
+    buttons["status"].click()
+    assert requested[-1].args == ("ai", "chatgpt-project-mcp", "status")
+    buttons["stop"].click()
+    assert requested[-1].args == ("ai", "chatgpt-project-mcp", "stop")
+    assert requested[-1].mutable and requested[-1].preview_args == (
+        "ai", "chatgpt-project-mcp", "status")
+
+    page._on_status_ready("private.chatgpt-project-mcp.status", "", {
+        "active": False, "tunnelReady": False, "integrity": False,
+        "repo": "/tmp/fixture-repo", "toolCallProven": False,
+    })
+    assert state.property("state") == "error"
+    assert not buttons["start"].isEnabled()
