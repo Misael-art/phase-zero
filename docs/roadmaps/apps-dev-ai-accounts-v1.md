@@ -3113,13 +3113,16 @@ Comando oculto do catálogo: `pz ai chatgpt-project-mcp install --repo CAMINHO
 instalado 1.22.8-1 ainda não contém esse comando; nesta prova, gerenciador
 também está em cópia privada estável.
 
-Provas locais: 109 testes focais pytest, `py_compile`, `bash -n` e diff-check verdes.
+Provas locais: 111 testes focais pytest, `py_compile`, `bash -n` e diff-check verdes.
 `tunnel-client doctor` passou; execução temporária do túnel retornou `/readyz`
 HTTP 200 e foi encerrada. No host, asset oficial baixado e hash conferido;
 cópia estável em `~/.local/share/phasezero/chatgpt-project-mcp` íntegra;
 `status` mostrou `active:true`, `tunnelReady:true`, `integrity:true`, escopo
 fixado na worktree `/mnt/sdcard/Projects/pz-chatgpt-project-mcp`,
-`toolCallProven:false`. Launcher ChatGPT Web segue browser-only e rota ativa;
+`toolCallProven:false`. A prova mínima de sessão agora registra apenas duas
+classes de chamada bem-sucedida (leitura/escrita), sem argumentos ou conteúdo,
+e é apagada ao desligar/reiniciar o túnel. Não substitui revisão humana da
+conta e confirmação da escrita. Launcher ChatGPT Web segue browser-only e rota ativa;
 KDE/boot/VM intactos. **Ready do túnel não é ready do produto.** Falta
 vincular ou atualizar plugin privado no ChatGPT da conta, provar `tools/list`,
 leitura de arquivo aleatório e escrita reversível com confirmação da conta,

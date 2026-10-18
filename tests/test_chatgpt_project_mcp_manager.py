@@ -124,3 +124,38 @@ def test_malformed_config_fails_without_starting_or_reading_secret(
 
     with pytest.raises(module.ManagerError, match="configuração do projeto inválida"):
         manager.start()
+
+
+def test_status_requires_both_tool_classes_from_current_tunnel_session(
+        repo: Path, tmp_path: Path, monkeypatch) -> None:
+    manager = module.Manager(tmp_path / "data", tmp_path / "run")
+    binary = b"verified fixture binary"
+    monkeypatch.setattr(module, "BINARY_SHA256", hashlib.sha256(binary).hexdigest())
+    monkeypatch.setattr(manager, "_active", lambda: True)
+    module._atomic(manager.binary, binary, 0o700)
+    module._atomic(manager.server, Path(module.__file__).with_name(
+        "chatgpt_project_mcp.py").read_bytes())
+    module._atomic(manager.config, json.dumps({
+        "repo": str(repo), "tunnelId": "tunnel_" + "a" * 32,
+        "serverSha256": module._digest(manager.server),
+    }).encode())
+    manager.runtime.mkdir(parents=True)
+    (manager.runtime / "health.url").write_text("http://127.0.0.1:12345")
+
+    class Ready:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", lambda *args, **kwargs: Ready())
+    proof = manager.runtime / "proof.json"
+    module._atomic(proof, b'{"read":true}')
+    assert manager.status()["toolCallProven"] is False
+    module._atomic(proof, b'{"read":true,"write":true}')
+    assert manager.status()["toolCallProven"] is True
+    proof.chmod(0o644)
+    assert manager.status()["toolCallProven"] is False

@@ -429,7 +429,7 @@ class AiDevPage(BasePage):
         elif not proven:
             label, state = "● Túnel conectado; uso pela conta ainda não comprovado", "warning"
         else:
-            label, state = "● Ferramentas do projeto verificadas", "success"
+            label, state = "● Leitura e escrita comprovadas nesta sessão", "success"
         self.project_mcp_state.setText(label)
         self.project_mcp_state.setProperty("state", state)
         self.project_mcp_state.style().unpolish(self.project_mcp_state)

@@ -197,7 +197,10 @@ class Manager:
             raise ManagerError("servidor ausente ou alterado; reinstale")
         Project(data["repo"])
         key = self._key()
-        command = shlex.join(["/usr/bin/python3", str(self.server), "--repo", data["repo"]])
+        proof = self.runtime / "proof.json"
+        proof.unlink(missing_ok=True)
+        command = shlex.join(["/usr/bin/python3", str(self.server), "--repo", data["repo"],
+                              "--proof-file", str(proof)])
         init = self._run([str(self.binary), "init", "--profile", PROFILE,
                           "--profile-dir", str(self.profile_dir), "--tunnel-id", data["tunnelId"],
                           "--mcp-command", command, "--control-plane-api-key-ref",
@@ -254,11 +257,24 @@ class Manager:
                             ready = response.status == 200
                 except (OSError, ValueError):
                     pass
+        proven = False
+        if ready and integrity and self.runtime is not None:
+            proof = self.runtime / "proof.json"
+            try:
+                if (proof.is_file() and not proof.is_symlink()
+                        and proof.stat().st_uid == os.getuid()
+                        and not proof.stat().st_mode & 0o077):
+                    flags = json.loads(proof.read_text(encoding="utf-8"))
+                    proven = isinstance(flags, dict) and flags.get("read") is True \
+                        and flags.get("write") is True
+            except (OSError, UnicodeError, ValueError):
+                pass
         return {"installed": True, "active": active, "tunnelReady": ready,
                 "integrity": integrity,
-                "repo": data["repo"], "toolCallProven": False,
+                "repo": data["repo"], "toolCallProven": proven,
                 "next": "No ChatGPT Plugins, conecte o túnel e faça uma chamada real de leitura "
-                        "e escrita reversível." if ready else "start"}
+                        "e escrita reversível." if ready and not proven else
+                        "Leitura e escrita comprovadas nesta sessão." if proven else "start"}
 
     def stop(self) -> dict[str, Any]:
         self._run(["systemctl", "--user", "stop", UNIT], 30)
@@ -271,6 +287,7 @@ class Manager:
                     os.fsync(stream.fileno())
             key.unlink(missing_ok=True)
             (self.runtime / "health.url").unlink(missing_ok=True)
+            (self.runtime / "proof.json").unlink(missing_ok=True)
         return {"active": self._active(), "tunnelReady": False,
                 "runtimeKeyStaged": False}
 

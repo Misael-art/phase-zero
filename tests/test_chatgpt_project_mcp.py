@@ -105,3 +105,24 @@ def test_tool_arguments_are_rejected_without_running_project_code(repo: Path) ->
     assert bad["result"]["isError"] is True
     assert (repo / "src/app.py").read_text() == "print('ok')\n"
     assert os.path.exists(repo / "README.md")
+
+
+def test_session_proof_records_successful_read_and_write_without_content(repo: Path) -> None:
+    proof = repo.parent / "proof.json"
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "project_read_file", "arguments": {"path": "README.md"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "project_write_file", "arguments": {
+             "path": "src/new.py", "content": "probe-only\n", "expectedSha256": None}}},
+    ]
+    stdin = io.BytesIO(b"".join((json.dumps(item) + "\n").encode() for item in requests))
+    stdout = io.BytesIO()
+    serve(Project(str(repo)), stdin, stdout, proof)
+
+    assert all(not item["result"].get("isError") for item in
+               (json.loads(line) for line in stdout.getvalue().splitlines()))
+    assert json.loads(proof.read_text()) == {"read": True, "write": True}
+    assert "probe-only" not in proof.read_text()
+    assert "README.md" not in proof.read_text()
+    assert proof.stat().st_mode & 0o777 == 0o600

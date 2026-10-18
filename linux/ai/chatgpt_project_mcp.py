@@ -8,6 +8,7 @@ never opens a listener or accepts a shell command from a tool caller.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -308,7 +309,31 @@ def handle(project: Project, message: dict[str, Any]) -> dict[str, Any] | None:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-def serve(project: Project, stdin: BinaryIO, stdout: BinaryIO) -> None:
+def _record_proof(path: Path, tool_name: str) -> None:
+    """Record only successful read/write classes; never log arguments or content."""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) & 0o077
+                or info.st_size > 1024):
+            raise ProjectError("arquivo de prova inválido")
+        raw = os.read(fd, 1025)
+        flags = json.loads(raw) if raw else {}
+        if not isinstance(flags, dict):
+            raise ProjectError("arquivo de prova inválido")
+        flags["read" if tool_name == "project_read_file" else "write"] = True
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.ftruncate(fd, 0)
+        os.write(fd, json.dumps(flags, separators=(",", ":")).encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def serve(project: Project, stdin: BinaryIO, stdout: BinaryIO,
+          proof_file: Path | None = None) -> None:
     while True:
         line = stdin.readline(MAX_MESSAGE + 2)
         if not line:
@@ -320,6 +345,15 @@ def serve(project: Project, stdin: BinaryIO, stdout: BinaryIO) -> None:
             if not isinstance(message, dict):
                 raise ValueError("not an object")
             response = handle(project, message)
+            if (proof_file is not None and response is not None
+                    and message.get("method") == "tools/call"
+                    and isinstance(message.get("params"), dict)
+                    and message["params"].get("name") in {"project_read_file", "project_write_file"}
+                    and not response.get("result", {}).get("isError")):
+                try:
+                    _record_proof(proof_file, message["params"]["name"])
+                except (OSError, ProjectError, UnicodeError, ValueError):
+                    pass  # Successful tool use remains valid; status stays unproven.
         except (UnicodeError, ValueError):
             response = {"jsonrpc": "2.0", "id": None,
                         "error": {"code": -32700, "message": "Parse error"}}
@@ -331,13 +365,14 @@ def serve(project: Project, stdin: BinaryIO, stdout: BinaryIO) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="MCP privado para um repositório Git")
     parser.add_argument("--repo", required=True, help="raiz canônica do repositório permitido")
+    parser.add_argument("--proof-file", type=Path, help="prova mínima da sessão do túnel")
     args = parser.parse_args()
     try:
         project = Project(args.repo)
     except (ProjectError, OSError, subprocess.TimeoutExpired) as error:
         print("repositório recusado: " + str(error), file=sys.stderr)
         return 2
-    serve(project, sys.stdin.buffer, sys.stdout.buffer)
+    serve(project, sys.stdin.buffer, sys.stdout.buffer, args.proof_file)
     return 0
 
 
