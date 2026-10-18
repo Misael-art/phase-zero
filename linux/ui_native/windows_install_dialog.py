@@ -89,7 +89,8 @@ class WindowsInstallDialog(QDialog):
         layout.addWidget(title)
         intro = QLabel(
             "Escolha a ISO e as opções antes de iniciar. O PhaseZero valida o arquivo "
-            "e lê as edições disponíveis nessa mídia."
+            "e lê as edições disponíveis nessa mídia. O disco QCOW2 cresce conforme o uso: "
+            "a capacidade virtual não é reservada inteira no host. Snapshots e cópias usam espaço adicional."
         )
         intro.setObjectName("cardDescription")
         intro.setWordWrap(True)

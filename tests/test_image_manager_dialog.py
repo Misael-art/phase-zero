@@ -5,8 +5,9 @@ import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QDialog, QPushButton, QLabel, QScrollArea
 
 from linux.ui_native import image_manager_dialog as imd_mod
 from linux.ui_native import image_registry as reg
@@ -59,7 +60,8 @@ def _entry(path: str = "/tmp/win.iso", sha: str | None = None, **overrides) -> d
 
 def _write_fake_pz(tmp_path: Path, *, inspect_fail: bool = False,
                    scan_candidates: list[str] | None = None,
-                   inventory: list[dict] | None = None) -> Path:
+                   inventory: list[dict] | None = None,
+                   integrity: dict | None = None) -> Path:
     pz = tmp_path / "linux" / "pz"
     pz.parent.mkdir(parents=True, exist_ok=True)
     scan_payload = json.dumps({
@@ -93,6 +95,10 @@ def _write_fake_pz(tmp_path: Path, *, inspect_fail: bool = False,
         f"{inspect_body}"
         '  "windows-vm provision inventory")\n'
         f"    printf '%s' {json.dumps(inventory_payload)}\n"
+        "    exit 0 ;;\n"
+        '  "windows-vm provision integrity")\n'
+        "    sleep 0.1\n"
+        f"    printf '%s' {json.dumps(json.dumps(integrity or {}))}\n"
         "    exit 0 ;;\n"
         "  *) exit 1 ;;\n"
         "esac\n"
@@ -549,3 +555,55 @@ def test_advanced_mode_reveals_sha_full(qapp, tmp_path: Path) -> None:
     dlg.set_advanced_mode(True)
     assert not dlg._sha_full_label.isHidden()
     assert "h" * 64 in dlg._sha_full_label.text()
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_inventory_public_integrity_button_real_theme(qapp, tmp_path, theme):
+    from linux.ui_native.app import apply_theme
+    apply_theme(qapp, theme)
+    op = "op-integrity-fixture"
+    observed = {"id": op, "state": "issues", "message": "Problema encontrado na instalação.",
+                "nextStep": "Confira os detalhes; nada foi apagado.", "bootVerified": False}
+    _write_fake_pz(tmp_path, inventory=[{
+        "id": op, "state": "completed", "imageIndex": 1, "allocatedBytes": 40 * 1024**3,
+        "vmDir": "/fixture/vms/" + op, "running": False,
+        "storage": {"virtualBytes": 256 * 1024**3, "baseBytes": 18 * 1024**3,
+                    "snapshotBytes": 21 * 1024**3, "mediaBytes": 1024**3},
+    }], integrity=observed)
+    dlg = _make_dialog(tmp_path, by_id=_real_by_id(), advanced=True)
+    dlg.resize(800, 600)
+    dlg.show()
+    assert _wait_for(lambda: not dlg._reader.is_running("vm-inventory"))
+    failures = []
+    def interact():
+        modal = dlg.findChild(QDialog, "windowsVmInventoryDialog")
+        try:
+            assert modal is not None
+            assert modal.width() <= 800 and modal.height() <= 600
+            check = modal.findChild(QPushButton, "windowsVmIntegrityCheck")
+            assert check.isVisible() and check.isEnabled()
+            for button in modal.findChildren(QPushButton):
+                if not button.isVisible():
+                    continue
+                point = button.mapTo(modal, button.rect().bottomRight())
+                assert modal.contentsRect().contains(point), button.text()
+            for area in modal.findChildren(QScrollArea):
+                assert area.horizontalScrollBar().maximum() == 0
+            QTest.mouseClick(check, Qt.LeftButton)
+            assert not check.isEnabled()
+            assert _wait_for(lambda: check.isEnabled())
+            text = "\n".join(label.text() for label in modal.findChildren(QLabel))
+            assert "Problema encontrado" in text
+            assert "256.0 GB" in text and "snapshot" in text
+            assert '"bootVerified": false' in text
+            assert dlg._pending_action is None
+        except BaseException as exc:
+            failures.append(exc)
+        finally:
+            if modal:
+                modal.reject()
+    QTimer.singleShot(50, interact)
+    QTest.mouseClick(dlg.vms_button, Qt.LeftButton)
+    dlg.close()
+    if failures:
+        raise failures[0]

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -813,7 +815,7 @@ class ImageManagerDialog(QDialog):
         layout.setSpacing(12)
         layout.addWidget(SectionHeader(
             "Instalações Windows",
-            "Concluídas e interrompidas aparecem aqui. Escolha uma para conferir espaço e remover os arquivos.",
+            "Confira integridade e espaço antes de decidir retomar ou remover uma instalação.",
         ))
         vm_list = QListWidget()
         vm_list.setObjectName("windowsVmInventoryList")
@@ -825,7 +827,7 @@ class ImageManagerDialog(QDialog):
                 "interrupted": "Interrompida · pode retomar",
                 "failed": "Falhou · arquivos preservados",
                 "cancelled": "Cancelada · arquivos preservados",
-            }.get(state, "Concluída · desligada")
+            }.get(state, "Instalador concluído · integridade não verificada")
             item = QListWidgetItem(
                 f"Windows 11 · {edition}  —  {_human_bytes(entry.get('allocatedBytes'))}  ·  {status}"
             )
@@ -834,11 +836,19 @@ class ImageManagerDialog(QDialog):
         vm_list.setCurrentRow(0)
         layout.addWidget(vm_list, 1)
         details = QLabel()
+        details.setTextFormat(Qt.PlainText)
         details.setObjectName("cardDescription")
         details.setWordWrap(True)
-        layout.addWidget(details)
+        details_scroll = QScrollArea()
+        details_scroll.setWidgetResizable(True)
+        details_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        details_scroll.setWidget(details)
+        layout.addWidget(details_scroll, 2)
 
-        buttons = QHBoxLayout()
+        buttons = QGridLayout()
+        check = QPushButton("Verificar integridade")
+        check.setObjectName("windowsVmIntegrityCheck")
+        check.setMinimumHeight(44)
         resume = QPushButton("Retomar instalação")
         resume.setObjectName("primaryButton")
         resume.setMinimumHeight(44)
@@ -850,12 +860,14 @@ class ImageManagerDialog(QDialog):
         purge.setMinimumHeight(44)
         close = QPushButton("Cancelar")
         close.setMinimumHeight(44)
-        buttons.addWidget(resume)
-        buttons.addWidget(trash)
-        buttons.addWidget(purge)
-        buttons.addStretch()
-        buttons.addWidget(close)
+        buttons.addWidget(check, 0, 0)
+        buttons.addWidget(resume, 0, 1)
+        buttons.addWidget(trash, 1, 0)
+        buttons.addWidget(purge, 1, 1)
+        buttons.addWidget(close, 1, 2)
         layout.addLayout(buttons)
+        reader = _PzReader(self._root, dialog)
+        checking_id = ""
 
         def selected() -> dict | None:
             item = vm_list.currentItem()
@@ -870,22 +882,89 @@ class ImageManagerDialog(QDialog):
                 purge.setEnabled(False)
                 return
             running = bool(entry.get("running"))
+            checking = bool(checking_id)
             recoverable = entry.get("state") in {"interrupted", "failed", "cancelled"}
             path_text = str(entry.get("vmDir") or "")
+            storage = entry.get("storage") or {}
+            integrity = entry.get("integrity") or {}
+            capacity = storage.get("virtualBytes")
+            capacity_text = _human_bytes(capacity) if capacity is not None else "não identificada"
+            breakdown = (
+                f"Disco base: {_human_bytes(storage.get('baseBytes'))}; "
+                f"snapshot: {_human_bytes(storage.get('snapshotBytes'))}; "
+                f"mídias: {_human_bytes(storage.get('mediaBytes'))}.\n"
+                if storage else ""
+            )
+            adopted = storage.get("adoptedDisk") or {}
+            adopted_text = (
+                f"Cópia ativada separada: {_human_bytes(adopted.get('allocatedBytes'))}. "
+                "Remover estes arquivos de instalação não remove essa cópia.\n"
+                if entry.get("adoptedDisk") else ""
+            )
             details.setText(
-                f"Espaço ocupado: {_human_bytes(entry.get('allocatedBytes'))}\n"
-                f"Criada em: {entry.get('createdAt') or '—'}\n"
-                f"Local: {path_text}\n\n"
+                f"Estado observado: {integrity.get('message') or 'Integridade ainda não verificada.'}\n"
+                + (f"Motivo: {integrity['reason']}\n" if integrity.get('reason') else "")
+                +
+                f"Próximo passo: {integrity.get('nextStep') or 'Clique em Verificar integridade. Windows não será iniciado.'}\n\n"
+                f"Espaço ocupado no host: {_human_bytes(entry.get('allocatedBytes'))}\n"
+                f"Capacidade virtual: {capacity_text} · QCOW2 cresce conforme gravações.\n"
+                + breakdown + adopted_text
+                + "Snapshots retêm blocos antigos; espaço livre no Windows não equivale a espaço livre no host.\n\n"
                 + ("Instalação parcial preservada. Retome pelo botão acima ou remova os arquivos desta operação.\n\n"
                    if entry.get("state") in {"interrupted", "failed", "cancelled"} else "")
                 + "Lixeira permite recuperação, mas libera espaço somente após ser esvaziada. "
                 "Liberação imediata é permanente."
+                + (f"\n\nLocal: {path_text}\nCriada em: {entry.get('createdAt') or '—'}\n"
+                   + json.dumps(integrity, ensure_ascii=False, indent=2) if self._advanced else "")
             )
+            check.setEnabled(not running and not checking)
+            check.setText("Verificando…" if checking else "Verificar integridade")
+            check.setToolTip("Somente leitura: QCOW2 e arquivos essenciais via libguestfs. Não comprova boot nem repara discos.")
             resume.setVisible(recoverable)
-            resume.setEnabled(recoverable and not running and "windows.provision.resume" in self._by_id)
-            trash.setEnabled(not running)
+            resume.setEnabled(recoverable and not running and not checking and "windows.provision.resume" in self._by_id)
+            trash.setEnabled(not running and not checking)
             trash.setText("Remover instalação parcial" if recoverable else "Mover VM para a lixeira")
-            purge.setEnabled(not running)
+            purge.setEnabled(not running and not checking)
+
+        def check_selected() -> None:
+            nonlocal checking_id
+            entry = selected()
+            if entry is None or checking_id:
+                return
+            checking_id = str(entry["id"])
+            entry["integrity"] = {"message": "Verificação em andamento; arquivos preservados.",
+                                  "nextStep": "Aguarde. Windows permanece desligado."}
+            update_details()
+            reader.run(checking_id, ["windows-vm", "provision", "integrity", "--operation-id",
+                                    checking_id, "--guest-files", "--json"], timeout_ms=720_000)
+
+        def check_done(request_id: str, stdout: str) -> None:
+            nonlocal checking_id
+            try:
+                observation = json.loads(stdout)
+                if not isinstance(observation, dict) or observation.get("id") != request_id:
+                    raise ValueError("resposta inválida")
+            except (ValueError, TypeError):
+                check_failed(request_id, "Resposta inválida do verificador.")
+                return
+            for row in range(vm_list.count()):
+                item = vm_list.item(row)
+                data = item.data(Qt.UserRole)
+                if data.get("id") == request_id:
+                    data["integrity"] = observation
+                    item.setData(Qt.UserRole, data)
+                    item.setText(f"Windows 11 · Edição {data.get('imageIndex') or '?'} · {observation.get('message')}")
+            checking_id = ""
+            update_details()
+
+        def check_failed(request_id: str, message: str) -> None:
+            check_done(request_id, json.dumps({"id": request_id, "state": "unknown",
+                       "message": "Verificação inconclusiva; arquivos preservados.",
+                       "nextStep": message + " Tente novamente; não descarte somente por este resultado."}))
+
+        check.clicked.connect(check_selected)
+        reader.finished_ok.connect(check_done)
+        reader.failed.connect(check_failed)
 
         def choose(mode: str) -> None:
             entry = selected()
