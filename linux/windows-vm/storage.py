@@ -94,6 +94,10 @@ def run(args: list[str], *, timeout: int = 30, script: str | None = None) -> sub
             try:
                 proc.communicate(timeout=2)
             except subprocess.TimeoutExpired:
+                pass
+            finally:
+                # A child may close its pipes and ignore TERM while its parent
+                # exits. Reclaim the remaining probe group in that case too.
                 try:
                     os.killpg(proc.pid, signal.SIGKILL)
                 except ProcessLookupError:

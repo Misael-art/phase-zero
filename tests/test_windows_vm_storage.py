@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -183,11 +184,22 @@ def test_public_cli_integrity_and_inventory_are_read_only(tmp_path):
 
 def test_probe_timeout_reclaims_its_own_child_processes(tmp_path):
     marker = tmp_path / "child-pid"
-    code = ("import subprocess,sys,time,pathlib; "
-            "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']); "
-            "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(30)")
+    child = ("import signal,time,sys,pathlib,os; "
+             "signal.signal(signal.SIGTERM,signal.SIG_IGN); "
+             "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)")
+    code = ("import subprocess,sys,time; "
+            "subprocess.Popen([sys.executable,'-c',sys.argv[2],sys.argv[1]],"
+            "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); time.sleep(30)")
     with pytest.raises(subprocess.TimeoutExpired):
-        storage.run([sys.executable, "-c", code, str(marker)], timeout=1)
+        storage.run([sys.executable, "-c", code, str(marker), child], timeout=1)
     pid = int(marker.read_text())
     status = Path(f"/proc/{pid}/status")
-    assert not status.exists() or "State:\tZ" in status.read_text()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        try:
+            if "State:\tZ" in status.read_text():
+                return
+        except (FileNotFoundError, ProcessLookupError):
+            return
+        time.sleep(0.01)
+    pytest.fail("probe child outlived timeout cleanup")
