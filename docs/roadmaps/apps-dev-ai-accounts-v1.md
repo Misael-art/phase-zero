@@ -3044,3 +3044,45 @@ manager anterior em
 Pacote instalado 1.22.8-1 não contém a
 copy nova da UI; publicar pacote depois da revisão. Sem reiniciar ou mudar
 launcher, túnel, credenciais, VM, KDE ou boot.
+
+### PXA-010: prova Full restrita à worktree — 2026-10-18
+
+Pedido atual: ferramentas para trabalhar no PhaseZero. No host `misael-jupiter`,
+Codex CLI 0.163.0 e launcher fixado em 6.1.8, teste real isolado usou a
+worktree `pz-chatgpt-web-resilience`, arquivo aleatório descartável, sandbox
+`workspace-write`, `sandbox_workspace_write.network_access=true`, aprovação
+`on-request`, sem acesso irrestrito. Configuração browser-only salva em
+`~/.local/share/phasezero/chatgpt-web/journal/full-project-probe-20261018T190903Z/`;
+configuração Full anterior reaproveitada apenas durante a prova. O launcher foi
+reiniciado duas vezes; KDE, boot, pacote, perfil normal `~/.codex` e VM intactos.
+
+Resultado: `doctor --json` do upstream retornou `ok:true`, mas o **turno real**
+de leitura falhou, rc 1, com `ChatGPT web turn is missing network access in
+trusted Codex environment context`. Nenhuma ferramenta respondeu; nenhuma
+escrita foi tentada. `codex debug prompt-input` com a configuração acima
+mostrou perfil gerenciado com raiz gravável da worktree, mas **sem declaração
+de rede** no `environment_context`. Perfil nomeado com
+`permissions.<nome>.network.enabled=true` também não a emitiu. O resolver
+6.1.8 exige essa declaração textual antes do broker. Logo, habilitar a opção
+de rede ou passar para `workspace-write` não resolve o contrato do runtime
+nesta combinação. Não contornar com `danger-full-access` ou texto forjado no
+prompt. Prova de escrita e política da conta continuam pendentes.
+
+O script de prova restaurou browser-only, removeu o arquivo descartável e
+reabriu o launcher. Após a prova: `route verify ok:true`, rota ativa em
+`127.0.0.1:17841`, `~/.codex` normal intocado. O Codex dedicado estava aberto
+em outro processo; não foi encerrado. A cópia instalada do gerenciador ainda
+tem o texto antigo do bloqueio; atualizar somente após testes e publicação.
+
+Próxima implementação: investigar correção upstream do vínculo entre política
+de rede e contexto confiável **ou** criar conector MCP privado restrito ao
+repositório, via [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels).
+O conector deve anunciar ferramentas com fronteira de leitura/escrita aplicada
+no servidor, operar sem chave em argumento/log, confirmar escrita no ChatGPT,
+provar leitura e edição reversível por chamada real e oferecer desativação
+atômica. [Plugins MCP personalizados](https://developers.openai.com/api/docs/guides/custom-mcp-server)
+aceitam leitura/escrita em princípio, mas a conta/workspace deste host ainda
+não foi verificada para essa ação. Não promover `toolsGate.ready` antes dessa
+prova. A release upstream 6.1.10 corrige raízes de workspace e handshakes do
+conector, mas suas notas não afirmam corrigir esta recusa de rede; qualquer
+upgrade exige nova auditoria e teste real antes de mudar o pin.
