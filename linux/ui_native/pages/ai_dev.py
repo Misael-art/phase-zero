@@ -196,7 +196,7 @@ class AiDevPage(BasePage):
         card = QFrame()
         card.setObjectName("settingsCard")
         layout = QVBoxLayout(card)
-        layout.addWidget(SectionHeader("Bonsai", "Serviço externo · uso e proxy sujeitos a gates"))
+        layout.addWidget(SectionHeader("Bonsai", "Serviço externo · diagnóstico e login"))
         self.bonsai_state = QLabel("Estado ainda não observado")
         self.bonsai_state.setWordWrap(True)
         layout.addWidget(self.bonsai_state)

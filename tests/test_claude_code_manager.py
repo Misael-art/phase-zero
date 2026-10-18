@@ -128,7 +128,7 @@ echo "bonsai:$*"
         self.assertFalse(state["routeCapabilities"]["bonsai"]["claudeAiConnectors"])
         self.assertFalse(state["routeCapabilities"]["bonsai"]["connectorsWarningExpected"])
         self.assertTrue(state["routeCapabilities"]["bonsai"]["upstreamDirectCommandMayWarn"])
-        self.assertTrue(state["routeCapabilities"]["bonsai"]["phaseZeroLauncherSuppressesWarning"])
+        self.assertFalse(state["routeCapabilities"]["bonsai"]["phaseZeroLauncherSuppressesWarning"])
         self.assertEqual(1, sum(item["state"] == "orphan" for item in state["configuration"]["hooks"]))
 
     def test_live_verify_reports_grant_block_without_sending_prompt(self) -> None:

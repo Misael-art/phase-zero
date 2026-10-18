@@ -334,7 +334,7 @@ def test_hidden_ai_dev_page_probes_only_when_opened(qapp):
             page.block_while_running(False)
             assert calls == []
             window.show_category("IA & Dev")
-        assert calls == [("ai.status", ["ai", "status"])]
+        assert calls == [("ai.status", ["ai", "status"]), ("private.bonsai.status", ["ai", "claude", "bonsai-status"])]
     finally:
         window.close()
         host_patcher.stop()

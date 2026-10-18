@@ -497,6 +497,10 @@ Adicionar IDs, nunca reutilizar ID para requisito diferente. Estados permitidos:
 
 ## Estado vivo
 
+Bonsai/reparos 2026-10-17: worktree `codex/bonsai-repairs`; evidência em
+`reports/bonsai-repairs-20261017/README.md`. Pacote host 1.22.5-1 preservado;
+nenhum workload Homelab iniciado. Release pendente CI e gate de teste host.
+
 Atualizar esta seção no início e fim de cada sessão. Não alterar metadados históricos
 sem evidência.
 
@@ -572,6 +576,10 @@ sem evidência.
 | Fase 5 auditoria host limpo | PZ-AUD-028 verified em `codex/aud-fase5`; job arch-clean-host, gates de manifesto/exatidão, matriz de evidência | Arch descartável real (15 perfis, asset, entrypoints); CI estendido; sem mutação no host | 2026-09-07 |
 
 ## Ledger de execução
+
+2026-10-17 — Codex, `codex/bonsai-repairs`, base fa91c09: Bonsai sem
+mascaramento de latest, observações separadas e reparos sob demanda; ver relatório.
+Login upstream e API proxy bloqueados; entrada real pendente autorização OS.
 
 Adicionar uma linha por sessão material. Não apagar histórico.
 

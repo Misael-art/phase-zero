@@ -770,13 +770,13 @@ try {
             "nextAction": (
                 "Login indisponível no provedor; aguarde recuperação do Bonsai. Credenciais preservadas."
                 if provider.get("class") == "upstream-auth-disabled" else
-                "Atualização indisponível: HTTP " + str(update.get("httpStatus", "n/a")) + "; consulte https://www.trybons.ai. Credenciais preservadas."
+                "Atualização indisponível: " + update["state"] + " HTTP " + str(update.get("httpStatus", "n/a")) + "; consulte https://www.trybons.ai. Credenciais preservadas."
                 if not update["available"] else
                 "Runner mascara atualização; repare atalhos pelo PhaseZero e use canal oficial."
                 if update_check == "forged" else "Atualize diagnóstico antes de login."
             ),
             "credentialStorePresent": store_present,
-            "authenticated": False if store_present else None,
+            "authenticated": None if credential.get("state") in {"missing", "valid-local-token"} else False,
             "credentialStatus": credential,
             "authProvider": provider,
             "updateObservation": update,
@@ -786,7 +786,9 @@ try {
             "observedAt": now_iso(),
             "source": "phasezero-manager/local-credential-metadata/provider-cache",
             "loginAvailable": provider.get("available") is True and update["available"] and update_check != "forged",
-            "snapshotConsent": "interactive-upstream",
+            "snapshotConsent": "explicit-directory-and-per-execution-consent-required",
+            "managerPath": str(Path(__file__).resolve()),
+            "commandPath": str(self.local_bin / "bonsai"),
             "credentialStorePermissions": {
                 "directoryMode": f"{directory_mode:04o}" if directory_mode is not None else None,
                 "insecureFiles": insecure_files,
@@ -1074,7 +1076,7 @@ try {
                     "claudeAiConnectors": False,
                     "connectorsWarningExpected": False,
                     "upstreamDirectCommandMayWarn": True,
-                    "phaseZeroLauncherSuppressesWarning": True,
+                    "phaseZeroLauncherSuppressesWarning": False,
                     "reason": "Claude.ai connectors require Claude.ai subscription authentication and are unavailable through external gateways",
                 },
                 "proxy": {
@@ -1475,6 +1477,7 @@ case "${{1:-status}}" in
   *) echo "PhaseZero Bonsai: use status, login ou start --cwd <diretório>." >&2; exit 2 ;;
 esac
 shift
+echo "Bonsai pode acessar/enviar dados do workspace: https://www.trybons.ai/terms. Diretório explícito e consentimento por execução obrigatórios; execução permanece bloqueada sem grant." >&2
 cwd=""
 route="${{BONSAI_ROUTE:-direct}}"
 allow_sensitive=false
@@ -1891,9 +1894,14 @@ esac
             except BaseException:
                 if existed:
                     shutil.copy2(backup, self.bonsai_config)
+                else:
+                    self.bonsai_config.unlink(missing_ok=True)
                 raise
-            if rc != 0 and existed:
-                shutil.copy2(backup, self.bonsai_config)
+            if rc != 0:
+                if existed:
+                    shutil.copy2(backup, self.bonsai_config)
+                else:
+                    self.bonsai_config.unlink(missing_ok=True)
             return rc
 
     def run_route(self, route: str, args: list[str], cwd: str | None = None, allow_sensitive: bool = False) -> int:
