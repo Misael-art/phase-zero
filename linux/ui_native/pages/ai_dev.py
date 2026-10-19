@@ -134,6 +134,7 @@ class AiDevPage(BasePage):
         self._project_mcp_buttons: list[QPushButton] = []
         self._project_mcp_active: bool | None = None
         self._project_mcp_integrity = False
+        self._project_mcp_autostart = "unknown"
 
     def build(self) -> None:
         for action_id in _PRIMARY_IDS | _REPRESENTED_ELSEWHERE:
@@ -376,8 +377,9 @@ class AiDevPage(BasePage):
         layout.setSpacing(8)
         layout.addWidget(SectionHeader(
             "Ferramentas do projeto no ChatGPT (experimental)",
-            "Conector privado para um repositório Git. Leia e altere arquivos com confirmação "
-            "na conta; não oferece comandos livres nem acesso ao restante do host.",
+            "Use o plugin privado no ChatGPT para ler e alterar um repositório Git. "
+            "ChatGPT Web High no Codex usa outro modo, ainda sem ferramentas locais. "
+            "Este conector não oferece comandos livres nem acesso ao restante do host.",
         ))
         self.project_mcp_state = QLabel("Verificando túnel…")
         self.project_mcp_state.setObjectName("chatgptProjectMcpState")
@@ -388,10 +390,15 @@ class AiDevPage(BasePage):
         self.project_mcp_detail.setWordWrap(True)
         layout.addWidget(self.project_mcp_detail)
         row = QHBoxLayout()
+        login_row = QHBoxLayout()
         for label, command, mutable, impact in (
             ("Ver estado", "status", False, ""),
-            ("Ligar túnel", "start", True, "Inicia o túnel privado nesta sessão."),
-            ("Desligar túnel", "stop", True, "Encerra o túnel e apaga a chave temporária."),
+            ("Ligar agora", "start", True, "Inicia o túnel privado nesta sessão."),
+            ("Desligar agora", "stop", True, "Encerra o túnel e apaga a chave temporária."),
+            ("Iniciar ao entrar", "autostart-enable", True,
+             "Liga automaticamente o túnel ao entrar na sessão gráfica."),
+            ("Não iniciar ao entrar", "autostart-disable", True,
+             "Remove o início automático; o túnel atual continua como está."),
         ):
             action = ActionSpec(
                 id=f"private.chatgpt-project-mcp.{command}", category="IA & Dev",
@@ -407,9 +414,11 @@ class AiDevPage(BasePage):
             button.clicked.connect(
                 lambda _checked=False, spec=action: self.action_requested.emit(spec))
             self._project_mcp_buttons.append(button)
-            row.addWidget(button)
+            (login_row if command.startswith("autostart-") else row).addWidget(button)
         row.addStretch()
         layout.addLayout(row)
+        login_row.addStretch()
+        layout.addLayout(login_row)
         self._apply_project_mcp_buttons()
         card.setVisible(_project_mcp_installed())
         self.project_mcp_card = card
@@ -435,10 +444,14 @@ class AiDevPage(BasePage):
         self.project_mcp_state.style().unpolish(self.project_mcp_state)
         self.project_mcp_state.style().polish(self.project_mcp_state)
         repo = str(payload.get("repo") or "")
+        self._project_mcp_autostart = str(payload.get("autostart") or "unknown")
+        login = {"enabled": "início no login ligado", "off": "início no login desligado",
+                 "inconsistent": "início no login precisa de revisão"}.get(
+                     self._project_mcp_autostart, "início no login desconhecido")
         self.project_mcp_detail.setText(
             (f"Projeto: {repo}. " if repo else "")
-            + "No ChatGPT, selecione o plugin privado e confirme uma leitura e uma escrita "
-              "reversível antes de considerar as ferramentas prontas."
+            + f"{login}. No ChatGPT, selecione o plugin privado; após cada reinício, "
+              "verifique uma leitura. A aprovação de gravações depende das permissões da conta."
         )
         self._project_mcp_active = active
         self._project_mcp_integrity = integrity
@@ -447,11 +460,18 @@ class AiDevPage(BasePage):
     def _apply_project_mcp_buttons(self, running: bool = False) -> None:
         for button in self._project_mcp_buttons:
             role = button.property("projectMcpRole")
+            if role == "autostart-enable":
+                button.setVisible(self._project_mcp_autostart == "off")
+            elif role == "autostart-disable":
+                button.setVisible(self._project_mcp_autostart == "enabled")
             button.setEnabled(not running and (
                 role == "status" or
                 (role == "start" and self._project_mcp_active is False
                  and self._project_mcp_integrity) or
-                (role == "stop" and self._project_mcp_active is True)))
+                (role == "stop" and self._project_mcp_active is True) or
+                (role == "autostart-enable" and self._project_mcp_autostart == "off"
+                 and self._project_mcp_integrity) or
+                (role == "autostart-disable" and self._project_mcp_autostart == "enabled")))
 
     def _apply_bridge_buttons(self, running: bool = False) -> None:
         for name, button in self._bridge_buttons.items():

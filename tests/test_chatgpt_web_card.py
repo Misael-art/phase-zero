@@ -180,23 +180,40 @@ def test_project_tools_card_is_private_and_never_claims_proof_from_tunnel_health
     page.action_requested.connect(requested.append)
     buttons = {button.property("projectMcpRole"): button
                for button in card.findChildren(QPushButton)}
-    assert set(buttons) == {"status", "start", "stop"}
+    assert set(buttons) == {"status", "start", "stop", "autostart-enable",
+                            "autostart-disable"}
 
     page._on_status_ready("private.chatgpt-project-mcp.status", "", {
         "active": True, "tunnelReady": True, "integrity": True,
         "repo": "/tmp/fixture-repo", "toolCallProven": False,
+        "autostart": "off",
     })
     state = card.findChild(QLabel, "chatgptProjectMcpState")
     assert "ainda não comprovado" in state.text()
     assert state.property("state") == "warning"
     assert not buttons["start"].isEnabled() and buttons["stop"].isEnabled()
     assert "/tmp/fixture-repo" in page.project_mcp_detail.text()
+    assert "início no login desligado" in page.project_mcp_detail.text()
+    assert not buttons["autostart-enable"].isHidden()
+    assert buttons["autostart-disable"].isHidden()
     buttons["status"].click()
     assert requested[-1].args == ("ai", "chatgpt-project-mcp", "status")
     buttons["stop"].click()
     assert requested[-1].args == ("ai", "chatgpt-project-mcp", "stop")
     assert requested[-1].mutable and requested[-1].preview_args == (
         "ai", "chatgpt-project-mcp", "status")
+    buttons["autostart-enable"].click()
+    assert requested[-1].args == ("ai", "chatgpt-project-mcp", "autostart-enable")
+
+    page._on_status_ready("private.chatgpt-project-mcp.status", "", {
+        "active": True, "tunnelReady": True, "integrity": True,
+        "repo": "/tmp/fixture-repo", "toolCallProven": False,
+        "autostart": "enabled",
+    })
+    assert buttons["autostart-enable"].isHidden()
+    assert not buttons["autostart-disable"].isHidden()
+    buttons["autostart-disable"].click()
+    assert requested[-1].args == ("ai", "chatgpt-project-mcp", "autostart-disable")
 
     page._on_status_ready("private.chatgpt-project-mcp.status", "", {
         "active": False, "tunnelReady": False, "integrity": False,

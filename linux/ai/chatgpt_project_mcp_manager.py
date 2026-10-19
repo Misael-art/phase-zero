@@ -35,6 +35,7 @@ BINARY_SHA256 = "ee9d4a75bc0b42f36f345aa96231e0db1ab00488122f34ebc99d6db055b6603
 UNIT = "pz-chatgpt-project-mcp.service"
 PROFILE = "pz-phasezero"
 TUNNEL_ID = re.compile(r"tunnel_[0-9a-f]{32}")
+AUTOSTART_ENTRY = "phasezero-chatgpt-project-mcp.desktop"
 
 
 class ManagerError(Exception):
@@ -68,8 +69,44 @@ def _atomic(path: Path, data: bytes, mode: int = 0o600) -> None:
         Path(name).unlink(missing_ok=True)
 
 
+def _kde_secret_lookup(reference: str) -> str | None:
+    """Read the same Secret Service item when KDE, not GNOME, owns its vault."""
+    try:
+        import gi
+
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio, GLib
+
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        service = Gio.DBusProxy.new_sync(
+            bus, Gio.DBusProxyFlags.DO_NOT_AUTO_START, None,
+            "org.kde.secretservicecompat", "/org/freedesktop/secrets",
+            "org.freedesktop.Secret.Service", None)
+        unlocked, locked = service.call_sync(
+            "SearchItems", GLib.Variant("(a{ss})", ({"reference": reference},)),
+            Gio.DBusCallFlags.NONE, 5000, None).unpack()
+        if len(unlocked) != 1 or locked:
+            return None
+        _, session = service.call_sync(
+            "OpenSession", GLib.Variant("(sv)", ("plain", GLib.Variant("s", ""))),
+            Gio.DBusCallFlags.NONE, 5000, None).unpack()
+        secrets, = service.call_sync(
+            "GetSecrets", GLib.Variant("(aoo)", (unlocked, session)),
+            Gio.DBusCallFlags.NONE, 5000, None).unpack()
+        record = secrets.get(unlocked[0])
+        if not record:
+            return None
+        value = bytes(record[2]).decode("utf-8")
+        return value if value and "\0" not in value and len(value.encode()) <= 64 * 1024 else None
+    except Exception:
+        # D-Bus/Secret Service exceptions differ across PyGObject versions.
+        # Never put exception text (which may contain account metadata) in logs.
+        return None
+
+
 class Manager:
-    def __init__(self, home: Path | None = None, runtime: Path | None = None) -> None:
+    def __init__(self, home: Path | None = None, runtime: Path | None = None,
+                 autostart_dir: Path | None = None) -> None:
         data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
         self.home = home or data / "phasezero/chatgpt-project-mcp"
         xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
@@ -80,6 +117,8 @@ class Manager:
         self.binary = self.home / "tunnel-client"
         self.config = self.home / "config.json"
         self.profile_dir = self.home / "profile"
+        config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+        self.autostart = (autostart_dir or config / "autostart") / AUTOSTART_ENTRY
 
     @staticmethod
     def _run(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -180,9 +219,14 @@ class Manager:
         record = state.get("runtimeKey") or {}
         if bridge.key_status(state).get("state") != "stored":
             raise ManagerError("chave de túnel ausente ou vencida no cofre")
-        secret = bridge.secret_store().lookup(record["ref"])
+        try:
+            secret = bridge.secret_store().lookup(record["ref"])
+        except Exception:
+            secret = None
         if not secret:
-            raise ManagerError("chave não encontrada no cofre")
+            secret = _kde_secret_lookup(record["ref"])
+        if not secret:
+            raise ManagerError("chave indisponível nos cofres GNOME/KDE; desbloqueie o cofre do login")
         path = self.runtime / "runtime-key"
         _atomic(path, secret.encode())
         return path
@@ -272,6 +316,7 @@ class Manager:
         return {"installed": True, "active": active, "tunnelReady": ready,
                 "integrity": integrity,
                 "repo": data["repo"], "toolCallProven": proven,
+                "autostart": self.autostart_status()["state"],
                 "next": "No ChatGPT Plugins, conecte o túnel e faça uma chamada real de leitura "
                         "e escrita reversível." if ready and not proven else
                         "Leitura e escrita comprovadas nesta sessão." if proven else "start"}
@@ -291,7 +336,60 @@ class Manager:
         return {"active": self._active(), "tunnelReady": False,
                 "runtimeKeyStaged": False}
 
+    def _autostart_text(self) -> str:
+        path = str(self.manager)
+        if "\n" in path or "\r" in path:
+            raise ManagerError("caminho do gerenciador inválido para autostart")
+        path = path.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+        return ("[Desktop Entry]\nType=Application\nName=PhaseZero tools for this project\n"
+                "Comment=Start the private ChatGPT MCP tunnel at desktop login\n"
+                f'Exec=/usr/bin/python3 "{path}" autostart-run\n'
+                "Terminal=false\nNoDisplay=true\n")
+
+    def autostart_status(self) -> dict[str, Any]:
+        if self.autostart.is_symlink():
+            state = "inconsistent"
+        elif not self.autostart.exists():
+            state = "off"
+        else:
+            try:
+                state = ("enabled" if self.autostart.read_text(encoding="utf-8")
+                         == self._autostart_text() else "inconsistent")
+            except (OSError, UnicodeError):
+                state = "inconsistent"
+        return {"state": state, "entry": str(self.autostart)}
+
+    def autostart_enable(self) -> dict[str, Any]:
+        self._load()
+        if not self.manager.is_file() or self.manager.is_symlink():
+            raise ManagerError("gerenciador estável ausente; reinstale antes do início no login")
+        if self.autostart_status()["state"] == "inconsistent":
+            raise ManagerError("entrada de início no login alterada; revisão manual necessária")
+        if self.autostart.parent.is_symlink():
+            raise ManagerError("diretório de autostart por symlink recusado")
+        _atomic(self.autostart, self._autostart_text().encode(), 0o600)
+        return self.autostart_status()
+
+    def autostart_disable(self) -> dict[str, Any]:
+        if self.autostart_status()["state"] == "inconsistent":
+            raise ManagerError("entrada de início no login alterada; revisão manual necessária")
+        self.autostart.unlink(missing_ok=True)
+        return self.autostart_status()
+
+    def autostart_run(self) -> dict[str, Any]:
+        if self.autostart_status()["state"] != "enabled":
+            raise ManagerError("início no login não está habilitado")
+        for attempt in range(12):
+            try:
+                return self.start()
+            except ManagerError as error:
+                if "chave indisponível nos cofres" not in str(error) or attempt == 11:
+                    raise
+                time.sleep(5)
+        raise ManagerError("cofre não ficou disponível após o login")
+
     def remove(self) -> dict[str, Any]:
+        self.autostart_disable()
         self.stop()
         if self._active():
             raise ManagerError("túnel ainda ativo; remoção recusada")
@@ -309,13 +407,14 @@ def main() -> int:
     install = commands.add_parser("install")
     install.add_argument("--repo", required=True)
     install.add_argument("--tunnel-id", required=True)
-    for name in ("start", "status", "stop", "remove"):
+    for name in ("start", "status", "stop", "remove", "autostart-enable",
+                 "autostart-disable", "autostart-status", "autostart-run"):
         commands.add_parser(name)
     args = parser.parse_args()
     manager = Manager()
     try:
         result = (manager.install(args.repo, args.tunnel_id) if args.command == "install" else
-                  getattr(manager, args.command)())
+                  getattr(manager, args.command.replace("-", "_"))())
     except (ManagerError, ProjectError, OSError, subprocess.TimeoutExpired) as error:
         print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
         return 1

@@ -21,7 +21,7 @@ def repo(tmp_path: Path) -> Path:
 
 def test_install_is_private_pinned_and_never_stages_a_key(repo: Path, tmp_path: Path,
                                                            monkeypatch) -> None:
-    manager = module.Manager(tmp_path / "data", tmp_path / "run")
+    manager = module.Manager(tmp_path / "data", tmp_path / "run", tmp_path / "autostart")
     binary = b"verified fixture binary"
     monkeypatch.setattr(module, "BINARY_SHA256", hashlib.sha256(binary).hexdigest())
     monkeypatch.setattr(manager, "_active", lambda: False)
@@ -46,7 +46,7 @@ def test_install_is_private_pinned_and_never_stages_a_key(repo: Path, tmp_path: 
 
 def test_start_uses_secret_file_not_argv_and_stop_removes_it(repo: Path, tmp_path: Path,
                                                               monkeypatch) -> None:
-    manager = module.Manager(tmp_path / "data", tmp_path / "run")
+    manager = module.Manager(tmp_path / "data", tmp_path / "run", tmp_path / "autostart")
     binary = b"verified fixture binary"
     monkeypatch.setattr(module, "BINARY_SHA256", hashlib.sha256(binary).hexdigest())
     monkeypatch.setattr(manager, "_active", lambda: False)
@@ -98,7 +98,7 @@ def test_start_uses_secret_file_not_argv_and_stop_removes_it(repo: Path, tmp_pat
 
 def test_start_rejects_modified_server_before_retrieving_secret(repo: Path, tmp_path: Path,
                                                                  monkeypatch) -> None:
-    manager = module.Manager(tmp_path / "data", tmp_path / "run")
+    manager = module.Manager(tmp_path / "data", tmp_path / "run", tmp_path / "autostart")
     binary = b"verified fixture binary"
     monkeypatch.setattr(module, "BINARY_SHA256", hashlib.sha256(binary).hexdigest())
     monkeypatch.setattr(manager, "_active", lambda: False)
@@ -115,7 +115,7 @@ def test_start_rejects_modified_server_before_retrieving_secret(repo: Path, tmp_
 
 def test_malformed_config_fails_without_starting_or_reading_secret(
         repo: Path, tmp_path: Path, monkeypatch) -> None:
-    manager = module.Manager(tmp_path / "data", tmp_path / "run")
+    manager = module.Manager(tmp_path / "data", tmp_path / "run", tmp_path / "autostart")
     manager.home.mkdir()
     manager.config.write_text(json.dumps({"tunnelId": "tunnel_" + "a" * 32,
                                           "repo": "relative/path", "serverSha256": "invalid"}))
@@ -128,7 +128,7 @@ def test_malformed_config_fails_without_starting_or_reading_secret(
 
 def test_status_requires_both_tool_classes_from_current_tunnel_session(
         repo: Path, tmp_path: Path, monkeypatch) -> None:
-    manager = module.Manager(tmp_path / "data", tmp_path / "run")
+    manager = module.Manager(tmp_path / "data", tmp_path / "run", tmp_path / "autostart")
     binary = b"verified fixture binary"
     monkeypatch.setattr(module, "BINARY_SHA256", hashlib.sha256(binary).hexdigest())
     monkeypatch.setattr(manager, "_active", lambda: True)
@@ -159,3 +159,71 @@ def test_status_requires_both_tool_classes_from_current_tunnel_session(
     assert manager.status()["toolCallProven"] is True
     proof.chmod(0o644)
     assert manager.status()["toolCallProven"] is False
+
+
+def test_key_recovers_from_kde_when_default_secret_service_has_no_item(
+        tmp_path: Path, monkeypatch) -> None:
+    manager = module.Manager(tmp_path / "data", tmp_path / "run", tmp_path / "autostart")
+
+    class Vault:
+        def lookup(self, reference):
+            assert reference == "vault-ref"
+            return None
+
+    class Bridge:
+        def load_state(self):
+            return {"runtimeKey": {"ref": "vault-ref"}}
+
+        def key_status(self, state):
+            return {"state": "stored"}
+
+        def secret_store(self):
+            return Vault()
+
+    monkeypatch.setattr(manager, "_bridge", lambda: Bridge())
+    monkeypatch.setattr(module, "_kde_secret_lookup", lambda reference:
+                        "recovered-secret" if reference == "vault-ref" else None)
+
+    key = manager._key()
+    assert key.read_text() == "recovered-secret"
+    assert key.stat().st_mode & 0o777 == 0o600
+
+
+def test_autostart_uses_stable_manager_retries_vault_and_preserves_foreign_entry(
+        repo: Path, tmp_path: Path, monkeypatch) -> None:
+    manager = module.Manager(tmp_path / "data", tmp_path / "run", tmp_path / "autostart")
+    binary = b"verified fixture binary"
+    monkeypatch.setattr(module, "BINARY_SHA256", hashlib.sha256(binary).hexdigest())
+    monkeypatch.setattr(manager, "_active", lambda: False)
+    monkeypatch.setattr(manager, "_install_binary", lambda: module._atomic(manager.binary,
+                                                                          binary, 0o700))
+    manager.install(str(repo), "tunnel_" + "a" * 32)
+
+    assert manager.autostart_status()["state"] == "off"
+    assert manager.autostart_enable()["state"] == "enabled"
+    entry = manager.autostart.read_text()
+    assert str(manager.manager) in entry
+    assert "autostart-run" in entry
+    assert "tunnel_" not in entry and "sk-" not in entry
+    assert manager.autostart.stat().st_mode & 0o777 == 0o600
+
+    attempts = []
+
+    def start():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise module.ManagerError("chave indisponível nos cofres GNOME/KDE")
+        return {"tunnelReady": True}
+
+    monkeypatch.setattr(manager, "start", start)
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
+    assert manager.autostart_run()["tunnelReady"] is True
+    assert len(attempts) == 3
+    assert manager.autostart_disable()["state"] == "off"
+
+    manager.autostart.write_text("[Desktop Entry]\nExec=foreign\n")
+    with pytest.raises(module.ManagerError, match="alterada"):
+        manager.autostart_enable()
+    with pytest.raises(module.ManagerError, match="alterada"):
+        manager.autostart_disable()
+    assert "foreign" in manager.autostart.read_text()
