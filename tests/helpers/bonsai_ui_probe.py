@@ -73,6 +73,15 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     QTest.mouseClick(page.bonsai_login, Qt.LeftButton)
     assert [action.id for action in requested] == ["ai.bonsai-diagnose", "ai.claude-bonsai-login"]
     assert requested[-1].args == ("ai", "claude", "login", "bonsai", "--terminal")
+    observed["loginCompatibility"] = "registry-404-pinned-cli"
+    observed["updateObservation"] = {"available": False, "state": "registry-http-error", "httpStatus": 404,
+                                     "failureClass": "package-unavailable"}
+    page._on_status_ready("private.bonsai.status", "", observed)
+    assert page.bonsai_login.isEnabled()
+    assert "npm HTTP 404" in page.bonsai_state.text()
+    assert "autenticação depende do Bonsai" in page.bonsai_reason.text()
+    assert "não comprova autenticação" in page.bonsai_next.text()
+    observed["loginCompatibility"] = "none"
     observed["loginTerminalAvailable"] = False
     page._on_status_ready("private.bonsai.status", "", observed)
     assert not page.bonsai_login.isEnabled()

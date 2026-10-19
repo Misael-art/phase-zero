@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import importlib.util
+import fcntl
+import hashlib
 import json
 import os
+import pty
+import shutil
 import stat
 import subprocess
 import tempfile
+import termios
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -342,6 +347,107 @@ echo "bonsai:$*"
             response.__enter__.return_value.read.return_value = body
             with mock.patch.object(CC.urllib.request, "urlopen", return_value=response):
                 self.assertEqual("invalid-response", manager.bonsai_update_observation()["state"])
+
+    def test_bonsai_diagnosis_distinguishes_registry_from_missing_package(self):
+        manager = CC.Manager()
+        def response(url, timeout):
+            if url.endswith("/-/ping"):
+                handle = mock.MagicMock()
+                handle.__enter__.return_value.status = 200
+                return handle
+            raise CC.urllib.error.HTTPError(url, 404, "missing", {}, None)
+        with mock.patch.object(CC.urllib.request, "urlopen", side_effect=response):
+            observed = manager.refresh_bonsai_update()
+        self.assertEqual("package-unavailable", observed["failureClass"])
+        self.assertEqual(200, observed["registryControlHttpStatus"])
+        self.assertEqual(404, observed["packageHttpStatus"])
+        self.assertNotIn("version", observed)
+        self.assertEqual("package-unavailable", manager._cached_bonsai_update()["failureClass"])
+
+    def test_pinned_cli_can_attempt_login_without_claiming_registry_or_auth(self):
+        manager = CC.Manager()
+        package = self.root / "node_modules/@bonsai-ai/cli"
+        cli = package / "dist/cli.js"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("console.log('fixture')\n")
+        (package / "package.json").write_text(json.dumps({"name": "@bonsai-ai/cli", "version": "0.4.19"}))
+        cli.chmod(0o700)
+        digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+        unavailable = {"available": False, "state": "registry-http-error", "httpStatus": 404,
+                       "observedAt": CC.now_iso(),
+                       "failureClass": "package-unavailable"}
+        with mock.patch.object(CC, "BONSAI_COMPAT_CLI_SHA256", digest), \
+             mock.patch.object(manager, "_bonsai_upstream", return_value=str(cli)), \
+             mock.patch.object(manager, "bonsai_update_observation", return_value=unavailable), \
+             mock.patch.object(manager, "_bonsai_update_check", return_value="upstream"), \
+             mock.patch.object(CC, "command_path", side_effect=lambda name: "/usr/bin/node" if name == "node" else None), \
+             mock.patch.object(CC, "run_capture", return_value=(0, "v24.0.0", "")), \
+             mock.patch.dict(os.environ, {"NODE_OPTIONS": "--require /untrusted.cjs"}):
+            self.assertEqual(str(cli), manager._check_bonsai_login())
+            command, env = manager._bonsai_login_command(str(cli))
+            self.assertEqual(["/usr/bin/node", "--require", str(CC.BONSAI_COMPAT_PRELOAD), str(cli), "login"], command)
+            self.assertNotIn("NODE_OPTIONS", env)
+            state = manager.bonsai_info()
+        self.assertTrue(state["loginAttemptAvailable"])
+        self.assertEqual("registry-404-pinned-cli", state["loginCompatibility"])
+        self.assertFalse(state["authenticated"])
+        self.assertFalse(state["sessionUsable"])
+        self.assertFalse(state["proxyAvailable"])
+        self.assertIn("HTTP 404", state["nextAction"])
+
+    def test_changed_cli_cannot_use_404_login_compatibility(self):
+        manager = CC.Manager()
+        with mock.patch.object(manager, "bonsai_update_observation", return_value={
+            "available": False, "state": "registry-http-error", "httpStatus": 404,
+        }), mock.patch.object(manager, "_bonsai_compat_eligible", return_value=False), \
+             mock.patch.object(CC.subprocess, "run", side_effect=AssertionError("no CLI may start")):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 404"):
+                manager.login("bonsai")
+
+    def test_login_compatibility_loader_only_handles_latest_404(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js unavailable")
+        package = self.root / "node_modules/@bonsai-ai/cli"
+        cli = package / "dist/cli.js"
+        cli.parent.mkdir(parents=True)
+        (package / "package.json").write_text(json.dumps({"name": "@bonsai-ai/cli", "version": "0.4.19", "type": "module"}))
+        cli.write_text("const r = await fetch('https://registry.npmjs.org/@bonsai-ai/cli/latest'); console.log(JSON.stringify(await r.json()));\n")
+        fetch_stub = self.root / "fetch-stub.cjs"
+        fetch_stub.write_text("globalThis.fetch = async () => new Response('{}', {status:404});\n")
+        command = [node, "--require", str(fetch_stub), "--require", str(CC.BONSAI_COMPAT_PRELOAD), str(cli)]
+        attempt = subprocess.run([*command, "login"], capture_output=True, text=True, check=False)
+        self.assertEqual(0, attempt.returncode, attempt.stderr)
+        self.assertEqual({"version": "0.4.19"}, json.loads(attempt.stdout))
+        self.assertIn("HTTP 404", attempt.stderr)
+        other = subprocess.run([*command, "start"], capture_output=True, text=True, check=False)
+        self.assertNotEqual(0, other.returncode)
+        self.assertIn("restricted to explicit login", other.stderr)
+
+    def test_private_login_accepts_real_nonseekable_pty(self):
+        code = (
+            "import importlib.util\n"
+            f"spec=importlib.util.spec_from_file_location('cc', {str(MODULE_PATH)!r})\n"
+            "cc=importlib.util.module_from_spec(spec);spec.loader.exec_module(cc)\n"
+            "manager=cc.Manager()\n"
+            "manager._check_bonsai_login=lambda:'/bin/true'\n"
+            "manager._bonsai_login_command=lambda _:(['/bin/true'],None)\n"
+            "raise SystemExit(manager.login('bonsai'))\n"
+        )
+        master, slave = pty.openpty()
+        def session():
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+        try:
+            child = subprocess.Popen([os.sys.executable, "-c", code], stdin=slave, stdout=slave,
+                                     stderr=slave, preexec_fn=session, close_fds=True)
+            os.close(slave)
+            slave = -1
+            self.assertEqual(0, child.wait(timeout=8))
+        finally:
+            if slave >= 0:
+                os.close(slave)
+            os.close(master)
 
     def test_disabled_provider_blocks_login_before_process_and_preserves_credentials(self):
         manager = CC.Manager()

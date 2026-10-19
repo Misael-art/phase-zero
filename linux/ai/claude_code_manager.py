@@ -52,6 +52,8 @@ SECRET_FILE_RE = re.compile(
 )
 KNOWN_SHELL_BUILTINS = {".", ":", "source", "test", "[", "printf", "echo", "true", "false"}
 BONSAI_ROUTER_URL = "https://go.trybons.ai"
+BONSAI_COMPAT_CLI_SHA256 = "38fb1e96fe56f393133049bb4a865e37136aab2ab9ed1f68eb5cc8f781a44f54"
+BONSAI_COMPAT_PRELOAD = Path(__file__).with_name("bonsai_login_compat.cjs")
 TRANSIENT_NETWORK_CODES = {
     "EAI_AGAIN",
     "ECONNABORTED",
@@ -732,7 +734,8 @@ function probeHttp() {
             age = (dt.datetime.now(dt.timezone.utc) - checked).total_seconds()
             if not isinstance(value.get("state"), str) or not 0 <= age <= 900:
                 raise ValueError("stale")
-            return {key: value[key] for key in ("available", "state", "source", "observedAt", "httpStatus", "version") if key in value}
+            return {key: value[key] for key in ("available", "state", "source", "observedAt", "httpStatus", "version",
+                                                  "registryControlHttpStatus", "packageHttpStatus", "failureClass") if key in value}
         except (OSError, ValueError, KeyError, TypeError):
             return {"available": False, "state": "not-probed-or-stale", "source": "npm-registry-cache"}
 
@@ -780,6 +783,21 @@ try {
                 result.update(available=True, state="available", version=version)
         except urllib.error.HTTPError as exc:
             result.update(state="registry-http-error", httpStatus=exc.code)
+            if exc.code == 404:
+                def status_only(url: str) -> int | None:
+                    try:
+                        with urllib.request.urlopen(url, timeout=3) as response:
+                            return response.status
+                    except urllib.error.HTTPError as error:
+                        return error.code
+                    except (TimeoutError, OSError, urllib.error.URLError):
+                        return None
+                result["registryControlHttpStatus"] = status_only("https://registry.npmjs.org/-/ping")
+                result["packageHttpStatus"] = status_only("https://registry.npmjs.org/@bonsai-ai%2Fcli")
+                if result["registryControlHttpStatus"] == 200 and result["packageHttpStatus"] == 404:
+                    result["failureClass"] = "package-unavailable"
+                else:
+                    result["failureClass"] = "registry-or-package-unknown"
         except (TimeoutError, OSError, urllib.error.URLError) as exc:
             result["state"] = "timeout" if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError) else "unreachable"
         except (ValueError, UnicodeError):
@@ -809,20 +827,32 @@ try {
                 if item.is_file() and not item.is_symlink() and stat.S_IMODE(item.stat().st_mode) != 0o600:
                     insecure_files += 1
         update_check = self._bonsai_update_check(path)
+        compat = self._bonsai_compat_eligible(path) if update.get("httpStatus") == 404 else False
         attempt_ready = (bool(path) and not self._bonsai_provider_recently_disabled(provider)
-                         and update["available"] and update_check != "forged")
+                         and (update["available"] or compat) and update_check != "forged")
         terminal = self._bonsai_terminal()
+        if update_check == "forged":
+            next_action = "Runner mascara atualização; repare atalhos pelo PhaseZero e use canal oficial."
+        elif self._bonsai_provider_recently_disabled(provider):
+            next_action = self._bonsai_login_block_reason(provider, update)
+        elif update.get("httpStatus") == 404 and path and not compat:
+            next_action = ("npm HTTP 404 e CLI local diferente da versão 0.4.19 conhecida; "
+                           "contorno recusado. Reinstale apenas de fonte oficial; credenciais preservadas. "
+                           + self._bonsai_login_block_reason(provider, update))
+        elif not update["available"] and not compat:
+            next_action = self._bonsai_login_block_reason(provider, update)
+        elif compat and not update["available"]:
+            next_action = ("CLI instalada pode tentar login com contorno limitado do check de atualização HTTP 404; "
+                           "npm e autenticação seguem indisponíveis/desconhecidos.")
+        else:
+            next_action = ("Execute bonsai login em terminal privado para tentar autenticação; "
+                           "disponibilidade do provedor ainda não comprovada.")
         return {
             "installed": bool(path),
             "path": path,
             "version": version,
             "updateCheck": update_check,
-            "nextAction": (
-                self._bonsai_login_block_reason(provider, update)
-                if self._bonsai_provider_recently_disabled(provider) or not update["available"] else
-                "Runner mascara atualização; repare atalhos pelo PhaseZero e use canal oficial."
-                if update_check == "forged" else "Execute bonsai login em terminal privado para tentar autenticação; disponibilidade do provedor ainda não comprovada."
-            ),
+            "nextAction": next_action,
             "credentialStorePresent": store_present,
             "authenticated": None if credential.get("state") in {"missing", "valid-local-token"} else False,
             "credentialStatus": credential,
@@ -837,6 +867,7 @@ try {
             # action off; current panels explicitly launch a private terminal.
             "loginAvailable": False,
             "loginAttemptAvailable": attempt_ready,
+            "loginCompatibility": "registry-404-pinned-cli" if compat else "none",
             "loginTerminalAvailable": attempt_ready and terminal is not None,
             "loginTerminalInstalled": terminal is not None,
             "loginRequiresPrivateTerminal": True,
@@ -877,6 +908,21 @@ try {
             for match in re.finditer(r"^(?:upstream=|exec\s+)['\"]?([^'\"\s]+)", text, re.MULTILINE):
                 pending.append(Path(match.group(1)))
         return "upstream"
+
+    @staticmethod
+    def _bonsai_compat_eligible(path: str | None) -> bool:
+        """Only known 0.4.19 bundle; never patch vendor files or trust a future CLI."""
+        if not path or not BONSAI_COMPAT_PRELOAD.is_file():
+            return False
+        cli = Path(path).resolve()
+        if cli.name != "cli.js" or cli.parent.name != "dist":
+            return False
+        try:
+            manifest = json.loads((cli.parent.parent / "package.json").read_text(encoding="utf-8"))
+            return (manifest.get("name") == "@bonsai-ai/cli" and manifest.get("version") == "0.4.19"
+                    and file_sha256(cli) == BONSAI_COMPAT_CLI_SHA256)
+        except (OSError, ValueError):
+            return False
 
     def node_info(self) -> dict[str, Any]:
         node = command_path("node")
@@ -1938,12 +1984,36 @@ esac
         if self._bonsai_provider_recently_disabled(provider):
             raise RuntimeError(self._bonsai_login_block_reason(provider, self._cached_bonsai_update()))
         update = self.refresh_bonsai_update()
-        if not update["available"]:
-            raise RuntimeError(self._bonsai_login_block_reason(provider, update))
         bonsai = self._bonsai_upstream()
         if not bonsai or self._bonsai_update_check(bonsai) == "forged":
             raise RuntimeError("Runner Bonsai inválido; reinstale pelo canal oficial. Credenciais preservadas.")
+        if update.get("httpStatus") == 404 and not self._bonsai_compat_eligible(bonsai):
+            raise RuntimeError("npm HTTP 404 e CLI Bonsai local diferente da versão 0.4.19 conhecida; "
+                               "contorno recusado. Credenciais preservadas. "
+                               + self._bonsai_login_block_reason(provider, update))
+        if not update["available"] and not (
+            update.get("httpStatus") == 404 and self._bonsai_compat_eligible(bonsai)
+        ):
+            raise RuntimeError(self._bonsai_login_block_reason(provider, update))
         return bonsai
+
+    def _bonsai_login_command(self, bonsai: str) -> tuple[list[str], dict[str, str] | None]:
+        update = self._cached_bonsai_update()
+        if update.get("httpStatus") != 404:
+            return [bonsai, "login"], None
+        if not self._bonsai_compat_eligible(bonsai):
+            raise RuntimeError("Contorno Bonsai indisponível; CLI ou diagnóstico mudou. Credenciais preservadas.")
+        managed_node = self.data_root / "runtime/node-lts/bin/node"
+        node = str(managed_node) if managed_node.is_file() else command_path("node")
+        if not node:
+            raise RuntimeError("Node.js ausente para login Bonsai; credenciais preservadas.")
+        rc, version, _ = run_capture([node, "--version"], timeout=4)
+        match = re.match(r"v(\d+)\.", version.strip()) if rc == 0 else None
+        if not match or int(match.group(1)) < 18:
+            raise RuntimeError("Login Bonsai exige Node.js 18+; credenciais preservadas.")
+        env = os.environ.copy()
+        env.pop("NODE_OPTIONS", None)
+        return [node, "--require", str(BONSAI_COMPAT_PRELOAD), str(Path(bonsai).resolve()), "login"], env
 
     @staticmethod
     def _bonsai_terminal() -> list[str] | None:
@@ -2000,6 +2070,7 @@ esac
         bonsai = self._check_bonsai_login()
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             raise RuntimeError("Login Bonsai exige terminal privado; execute bonsai login no terminal. Credenciais preservadas.")
+        command, env = self._bonsai_login_command(bonsai)
         pending, backup = self._bonsai_recovery_paths()
         existed = self.bonsai_config.is_file()
         if existed:
@@ -2011,10 +2082,11 @@ esac
         try:
             for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
                 previous[signum] = signal.signal(signum, interrupted)
-            with open("/dev/tty", "r+") as terminal:
-                rc = subprocess.run([bonsai, "login"], check=False, stdin=terminal,
+            # Text update mode may seek during initialization; a PTY cannot.
+            with open("/dev/tty", "r+b", buffering=0) as terminal:
+                rc = subprocess.run(command, check=False, stdin=terminal,
                                     stdout=terminal, stderr=terminal, timeout=180,
-                                    pass_fds=(lock.fileno(),)).returncode
+                                    pass_fds=(lock.fileno(),), env=env).returncode
             if rc != 0:
                 raise RuntimeError(f"Login Bonsai não concluído (exit {rc}); tente diagnóstico e contate provedor. Credenciais preservadas.")
             pending.unlink()
