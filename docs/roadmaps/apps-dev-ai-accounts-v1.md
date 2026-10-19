@@ -3086,3 +3086,124 @@ não foi verificada para essa ação. Não promover `toolsGate.ready` antes dess
 prova. A release upstream 6.1.10 corrige raízes de workspace e handshakes do
 conector, mas suas notas não afirmam corrigir esta recusa de rede; qualquer
 upgrade exige nova auditoria e teste real antes de mudar o pin.
+
+### PXA-010: conector privado de ferramentas por repositório — 2026-10-18
+
+Alternativa experimental ao Full upstream bloqueado. `linux/ai/chatgpt_project_mcp.py`
+implementa MCP stdio apenas com biblioteca padrão. Operador escolhe **uma**
+raiz Git canônica; ferramentas expostas: estado Git, listagem de arquivos
+versionados, leitura UTF-8 e gravação atômica de um arquivo. Gravação exige
+SHA-256 atual ou ausência esperada. Caminhos absolutos, `..`, symlinks de
+arquivo/diretório e nomes comuns de credenciais são recusados. Sem shell,
+porta local pública, instalação de pacote, acesso a VM/boot ou chave no JSON
+MCP. Nome de arquivo comum não garante ausência de segredo: revisar conteúdo
+antes da chamada remota.
+
+`linux/ai/chatgpt_project_mcp_manager.py` fixa o cliente oficial
+`openai/tunnel-client` v0.0.12 para Linux x64 por checksum do ZIP
+`2bb693bd7b5cd28da7ce09cd9e309529dbb33b7cc9dc0058e62a064688f92c81`
+e do binário `ee9d4a75bc0b42f36f345aa96231e0db1ab00488122f34ebc99d6db055b6603e`.
+Instala no diretório privado do usuário, usa chave já guardada no cofre do
+ChatGPT Web, materializada temporariamente em `XDG_RUNTIME_DIR` modo 0600, e
+inicia `pz-chatgpt-project-mcp.service` via systemd de usuário. `stop`
+encerra unidade e apaga cópia temporária da chave; `remove` preserva
+repositório, túnel e plugin externos. Autostart desligado.
+Comando oculto do catálogo: `pz ai chatgpt-project-mcp install --repo CAMINHO
+--tunnel-id tunnel_...`, seguido de `start|status|stop|remove`. Pacote público
+instalado 1.22.8-1 ainda não contém esse comando; nesta prova, gerenciador
+também está em cópia privada estável.
+
+Provas locais: 111 testes focais pytest, `py_compile`, `bash -n` e diff-check verdes.
+`tunnel-client doctor` passou; execução temporária do túnel retornou `/readyz`
+HTTP 200 e foi encerrada. No host, asset oficial baixado e hash conferido;
+cópia estável em `~/.local/share/phasezero/chatgpt-project-mcp` íntegra;
+`status` mostrou `active:true`, `tunnelReady:true`, `integrity:true`, escopo
+fixado na worktree `/mnt/sdcard/Projects/pz-chatgpt-project-mcp`,
+`toolCallProven:false`. A prova mínima de sessão agora registra apenas duas
+classes de chamada bem-sucedida (leitura/escrita), sem argumentos ou conteúdo,
+e é apagada ao desligar/reiniciar o túnel. Não substitui revisão humana da
+conta e confirmação da escrita. Launcher ChatGPT Web segue browser-only e rota ativa;
+KDE/boot/VM intactos. **Ready do túnel não é ready do produto.** Falta
+vincular ou atualizar plugin privado no ChatGPT da conta, provar `tools/list`,
+leitura de arquivo aleatório e escrita reversível com confirmação da conta,
+depois desativar/reativar e observar rollback. O cartão privado de IA & Dev
+aparece apenas com instalação local e separa integridade, saúde do túnel e falta
+de prova pela conta. Comandos de ligar, desligar e consultar estado usam o
+gerenciador; nenhuma ação entrou no catálogo público. Release e promoção do
+cartão para pronto dependem desse gate. O gerenciador recusa configuração
+incompleta e arquitetura diferente de Linux x86_64; Windows exige binário
+próprio e gate G2.
+
+### PXA-010: confirmação do plugin na conta real — 2026-10-18
+
+No Chrome já autenticado pelo operador, foi criado e conectado o plugin privado
+**PhaseZero Projeto** ao túnel ativo, separado do plugin preexistente **Codex
+Native2**. A interface descobriu `project_status`, `project_list_files`,
+`project_read_file` e `project_write_file` (Write1/Read3). No chat de teste,
+`project_status` e `project_read_file` de `README.md` retornaram a branch
+`codex/chatgpt-project-mcp` e árvore inicialmente limpa. Em seguida,
+`project_write_file` criou `docs/chatgpt-tool-proof-20261018.txt` com 26 bytes;
+o arquivo e seu SHA-256 foram conferidos no host, e o gerenciador passou a
+`toolCallProven:true`. O arquivo descartável foi removido. Nenhum outro
+arquivo do repositório foi alterado pelo teste.
+
+O plugin usa a permissão de conta **Permitir ações de baixo risco**. A criação
+solicitada explicitamente no chat não exibiu um segundo diálogo de aprovação.
+Logo, esta prova confirma chamada real de leitura e escrita pela conta, mas
+**não** comprova confirmação interativa separada para toda gravação. Testar
+substituição de arquivo e política de aprovação antes de marcar esse requisito
+como aceito. Também faltam teste de parada/retomada do túnel, revalidação após
+reinício e verificação independente do plugin antigo. Sem promoção ao catálogo
+público ou release por esta prova isolada.
+
+### PXA-010: recuperação após reboot do host — 2026-10-18
+
+Após reboot real, ChatGPT Web High exibiu **Local tools unavailable**. São
+dois caminhos distintos: o Full harness do launcher Codex Web GPT continua
+bloqueado pelo gate de rede já registrado; o plugin privado **PhaseZero
+Projeto** usa MCP por túnel e pode operar só no repositório. O launcher Web
+iniciou normalmente em browser-only. O serviço MCP do projeto, criado antes
+com `systemd-run --collect`, não existia após reboot: `active:false`,
+`tunnelReady:false`. A documentação oficial do túnel exige cliente em execução
+para descoberta e chamadas MCP.
+
+O primeiro `start` falhou porque `org.freedesktop.secrets` passou a ser atendido
+pelo GNOME Keyring, cuja coleção padrão estava bloqueada e não continha a
+chave. O mesmo identificador opaco continuava presente e desbloqueado no
+KWallet KDE (`org.kde.secretservicecompat`). Recuperação local: leitura direta
+da entrada KWallet via protocolo Secret Service, cópia temporária para a
+coleção padrão GNOME e verificação de igualdade **em memória**, sem imprimir
+nem gravar a chave em argumento/log. A cópia GNOME foi removida após a
+recuperação para evitar duplicata órfã em futura rotação. O gerenciador
+instalado voltou a materializar a chave privada `0600` diretamente do KWallet
+com a coleção GNOME vazia. Ausência em ambos os cofres falha fechado.
+
+Novo início no login opt-in: `autostart-enable|disable|status|run` gerencia uma
+entrada XDG que chama **a cópia estável instalada** do gerenciador. `run`
+aguarda até 60 s pelo cofre após entrar na sessão gráfica. Neste host,
+autostart está **enabled**. O comando de parada continua encerrando o túnel e
+apagando a chave temporária; desabilitar autostart não interrompe a sessão
+atual. A página IA & Dev distingue o plugin do modo Web High e mostra o
+controle de início no login. O pacote público instalado ainda não inclui
+esta UI; a implementação está apenas na branch/PR.
+
+Aceites desta rodada: 17 testes focais, `py_compile`, `git diff --check`,
+`desktop-file-validate` e cópia instalada idêntica à fonte. No host, `start`
+e uma parada/retomada fria via `autostart-run` retornaram `active:true`,
+`tunnelReady:true`, `integrity:true`. Pelo plugin da conta, chamadas reais de
+status, leitura e escrita de arquivo de prova chegaram ao repositório depois
+do reboot; SHA e bytes conferidos, prova descartável removida e
+`toolCallProven:true`. **Ainda falta um segundo reboot** para provar a entrada
+XDG no ciclo completo. Após parada/retomada rápida, uma leitura paralela à
+escrita expirou antes de chegar ao dispatcher; escrita passou, e leitura
+sequencial posterior passou. Duas leituras paralelas com conexão estabilizada
+passaram. Registrar como limite de reconexão rápida; `readyz` sozinho não
+substitui chamada remota. Nenhuma sessão KDE foi encerrada nesta rodada.
+
+Risco residual: a rotina de rotação/revogação do ChatGPT Web fala apenas com
+o provedor Secret Service que possuir `org.freedesktop.secrets` naquele
+instante. Se a chave antiga estiver somente no outro cofre, pode sobrar uma
+entrada órfã; isso exige correção própria antes de declarar rotação/revogação
+entre cofres resiliente. Nesta recuperação a cópia adicional foi removida e a
+referência original permaneceu no KWallet. O Full harness Web High não foi
+alterado nem declarado pronto.

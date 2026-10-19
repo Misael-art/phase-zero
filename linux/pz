@@ -675,6 +675,11 @@ cmd_ai() {
             shift
             python3 "$PZ_ROOT/linux/ai/chatgpt_web_bridge.py" "${@:-status}"
             ;;
+        chatgpt-project-mcp)
+            # Private project tools: kept out of public catalog until real-account proof.
+            shift
+            python3 "$PZ_ROOT/linux/ai/chatgpt_project_mcp_manager.py" "${@:-status}"
+            ;;
         claude|claude-code|bonsai)
             shift
             bash "$PZ_ROOT/linux/ai/setup-claude-code.sh" "${@:-status}"
