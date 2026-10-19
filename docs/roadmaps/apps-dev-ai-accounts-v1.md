@@ -3155,3 +3155,55 @@ substituição de arquivo e política de aprovação antes de marcar esse requis
 como aceito. Também faltam teste de parada/retomada do túnel, revalidação após
 reinício e verificação independente do plugin antigo. Sem promoção ao catálogo
 público ou release por esta prova isolada.
+
+### PXA-010: recuperação após reboot do host — 2026-10-18
+
+Após reboot real, ChatGPT Web High exibiu **Local tools unavailable**. São
+dois caminhos distintos: o Full harness do launcher Codex Web GPT continua
+bloqueado pelo gate de rede já registrado; o plugin privado **PhaseZero
+Projeto** usa MCP por túnel e pode operar só no repositório. O launcher Web
+iniciou normalmente em browser-only. O serviço MCP do projeto, criado antes
+com `systemd-run --collect`, não existia após reboot: `active:false`,
+`tunnelReady:false`. A documentação oficial do túnel exige cliente em execução
+para descoberta e chamadas MCP.
+
+O primeiro `start` falhou porque `org.freedesktop.secrets` passou a ser atendido
+pelo GNOME Keyring, cuja coleção padrão estava bloqueada e não continha a
+chave. O mesmo identificador opaco continuava presente e desbloqueado no
+KWallet KDE (`org.kde.secretservicecompat`). Recuperação local: leitura direta
+da entrada KWallet via protocolo Secret Service, cópia temporária para a
+coleção padrão GNOME e verificação de igualdade **em memória**, sem imprimir
+nem gravar a chave em argumento/log. A cópia GNOME foi removida após a
+recuperação para evitar duplicata órfã em futura rotação. O gerenciador
+instalado voltou a materializar a chave privada `0600` diretamente do KWallet
+com a coleção GNOME vazia. Ausência em ambos os cofres falha fechado.
+
+Novo início no login opt-in: `autostart-enable|disable|status|run` gerencia uma
+entrada XDG que chama **a cópia estável instalada** do gerenciador. `run`
+aguarda até 60 s pelo cofre após entrar na sessão gráfica. Neste host,
+autostart está **enabled**. O comando de parada continua encerrando o túnel e
+apagando a chave temporária; desabilitar autostart não interrompe a sessão
+atual. A página IA & Dev distingue o plugin do modo Web High e mostra o
+controle de início no login. O pacote público instalado ainda não inclui
+esta UI; a implementação está apenas na branch/PR.
+
+Aceites desta rodada: 17 testes focais, `py_compile`, `git diff --check`,
+`desktop-file-validate` e cópia instalada idêntica à fonte. No host, `start`
+e uma parada/retomada fria via `autostart-run` retornaram `active:true`,
+`tunnelReady:true`, `integrity:true`. Pelo plugin da conta, chamadas reais de
+status, leitura e escrita de arquivo de prova chegaram ao repositório depois
+do reboot; SHA e bytes conferidos, prova descartável removida e
+`toolCallProven:true`. **Ainda falta um segundo reboot** para provar a entrada
+XDG no ciclo completo. Após parada/retomada rápida, uma leitura paralela à
+escrita expirou antes de chegar ao dispatcher; escrita passou, e leitura
+sequencial posterior passou. Duas leituras paralelas com conexão estabilizada
+passaram. Registrar como limite de reconexão rápida; `readyz` sozinho não
+substitui chamada remota. Nenhuma sessão KDE foi encerrada nesta rodada.
+
+Risco residual: a rotina de rotação/revogação do ChatGPT Web fala apenas com
+o provedor Secret Service que possuir `org.freedesktop.secrets` naquele
+instante. Se a chave antiga estiver somente no outro cofre, pode sobrar uma
+entrada órfã; isso exige correção própria antes de declarar rotação/revogação
+entre cofres resiliente. Nesta recuperação a cópia adicional foi removida e a
+referência original permaneceu no KWallet. O Full harness Web High não foi
+alterado nem declarado pronto.
