@@ -482,8 +482,9 @@ class AiDevPage(BasePage):
             unknown = provider.get("currentAvailability", "unknown") == "unknown" and not disabled
             attempt_ready = parsed.get("loginAttemptAvailable") is True
             terminal_ready = parsed.get("loginTerminalAvailable") is True
+            compatibility = parsed.get("loginCompatibility") == "registry-404-pinned-cli"
             if terminal_ready:
-                label = "Login disponível no terminal privado"
+                label = "Tentativa de login no terminal (npm HTTP 404)" if compatibility else "Login disponível no terminal privado"
             elif attempt_ready:
                 label = "Login disponível para tentativa no terminal"
             elif disabled:
@@ -505,9 +506,13 @@ class AiDevPage(BasePage):
             elif update.get("available") is False or update.get("state") == "registry-http-error":
                 http = f" (HTTP {update['httpStatus']})" if update.get("httpStatus") else ""
                 reason += f" Atualização indisponível{http}."
+            if update.get("failureClass") == "package-unavailable":
+                reason += " npm responde; pacote Bonsai não está acessível."
+            if compatibility:
+                reason += " PhaseZero contorna só a checagem de versão da CLI 0.4.19 instalada; autenticação depende do Bonsai."
             self.bonsai_reason.setText(reason)
             next_step = (
-                "Próximo passo: clique Login Bonsai para abrir terminal privado. Login não inicia inferência."
+                "Próximo passo: clique Login Bonsai para tentar em terminal privado. O contorno do HTTP 404 não comprova autenticação nem inicia inferência."
                 if terminal_ready else
                 "Próximo passo: execute bonsai login em terminal privado. Tentativa explícita não inicia inferência."
                 if attempt_ready else
