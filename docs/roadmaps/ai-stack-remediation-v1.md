@@ -97,6 +97,33 @@ Nota: nenhuma suíte shell de IA roda no CI (`.github/workflows/ci.yml` só faz
 
 ## Backlog P2/P3
 
+### AISR-015 — Bonsai npm 404 e tentativa de login (2026-10-18)
+
+O `@bonsai-ai/cli` 0.4.19 consulta `/latest` antes de `login` e chama
+`semver.gt(undefined, installedVersion)` quando recebe 404. No host, `/-/ping`
+responde 200, mas metadados do pacote e `/latest` respondem 404. A CLI local
+permanece instalada; o token local exige renovação. Uma observação anterior de
+`upstream-auth-disabled` está vencida e **não** prova o estado atual do login.
+
+PhaseZero agora classifica separadamente controle do npm, pacote e `/latest` no
+diagnóstico explícito `pz ai claude bonsai-probe`. Quando o CLI local 0.4.19
+corresponde ao hash conhecido, uma tentativa **explícita** de login em terminal
+privado pode contornar somente a checagem de versão que falha em HTTP 404. O
+preload não altera o pacote, não vale para `start` ou `status`, não chama o
+serviço em diagnóstico, não afirma que a versão está atualizada e não promove
+login, sessão ou proxy a `ready`. CLI diferente falha fechado. O fluxo de
+recuperação preserva o armazenamento de credenciais se a tentativa falhar.
+
+Teste real de PTY no host alcançou o fluxo de dispositivo do CLI, com espera
+por autenticação; foi interrompido sem concluir login. Antes, `open('/dev/tty',
+'r+')` falhava porque PTY não suporta seek; passou a usar `r+b` sem buffer.
+Os detalhes da tentativa ficam apenas no terminal privado; nenhum código,
+token ou URL de verificação entra em status, logs ou repositório. Estado atual
+do provedor: **desconhecido**. API/proxy para outros clientes continua fora de
+escopo até contrato oficial e concessão por consumidor verificáveis.
+
+Evidência e rollback: `docs/handoff/bonsai-404-login-20261018.md`.
+
 - AICR-005 `proxies test`: exit 0/2/3, envelope `summary/next`, classificação `upstream-error`/`unreachable`.
 - AICR-006 "sessão salva (não verificada)" até chat ok.
 - AICR-007 runner do 9Router copiado para `INSTALL_ROOT` (independe do checkout em SD).
