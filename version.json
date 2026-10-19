@@ -1,13 +1,13 @@
 {
   "schema": "https://phasezero.local/schemas/version.json",
-  "version": "1.22.8",
+  "version": "1.22.9",
   "channel": "beta",
   "platforms": [
     "windows",
     "linux"
   ],
-  "commit": "release-v1.22.8",
-  "builtAt": "2026-10-18T13:26:00Z",
+  "commit": "release-v1.22.9",
+  "builtAt": "2026-10-19T01:37:10Z",
   "minimumPowerShellVersion": "5.1",
   "minimumPesterVersion": "3.4.0",
   "linux": {
