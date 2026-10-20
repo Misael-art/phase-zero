@@ -421,6 +421,9 @@ jobs:
           PZ_DSH_ROOT="/tmp/pz-dsh-clean-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           export PZ_DSH_ROOT
           trap 'python linux/ai/deepseek_harness_manager.py stop --json >/dev/null 2>&1 || true' EXIT
+          mkdir -p "$PZ_DSH_ROOT/homes/account" "$PZ_DSH_ROOT/homes/api"
+          printf 'keep-account-home\n' > "$PZ_DSH_ROOT/homes/account/preserved-by-uninstall.txt"
+          printf 'keep-api-home\n' > "$PZ_DSH_ROOT/homes/api/preserved-by-uninstall.txt"
           python linux/ai/deepseek_harness_manager.py plan --json
           python linux/ai/deepseek_harness_manager.py status --json
           python linux/ai/deepseek_harness_manager.py doctor --json || test "$?" -eq 1
@@ -437,8 +440,8 @@ jobs:
           python -c "from pathlib import Path; p=Path('$PZ_DSH_ROOT/logs/dsh.log'); text=p.read_text(); assert p.is_file() and 'fixture-launch-secret' not in text and '?token=fixture' not in text"
           python linux/ai/deepseek_harness_manager.py uninstall --json
           test ! -e "$PZ_DSH_ROOT/runtime"
-          test -d "$PZ_DSH_ROOT/homes/account"
-          test -d "$PZ_DSH_ROOT/homes/api"
+          test "$(cat "$PZ_DSH_ROOT/homes/account/preserved-by-uninstall.txt")" = keep-account-home
+          test "$(cat "$PZ_DSH_ROOT/homes/api/preserved-by-uninstall.txt")" = keep-api-home
 
   hosted-qemu-kvm-probe:
     # Check whether an isolated hosted Linux runner can support future real-VM

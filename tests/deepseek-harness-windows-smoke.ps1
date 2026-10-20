@@ -10,7 +10,7 @@ $cli = Join-Path $repo 'windows\pz.ps1'
 $fixture = Join-Path $PSScriptRoot 'fixtures\deepseek-harness-web-fixture.cjs'
 $engine = (Get-Process -Id $PID).Path
 $testRoot = Join-Path $env:TEMP ('pz-dsh-clean-' + [guid]::NewGuid().ToString('N'))
-$workspace = Join-Path $testRoot 'workspace'
+$workspace = Join-Path $env:TEMP ('pz-dsh-workspace-' + [guid]::NewGuid().ToString('N'))
 $record = Join-Path $testRoot 'fixture-env.json'
 $requestRecord = Join-Path $testRoot 'fixture-requests.txt'
 $saved = @{}
@@ -181,5 +181,9 @@ try {
     if (Test-Path -LiteralPath $testRoot) {
         Write-Host "Removing test-owned disposable root: $testRoot"
         Remove-Item -LiteralPath $testRoot -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $workspace) {
+        Write-Host "Removing test-owned workspace: $workspace"
+        Remove-Item -LiteralPath $workspace -Recurse -Force
     }
 }
