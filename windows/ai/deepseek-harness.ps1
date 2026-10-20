@@ -662,6 +662,7 @@ namespace PhaseZero {
 
 function Start-Supervisor {
     param([string]$LaunchDirectory, [string]$WorkspaceForUi, [string]$Route, [int]$PortNumber, [string]$RuntimeDirectory)
+    Initialize-ProcessJobSupport
     New-PrivateDirectory -Path $LaunchDirectory
     New-PrivateDirectory -Path (Split-Path -Parent $script:LogPath)
     $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
@@ -694,7 +695,6 @@ function Start-Supervisor {
     $stopRequested = $false
     $jobHandle = [IntPtr]::Zero
     try {
-        Initialize-ProcessJobSupport
         $jobHandle = [PhaseZero.DeepSeekHarnessProcessJob]::CreateKillOnCloseJob()
         if ($jobHandle -eq [IntPtr]::Zero) { throw 'runtime-process-control-unavailable' }
         if (-not $child.Start()) { throw 'runtime-start-failed' }
