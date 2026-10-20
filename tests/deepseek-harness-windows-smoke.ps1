@@ -108,7 +108,9 @@ try {
     $realWorkspace = Join-Path $testRoot 'real-workspace'
     $null = New-Item -ItemType Directory -Path $realWorkspace -Force
     $realStart = Invoke-Manager 'start' $realWorkspace 'account' $port
-    Assert-True ($realStart.Code -eq 0 -and $realStart.Payload.state -eq 'running') 'Real upstream Web UI failed no-credential smoke start.'
+    if ($realStart.Code -ne 0 -or $realStart.Payload.state -ne 'running') {
+        throw ("Real upstream Web UI failed no-credential smoke start (exit={0}, state={1}, reason={2}, nextAction={3})." -f $realStart.Code,$realStart.Payload.state,$realStart.Payload.reason,$realStart.Payload.nextAction)
+    }
     $realStatus = Invoke-Manager 'status'
     Assert-True ($realStatus.Payload.authRoute -eq 'account' -and $realStatus.Payload.quota -eq 'unknown') 'No-cost smoke claimed account or quota state.'
     $realStop = Invoke-Manager 'stop'
