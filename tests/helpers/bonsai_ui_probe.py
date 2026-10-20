@@ -21,7 +21,10 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     window.show_category("IA & Dev")
     page = window.registry.page_for("IA & Dev")
     requested = []
-    page.request_action = requested.append
+    selected = []
+    page.action_requested.disconnect(window.request_action)
+    page.action_requested.connect(requested.append)
+    page.action_selected.connect(selected.append)
     observed = {
         "installed": True, "authenticated": False, "sessionUsable": False,
         "proxyAvailable": False, "loginAvailable": False,
@@ -36,6 +39,9 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     assert "vencida" in page.bonsai_reason.text()
     assert "Próximo passo" in page.bonsai_next.text()
     assert not page.bonsai_login.isEnabled()
+    assert page.bonsai_login.objectName() == "secondaryButton"
+    assert page.bonsai_diagnose.objectName() == "primaryButton"
+    blocked_color = page.bonsai_login.grab().toImage().pixelColor(12, page.bonsai_login.height() // 2)
     observed["authProvider"]["fresh"] = False
     page._on_status_ready("private.bonsai.status", "", observed)
     app.processEvents()
@@ -44,6 +50,7 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     assert "HTTP 404" in page.bonsai_reason.text()
     assert "não testa login" in page.bonsai_next.text()
     assert not page.bonsai_login.isEnabled()
+    assert page.bonsai_diagnose.objectName() == "primaryButton"
     area = page.findChildren(QScrollArea)[0]
     area.ensureWidgetVisible(page.bonsai_login)
     app.processEvents()
@@ -54,8 +61,11 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     diagnose = next(button for button in page.findChildren(QPushButton) if button.text() == "Atualizar diagnóstico")
     area.ensureWidgetVisible(diagnose)
     app.processEvents()
-    QTest.mouseClick(diagnose, Qt.LeftButton)
+    diagnose_hit = app.widgetAt(diagnose.mapToGlobal(diagnose.rect().center()))
+    assert diagnose_hit is diagnose
+    QTest.mouseClick(diagnose_hit, Qt.LeftButton)
     assert [action.id for action in requested] == ["ai.bonsai-diagnose"]
+    assert not selected
     assert not page.bonsai_details.isVisible()
     # Registry recovery enables the explicit private-terminal action.
     observed["loginAvailable"] = False
@@ -68,23 +78,35 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     assert page.bonsai_state.text() == "Login disponível no terminal privado"
     assert "terminal privado" in page.bonsai_next.text()
     assert page.bonsai_login.isEnabled()
+    assert page.bonsai_login.isEnabledTo(window)
+    assert page.bonsai_login.objectName() == "primaryButton"
+    assert page.bonsai_diagnose.objectName() == "secondaryButton"
     area.ensureWidgetVisible(page.bonsai_login)
     app.processEvents()
-    QTest.mouseClick(page.bonsai_login, Qt.LeftButton)
+    login_color = page.bonsai_login.grab().toImage().pixelColor(12, page.bonsai_login.height() // 2)
+    assert login_color != blocked_color
+    login_hit = app.widgetAt(page.bonsai_login.mapToGlobal(page.bonsai_login.rect().center()))
+    assert login_hit is page.bonsai_login
+    QTest.mouseClick(login_hit, Qt.LeftButton)
     assert [action.id for action in requested] == ["ai.bonsai-diagnose", "ai.claude-bonsai-login"]
+    assert not selected
     assert requested[-1].args == ("ai", "claude", "login", "bonsai", "--terminal")
     observed["loginCompatibility"] = "registry-404-pinned-cli"
     observed["updateObservation"] = {"available": False, "state": "registry-http-error", "httpStatus": 404,
                                      "failureClass": "package-unavailable"}
     page._on_status_ready("private.bonsai.status", "", observed)
     assert page.bonsai_login.isEnabled()
+    assert page.bonsai_login.objectName() == "primaryButton"
     assert "npm HTTP 404" in page.bonsai_state.text()
     assert "autenticação depende do Bonsai" in page.bonsai_reason.text()
     assert "não comprova autenticação" in page.bonsai_next.text()
+    assert window.grab().save(sys.argv[2])
     observed["loginCompatibility"] = "none"
     observed["loginTerminalAvailable"] = False
     page._on_status_ready("private.bonsai.status", "", observed)
     assert not page.bonsai_login.isEnabled()
+    assert page.bonsai_login.objectName() == "secondaryButton"
+    assert page.bonsai_diagnose.objectName() == "primaryButton"
     assert "execute bonsai login" in page.bonsai_next.text()
     observed["loginAttemptAvailable"] = False
     observed["loginAvailable"] = False
@@ -96,5 +118,4 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     assert page.bonsai_details.isVisible()
     assert "provider-cache" in page.bonsai_details.text()
     assert "bonsai/direct" in page.bonsai_details.text()
-    assert window.grab().save(sys.argv[2])
     window.close()

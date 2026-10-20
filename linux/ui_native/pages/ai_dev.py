@@ -200,10 +200,14 @@ class AiDevPage(BasePage):
         self.bonsai_state = QLabel("Estado ainda não observado")
         self.bonsai_state.setWordWrap(True)
         layout.addWidget(self.bonsai_state)
-        diagnose = self._action_button("ai.bonsai-diagnose", "Atualizar diagnóstico", primary=True)
-        if diagnose:
-            layout.addWidget(diagnose)
-        self.bonsai_login = self._action_button("ai.claude-bonsai-login", "Login Bonsai", primary=False)
+        self.bonsai_diagnose = self._action_button(
+            "ai.bonsai-diagnose", "Atualizar diagnóstico", primary=True, direct=True
+        )
+        if self.bonsai_diagnose:
+            layout.addWidget(self.bonsai_diagnose)
+        self.bonsai_login = self._action_button(
+            "ai.claude-bonsai-login", "Login Bonsai", primary=False, direct=True
+        )
         if self.bonsai_login:
             self.bonsai_login.setEnabled(False)
             layout.addWidget(self.bonsai_login)
@@ -446,7 +450,7 @@ class AiDevPage(BasePage):
             self._status_labels: dict[str, QLabel] = {}
         self._status_labels[key] = label
 
-    def _action_button(self, action_id: str, label: str, *, primary: bool) -> QPushButton | None:
+    def _action_button(self, action_id: str, label: str, *, primary: bool, direct: bool = False) -> QPushButton | None:
         action = self.by_id.get(action_id)
         if action is None:
             return None
@@ -454,8 +458,24 @@ class AiDevPage(BasePage):
         button = QPushButton(label)
         button.setObjectName("primaryButton" if primary else "secondaryButton")
         button.setToolTip(action.description)
-        button.clicked.connect(lambda _checked=False, a=action: self.request_action(a))
+        if direct:
+            # The Bonsai card owns these operations; app-catalog shortcuts
+            # would navigate away instead of running their explicit action.
+            button.clicked.connect(lambda _checked=False, a=action: self.action_requested.emit(a))
+        else:
+            button.clicked.connect(lambda _checked=False, a=action: self.request_action(a))
         return button
+
+    def _set_bonsai_action_priority(self, login_ready: bool) -> None:
+        for button, name in (
+            (self.bonsai_login, "primaryButton" if login_ready else "secondaryButton"),
+            (self.bonsai_diagnose, "secondaryButton" if login_ready else "primaryButton"),
+        ):
+            if button is not None and button.objectName() != name:
+                button.setObjectName(name)
+                button.style().unpolish(button)
+                button.style().polish(button)
+                button.update()
 
     def reload(self) -> None:
         action = self.by_id.get("ai.status")
@@ -495,6 +515,7 @@ class AiDevPage(BasePage):
                 label = "Bonsai indisponível para execução"
             self.bonsai_state.setText(label)
             self.bonsai_login.setEnabled(terminal_ready)
+            self._set_bonsai_action_priority(terminal_ready)
             self.bonsai_login.setToolTip("Abre terminal privado para login; códigos não passam pelo painel.")
             expired = str(parsed.get("credentialStatus", {}).get("state", "")).startswith("expired")
             reason = "Credencial vencida; renovação necessária." if expired else "Autenticação ainda não comprovada."
@@ -581,6 +602,7 @@ class AiDevPage(BasePage):
     def _on_status_failed(self, action_id: str, message: str) -> None:
         if action_id == "private.bonsai.status":
             self.bonsai_login.setEnabled(False)
+            self._set_bonsai_action_priority(False)
             self.bonsai_state.setText("Estado Bonsai indisponível")
             self.bonsai_next.setText("Próximo passo: atualizar diagnóstico.")
             return

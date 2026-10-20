@@ -342,6 +342,11 @@ QPushButton:disabled {
     background: {{border}};
     border-color: {{border_strong}};
 }
+#secondaryButton:disabled {
+    color: {{text_muted}};
+    background: {{surface_disabled}};
+    border-color: {{border_subtle}};
+}
 #dangerButton {
     color: {{on_accent}};
     background: {{error}};
