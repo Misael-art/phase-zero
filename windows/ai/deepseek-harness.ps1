@@ -358,6 +358,8 @@ function Install-Runtime {
             [IO.File]::WriteAllText($npmUserConfig, '', (New-Object Text.UTF8Encoding($false)))
             [IO.File]::WriteAllText($npmGlobalConfig, '', (New-Object Text.UTF8Encoding($false)))
             $node = Join-Path $nodeRoot 'node.exe'; $npm = Join-Path $nodeRoot 'npm.cmd'
+            $lockPath = Join-Path $app 'package-lock.json'
+            $lockScript = 'const fs=require("fs"); let lock,pins; try { lock=JSON.parse(fs.readFileSync(process.env.PZ_DSH_LOCK_FILE,"utf8")); pins=JSON.parse(fs.readFileSync(process.env.PZ_DSH_PINS_FILE,"utf8")); } catch { console.error("lock-check: parse-or-read-error"); process.exit(24); } const expected=pins.harness || {}; const entry=lock.packages && lock.packages["node_modules/@deepseek-ai/dsh"]; const result={entryFound:Boolean(entry),versionMatches:Boolean(entry) && entry.version === expected.version,integrityMatches:Boolean(entry) && entry.integrity === expected.integrity}; if (!result.entryFound || !result.versionMatches || !result.integrityMatches) { console.error("lock-check: " + JSON.stringify(result)); process.exit(23); }'
             $envBefore = @{}; Get-ChildItem Env: | ForEach-Object { $envBefore[$_.Name] = $_.Value }
             try {
                 Get-ChildItem Env: | Where-Object { Test-SensitiveEnvironmentName -Name $_.Name } | ForEach-Object { Remove-Item -LiteralPath ("Env:" + $_.Name) -ErrorAction SilentlyContinue }
@@ -372,22 +374,20 @@ function Install-Runtime {
                     if ($LASTEXITCODE -ne 0) { throw 'registry-or-dependency-failed' }
                     $null = @(& $npm rebuild --foreground-scripts --no-audit --no-fund --userconfig $npmUserConfig --globalconfig $npmGlobalConfig --registry ([string]$pins.harness.registry) node-pty koffi '@deepseek-ai/dsh-subprocess-local' 2>&1)
                     if ($LASTEXITCODE -ne 0) { throw 'allowed-build-hook-failed' }
+                    $env:PZ_DSH_LOCK_FILE = $lockPath; $env:PZ_DSH_PINS_FILE = $script:PinsPath
+                    try {
+                        $lockOutput = @(& $node -e $lockScript 2>&1); $lockExitCode = $LASTEXITCODE
+                    } finally {
+                        Remove-Item Env:PZ_DSH_LOCK_FILE,Env:PZ_DSH_PINS_FILE -ErrorAction SilentlyContinue
+                    }
+                    if ($lockExitCode -ne 0) {
+                        if ($env:PZ_DSH_DEBUG) { [Console]::Error.WriteLine(($lockOutput -join "`n")) }
+                        throw 'package-integrity-mismatch'
+                    }
                 } finally { Pop-Location }
             } finally {
                 foreach ($name in @((Get-ChildItem Env: | Select-Object -ExpandProperty Name))) { Remove-Item -LiteralPath ("Env:" + $name) -ErrorAction SilentlyContinue }
                 foreach ($name in $envBefore.Keys) { Set-Item -Path ("Env:" + $name) -Value $envBefore[$name] }
-            }
-            $lockPath = Join-Path $app 'package-lock.json'
-            $lockScript = 'const fs=require("fs"); let lock,pins; try { lock=JSON.parse(fs.readFileSync(process.env.PZ_DSH_LOCK_FILE,"utf8")); pins=JSON.parse(fs.readFileSync(process.env.PZ_DSH_PINS_FILE,"utf8")); } catch { console.error("lock-check: parse-or-read-error"); process.exit(24); } const expected=pins.harness || {}; const entry=lock.packages && lock.packages["node_modules/@deepseek-ai/dsh"]; const result={entryFound:Boolean(entry),versionMatches:Boolean(entry) && entry.version === expected.version,integrityMatches:Boolean(entry) && entry.integrity === expected.integrity}; if (!result.entryFound || !result.versionMatches || !result.integrityMatches) { console.error("lock-check: " + JSON.stringify(result)); process.exit(23); }'
-            $env:PZ_DSH_LOCK_FILE = $lockPath; $env:PZ_DSH_PINS_FILE = $script:PinsPath
-            try {
-                $lockOutput = @(& $node -e $lockScript 2>&1); $lockExitCode = $LASTEXITCODE
-            } finally {
-                Remove-Item Env:PZ_DSH_LOCK_FILE,Env:PZ_DSH_PINS_FILE -ErrorAction SilentlyContinue
-            }
-            if ($lockExitCode -ne 0) {
-                if ($env:PZ_DSH_DEBUG) { [Console]::Error.WriteLine(($lockOutput -join "`n")) }
-                throw 'package-integrity-mismatch'
             }
             $pkg = Get-Content -LiteralPath (Join-Path $app 'node_modules\@deepseek-ai\dsh\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($pkg.version -ne $pins.harness.version -or $pkg.license -ne 'MIT') { throw 'package-metadata-mismatch' }
