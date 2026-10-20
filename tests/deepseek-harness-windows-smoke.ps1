@@ -107,9 +107,16 @@ try {
     $entry = Join-Path $runtime 'app\node_modules\@deepseek-ai\dsh\lib\bin.js'
     $realWorkspace = Join-Path $testRoot 'real-workspace'
     $null = New-Item -ItemType Directory -Path $realWorkspace -Force
-    $realStart = Invoke-Manager 'start' $realWorkspace 'account' $port
+    $realStart = Invoke-Manager 'start' $realWorkspace 'account' $port -DebugManager
     if ($realStart.Code -ne 0 -or $realStart.Payload.state -ne 'running') {
-        throw ("Real upstream Web UI failed no-credential smoke start (exit={0}, state={1}, reason={2}, nextAction={3})." -f $realStart.Code,$realStart.Payload.state,$realStart.Payload.reason,$realStart.Payload.nextAction)
+        $detail = @($realStart.Diagnostics | ForEach-Object {
+            $line = [string]$_
+            $line = [regex]::Replace($line, '([?&](?:token|launchToken)=)[^&\s"'']+', '$1[redacted]', 'IgnoreCase')
+            $line = [regex]::Replace($line, '(?i)((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|launch[_ -]?token|client[_ -]?secret|secret|password|cookie|authorization|bearer|token)\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|\S+)', '$1[redacted]')
+            [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
+        }) -join ' | '
+        if ($detail.Length -gt 3000) { $detail = $detail.Substring(0,3000) }
+        throw ("Real upstream Web UI failed no-credential smoke start (exit={0}, state={1}, reason={2}, nextAction={3}, errorType={4}). {5}" -f $realStart.Code,$realStart.Payload.state,$realStart.Payload.reason,$realStart.Payload.nextAction,$realStart.Payload.error.errorType,$detail)
     }
     $realStatus = Invoke-Manager 'status'
     Assert-True ($realStatus.Payload.authRoute -eq 'account' -and $realStatus.Payload.quota -eq 'unknown') 'No-cost smoke claimed account or quota state.'

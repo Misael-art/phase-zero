@@ -35,6 +35,7 @@ $script:SupervisorReady = $false
 function Test-SensitiveEnvironmentName {
     param([string]$Name)
     if ($Name -match '^(?i)DEEPSEEK_') { return $true }
+    if ($Name -match '^(?i)PZ_DSH_DEBUG$') { return $true }
     if ($Name -match '^(?i)NPM_CONFIG_' -or $Name -match '^(?i)(NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS)$') { return $true }
     $sensitiveWords = @('API','AUTH','ACCESS','REFRESH','BEARER','KEY','TOKEN','SECRET','PASSWORD','COOKIE','CREDENTIAL','CREDENTIALS')
     $words = [regex]::Split($Name, '[^A-Za-z0-9]+')
