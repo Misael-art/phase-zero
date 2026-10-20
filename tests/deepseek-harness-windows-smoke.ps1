@@ -87,7 +87,9 @@ try {
     Assert-True ($status.Payload.quota -eq 'unknown' -and $doctor.Payload.sandboxEnforcement -eq 'unknown') 'Diagnostics overclaimed external state.'
 
     $installed = Invoke-Manager 'install'
-    Assert-True ($installed.Code -eq 0 -and $installed.Payload.installed) 'Pinned install failed on clean Windows runner.'
+    if ($installed.Code -ne 0 -or -not $installed.Payload.installed) {
+        throw "Pinned install failed on clean Windows runner ($($installed.Payload.reason))."
+    }
     $active = Get-Content -LiteralPath (Join-Path $testRoot 'active.json') -Raw | ConvertFrom-Json
     $runtime = Join-Path (Join-Path $testRoot 'runtime') ([string]$active.runtimePath)
     $entry = Join-Path $runtime 'app\node_modules\@deepseek-ai\dsh\lib\bin.js'
