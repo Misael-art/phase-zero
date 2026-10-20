@@ -45,7 +45,7 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     observed["authProvider"]["fresh"] = False
     page._on_status_ready("private.bonsai.status", "", observed)
     app.processEvents()
-    assert page.bonsai_state.text() == "Autenticação não verificada"
+    assert page.bonsai_state.text() == "Última falha: autenticação desativada; estado atual desconhecido"
     assert "não comprova disponibilidade atual" in page.bonsai_reason.text()
     assert "HTTP 404" in page.bonsai_reason.text()
     assert "não testa autenticação" in page.bonsai_next.text()
@@ -77,6 +77,10 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     observed["loginTerminalAvailable"] = True
     observed["loginRequiresPrivateTerminal"] = True
     observed["updateObservation"] = {"available": True, "state": "available"}
+    page._on_status_ready("private.bonsai.status", "", observed)
+    app.processEvents()
+    assert page.bonsai_state.text() == "Última falha: autenticação desativada; estado atual desconhecido"
+    observed["authProvider"]["class"] = "not-probed"
     page._on_status_ready("private.bonsai.status", "", observed)
     app.processEvents()
     assert page.bonsai_state.text() == "Tentativa local pronta; autenticação não confirmada"

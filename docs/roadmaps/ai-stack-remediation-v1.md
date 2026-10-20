@@ -137,7 +137,8 @@ Entrega local: `Login Bonsai` permanece visível e acionável ao lado de
 `Atualizar diagnóstico`, inclusive quando a observação npm está vencida.
 O clique mantém o preflight do gerenciador e o terminal privado; não afirma
 sessão, API ou proxy prontos. O card distingue tentativa local de autenticação
-remota e orienta suporte Bonsai para a mensagem do navegador. Aceite: teste
+remota, mostra a última falha do provedor como histórica quando vencida e
+orienta suporte Bonsai para a mensagem do navegador. Aceite: teste
 temático em 800×600 prova geometria, hit-test e despacho pelas ações públicas
 com estados disponível, vencido e indisponível; testes do gerenciador preservam
 gates da CLI e das credenciais. Uma observação histórica de provedor desativado

@@ -495,13 +495,17 @@ class AiDevPage(BasePage):
             provider = parsed.get("authProvider")
             if not isinstance(provider, dict):
                 provider = {}
-            disabled = provider.get("class") == "upstream-auth-disabled" and provider.get("fresh") is True
-            unknown = provider.get("currentAvailability", "unknown") == "unknown" and not disabled
+            previously_disabled = provider.get("class") == "upstream-auth-disabled"
+            disabled = previously_disabled and provider.get("fresh") is True
+            historical_disabled = previously_disabled and not disabled
+            unknown = provider.get("currentAvailability", "unknown") == "unknown" and not previously_disabled
             attempt_ready = parsed.get("loginAttemptAvailable") is True
             terminal_ready = parsed.get("loginTerminalAvailable") is True
             compatibility = parsed.get("loginCompatibility") == "registry-404-pinned-cli"
             if disabled:
                 label = "Autenticação desativada pelo Bonsai"
+            elif historical_disabled:
+                label = "Última falha: autenticação desativada; estado atual desconhecido"
             elif terminal_ready:
                 label = "Tentativa local pronta (npm HTTP 404)" if compatibility else "Tentativa local pronta; autenticação não confirmada"
             elif attempt_ready:
@@ -518,6 +522,8 @@ class AiDevPage(BasePage):
             reason = "Credencial vencida; renovação necessária." if expired else "Autenticação ainda não comprovada."
             if disabled:
                 reason += " O Bonsai desativou a autenticação desta aplicação; PhaseZero não pode reativá-la."
+            elif historical_disabled:
+                reason += " Observação anterior apontou autenticação desativada; não comprova disponibilidade atual."
             elif unknown:
                 reason += " Observação anterior não comprova disponibilidade atual."
             update = parsed.get("updateObservation")
