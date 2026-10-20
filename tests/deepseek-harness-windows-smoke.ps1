@@ -75,6 +75,7 @@ function Wait-FixtureDescendant {
         if (Test-Path -LiteralPath $record) {
             $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
             if ([int]$captured.descendantProcessId -gt 0) { return [int]$captured.descendantProcessId }
+            if ($captured.descendantError -match '^[A-Z0-9_-]{1,32}$') { throw "Fixture descendant spawn failed ($($captured.descendantError))." }
         }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)

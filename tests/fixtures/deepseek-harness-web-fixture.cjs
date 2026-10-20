@@ -39,12 +39,20 @@ http.createServer((request, response) => {
 // Child process reproduces an upstream descendant that can outlive its
 // direct Node parent unless the supervisor owns the full Windows process job.
 setTimeout(() => {
-  const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-    cwd: process.cwd(), stdio: "ignore", windowsHide: true,
-  });
-  if (record) {
+  const saveDescendantState = (pid, errorCode = "") => {
+    if (!record) return;
     const state = JSON.parse(fs.readFileSync(record, "utf8"));
-    state.descendantProcessId = descendant.pid;
+    state.descendantProcessId = pid || 0;
+    state.descendantError = /^[A-Z0-9_-]{1,32}$/.test(errorCode) ? errorCode : "";
     fs.writeFileSync(record, JSON.stringify(state));
+  };
+  try {
+    const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      cwd: process.cwd(), stdio: "ignore", windowsHide: true,
+    });
+    descendant.once("error", (error) => saveDescendantState(0, String(error.code || "SPAWN-ERROR")));
+    if (descendant.pid) saveDescendantState(descendant.pid);
+  } catch (error) {
+    saveDescendantState(0, String(error.code || "SPAWN-ERROR"));
   }
 }, 500);
