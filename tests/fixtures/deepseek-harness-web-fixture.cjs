@@ -36,11 +36,11 @@ http.createServer((request, response) => {
   response.end("fixture only");
 }).listen(port, "127.0.0.1");
 
-// Detached child reproduces an upstream descendant that can outlive its
+// Child process reproduces an upstream descendant that can outlive its
 // direct Node parent unless the supervisor owns the full Windows process job.
 setTimeout(() => {
   const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-    cwd: process.cwd(), detached: true, stdio: "ignore", windowsHide: true,
+    cwd: process.cwd(), stdio: "ignore", windowsHide: true,
   });
   if (record) {
     const state = JSON.parse(fs.readFileSync(record, "utf8"));

@@ -149,8 +149,17 @@ try {
     Assert-True ($busyListener.LocalEndpoint.Port -eq $port) 'Port conflict handling disturbed unrelated listener.'
     $busyListener.Stop()
 
-    $api = Invoke-Manager 'start' $workspace 'api' $port
-    Assert-True ($api.Code -eq 0 -and $api.Payload.state -eq 'running') 'API route fixture failed health check.'
+    $api = Invoke-Manager 'start' $workspace 'api' $port -DebugManager
+    if ($api.Code -ne 0 -or $api.Payload.state -ne 'running') {
+        $detail = @($api.Diagnostics | ForEach-Object {
+            $line = [string]$_
+            $line = [regex]::Replace($line, '([?&](?:token|launchToken)=)[^&\s"'']+', '$1[redacted]', 'IgnoreCase')
+            $line = [regex]::Replace($line, '(?i)((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|launch[_ -]?token|client[_ -]?secret|secret|password|cookie|authorization|bearer|token)\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|\S+)', '$1[redacted]')
+            [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
+        }) -join ' | '
+        if ($detail.Length -gt 3000) { $detail = $detail.Substring(0,3000) }
+        throw ("API route fixture failed health check (exit={0}, state={1}, reason={2}, nextAction={3}, errorType={4}). {5}" -f $api.Code,$api.Payload.state,$api.Payload.reason,$api.Payload.nextAction,$api.Payload.error.errorType,$detail)
+    }
     $apiPid = [int]$api.Payload.processId
     $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
     $apiChildPid = [int]$captured.processId
