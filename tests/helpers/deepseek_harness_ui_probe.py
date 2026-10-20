@@ -27,6 +27,8 @@ page.action_selected.connect(selected.append)
 page.set_advanced_mode(False)
 window.resize(800, 600)
 window.show()
+window.raise_()
+window.activateWindow()
 window.show_category("IA & Dev")
 app.processEvents()
 page._on_status_ready("private.deepseek-harness.status", "", {
@@ -67,6 +69,8 @@ for width, height in ((800, 600), (1280, 800)):
         assert viewport.contains(rect), f"{sys.argv[1]} {width}x{height}: {button.objectName()} outside viewport"
     assert scroll.horizontalScrollBar().maximum() == 0, f"{sys.argv[1]} {width}x{height}: horizontal overflow"
     install.setFocus()
+    app.processEvents()
+    assert app.focusWidget() is install, "Install control must receive keyboard focus"
     QTest.keyClick(install, Qt.Key_Tab)
     assert app.focusWidget() is start, "Tab order must follow install -> connect"
     QTest.keyClick(start, Qt.Key_Space)

@@ -233,12 +233,16 @@ class AiDevPage(BasePage):
             ("ai.deepseek-harness-stop", "Parar", True),
             ("ai.deepseek-harness-doctor", "Verificar", True),
         )
+        harness_buttons: list[QPushButton] = []
         for index, (action_id, title, direct) in enumerate(controls):
             button = self._action_button(action_id, title, primary=index < 2, direct=direct)
             if button is not None:
                 button.setObjectName("deepseekHarness" + action_id.rsplit("-", 1)[-1].title().replace("-", ""))
                 button.setAccessibleName(title)
                 buttons.addWidget(button, index // 3, index % 3)
+                harness_buttons.append(button)
+        for previous, following in zip(harness_buttons, harness_buttons[1:]):
+            QWidget.setTabOrder(previous, following)
         layout.addLayout(buttons)
         self._harness_technical = QLabel(
             "Somente perfil Web ativo. ACP/SDK, plugins/MCPs, autostart e proxy/9Router seguem desativados; "
