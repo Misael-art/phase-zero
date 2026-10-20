@@ -524,10 +524,36 @@ function Capture-SupervisorStderr {
     try { Remove-Item -LiteralPath $capturePath -Force -ErrorAction SilentlyContinue } catch { }
 }
 
+function Drain-RuntimeOutput {
+    param([object]$Collector, [switch]$CaptureLaunchUrl)
+    $line = $null
+    while ($Collector.TryDequeue([ref]$line)) {
+        $line = [string]$line
+        if ($CaptureLaunchUrl -and $line -match '(?i)dsh web:' -and $line -match 'https?://[^\s"'']+') {
+            $candidate = $matches[0].TrimEnd('.,;)')
+            try {
+                $uri = [Uri]$candidate
+                if ($uri.Host -in @('127.0.0.1','localhost') -and $uri.Port -eq $script:Port -and $uri.Query -match '(?i)(token|launchToken)=') {
+                    $script:LaunchUrl = $candidate
+                    $script:SupervisorReady = $true
+                    $info = Read-JsonFile -Path $script:SupervisorPath
+                    if ($info) { $info.ready = $true; Write-PrivateJson -Path $script:SupervisorPath -Value $info }
+                    $state = Read-JsonFile -Path $script:StatePath
+                    if ($state) { $state.state = 'running'; $state.updatedAt = [DateTime]::UtcNow.ToString('o'); Write-PrivateJson -Path $script:StatePath -Value $state }
+                }
+            } catch { }
+        }
+        [IO.File]::AppendAllText($script:LogPath, (Redact-Line $line) + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
+        $line = $null
+    }
+}
+
 function Initialize-ProcessJobSupport {
     if ('PhaseZero.DeepSeekHarnessProcessJob' -as [type]) { return }
     Add-Type -ErrorAction Stop -TypeDefinition @'
 using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace PhaseZero {
@@ -615,6 +641,21 @@ namespace PhaseZero {
         }
         public static bool Close(IntPtr job) { return job == IntPtr.Zero || CloseHandle(job); }
     }
+
+    public sealed class DeepSeekHarnessOutputCollector {
+        private readonly ConcurrentQueue<string> lines = new ConcurrentQueue<string>();
+        public readonly DataReceivedEventHandler Handler;
+
+        public DeepSeekHarnessOutputCollector() {
+            Handler = new DataReceivedEventHandler(Collect);
+        }
+
+        private void Collect(object sender, DataReceivedEventArgs eventArgs) {
+            if (eventArgs != null && eventArgs.Data != null) lines.Enqueue(eventArgs.Data);
+        }
+
+        public bool TryDequeue(out string line) { return lines.TryDequeue(out line); }
+    }
 }
 '@
 }
@@ -647,26 +688,9 @@ function Start-Supervisor {
     foreach ($key in $launchEnvironment.Keys) { $psi.EnvironmentVariables[[string]$key] = $launchEnvironment[$key] }
     $script:Port = $PortNumber; $script:LaunchUrl = ''; $script:SupervisorReady = $false
     $child = New-Object Diagnostics.Process; $child.StartInfo = $psi
-    $handler = [Diagnostics.DataReceivedEventHandler]{
-        param($sender, $eventArgs)
-        if ($null -eq $eventArgs.Data) { return }
-        $line = [string]$eventArgs.Data
-        if ($line -match '(?i)dsh web:' -and $line -match 'https?://[^\s"'']+') {
-            $candidate = $matches[0].TrimEnd('.,;)')
-            try {
-                $uri = [Uri]$candidate
-                if ($uri.Host -in @('127.0.0.1','localhost') -and $uri.Port -eq $script:Port -and $uri.Query -match '(?i)(token|launchToken)=') {
-                    $script:LaunchUrl = $candidate; $script:SupervisorReady = $true
-                    $info = Read-JsonFile -Path $script:SupervisorPath
-                    if ($info) { $info.ready = $true; Write-PrivateJson -Path $script:SupervisorPath -Value $info }
-                    $state = Read-JsonFile -Path $script:StatePath
-                    if ($state) { $state.state = 'running'; $state.updatedAt = [DateTime]::UtcNow.ToString('o'); Write-PrivateJson -Path $script:StatePath -Value $state }
-                }
-            } catch { }
-        }
-        [IO.File]::AppendAllText($script:LogPath, (Redact-Line $line) + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
-    }
-    $child.add_OutputDataReceived($handler); $child.add_ErrorDataReceived($handler)
+    $outputCollector = New-Object PhaseZero.DeepSeekHarnessOutputCollector
+    $errorCollector = New-Object PhaseZero.DeepSeekHarnessOutputCollector
+    $child.add_OutputDataReceived($outputCollector.Handler); $child.add_ErrorDataReceived($errorCollector.Handler)
     $stopRequested = $false
     $jobHandle = [IntPtr]::Zero
     try {
@@ -680,6 +704,8 @@ function Start-Supervisor {
         }
         $child.BeginOutputReadLine(); $child.BeginErrorReadLine()
         while (-not $child.HasExited -and -not $stopRequested) {
+            Drain-RuntimeOutput -Collector $outputCollector -CaptureLaunchUrl
+            Drain-RuntimeOutput -Collector $errorCollector
             if ($listener.Pending()) {
                 $client = $listener.AcceptTcpClient()
                 try {
@@ -718,6 +744,9 @@ function Start-Supervisor {
             }
             Start-Sleep -Milliseconds 100
         }
+        $child.WaitForExit()
+        Drain-RuntimeOutput -Collector $outputCollector -CaptureLaunchUrl
+        Drain-RuntimeOutput -Collector $errorCollector
         $state = Read-JsonFile -Path $script:StatePath
         if ($state) { $state.state = if ($stopRequested) { 'stopped' } else { 'crashed' }; $state.updatedAt = [DateTime]::UtcNow.ToString('o'); Write-PrivateJson -Path $script:StatePath -Value $state }
     } finally {
