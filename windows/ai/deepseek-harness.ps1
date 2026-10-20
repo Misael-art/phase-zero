@@ -785,7 +785,13 @@ function Invoke-Action {
 if ($InternalSupervisor) {
     try { Start-Supervisor -LaunchDirectory $Workspace -WorkspaceForUi $RequestedWorkspace -Route $AuthRoute -PortNumber $Port -RuntimeDirectory $Runtime; exit 0 }
     catch {
-        try { [IO.File]::AppendAllText($script:LogPath, "PhaseZero supervisor error: $($_.Exception.GetType().Name)`n") } catch { }
+        try {
+            $message = Redact-Line -Line ([string]$_.Exception.Message)
+            $message = [regex]::Replace($message, '\s+', ' ')
+            if ($message.Length -gt 300) { $message = $message.Substring(0,300) }
+            $entry = "PhaseZero supervisor error: type=$($_.Exception.GetType().Name) message=$message$([Environment]::NewLine)"
+            [IO.File]::AppendAllText($script:LogPath, $entry, (New-Object Text.UTF8Encoding($false)))
+        } catch { }
         exit 1
     }
 }

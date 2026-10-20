@@ -158,6 +158,16 @@ try {
             $line = [regex]::Replace($line, '(?i)((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|launch[_ -]?token|client[_ -]?secret|secret|password|cookie|authorization|bearer|token)\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|\S+)', '$1[redacted]')
             [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
         }) -join ' | '
+        $supervisorLog = Join-Path $testRoot 'logs\dsh.log'
+        if (Test-Path -LiteralPath $supervisorLog) {
+            $logDetail = @(Get-Content -LiteralPath $supervisorLog -Tail 8 | ForEach-Object {
+                $line = [regex]::Replace([string]$_, '([?&](?:token|launchToken)=)[^&\s"'']+', '$1[redacted]', 'IgnoreCase')
+                $line = [regex]::Replace($line, '(?i)((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|launch[_ -]?token|client[_ -]?secret|secret|password|cookie|authorization|bearer|token)\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|\S+)', '$1[redacted]')
+                [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
+            }) -join ' | '
+            if ($logDetail.Length -gt 1500) { $logDetail = $logDetail.Substring(0,1500) }
+            if ($logDetail) { $detail += " Supervisor log: $logDetail" }
+        }
         if ($detail.Length -gt 3000) { $detail = $detail.Substring(0,3000) }
         throw ("API route fixture failed health check (exit={0}, state={1}, reason={2}, nextAction={3}, errorType={4}). {5}" -f $api.Code,$api.Payload.state,$api.Payload.reason,$api.Payload.nextAction,$api.Payload.error.errorType,$detail)
     }
