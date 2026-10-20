@@ -55,6 +55,23 @@ def test_existing_shortcuts_converge_on_one_product():
     assert rows["capability.plan.development.vscodium"].target_id == "app.vscodium"
 
 
+def test_deepseek_harness_is_canonical_and_distinct_from_proxy():
+    payload = inventory_manifest(ROOT)
+    products = {product["appId"]: product for product in payload["products"]}
+    harness = products["app.deepseek-harness"]
+    proxy = products["app.deepseek-proxy"]
+    assert harness["name"] == "DeepSeek Harness"
+    assert harness["risk"] == "high" and harness["license"] == "MIT"
+    assert "@deepseek-ai/dsh" in harness["sources"][0]["name"]
+    assert proxy["name"] == "DeepSeek Proxy"
+    assert harness["appId"] != proxy["appId"]
+    assert set(harness["actionIds"]) == {
+        "ai.deepseek-harness-plan", "ai.deepseek-harness-status", "ai.deepseek-harness-install",
+        "ai.deepseek-harness-update", "ai.deepseek-harness-start", "ai.deepseek-harness-open",
+        "ai.deepseek-harness-stop", "ai.deepseek-harness-doctor", "ai.deepseek-harness-uninstall",
+    }
+
+
 def test_open_webui_usage_routes_are_not_advertised_without_request_grant_support():
     actions = {action.id: action for action in build_catalog(ROOT)}
 

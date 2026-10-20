@@ -34,6 +34,11 @@ _PRIMARY_IDS = {
     "ai.memory",
     "ai.ides",
     "ai.admin",
+    "ai.deepseek-harness-status",
+    "ai.deepseek-harness-install",
+    "ai.deepseek-harness-start",
+    "ai.deepseek-harness-open",
+    "ai.deepseek-harness-stop",
 }
 
 # Gateways live on Proxies IA; keep them off the leftover dump here.
@@ -75,6 +80,8 @@ _REPRESENTED_ELSEWHERE = {
 # manager: its actions are built here and never registered in the catalog.
 _BRIDGE_STATUS_ID = "private.chatgpt-web.status"
 _BRIDGE_ARGS = ("ai", "chatgpt-web")
+_HARNESS_STATUS_ID = "private.deepseek-harness.status"
+_HARNESS_STATUS_ARGS = ("ai", "deepseek-harness", "status", "--json")
 _BRIDGE_STAGES = {
     "opted-in": "aceito, ainda não instalado",
     "package-verified": "instalado, ainda não configurado",
@@ -125,6 +132,7 @@ class AiDevPage(BasePage):
         self._technical_widgets: list[QWidget] = []
         self._bridge_buttons: dict[str, QPushButton] = {}
         self._bridge_ready = False
+        self._harness_technical: QLabel | None = None
 
     def build(self) -> None:
         for action_id in _PRIMARY_IDS | _REPRESENTED_ELSEWHERE:
@@ -182,6 +190,7 @@ class AiDevPage(BasePage):
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
         layout.addLayout(cards)
+        layout.addWidget(self._build_harness_card())
         layout.addWidget(self._build_bonsai_card())
         layout.addWidget(self._build_bridge_card())
         layout.addWidget(self._build_advanced_connections())
@@ -191,6 +200,57 @@ class AiDevPage(BasePage):
         self._layout.addWidget(scroll, 1)
         self.status_loader.status_ready.connect(self._on_status_ready)
         self.status_loader.status_failed.connect(self._on_status_failed)
+
+    def _build_harness_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("deepseekHarnessCard")
+        layout = QVBoxLayout(card)
+        layout.addWidget(SectionHeader(
+            "DeepSeek Harness · Experimental",
+            "App oficial independente do DeepSeek Proxy e da escolha de modelos.",
+        ))
+        self.harness_state = QLabel("Estado ainda não observado")
+        self.harness_state.setObjectName("deepseekHarnessState")
+        self.harness_state.setWordWrap(True)
+        layout.addWidget(self.harness_state)
+        journey = QLabel("Instalar → Conectar → Escolher pasta → Verificar → Abrir → Parar")
+        journey.setObjectName("deepseekHarnessJourney")
+        journey.setWordWrap(True)
+        journey.setAccessibleName("Etapas do DeepSeek Harness")
+        layout.addWidget(journey)
+        warning = QLabel(
+            "A política de arquivos não limita rede nem processos. Enforcement fica desconhecido "
+            "até prova do runtime; processos do mesmo usuário compartilham fronteira confiável."
+        )
+        warning.setObjectName("deepseekHarnessBoundary")
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+        buttons = QGridLayout()
+        controls = (
+            ("ai.deepseek-harness-install", "Instalar", True),
+            ("ai.deepseek-harness-start", "Conectar / escolher pasta", True),
+            ("ai.deepseek-harness-open", "Abrir", True),
+            ("ai.deepseek-harness-stop", "Parar", True),
+            ("ai.deepseek-harness-doctor", "Verificar", True),
+        )
+        for index, (action_id, title, direct) in enumerate(controls):
+            button = self._action_button(action_id, title, primary=index < 2, direct=direct)
+            if button is not None:
+                button.setObjectName("deepseekHarness" + action_id.rsplit("-", 1)[-1].title().replace("-", ""))
+                button.setAccessibleName(title)
+                buttons.addWidget(button, index // 3, index % 3)
+        layout.addLayout(buttons)
+        self._harness_technical = QLabel(
+            "Somente perfil Web ativo. ACP/SDK, plugins/MCPs, autostart e proxy/9Router seguem desativados; "
+            "proxy/9Router requer grants aplicados por requisição. Conta e API nunca fazem fallback entre si. "
+            "Início exige 2 GiB disponíveis e limita heap V8 a 2 GiB; subprocessos e ferramentas não têm cota rígida."
+        )
+        self._harness_technical.setObjectName("deepseekHarnessAdvanced")
+        self._harness_technical.setWordWrap(True)
+        self._harness_technical.setTextFormat(Qt.PlainText)
+        self._technical_widgets.append(self._harness_technical)
+        layout.addWidget(self._harness_technical)
+        return card
 
     def _build_bonsai_card(self) -> QFrame:
         card = QFrame()
@@ -481,6 +541,8 @@ class AiDevPage(BasePage):
         self._set_state("info")
         self.status_loader.fetch_action(action)
         self.status_loader.fetch("private.bonsai.status", ["ai", "claude", "bonsai-status"])
+        if not self.status_loader.running(_HARNESS_STATUS_ID):
+            self.status_loader.fetch(_HARNESS_STATUS_ID, list(_HARNESS_STATUS_ARGS))
         self.bridge_card.setVisible(_bridge_opted_in())
         if not self.bridge_card.isHidden() and not self.status_loader.running(_BRIDGE_STATUS_ID):
             self.status_loader.fetch(_BRIDGE_STATUS_ID, [*_BRIDGE_ARGS, "--json", "status"])
@@ -562,6 +624,24 @@ class AiDevPage(BasePage):
         if action_id == _BRIDGE_STATUS_ID and isinstance(parsed, dict):
             self._on_bridge_status(parsed)
             return
+        if action_id == _HARNESS_STATUS_ID and isinstance(parsed, dict):
+            state = str(parsed.get("state", "unknown"))
+            route = str(parsed.get("authRoute", "unknown"))
+            memory_budget = str(parsed.get("memoryBudget", "unknown"))
+            memory_note = {
+                "insufficient": " Orçamento: memória abaixo de 2 GiB; feche workloads antes de iniciar.",
+                "unknown": " Orçamento de memória desconhecido; início fica bloqueado até medir.",
+            }.get(memory_budget, " Orçamento de memória suficiente para iniciar.")
+            if state == "running":
+                requested = str(parsed.get("workspace", ""))
+                suffix = f" Confirme a pasta {requested} no seletor do Harness." if requested else " Escolha a pasta no seletor do Harness."
+                text = f"● Web ativo em loopback · rota {route}; conta, cota e saldo continuam desconhecidos.{suffix}{memory_note}"
+            elif parsed.get("installed"):
+                text = "● Instalado e parado. Escolha uma rota e uma pasta antes de iniciar." + memory_note
+            else:
+                text = "● Não instalado. Instalar não inicia o Harness nem configura uma conta." + memory_note
+            self.harness_state.setText(text)
+            return
         if action_id != "ai.status" or not isinstance(parsed, dict):
             return
         self.refresh_button.setEnabled(True)
@@ -625,6 +705,9 @@ class AiDevPage(BasePage):
             return
         if action_id == _BRIDGE_STATUS_ID:
             self._set_bridge_state("● Não foi possível ler o estado. Use Atualizar.", "warning")
+            return
+        if action_id == _HARNESS_STATUS_ID:
+            self.harness_state.setText("● Status Harness indisponível. Verifique o diagnóstico local.")
             return
         if action_id != "ai.status":
             return

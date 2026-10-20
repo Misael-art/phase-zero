@@ -659,3 +659,26 @@ def test_bonsai_observed_state_public_controls_and_theme_at_800x600(theme, tmp_p
                             cwd=ROOT, env=env, capture_output=True, text=True, timeout=45)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path / ("bonsai-" + theme + ".png")).is_file()
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_deepseek_harness_public_controls_viewports_theme_and_keyboard(theme, tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    task_home = tmp_path / "harness-ui-home"
+    env = os.environ.copy()
+    env.update(
+        HOME=str(task_home),
+        XDG_CONFIG_HOME=str(task_home / ".config"),
+        XDG_DATA_HOME=str(task_home / ".local/share"),
+        XDG_STATE_HOME=str(task_home / ".local/state"),
+    )
+    screenshot = tmp_path / f"deepseek-harness-{theme}.png"
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tests/helpers/deepseek_harness_ui_probe.py"), theme, str(screenshot)],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=45,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert screenshot.is_file()

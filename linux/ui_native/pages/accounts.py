@@ -67,6 +67,18 @@ ACCOUNT_CHANNELS = (
         "Configuração local apenas; validade de sessão e cota não verificadas aqui.",
     ),
     AccountChannel(
+        "deepseek-harness-account", "DeepSeek Harness · conta",
+        "Rota de conta do Harness, mantida em DSH_HOME próprio.",
+        "Login explícito no Web UI do Harness; cookies do navegador pessoal não são importados.",
+        "Experimental. Sessão, perfil, saldo e cota ficam desconhecidos até observação do upstream.",
+    ),
+    AccountChannel(
+        "deepseek-harness-api", "DeepSeek Harness · chave API",
+        "Rota API separada com DSH_HOME próprio.",
+        "Insira a chave em Settings → Models no Harness. O Harness guarda a chave no próprio cofre de credenciais local.",
+        "Experimental. Presença da chave não prova validade, cota nem saldo; nenhum probe de inferência automático.",
+    ),
+    AccountChannel(
         "9router-provider", "Provedores no 9Router",
         "Registro de provedor já existente na configuração do 9Router.",
         "Cadastro e autenticação geridos pelo dashboard do 9Router.",
