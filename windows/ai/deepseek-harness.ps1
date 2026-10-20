@@ -161,7 +161,14 @@ function Write-PrivateJson {
     $temp = Join-Path (Split-Path -Parent $Path) ('.' + [IO.Path]::GetFileName($Path) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
     [IO.File]::WriteAllText($temp, ($Value | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding($false)))
     Set-PrivateAcl -Path $temp
-    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temp, $Path, $null) } else { [IO.File]::Move($temp, $Path) }
+    if (Test-Path -LiteralPath $Path) {
+        $backup = Join-Path (Split-Path -Parent $Path) ('.' + [IO.Path]::GetFileName($Path) + '.' + [guid]::NewGuid().ToString('N') + '.bak')
+        try {
+            [IO.File]::Replace($temp, $Path, $backup)
+        } finally {
+            if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }
+        }
+    } else { [IO.File]::Move($temp, $Path) }
 }
 
 function Read-JsonFile {
