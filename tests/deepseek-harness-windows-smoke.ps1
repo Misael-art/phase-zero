@@ -25,18 +25,29 @@ foreach ($name in $testEnvNames) {
 }
 
 function Invoke-Manager {
-    param([string]$Name, [string]$Folder = '', [string]$Route = '', [int]$Port = 0)
+    param([string]$Name, [string]$Folder = '', [string]$Route = '', [int]$Port = 0, [switch]$DebugManager)
     $arguments = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$cli,'ai','deepseek-harness',$Name)
     if ($Folder) { $arguments += @('--workspace',$Folder) }
     if ($Route) { $arguments += @('--auth-route',$Route) }
     if ($Port) { $arguments += @('--port',[string]$Port) }
     $arguments += '--json'
-    $lines = & $engine @arguments
-    $code = $LASTEXITCODE
+    $hadDebug = Test-Path Env:PZ_DSH_DEBUG
+    $oldDebug = $env:PZ_DSH_DEBUG
+    try {
+        if ($DebugManager) { $env:PZ_DSH_DEBUG = '1' }
+        $lines = @(& $engine @arguments 2>&1)
+        $code = $LASTEXITCODE
+    } finally {
+        if ($DebugManager) {
+            if ($hadDebug) { $env:PZ_DSH_DEBUG = $oldDebug }
+            else { Remove-Item Env:PZ_DSH_DEBUG -ErrorAction SilentlyContinue }
+        }
+    }
     $line = @($lines | Where-Object { $_ -match '^\s*\{' } | Select-Object -Last 1)
     if ($line.Count -eq 0) { throw "Manager $Name returned no JSON (exit $code)." }
     try { $payload = $line[0] | ConvertFrom-Json } catch { throw "Manager $Name returned invalid JSON (exit $code)." }
-    return [pscustomobject]@{ Code = $code; Payload = $payload }
+    $diagnostics = @($lines | Where-Object { ([string]$_).Trim() -and ([string]$_ -notmatch '^\s*\{') } | ForEach-Object { [string]$_ })
+    return [pscustomobject]@{ Code = $code; Payload = $payload; Diagnostics = $diagnostics }
 }
 
 function Assert-True {
@@ -86,9 +97,10 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $testRoot)) 'Read-only diagnostics created managed state.'
     Assert-True ($status.Payload.quota -eq 'unknown' -and $doctor.Payload.sandboxEnforcement -eq 'unknown') 'Diagnostics overclaimed external state.'
 
-    $installed = Invoke-Manager 'install'
+    $installed = Invoke-Manager 'install' -DebugManager
     if ($installed.Code -ne 0 -or -not $installed.Payload.installed) {
-        throw "Pinned install failed on clean Windows runner ($($installed.Payload.reason))."
+        $detail = if ($installed.Diagnostics.Count -gt 0) { "`n" + ($installed.Diagnostics -join "`n") } else { '' }
+        throw "Pinned install failed on clean Windows runner ($($installed.Payload.reason)).$detail"
     }
     $active = Get-Content -LiteralPath (Join-Path $testRoot 'active.json') -Raw | ConvertFrom-Json
     $runtime = Join-Path (Join-Path $testRoot 'runtime') ([string]$active.runtimePath)
