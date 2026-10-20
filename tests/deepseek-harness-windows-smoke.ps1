@@ -14,6 +14,8 @@ $workspace = Join-Path $env:TEMP ('pz-dsh-workspace-' + [guid]::NewGuid().ToStri
 $record = Join-Path $testRoot 'fixture-env.json'
 $requestRecord = Join-Path $testRoot 'fixture-requests.txt'
 $saved = @{}
+$smokeFailure = $null
+$cleanupProblems = @()
 $testEnvNames = @(
     'PATH','PZ_DSH_ROOT','PZ_DSH_FIXTURE_RECORD','PZ_DSH_FIXTURE_REQUEST_RECORD',
     'PZ_DSH_FIXTURE_CRASH','DEEPSEEK_API_KEY','OPENAI_API_KEY','AWS_SECRET_ACCESS_KEY','NODE_AUTH_TOKEN',
@@ -195,18 +197,40 @@ try {
     Assert-True ((Test-Path -LiteralPath (Join-Path $testRoot 'homes\api')) -and (Test-Path -LiteralPath (Join-Path $testRoot 'homes\account'))) 'Uninstall removed route homes.'
     Assert-True ((Test-Path -LiteralPath $workspace) -and (Test-Path -LiteralPath (Join-Path $workspace '.env'))) 'Uninstall removed selected workspace data.'
     Write-Output 'deepseek-harness Windows clean-runtime smoke: passed; no inference sent'
+} catch {
+    $smokeFailure = $_
+    throw
 } finally {
-    if ($env:PZ_DSH_ROOT -eq $testRoot) { try { $null = Invoke-Manager 'stop' } catch { } }
+    if ($env:PZ_DSH_ROOT -eq $testRoot) {
+        try {
+            $cleanupStop = Invoke-Manager 'stop'
+            if ($cleanupStop.Code -ne 0) { $cleanupProblems += "stop-exit-$($cleanupStop.Code)-$($cleanupStop.Payload.reason)" }
+            $deadline = [DateTime]::UtcNow.AddSeconds(8)
+            do {
+                $cleanupStatus = Invoke-Manager 'status'
+                if ($cleanupStatus.Payload.runtimeState -notin @('running','starting-or-unhealthy')) { break }
+                Start-Sleep -Milliseconds 200
+            } while ([DateTime]::UtcNow -lt $deadline)
+            if ($cleanupStatus.Payload.runtimeState -in @('running','starting-or-unhealthy')) { $cleanupProblems += 'runtime-remains-running' }
+        } catch { $cleanupProblems += 'manager-stop-or-status-failed' }
+    }
     foreach ($name in $testEnvNames) {
         if ($saved.ContainsKey($name)) { Set-Item -Path ("Env:" + $name) -Value $saved[$name] }
         else { Remove-Item -LiteralPath ("Env:" + $name) -ErrorAction SilentlyContinue }
     }
     if (Test-Path -LiteralPath $testRoot) {
         Write-Host "Removing test-owned disposable root: $testRoot"
-        Remove-Item -LiteralPath $testRoot -Recurse -Force
+        try { Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction Stop }
+        catch { $cleanupProblems += 'test-root-still-in-use' }
     }
     if (Test-Path -LiteralPath $workspace) {
         Write-Host "Removing test-owned workspace: $workspace"
-        Remove-Item -LiteralPath $workspace -Recurse -Force
+        try { Remove-Item -LiteralPath $workspace -Recurse -Force -ErrorAction Stop }
+        catch { $cleanupProblems += 'workspace-cleanup-failed' }
+    }
+    if ($cleanupProblems.Count -gt 0) {
+        $summary = 'Disposable Windows smoke cleanup: ' + ($cleanupProblems -join ', ')
+        if ($smokeFailure) { Write-Warning $summary }
+        else { throw $summary }
     }
 }
