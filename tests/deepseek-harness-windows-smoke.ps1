@@ -82,6 +82,26 @@ function Wait-FixtureDescendant {
     throw 'Harness fixture descendant did not start.'
 }
 
+function Get-RedactedFailureDetail {
+    param([string[]]$Diagnostics = @(), [string]$LogPath = '')
+    $detail = @($Diagnostics | ForEach-Object {
+        $line = [string]$_
+        $line = [regex]::Replace($line, '([?&](?:token|launchToken)=)[^&\s"'']+', '$1[redacted]', 'IgnoreCase')
+        $line = [regex]::Replace($line, '(?i)((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|launch[_ -]?token|client[_ -]?secret|secret|password|cookie|authorization|bearer|token)\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|\S+)', '$1[redacted]')
+        [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
+    }) -join ' | '
+    if ($LogPath -and (Test-Path -LiteralPath $LogPath)) {
+        $logDetail = @(Get-Content -LiteralPath $LogPath -Tail 8 | ForEach-Object {
+            $line = [regex]::Replace([string]$_, '([?&](?:token|launchToken)=)[^&\s"'']+', '$1[redacted]', 'IgnoreCase')
+            $line = [regex]::Replace($line, '(?i)((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|launch[_ -]?token|client[_ -]?secret|secret|password|cookie|authorization|bearer|token)\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|\S+)', '$1[redacted]')
+            [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
+        }) -join ' | '
+        if ($logDetail) { $detail += " Supervisor log: $logDetail" }
+    }
+    if ($detail.Length -gt 3000) { $detail = $detail.Substring(0,3000) }
+    return $detail
+}
+
 try {
     $null = New-Item -ItemType Directory -Path $workspace -Force
     Set-Content -LiteralPath (Join-Path $workspace '.env') -Value 'DEEPSEEK_API_KEY=project-dotenv-fixture' -NoNewline
@@ -125,13 +145,7 @@ try {
     $null = New-Item -ItemType Directory -Path $realWorkspace -Force
     $realStart = Invoke-Manager 'start' $realWorkspace 'account' $port -DebugManager
     if ($realStart.Code -ne 0 -or $realStart.Payload.state -ne 'running') {
-        $detail = @($realStart.Diagnostics | ForEach-Object {
-            $line = [string]$_
-            $line = [regex]::Replace($line, '([?&](?:token|launchToken)=)[^&\s"'']+', '$1[redacted]', 'IgnoreCase')
-            $line = [regex]::Replace($line, '(?i)((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|launch[_ -]?token|client[_ -]?secret|secret|password|cookie|authorization|bearer|token)\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|\S+)', '$1[redacted]')
-            [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
-        }) -join ' | '
-        if ($detail.Length -gt 3000) { $detail = $detail.Substring(0,3000) }
+        $detail = Get-RedactedFailureDetail -Diagnostics $realStart.Diagnostics -LogPath (Join-Path $testRoot 'logs\dsh.log')
         throw ("Real upstream Web UI failed no-credential smoke start (exit={0}, state={1}, reason={2}, nextAction={3}, errorType={4}). {5}" -f $realStart.Code,$realStart.Payload.state,$realStart.Payload.reason,$realStart.Payload.nextAction,$realStart.Payload.error.errorType,$detail)
     }
     $realStatus = Invoke-Manager 'status'
@@ -152,23 +166,7 @@ try {
 
     $api = Invoke-Manager 'start' $workspace 'api' $port -DebugManager
     if ($api.Code -ne 0 -or $api.Payload.state -ne 'running') {
-        $detail = @($api.Diagnostics | ForEach-Object {
-            $line = [string]$_
-            $line = [regex]::Replace($line, '([?&](?:token|launchToken)=)[^&\s"'']+', '$1[redacted]', 'IgnoreCase')
-            $line = [regex]::Replace($line, '(?i)((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|launch[_ -]?token|client[_ -]?secret|secret|password|cookie|authorization|bearer|token)\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|\S+)', '$1[redacted]')
-            [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
-        }) -join ' | '
-        $supervisorLog = Join-Path $testRoot 'logs\dsh.log'
-        if (Test-Path -LiteralPath $supervisorLog) {
-            $logDetail = @(Get-Content -LiteralPath $supervisorLog -Tail 8 | ForEach-Object {
-                $line = [regex]::Replace([string]$_, '([?&](?:token|launchToken)=)[^&\s"'']+', '$1[redacted]', 'IgnoreCase')
-                $line = [regex]::Replace($line, '(?i)((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|launch[_ -]?token|client[_ -]?secret|secret|password|cookie|authorization|bearer|token)\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|\S+)', '$1[redacted]')
-                [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
-            }) -join ' | '
-            if ($logDetail.Length -gt 1500) { $logDetail = $logDetail.Substring(0,1500) }
-            if ($logDetail) { $detail += " Supervisor log: $logDetail" }
-        }
-        if ($detail.Length -gt 3000) { $detail = $detail.Substring(0,3000) }
+        $detail = Get-RedactedFailureDetail -Diagnostics $api.Diagnostics -LogPath (Join-Path $testRoot 'logs\dsh.log')
         throw ("API route fixture failed health check (exit={0}, state={1}, reason={2}, nextAction={3}, errorType={4}). {5}" -f $api.Code,$api.Payload.state,$api.Payload.reason,$api.Payload.nextAction,$api.Payload.error.errorType,$detail)
     }
     $apiPid = [int]$api.Payload.processId
