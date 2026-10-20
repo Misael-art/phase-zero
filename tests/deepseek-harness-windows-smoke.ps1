@@ -1,0 +1,183 @@
+# Disposable Windows end-to-end proof. Installs pinned runtime with a minimal
+# PATH, then replaces only the disposable entrypoint with a local HTTP fixture.
+$ErrorActionPreference = 'Stop'
+if ($env:OS -ne 'Windows_NT' -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -ne 'X64') {
+    throw 'This smoke test requires a disposable Windows x64 runner.'
+}
+
+$repo = Split-Path -Parent $PSScriptRoot
+$cli = Join-Path $repo 'windows\pz.ps1'
+$fixture = Join-Path $PSScriptRoot 'fixtures\deepseek-harness-web-fixture.cjs'
+$engine = (Get-Process -Id $PID).Path
+$testRoot = Join-Path $env:TEMP ('pz-dsh-clean-' + [guid]::NewGuid().ToString('N'))
+$workspace = Join-Path $testRoot 'workspace'
+$record = Join-Path $testRoot 'fixture-env.json'
+$requestRecord = Join-Path $testRoot 'fixture-requests.txt'
+$saved = @{}
+$testEnvNames = @(
+    'PATH','PZ_DSH_ROOT','PZ_DSH_FIXTURE_RECORD','PZ_DSH_FIXTURE_REQUEST_RECORD',
+    'PZ_DSH_FIXTURE_CRASH','DEEPSEEK_API_KEY','OPENAI_API_KEY','AWS_SECRET_ACCESS_KEY','NODE_AUTH_TOKEN',
+    'NODE_OPTIONS','NODE_PATH','NODE_EXTRA_CA_CERTS','NPM_CONFIG_USERCONFIG'
+)
+foreach ($name in $testEnvNames) {
+    $item = Get-Item -LiteralPath ("Env:" + $name) -ErrorAction SilentlyContinue
+    if ($item) { $saved[$name] = $item.Value }
+}
+
+function Invoke-Manager {
+    param([string]$Name, [string]$Folder = '', [string]$Route = '', [int]$Port = 0)
+    $arguments = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$cli,'ai','deepseek-harness',$Name)
+    if ($Folder) { $arguments += @('--workspace',$Folder) }
+    if ($Route) { $arguments += @('--auth-route',$Route) }
+    if ($Port) { $arguments += @('--port',[string]$Port) }
+    $arguments += '--json'
+    $lines = & $engine @arguments
+    $code = $LASTEXITCODE
+    $line = @($lines | Where-Object { $_ -match '^\s*\{' } | Select-Object -Last 1)
+    if ($line.Count -eq 0) { throw "Manager $Name returned no JSON (exit $code)." }
+    try { $payload = $line[0] | ConvertFrom-Json } catch { throw "Manager $Name returned invalid JSON (exit $code)." }
+    return [pscustomobject]@{ Code = $code; Payload = $payload }
+}
+
+function Assert-True {
+    param([bool]$Condition, [string]$Message)
+    if (-not $Condition) { throw $Message }
+}
+
+function Wait-Stopped {
+    param([int]$TimeoutSeconds = 10)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        Start-Sleep -Milliseconds 200
+        $status = Invoke-Manager 'status'
+        if ($status.Payload.runtimeState -ne 'running' -and $status.Payload.runtimeState -ne 'starting-or-unhealthy') { return }
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Harness fixture did not stop in time.'
+}
+
+try {
+    $null = New-Item -ItemType Directory -Path $workspace -Force
+    Set-Content -LiteralPath (Join-Path $workspace '.env') -Value 'DEEPSEEK_API_KEY=project-dotenv-fixture' -NoNewline
+    $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
+    $listener.Start(); $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port; $listener.Stop()
+    $env:PZ_DSH_ROOT = $testRoot
+    $env:PZ_DSH_FIXTURE_RECORD = $record
+    $env:PZ_DSH_FIXTURE_REQUEST_RECORD = $requestRecord
+    $env:DEEPSEEK_API_KEY = 'ambient-deepseek-fixture'
+    $env:OPENAI_API_KEY = 'ambient-openai-fixture'
+    $env:AWS_SECRET_ACCESS_KEY = 'ambient-cloud-fixture'
+    $env:NODE_AUTH_TOKEN = 'ambient-registry-fixture'
+    $env:NODE_OPTIONS = '--require=C:\ambient-hook.js'
+    $env:NODE_PATH = 'C:\ambient-modules'
+    $env:NODE_EXTRA_CA_CERTS = 'C:\ambient-ca.pem'
+    $env:NPM_CONFIG_USERCONFIG = 'C:\ambient.npmrc'
+
+    # Hide runner-provided Node/npm and compiler directories. Manager must use
+    # only its fixed Node archive plus Windows system utilities.
+    $env:PATH = Join-Path $env:SystemRoot 'System32'
+    Assert-True (-not (Get-Command node -ErrorAction SilentlyContinue)) 'Runner Node unexpectedly visible on clean PATH.'
+    Assert-True (-not (Get-Command npm -ErrorAction SilentlyContinue)) 'Runner npm unexpectedly visible on clean PATH.'
+
+    $plan = Invoke-Manager 'plan'
+    Assert-True ($plan.Code -eq 0 -and $plan.Payload.ok -and -not $plan.Payload.mutatesHost) 'Plan must be ready and read-only.'
+    $status = Invoke-Manager 'status'
+    $doctor = Invoke-Manager 'doctor'
+    Assert-True ($status.Code -eq 0 -and $status.Payload.state -eq 'not-installed') 'Absent status must still return a successful report.'
+    Assert-True (-not (Test-Path -LiteralPath $testRoot)) 'Read-only diagnostics created managed state.'
+    Assert-True ($status.Payload.quota -eq 'unknown' -and $doctor.Payload.sandboxEnforcement -eq 'unknown') 'Diagnostics overclaimed external state.'
+
+    $installed = Invoke-Manager 'install'
+    Assert-True ($installed.Code -eq 0 -and $installed.Payload.installed) 'Pinned install failed on clean Windows runner.'
+    $active = Get-Content -LiteralPath (Join-Path $testRoot 'active.json') -Raw | ConvertFrom-Json
+    $runtime = Join-Path (Join-Path $testRoot 'runtime') ([string]$active.runtimePath)
+    $entry = Join-Path $runtime 'app\node_modules\@deepseek-ai\dsh\lib\bin.js'
+    $realWorkspace = Join-Path $testRoot 'real-workspace'
+    $null = New-Item -ItemType Directory -Path $realWorkspace -Force
+    $realStart = Invoke-Manager 'start' $realWorkspace 'account' $port
+    Assert-True ($realStart.Code -eq 0 -and $realStart.Payload.state -eq 'running') 'Real upstream Web UI failed no-credential smoke start.'
+    $realStatus = Invoke-Manager 'status'
+    Assert-True ($realStatus.Payload.authRoute -eq 'account' -and $realStatus.Payload.quota -eq 'unknown') 'No-cost smoke claimed account or quota state.'
+    $realStop = Invoke-Manager 'stop'
+    Assert-True ($realStop.Code -eq 0) 'Real upstream no-credential smoke did not stop cleanly.'
+    $backup = Join-Path $testRoot 'upstream-bin.js'
+    Copy-Item -LiteralPath $entry -Destination $backup
+    Copy-Item -LiteralPath $fixture -Destination $entry -Force
+
+    $busyListener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $port)
+    $busyListener.Start()
+    $busy = Invoke-Manager 'start' $workspace 'api' $port
+    Assert-True ($busy.Code -ne 0 -and $busy.Payload.reason -eq 'port-occupied') 'Occupied loopback port did not fail closed.'
+    Assert-True ($busyListener.LocalEndpoint.Port -eq $port) 'Port conflict handling disturbed unrelated listener.'
+    $busyListener.Stop()
+
+    $api = Invoke-Manager 'start' $workspace 'api' $port
+    Assert-True ($api.Code -eq 0 -and $api.Payload.state -eq 'running') 'API route fixture failed health check.'
+    $apiPid = [int]$api.Payload.processId
+    $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
+    Assert-True ($captured.dshHome -eq (Join-Path $testRoot 'homes\api')) 'API DSH_HOME was not isolated.'
+    Assert-True ($captured.permission -eq 'workspace-write' -and $captured.telemetry -eq '1') 'Requested runtime policy was not set.'
+    Assert-True ($captured.leakedNames.Count -eq 0) 'Ambient secrets reached the Harness process.'
+    Assert-True ($captured.nodeConfigNames.Count -eq 0) 'Ambient Node/npm config reached the Harness process.'
+    Assert-True ($captured.nodeOptions -eq '--max-old-space-size=2048') 'Controlled V8 heap limit was not applied.'
+    Assert-True ($captured.cwd -eq (Join-Path $testRoot 'homes\api\launch')) 'Harness did not start in its private empty directory.'
+    Assert-True ($captured.cwd -ne $workspace) 'Workspace .env could affect Harness startup.'
+
+    $duplicate = Invoke-Manager 'start' $workspace 'api' $port
+    Assert-True ($duplicate.Code -eq 0 -and [int]$duplicate.Payload.processId -eq $apiPid) 'Second start created another process.'
+    $invalidCredential = Join-Path $testRoot 'homes\api\.credentials.yaml'
+    Set-Content -LiteralPath $invalidCredential -Value 'fixture: invalid-credential' -NoNewline
+    $unknown = Invoke-Manager 'status'
+    Assert-True ($unknown.Payload.apiCredential -eq 'credential file present; validity unknown') 'Credential presence was mistaken for validity.'
+    Assert-True ($unknown.Payload.quota -eq 'unknown' -and $unknown.Payload.balance -eq 'unknown') 'Quota/balance were inferred.'
+    $doctor = Invoke-Manager 'doctor'
+    Assert-True ($doctor.Payload.sandboxEnforcement -eq 'unknown') 'Requested file policy was presented as full sandbox enforcement.'
+
+    $opened = Invoke-Manager 'open'
+    Assert-True ($opened.Code -eq 0 -and $opened.Payload.opened) 'Authenticated Web UI handoff failed.'
+    foreach ($path in @((Join-Path $testRoot 'state.json'),(Join-Path $testRoot 'supervisor.json'),(Join-Path $testRoot 'logs\dsh.log'))) {
+        if (Test-Path -LiteralPath $path) {
+            Assert-True ((Get-Content -LiteralPath $path -Raw) -notmatch 'fixture-launch-secret') "Launch token persisted in $path"
+            Assert-True ((Get-Content -LiteralPath $path -Raw) -notmatch 'fixture-visible-secret') "Credential-like output persisted in $path"
+        }
+    }
+    Assert-True ((Get-Content -LiteralPath (Join-Path $testRoot 'logs\dsh.log') -Raw) -match 'apiKey=\[redacted\]') 'Credential-like Harness output was not redacted.'
+    $stopped = Invoke-Manager 'stop'
+    Assert-True ($stopped.Code -eq 0) 'Owned runtime stop failed.'
+    Wait-Stopped
+    Assert-True (-not (Get-Process -Id $apiPid -ErrorAction SilentlyContinue)) 'Supervisor process survived stop.'
+
+    $account = Invoke-Manager 'start' $workspace 'account' $port
+    Assert-True ($account.Code -eq 0 -and $account.Payload.authRoute -eq 'account') 'Account route did not start explicitly.'
+    $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
+    Assert-True ($captured.dshHome -eq (Join-Path $testRoot 'homes\account')) 'Account route reused API DSH_HOME.'
+    Assert-True ($captured.route -eq 'account') 'Account route did not stay explicit.'
+    $null = Invoke-Manager 'stop'
+    Wait-Stopped
+
+    $env:PZ_DSH_FIXTURE_CRASH = '1'
+    $crash = Invoke-Manager 'start' $workspace 'api' $port
+    Assert-True ($crash.Code -ne 0 -and $crash.Payload.reason -eq 'runtime-crashed') 'Early child crash was not reported.'
+    Remove-Item Env:PZ_DSH_FIXTURE_CRASH -ErrorAction SilentlyContinue
+    $restarted = Invoke-Manager 'start' $workspace 'api' $port
+    Assert-True ($restarted.Code -eq 0 -and $restarted.Payload.state -eq 'running') 'Runtime did not recover after crash.'
+    $null = Invoke-Manager 'stop'
+    Wait-Stopped
+
+    Copy-Item -LiteralPath $backup -Destination $entry -Force
+    $removed = Invoke-Manager 'uninstall'
+    Assert-True ($removed.Code -eq 0 -and -not $removed.Payload.installed) 'Uninstall failed.'
+    Assert-True (-not (Test-Path -LiteralPath $runtime)) 'Uninstall left pinned runtime files.'
+    Assert-True ((Test-Path -LiteralPath (Join-Path $testRoot 'homes\api')) -and (Test-Path -LiteralPath (Join-Path $testRoot 'homes\account'))) 'Uninstall removed route homes.'
+    Assert-True ((Test-Path -LiteralPath $workspace) -and (Test-Path -LiteralPath (Join-Path $workspace '.env'))) 'Uninstall removed selected workspace data.'
+    Write-Output 'deepseek-harness Windows clean-runtime smoke: passed; no inference sent'
+} finally {
+    if ($env:PZ_DSH_ROOT -eq $testRoot) { try { $null = Invoke-Manager 'stop' } catch { } }
+    foreach ($name in $testEnvNames) {
+        if ($saved.ContainsKey($name)) { Set-Item -Path ("Env:" + $name) -Value $saved[$name] }
+        else { Remove-Item -LiteralPath ("Env:" + $name) -ErrorAction SilentlyContinue }
+    }
+    if (Test-Path -LiteralPath $testRoot) {
+        Write-Host "Removing test-owned disposable root: $testRoot"
+        Remove-Item -LiteralPath $testRoot -Recurse -Force
+    }
+}
