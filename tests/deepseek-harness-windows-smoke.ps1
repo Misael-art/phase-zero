@@ -68,6 +68,19 @@ function Wait-Stopped {
     throw 'Harness fixture did not stop in time.'
 }
 
+function Wait-FixtureDescendant {
+    param([int]$TimeoutSeconds = 5)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        if (Test-Path -LiteralPath $record) {
+            $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
+            if ([int]$captured.descendantProcessId -gt 0) { return [int]$captured.descendantProcessId }
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Harness fixture descendant did not start.'
+}
+
 try {
     $null = New-Item -ItemType Directory -Path $workspace -Force
     Set-Content -LiteralPath (Join-Path $workspace '.env') -Value 'DEEPSEEK_API_KEY=project-dotenv-fixture' -NoNewline
@@ -141,6 +154,7 @@ try {
     $apiPid = [int]$api.Payload.processId
     $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
     $apiChildPid = [int]$captured.processId
+    $apiDescendantPid = Wait-FixtureDescendant
     Assert-True ($captured.dshHome -eq (Join-Path $testRoot 'homes\api')) 'API DSH_HOME was not isolated.'
     Assert-True ($captured.permission -eq 'workspace-write' -and $captured.telemetry -eq '1') 'Requested runtime policy was not set.'
     Assert-True ($captured.leakedNames.Count -eq 0) 'Ambient secrets reached the Harness process.'
@@ -173,18 +187,21 @@ try {
     Wait-Stopped
     Assert-True (-not (Get-Process -Id $apiPid -ErrorAction SilentlyContinue)) 'Supervisor process survived stop.'
     Assert-True (-not (Get-Process -Id $apiChildPid -ErrorAction SilentlyContinue)) 'Harness child process survived stop.'
+    Assert-True (-not (Get-Process -Id $apiDescendantPid -ErrorAction SilentlyContinue)) 'Harness descendant survived stop.'
     Assert-True ((Invoke-Manager 'status').Payload.runtimeState -eq 'stopped') 'Fixture stop left stale supervisor state.'
 
     $account = Invoke-Manager 'start' $workspace 'account' $port
     Assert-True ($account.Code -eq 0 -and $account.Payload.authRoute -eq 'account') 'Account route did not start explicitly.'
     $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
     $accountChildPid = [int]$captured.processId
+    $accountDescendantPid = Wait-FixtureDescendant
     Assert-True ($captured.dshHome -eq (Join-Path $testRoot 'homes\account')) 'Account route reused API DSH_HOME.'
     Assert-True ($captured.route -eq 'account') 'Account route did not stay explicit.'
     $accountStop = Invoke-Manager 'stop'
     Assert-True ($accountStop.Code -eq 0) 'Account route stop failed.'
     Wait-Stopped
     Assert-True (-not (Get-Process -Id $accountChildPid -ErrorAction SilentlyContinue)) 'Account route child survived stop.'
+    Assert-True (-not (Get-Process -Id $accountDescendantPid -ErrorAction SilentlyContinue)) 'Account route descendant survived stop.'
 
     $env:PZ_DSH_FIXTURE_CRASH = '1'
     $crash = Invoke-Manager 'start' $workspace 'api' $port

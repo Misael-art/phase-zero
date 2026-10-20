@@ -488,6 +488,101 @@ function Redact-Line {
     return $line
 }
 
+function Initialize-ProcessJobSupport {
+    if ('PhaseZero.DeepSeekHarnessProcessJob' -as [type]) { return }
+    Add-Type -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace PhaseZero {
+    public static class DeepSeekHarnessProcessJob {
+        private const uint KillOnJobClose = 0x2000;
+        private const int JobObjectExtendedLimitInfoClass = 9;
+        private const int JobObjectBasicAccountingInfoClass = 1;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BasicLimitInformation {
+            public long PerProcessUserTimeLimit;
+            public long PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize;
+            public UIntPtr MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass;
+            public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoCounters {
+            public ulong ReadOperationCount;
+            public ulong WriteOperationCount;
+            public ulong OtherOperationCount;
+            public ulong ReadTransferCount;
+            public ulong WriteTransferCount;
+            public ulong OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ExtendedLimitInformation {
+            public BasicLimitInformation BasicLimitInformation;
+            public IoCounters IoInfo;
+            public UIntPtr ProcessMemoryLimit;
+            public UIntPtr JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed;
+            public UIntPtr PeakJobMemoryUsed;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BasicAccountingInformation {
+            public long TotalUserTime;
+            public long TotalKernelTime;
+            public long ThisPeriodTotalUserTime;
+            public long ThisPeriodTotalKernelTime;
+            public uint TotalPageFaultCount;
+            public uint TotalProcesses;
+            public uint ActiveProcesses;
+            public uint TotalTerminatedProcesses;
+        }
+
+        [DllImport("kernel32.dll", EntryPoint = "CreateJobObjectW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetInformationJobObject(IntPtr job, int informationClass, ref ExtendedLimitInformation information, uint length);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool QueryInformationJobObject(IntPtr job, int informationClass, ref BasicAccountingInformation information, uint length, IntPtr returnLength);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        public static IntPtr CreateKillOnCloseJob() {
+            IntPtr job = CreateJobObject(IntPtr.Zero, null);
+            if (job == IntPtr.Zero) return IntPtr.Zero;
+            ExtendedLimitInformation information = new ExtendedLimitInformation();
+            information.BasicLimitInformation.LimitFlags = KillOnJobClose;
+            if (SetInformationJobObject(job, JobObjectExtendedLimitInfoClass, ref information,
+                (uint)Marshal.SizeOf(typeof(ExtendedLimitInformation)))) return job;
+            CloseHandle(job);
+            return IntPtr.Zero;
+        }
+
+        public static bool Assign(IntPtr job, IntPtr process) { return AssignProcessToJobObject(job, process); }
+        public static bool Terminate(IntPtr job) { return TerminateJobObject(job, 1); }
+        public static uint ActiveProcessCount(IntPtr job) {
+            BasicAccountingInformation information = new BasicAccountingInformation();
+            if (!QueryInformationJobObject(job, JobObjectBasicAccountingInfoClass, ref information,
+                (uint)Marshal.SizeOf(typeof(BasicAccountingInformation)), IntPtr.Zero)) return UInt32.MaxValue;
+            return information.ActiveProcesses;
+        }
+        public static bool Close(IntPtr job) { return job == IntPtr.Zero || CloseHandle(job); }
+    }
+}
+'@
+}
+
 function Start-Supervisor {
     param([string]$LaunchDirectory, [string]$WorkspaceForUi, [string]$Route, [int]$PortNumber, [string]$RuntimeDirectory)
     New-PrivateDirectory -Path $LaunchDirectory
@@ -536,10 +631,18 @@ function Start-Supervisor {
         [IO.File]::AppendAllText($script:LogPath, (Redact-Line $line) + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
     }
     $child.add_OutputDataReceived($handler); $child.add_ErrorDataReceived($handler)
-    if (-not $child.Start()) { throw 'runtime-start-failed' }
-    $child.BeginOutputReadLine(); $child.BeginErrorReadLine()
     $stopRequested = $false
+    $jobHandle = [IntPtr]::Zero
     try {
+        Initialize-ProcessJobSupport
+        $jobHandle = [PhaseZero.DeepSeekHarnessProcessJob]::CreateKillOnCloseJob()
+        if ($jobHandle -eq [IntPtr]::Zero) { throw 'runtime-process-control-unavailable' }
+        if (-not $child.Start()) { throw 'runtime-start-failed' }
+        if (-not [PhaseZero.DeepSeekHarnessProcessJob]::Assign($jobHandle, $child.Handle)) {
+            try { $child.Kill() } catch { }
+            throw 'runtime-process-control-unavailable'
+        }
+        $child.BeginOutputReadLine(); $child.BeginErrorReadLine()
         while (-not $child.HasExited -and -not $stopRequested) {
             if ($listener.Pending()) {
                 $client = $listener.AcceptTcpClient()
@@ -557,11 +660,19 @@ function Start-Supervisor {
                         } catch { $reply = @{ ok = $false; code = 'browser-unavailable' } }
                     }
                     elseif ($request.action -eq 'stop') {
-                        try { & taskkill.exe /PID $child.Id /T /F | Out-Null } catch { }
                         try {
-                            $child.Refresh()
-                            if (-not $child.HasExited) { try { $child.Kill() } catch { } }
-                            if ($child.WaitForExit(5000)) { $stopRequested = $true; $reply = @{ ok = $true; stopping = $true } }
+                            if (-not [PhaseZero.DeepSeekHarnessProcessJob]::Terminate($jobHandle)) { throw 'runtime-process-stop-failed' }
+                            $deadline = [DateTime]::UtcNow.AddSeconds(5)
+                            do {
+                                $activeProcesses = [PhaseZero.DeepSeekHarnessProcessJob]::ActiveProcessCount($jobHandle)
+                                if ($activeProcesses -eq [uint32]::MaxValue) { throw 'runtime-process-stop-failed' }
+                                if ($activeProcesses -eq 0) {
+                                    $null = $child.WaitForExit(1000); $child.Refresh()
+                                    if ($child.HasExited) { $stopRequested = $true; break }
+                                }
+                                Start-Sleep -Milliseconds 100
+                            } while ([DateTime]::UtcNow -lt $deadline)
+                            if ($stopRequested) { $reply = @{ ok = $true; stopping = $true } }
                             else { $reply = @{ ok = $false; code = 'runtime-process-stop-failed' } }
                         } catch { $reply = @{ ok = $false; code = 'runtime-process-stop-failed' } }
                     } else { $reply = @{ ok = $false; code = 'unknown-action' } }
@@ -571,10 +682,13 @@ function Start-Supervisor {
             }
             Start-Sleep -Milliseconds 100
         }
-        if (-not $child.HasExited) { try { & taskkill.exe /PID $child.Id /T /F | Out-Null } catch { } }
         $state = Read-JsonFile -Path $script:StatePath
         if ($state) { $state.state = if ($stopRequested) { 'stopped' } else { 'crashed' }; $state.updatedAt = [DateTime]::UtcNow.ToString('o'); Write-PrivateJson -Path $script:StatePath -Value $state }
-    } finally { $listener.Stop(); $child.Dispose() }
+    } finally {
+        $listener.Stop()
+        if ($jobHandle -ne [IntPtr]::Zero) { $null = [PhaseZero.DeepSeekHarnessProcessJob]::Close($jobHandle) }
+        $child.Dispose()
+    }
 }
 
 function Stop-Runtime {
@@ -697,6 +811,7 @@ try {
         'runtime-crashed' { 'doctor; inspect redacted local log' }
         'health-timeout' { 'doctor; inspect redacted local log' }
         'different-route-running-stop-first' { 'stop current runtime, then choose the other route' }
+        'runtime-process-control-unavailable' { 'Windows cannot supervise Harness descendants; runtime was not started' }
         'runtime-process-stop-failed' { 'runtime remains active; inspect doctor and retry stop' }
         'supervisor-unreachable-runtime-preserved' { 'doctor; no process was killed' }
         default { 'doctor' }

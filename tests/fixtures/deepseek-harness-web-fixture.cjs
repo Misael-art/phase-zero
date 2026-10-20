@@ -2,6 +2,7 @@
 // inside a disposable runtime; this is not a Harness implementation.
 const fs = require("node:fs");
 const http = require("node:http");
+const { spawn } = require("node:child_process");
 
 const portIndex = process.argv.indexOf("--port");
 const port = Number(portIndex >= 0 ? process.argv[portIndex + 1] : 3080);
@@ -9,9 +10,12 @@ const record = process.env.PZ_DSH_FIXTURE_RECORD;
 const sensitive = ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "NODE_AUTH_TOKEN"];
 const nodeConfig = ["NODE_PATH", "NODE_EXTRA_CA_CERTS", "NPM_CONFIG_USERCONFIG"];
 
+if (process.env.PZ_DSH_FIXTURE_CRASH === "1") process.exit(19);
+
 if (record) {
   fs.writeFileSync(record, JSON.stringify({
     processId: process.pid,
+    descendantProcessId: 0,
     cwd: process.cwd(),
     dshHome: process.env.DSH_HOME || "",
     route: (process.env.DSH_HOME || "").split(/[\\/]/).filter(Boolean).pop() || "",
@@ -23,8 +27,6 @@ if (record) {
   }));
 }
 
-if (process.env.PZ_DSH_FIXTURE_CRASH === "1") process.exit(19);
-
 console.log(`dsh web: http://127.0.0.1:${port}/?token=fixture-launch-secret`);
 console.log("apiKey=fixture-visible-secret");
 http.createServer((request, response) => {
@@ -33,3 +35,16 @@ http.createServer((request, response) => {
   response.writeHead(200, { "content-type": "text/plain" });
   response.end("fixture only");
 }).listen(port, "127.0.0.1");
+
+// Detached child reproduces an upstream descendant that can outlive its
+// direct Node parent unless the supervisor owns the full Windows process job.
+setTimeout(() => {
+  const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    cwd: process.cwd(), detached: true, stdio: "ignore", windowsHide: true,
+  });
+  if (record) {
+    const state = JSON.parse(fs.readFileSync(record, "utf8"));
+    state.descendantProcessId = descendant.pid;
+    fs.writeFileSync(record, JSON.stringify(state));
+  }
+}, 500);
