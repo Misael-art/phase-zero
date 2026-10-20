@@ -497,6 +497,14 @@ Adicionar IDs, nunca reutilizar ID para requisito diferente. Estados permitidos:
 
 ## Estado vivo
 
+2026-10-20 — Bonsai AISR-016 em PR #125: card com login e diagnóstico lado a
+lado, tentativa explícita não bloqueada por observação histórica do provedor,
+timeout com recuperação de credencial. Regressão local: 106 Python/Qt e 52 shell
+verdes; CI do SHA final pendente. Pacote do host ainda 1.22.10-1. O navegador
+mostrou `Authentication is disabled for this application`; autenticação, execução
+e proxy Bonsai continuam não comprovados. npm pacote/latest HTTP 404, controle
+HTTP 200. Nenhum workload, serviço, VM ou sessão KDE alterado pela correção.
+
 2026-10-18 — WinVM integrity/storage: base `bbee41c`, pacote host 1.22.7-1;
 `codex/winvm-integrity-sparse`. Diagnóstico somente leitura das duas operações
 encontrou QCOW2 limpos e arquivos essenciais presentes; boot não comprovado.
@@ -612,6 +620,7 @@ Adicionar uma linha por sessão material. Não apagar histórico.
 
 | Data | Agente | Branch/worktree | Fase | Commit/PR | Gates | Resultado/próximo passo |
 |---|---|---|---|---|---|---|
+| 2026-10-20 | Codex | `codex/bonsai-auth-ux` / `pz-bonsai-auth-ux` | AISR-016 Bonsai UX/autenticação | `32a144e`, `e167cf8`, `4d10606`; PR #125 | Python/Qt 106; shell 52; dark/light 800×600 com hit-test; diff-check; CI pendente | Botões lado a lado e login acionável com cache vencido; tentativa explícita após falha histórica sem remover preflight/rollback. Bloqueio externo do Bonsai documentado. Host 1.22.10 intacto; próximo: CI, merge, release e teste do pacote. |
 | 2026-09-08 | Codex | codex/verify-ux-70d959f, dedicada | verificação UX | base70d959f; docs via git log | QA dark800→1280→800; pytest-final/validation.json | aceite local; nenhum host mutado; próxima jornada simples |
 | 2026-09-06 | Codex | `codex/portfolio-clean-host-audit` / `pz-portfolio-clean-host-audit` | diagnóstico transversal | docs sobre `2180c94` | 364 pytest; 4 shell; 12 registros reproduzidos; 2 contratos PS; 13 Compose; asset Arch verificado | PZ-AUD-001..031 pending; [plano/handoff](../../reports/portfolio-clean-host-2026-09-06/PLANO.md); P0 restore aberto. Sem mutação de runtime |
 | 2026-09-07 | opencode | `codex/aud-fase0` / `pz-aud-fase0` | Fase 0 (005,006,009,010,011,012) | `076b4ba`, `1a47c15`, `98b75a1`, `7fc3564` | linux-homelab/ai-proxies/9router/agent-workspaces exit 0; pytest Homelab 76; diff-check | 6 itens verified no backlog; P0 restore fechado em fixture. Sem workload/container/servidor tocado. Próximo: Fase 1 (001,002,003,004,026,027) em worktree novo |
