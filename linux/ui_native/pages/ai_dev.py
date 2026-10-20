@@ -200,17 +200,23 @@ class AiDevPage(BasePage):
         self.bonsai_state = QLabel("Estado ainda não observado")
         self.bonsai_state.setWordWrap(True)
         layout.addWidget(self.bonsai_state)
-        self.bonsai_diagnose = self._action_button(
-            "ai.bonsai-diagnose", "Atualizar diagnóstico", primary=True, direct=True
-        )
-        if self.bonsai_diagnose:
-            layout.addWidget(self.bonsai_diagnose)
+        actions = QHBoxLayout()
+        actions.setSpacing(10)
         self.bonsai_login = self._action_button(
-            "ai.claude-bonsai-login", "Login Bonsai", primary=False, direct=True
+            "ai.claude-bonsai-login", "Login Bonsai", primary=True, direct=True
         )
         if self.bonsai_login:
-            self.bonsai_login.setEnabled(False)
-            layout.addWidget(self.bonsai_login)
+            self.bonsai_login.setToolTip(
+                "Verifica as condições atuais e tenta abrir login em terminal privado. "
+                "A autenticação depende do Bonsai."
+            )
+            actions.addWidget(self.bonsai_login, 1)
+        self.bonsai_diagnose = self._action_button(
+            "ai.bonsai-diagnose", "Atualizar diagnóstico", primary=False, direct=True
+        )
+        if self.bonsai_diagnose:
+            actions.addWidget(self.bonsai_diagnose, 1)
+        layout.addLayout(actions)
         self.bonsai_reason = QLabel("Aguarde diagnóstico. Presença de credencial não comprova autenticação.")
         self.bonsai_reason.setWordWrap(True)
         layout.addWidget(self.bonsai_reason)
@@ -466,17 +472,6 @@ class AiDevPage(BasePage):
             button.clicked.connect(lambda _checked=False, a=action: self.request_action(a))
         return button
 
-    def _set_bonsai_action_priority(self, login_ready: bool) -> None:
-        for button, name in (
-            (self.bonsai_login, "primaryButton" if login_ready else "secondaryButton"),
-            (self.bonsai_diagnose, "secondaryButton" if login_ready else "primaryButton"),
-        ):
-            if button is not None and button.objectName() != name:
-                button.setObjectName(name)
-                button.style().unpolish(button)
-                button.style().polish(button)
-                button.update()
-
     def reload(self) -> None:
         action = self.by_id.get("ai.status")
         if action is None or self.status_loader.running(action.id):
@@ -497,31 +492,43 @@ class AiDevPage(BasePage):
 
     def _on_status_ready(self, action_id: str, _stdout: str, parsed: object) -> None:
         if action_id == "private.bonsai.status" and isinstance(parsed, dict):
-            provider = parsed.get("authProvider", {})
-            disabled = provider.get("class") == "upstream-auth-disabled" and provider.get("fresh") is True
-            unknown = provider.get("currentAvailability", "unknown") == "unknown" and not disabled
+            provider = parsed.get("authProvider")
+            if not isinstance(provider, dict):
+                provider = {}
+            previously_disabled = provider.get("class") == "upstream-auth-disabled"
+            disabled = previously_disabled and provider.get("fresh") is True
+            historical_disabled = previously_disabled and not disabled
+            unknown = provider.get("currentAvailability", "unknown") == "unknown" and not previously_disabled
             attempt_ready = parsed.get("loginAttemptAvailable") is True
             terminal_ready = parsed.get("loginTerminalAvailable") is True
             compatibility = parsed.get("loginCompatibility") == "registry-404-pinned-cli"
-            if terminal_ready:
-                label = "Tentativa de login no terminal (npm HTTP 404)" if compatibility else "Login disponível no terminal privado"
+            if disabled:
+                label = "Autenticação desativada pelo Bonsai"
+            elif historical_disabled:
+                label = "Última falha: autenticação desativada; estado atual desconhecido"
+            elif terminal_ready:
+                label = "Tentativa local pronta (npm HTTP 404)" if compatibility else "Tentativa local pronta; autenticação não confirmada"
             elif attempt_ready:
-                label = "Login disponível para tentativa no terminal"
-            elif disabled:
-                label = "Login indisponível no provedor"
+                label = "Tentativa possível; terminal gráfico indisponível"
             elif unknown:
-                label = "Login indisponível; provedor sem verificação atual"
+                label = "Autenticação não verificada"
             else:
-                label = "Bonsai indisponível para execução"
+                label = "Bonsai sem pré-verificação concluída"
             self.bonsai_state.setText(label)
-            self.bonsai_login.setEnabled(terminal_ready)
-            self._set_bonsai_action_priority(terminal_ready)
-            self.bonsai_login.setToolTip("Abre terminal privado para login; códigos não passam pelo painel.")
-            expired = str(parsed.get("credentialStatus", {}).get("state", "")).startswith("expired")
+            credential = parsed.get("credentialStatus")
+            if not isinstance(credential, dict):
+                credential = {}
+            expired = str(credential.get("state", "")).startswith("expired")
             reason = "Credencial vencida; renovação necessária." if expired else "Autenticação ainda não comprovada."
-            if unknown:
+            if disabled:
+                reason += " O Bonsai desativou a autenticação desta aplicação; PhaseZero não pode reativá-la."
+            elif historical_disabled:
+                reason += " Observação anterior apontou autenticação desativada; não comprova disponibilidade atual."
+            elif unknown:
                 reason += " Observação anterior não comprova disponibilidade atual."
-            update = parsed.get("updateObservation", {})
+            update = parsed.get("updateObservation")
+            if not isinstance(update, dict):
+                update = {}
             if update.get("state") == "not-probed-or-stale":
                 reason += " Atualização ainda não verificada; atualize diagnóstico."
             elif update.get("available") is False or update.get("state") == "registry-http-error":
@@ -532,14 +539,23 @@ class AiDevPage(BasePage):
             if compatibility:
                 reason += " PhaseZero contorna só a checagem de versão da CLI 0.4.19 instalada; autenticação depende do Bonsai."
             self.bonsai_reason.setText(reason)
-            next_step = (
-                "Próximo passo: clique Login Bonsai para tentar em terminal privado. O contorno do HTTP 404 não comprova autenticação nem inicia inferência."
-                if terminal_ready else
-                "Próximo passo: execute bonsai login em terminal privado. Tentativa explícita não inicia inferência."
-                if attempt_ready else
-                "Próximo passo: confirme disponibilidade no suporte oficial Bonsai. "
-                "Diagnóstico consulta npm, não testa login. Credenciais preservadas."
-            )
+            if disabled:
+                next_step = (
+                    "Próximo passo: contate o suporte oficial Bonsai para reativar a autenticação. "
+                    "Login Bonsai permanece disponível para nova tentativa; credenciais preservadas."
+                )
+            elif terminal_ready:
+                next_step = (
+                    "Próximo passo: Login Bonsai abre terminal privado. Se o navegador mostrar "
+                    "'Authentication is disabled for this application', o bloqueio é do Bonsai; "
+                    "contate o suporte oficial. O HTTP 404 do npm não comprova autenticação."
+                )
+            else:
+                next_step = (
+                    "Próximo passo: Login Bonsai verifica novamente as condições antes de abrir "
+                    "o terminal privado. Atualizar diagnóstico consulta npm, não testa autenticação. "
+                    "Se o site disser que a autenticação está desativada, contate o suporte Bonsai."
+                )
             self.bonsai_next.setText(next_step)
             self.bonsai_details.setText(json.dumps({"route": "bonsai/direct", **parsed}, ensure_ascii=False, indent=2))
             return
@@ -601,10 +617,11 @@ class AiDevPage(BasePage):
 
     def _on_status_failed(self, action_id: str, message: str) -> None:
         if action_id == "private.bonsai.status":
-            self.bonsai_login.setEnabled(False)
-            self._set_bonsai_action_priority(False)
             self.bonsai_state.setText("Estado Bonsai indisponível")
-            self.bonsai_next.setText("Próximo passo: atualizar diagnóstico.")
+            self.bonsai_next.setText(
+                "Próximo passo: tente Login Bonsai para verificar as condições atuais ou "
+                "atualize o diagnóstico. A autenticação depende do provedor."
+            )
             return
         if action_id == _BRIDGE_STATUS_ID:
             self._set_bridge_state("● Não foi possível ler o estado. Use Atualizar.", "warning")

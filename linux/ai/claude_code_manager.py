@@ -828,13 +828,17 @@ try {
                     insecure_files += 1
         update_check = self._bonsai_update_check(path)
         compat = self._bonsai_compat_eligible(path) if update.get("httpStatus") == 404 else False
-        attempt_ready = (bool(path) and not self._bonsai_provider_recently_disabled(provider)
-                         and (update["available"] or compat) and update_check != "forged")
+        # Provider history is advisory: only an explicit login can establish
+        # whether Bonsai has re-enabled authentication. Keep local gates here.
+        attempt_ready = (bool(path) and (update["available"] or compat)
+                         and update_check != "forged")
         terminal = self._bonsai_terminal()
         if update_check == "forged":
             next_action = "Runner mascara atualização; repare atalhos pelo PhaseZero e use canal oficial."
         elif self._bonsai_provider_recently_disabled(provider):
-            next_action = self._bonsai_login_block_reason(provider, update)
+            next_action = ("Última observação indica autenticação desativada no Bonsai. "
+                           "Uma tentativa explícita pode verificar recuperação; "
+                           "se o navegador repetir o erro, contate o suporte Bonsai.")
         elif update.get("httpStatus") == 404 and path and not compat:
             next_action = ("npm HTTP 404 e CLI local diferente da versão 0.4.19 conhecida; "
                            "contorno recusado. Reinstale apenas de fonte oficial; credenciais preservadas. "
@@ -1981,8 +1985,8 @@ esac
 
     def _check_bonsai_login(self) -> str:
         provider = self.bonsai_auth_probe()
-        if self._bonsai_provider_recently_disabled(provider):
-            raise RuntimeError(self._bonsai_login_block_reason(provider, self._cached_bonsai_update()))
+        # A cached provider failure cannot veto an explicit retry after Bonsai
+        # recovers. This path still refreshes npm and checks the installed CLI.
         update = self.refresh_bonsai_update()
         bonsai = self._bonsai_upstream()
         if not bonsai or self._bonsai_update_check(bonsai) == "forged":
@@ -2084,11 +2088,23 @@ esac
                 previous[signum] = signal.signal(signum, interrupted)
             # Text update mode may seek during initialization; a PTY cannot.
             with open("/dev/tty", "r+b", buffering=0) as terminal:
-                rc = subprocess.run(command, check=False, stdin=terminal,
-                                    stdout=terminal, stderr=terminal, timeout=180,
-                                    pass_fds=(lock.fileno(),), env=env).returncode
+                try:
+                    rc = subprocess.run(command, check=False, stdin=terminal,
+                                        stdout=terminal, stderr=terminal, timeout=180,
+                                        pass_fds=(lock.fileno(),), env=env).returncode
+                except subprocess.TimeoutExpired:
+                    raise RuntimeError(
+                        "Tempo de login Bonsai esgotado. Se o navegador mostrou "
+                        "'Authentication is disabled for this application', "
+                        "o suporte Bonsai precisa reativar a autenticação. "
+                        "Credenciais preservadas."
+                    ) from None
             if rc != 0:
-                raise RuntimeError(f"Login Bonsai não concluído (exit {rc}); tente diagnóstico e contate provedor. Credenciais preservadas.")
+                raise RuntimeError(
+                    f"Login Bonsai não concluído (exit {rc}). Se o navegador mostrou "
+                    "'Authentication is disabled for this application', "
+                    "contate o suporte Bonsai. Credenciais preservadas."
+                )
             pending.unlink()
             backup.unlink(missing_ok=True)
             return rc

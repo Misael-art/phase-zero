@@ -449,12 +449,28 @@ echo "bonsai:$*"
                 os.close(slave)
             os.close(master)
 
-    def test_disabled_provider_blocks_login_before_process_and_preserves_credentials(self):
+    def test_cached_provider_outage_allows_explicit_retry_and_preserves_credentials(self):
         manager = CC.Manager()
         before = manager.bonsai_config.read_bytes()
-        with mock.patch.object(manager, "bonsai_auth_probe", return_value={"available": False, "class": "upstream-auth-disabled", "fresh": True, "checkedAt": "2026-10-17T21:43:34-03:00"}), mock.patch.object(CC.subprocess, "run", side_effect=AssertionError("no process allowed")), mock.patch.object(manager, "bonsai_update_observation", side_effect=AssertionError("disabled provider must block first")):
-            with self.assertRaisesRegex(RuntimeError, "Login indisponível no provedor"):
+        provider = {"available": False, "class": "upstream-auth-disabled", "fresh": True,
+                    "checkedAt": "2026-10-17T21:43:34-03:00"}
+        update = {"available": True, "state": "available", "version": "0.4.19"}
+        with mock.patch.object(manager, "_cached_bonsai_auth_probe", return_value=provider), \
+             mock.patch.object(manager, "_cached_bonsai_update", return_value=update):
+            state = manager.bonsai_info()
+        self.assertTrue(state["loginAttemptAvailable"])
+        self.assertIn("tentativa explícita", state["nextAction"])
+        with mock.patch.object(manager, "bonsai_auth_probe", return_value=provider), \
+             mock.patch.object(manager, "bonsai_update_observation", return_value=update), \
+             mock.patch.object(manager, "_bonsai_update_check", return_value="upstream"), \
+             mock.patch.object(CC.sys.stdin, "isatty", return_value=True), \
+             mock.patch.object(CC.sys.stdout, "isatty", return_value=True), \
+             mock.patch.object(CC, "open", mock.mock_open(), create=True), \
+             mock.patch.object(CC.subprocess, "run", return_value=mock.Mock(returncode=1)) as run:
+            with self.assertRaisesRegex(RuntimeError, "exit 1"):
                 manager.login("bonsai")
+        run.assert_called_once()
+        self.assertEqual([str(self.bonsai), "login"], run.call_args.args[0])
         self.assertEqual(before, manager.bonsai_config.read_bytes())
 
     def test_path_repair_wins_over_npm_in_interactive_bash_and_is_idempotent(self):
@@ -593,6 +609,23 @@ fs.writeFileSync(process.argv[1],Buffer.concat([iv,Buffer.from(':'),cipher.updat
             with self.assertRaisesRegex(RuntimeError, "Credenciais preservadas"):
                 manager.login("bonsai")
         self.assertEqual(before, manager.bonsai_config.read_bytes())
+
+    def test_browser_auth_timeout_explains_provider_error_and_restores_credential(self):
+        manager = CC.Manager()
+        before = manager.bonsai_config.read_bytes()
+        def timeout(*args, **kwargs):
+            manager.bonsai_config.write_text("corrupted")
+            raise subprocess.TimeoutExpired(args[0], 180)
+        with mock.patch.object(manager, "_check_bonsai_login", return_value=str(self.bonsai)), \
+             mock.patch.object(CC.subprocess, "run", side_effect=timeout), \
+             mock.patch.object(CC.sys.stdin, "isatty", return_value=True), \
+             mock.patch.object(CC.sys.stdout, "isatty", return_value=True), \
+             mock.patch.object(CC, "open", mock.mock_open(), create=True):
+            with self.assertRaisesRegex(RuntimeError, "Tempo de login Bonsai esgotado") as failure:
+                manager.login("bonsai")
+        self.assertIn("Authentication is disabled for this application", str(failure.exception))
+        self.assertEqual(before, manager.bonsai_config.read_bytes())
+        self.assertFalse(manager._bonsai_recovery_paths()[0].exists())
 
     def test_login_lock_blocks_overlapping_attempt_and_survives_in_child(self):
         manager = CC.Manager()
