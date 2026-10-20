@@ -558,7 +558,12 @@ function Start-Supervisor {
                     }
                     elseif ($request.action -eq 'stop') {
                         try { & taskkill.exe /PID $child.Id /T /F | Out-Null } catch { }
-                        $stopRequested = $true; $reply = @{ ok = $true; stopping = $true }
+                        try {
+                            $child.Refresh()
+                            if (-not $child.HasExited) { try { $child.Kill() } catch { } }
+                            if ($child.WaitForExit(5000)) { $stopRequested = $true; $reply = @{ ok = $true; stopping = $true } }
+                            else { $reply = @{ ok = $false; code = 'runtime-process-stop-failed' } }
+                        } catch { $reply = @{ ok = $false; code = 'runtime-process-stop-failed' } }
                     } else { $reply = @{ ok = $false; code = 'unknown-action' } }
                     $writer.WriteLine(($reply | ConvertTo-Json -Compress))
                 } catch { }
@@ -581,7 +586,10 @@ function Stop-Runtime {
         $supervisorId = if ($sup -and $sup.pid) { [int]$sup.pid } elseif ($state -and $state.supervisorPid) { [int]$state.supervisorPid } else { 0 }
         try { $null = Invoke-Control -ControlAction 'stop' }
         catch {
-            if (Test-PidAlive $supervisorId) { throw 'supervisor-unreachable-runtime-preserved' }
+            if (Test-PidAlive $supervisorId) {
+                if ([string]$_.Exception.Message -eq 'runtime-process-stop-failed') { throw 'runtime-process-stop-failed' }
+                throw 'supervisor-unreachable-runtime-preserved'
+            }
             if (Test-Path -LiteralPath $script:SupervisorPath -PathType Leaf) {
                 $record = Get-Item -LiteralPath $script:SupervisorPath -Force
                 if (($record.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-managed-path' }
@@ -689,6 +697,7 @@ try {
         'runtime-crashed' { 'doctor; inspect redacted local log' }
         'health-timeout' { 'doctor; inspect redacted local log' }
         'different-route-running-stop-first' { 'stop current runtime, then choose the other route' }
+        'runtime-process-stop-failed' { 'runtime remains active; inspect doctor and retry stop' }
         'supervisor-unreachable-runtime-preserved' { 'doctor; no process was killed' }
         default { 'doctor' }
     }

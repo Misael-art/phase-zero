@@ -11,6 +11,7 @@ const nodeConfig = ["NODE_PATH", "NODE_EXTRA_CA_CERTS", "NPM_CONFIG_USERCONFIG"]
 
 if (record) {
   fs.writeFileSync(record, JSON.stringify({
+    processId: process.pid,
     cwd: process.cwd(),
     dshHome: process.env.DSH_HOME || "",
     route: (process.env.DSH_HOME || "").split(/[\\/]/).filter(Boolean).pop() || "",
