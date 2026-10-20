@@ -254,7 +254,10 @@ function Get-Status {
             $healthy = [bool]$probe.Healthy; $httpCode = $probe.Status
             if ($healthy -and $control.running) { $runtimeState = 'running' } else { $runtimeState = 'starting-or-unhealthy' }
         } catch { $runtimeState = 'crashed-or-stale' }
-    } elseif ($sup) { $runtimeState = 'crashed-or-stale' }
+    } elseif ($sup) {
+        $runtimeState = 'crashed-or-stale'
+        if ($state -and $state.authRoute -and $state.supervisorDebugCapture) { Capture-SupervisorStderr -Route ([string]$state.authRoute) -Enabled }
+    }
     $installed = ($null -ne $active -and [string]$active.Metadata.version -eq [string]$pins.harness.version)
     $overall = if (-not $installed) { 'not-installed' } elseif ($runtimeState -eq 'running') { 'running' } elseif ($runtimeState -eq 'crashed-or-stale') { 'degraded' } else { 'installed' }
     $route = if ($state -and $state.authRoute) { [string]$state.authRoute } else { 'unknown' }
@@ -460,22 +463,35 @@ function Start-Runtime {
         if (Test-PortOccupied -PortNumber $portValue) { throw 'port-occupied' }
         $launchDir = Join-Path (Join-Path $script:HomesRoot $AuthRoute) 'launch'
         New-PrivateDirectory -Path $launchDir
-        $state = @{ schemaVersion = 1; requestedWorkspace = $workspaceFull; workspace = ''; workspaceSelection = 'confirm in Harness Web UI'; authRoute = $AuthRoute; state = 'starting'; port = $portValue; profile = 'web'; supervisorPid = $null; sandboxPolicy = 'workspace-write + ask (requested)'; sandboxEnforcement = 'unknown'; plugins = @(); updatedAt = [DateTime]::UtcNow.ToString('o') }
+        $state = @{ schemaVersion = 1; requestedWorkspace = $workspaceFull; workspace = ''; workspaceSelection = 'confirm in Harness Web UI'; authRoute = $AuthRoute; state = 'starting'; port = $portValue; profile = 'web'; supervisorPid = $null; supervisorDebugCapture = [bool]$env:PZ_DSH_DEBUG; sandboxPolicy = 'workspace-write + ask (requested)'; sandboxEnforcement = 'unknown'; plugins = @(); updatedAt = [DateTime]::UtcNow.ToString('o') }
         Write-PrivateJson -Path $script:StatePath -Value $state
         $engine = (Get-Process -Id $PID).Path
         $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Action','supervise','-InternalSupervisor','-Workspace',$launchDir,'-RequestedWorkspace',$workspaceFull,'-AuthRoute',$AuthRoute,'-Port',[string]$portValue,'-Runtime',$active.Path)
         $argumentLine = ($arguments | ForEach-Object { Quote-ProcessArgument ([string]$_) }) -join ' '
-        $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -PassThru
+        $supervisorStderrPath = Join-Path $launchDir 'supervisor-stderr.tmp'
+        if ($env:PZ_DSH_DEBUG) {
+            Remove-Item -LiteralPath $supervisorStderrPath -Force -ErrorAction SilentlyContinue
+            $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -RedirectStandardError $supervisorStderrPath -PassThru
+        } else {
+            $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -PassThru
+        }
         $state.supervisorPid = [int]$process.Id; Write-PrivateJson -Path $script:StatePath -Value $state
     } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
     $deadline = [DateTime]::UtcNow.AddSeconds($script:ReadyTimeoutSeconds)
     do {
         Start-Sleep -Milliseconds 250
-        if (-not (Test-PidAlive $process.Id)) { throw 'runtime-crashed' }
+        if (-not (Test-PidAlive $process.Id)) {
+            $process.Refresh()
+            Capture-SupervisorStderr -Route $AuthRoute -Emit -Enabled ([bool]$env:PZ_DSH_DEBUG)
+            if ($env:PZ_DSH_DEBUG) { [Console]::Error.WriteLine("Supervisor exited before ready; exitCode=$($process.ExitCode)") }
+            throw 'runtime-crashed'
+        }
         $status = Get-Status
         if ($status.state -eq 'running') { return $status }
     } while ([DateTime]::UtcNow -lt $deadline)
     try { $null = Invoke-Control -ControlAction 'stop' } catch { }
+    $null = $process.WaitForExit(5000); $process.Refresh()
+    Capture-SupervisorStderr -Route $AuthRoute -Emit -Enabled ([bool]$env:PZ_DSH_DEBUG)
     throw 'health-timeout'
 }
 
@@ -486,6 +502,26 @@ function Redact-Line {
     $line = [regex]::Replace($line, '(?i)\bBearer\s+\S+', 'Bearer [redacted]')
     $line = [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
     return $line
+}
+
+function Capture-SupervisorStderr {
+    param([string]$Route, [switch]$Emit, [switch]$Enabled)
+    if (-not $Enabled -or $Route -notin @('account','api')) { return }
+    $launchDir = Join-Path (Join-Path $script:HomesRoot $Route) 'launch'
+    $capturePath = Join-Path $launchDir 'supervisor-stderr.tmp'
+    if (-not (Test-Path -LiteralPath $capturePath -PathType Leaf)) { return }
+    try {
+        $lines = @(Get-Content -LiteralPath $capturePath -Tail 20 -ErrorAction Stop)
+        $safe = @($lines | ForEach-Object { Redact-Line -Line ([string]$_) }) -join ' | '
+        if ($safe.Length -gt 2000) { $safe = $safe.Substring(0,2000) }
+        if ($safe) {
+            New-PrivateDirectory -Path (Split-Path -Parent $script:LogPath)
+            $entry = "Supervisor stderr (redacted): $safe$([Environment]::NewLine)"
+            [IO.File]::AppendAllText($script:LogPath, $entry, (New-Object Text.UTF8Encoding($false)))
+            if ($Emit) { [Console]::Error.WriteLine($entry.TrimEnd()) }
+        }
+    } catch { }
+    try { Remove-Item -LiteralPath $capturePath -Force -ErrorAction SilentlyContinue } catch { }
 }
 
 function Initialize-ProcessJobSupport {
@@ -709,12 +745,14 @@ function Stop-Runtime {
                 if (($record.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-managed-path' }
                 Remove-Item -LiteralPath $script:SupervisorPath -Force
             }
+            if ($state -and $state.authRoute -and $state.supervisorDebugCapture) { Capture-SupervisorStderr -Route ([string]$state.authRoute) -Enabled }
             if ($state) { $state.state = 'stopped'; $state.updatedAt = [DateTime]::UtcNow.ToString('o'); Write-PrivateJson -Path $script:StatePath -Value $state }
             return @{ ok = $true; state = 'stopped'; reason = 'stale supervisor state cleared; no process was killed' }
         }
         $deadline = [DateTime]::UtcNow.AddSeconds(5)
         while ((Test-PidAlive $supervisorId) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
         if (Test-PidAlive $supervisorId) { throw 'stop-timeout' }
+        if ($state -and $state.authRoute -and $state.supervisorDebugCapture) { Capture-SupervisorStderr -Route ([string]$state.authRoute) -Enabled }
         if (Test-Path -LiteralPath $script:SupervisorPath -PathType Leaf) {
             $record = Get-Item -LiteralPath $script:SupervisorPath -Force
             if (($record.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-managed-path' }
