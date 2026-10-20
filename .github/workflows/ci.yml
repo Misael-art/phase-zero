@@ -375,6 +375,11 @@ jobs:
           test -x /usr/bin/pz
           test -x /usr/bin/phasezero-control-center
           pz --version
+          dsh_root="/tmp/pz-dsh-package-smoke-${GITHUB_RUN_ID}"
+          PZ_DSH_ROOT="$dsh_root" pz ai deepseek-harness plan --json | jq -e '.appId == "app.deepseek-harness" and .ok == true and .mutatesHost == false and .version == "0.2.1-rc.2"' >/dev/null
+          out="$(PZ_DSH_ROOT="$dsh_root" pz ai deepseek-harness status --json)"
+          jq -e '.state == "not-installed" and .reason == "absent" and .quota == "unknown"' <<<"$out" >/dev/null
+          test ! -e "$dsh_root"
           # Packaged tree serves diagnostics with no checkout and no daemon.
           out="$(pz server homelab status --json 2>/dev/null)"
           jq -e '.schemaVersion == "1" and .ready == false and (.reasons | type == "array")' <<<"$out" >/dev/null
@@ -397,6 +402,42 @@ jobs:
           PZ_ENABLE_ARCH_PUBLIC_JOURNEY_CONTAINER: "1"
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest tests/test_development_journey_arch_container.py -q -s
+
+  deepseek-harness-arch-clean:
+    runs-on: ubuntu-latest
+    container: archlinux:base
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Prepare only Python on disposable Arch base
+        run: |
+          set -euo pipefail
+          pacman -Syu --noconfirm --needed python
+
+      - name: Install pinned runtime with no Node/npm/compiler preinstalled
+        run: |
+          set -euo pipefail
+          PZ_DSH_ROOT="/tmp/pz-dsh-clean-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          export PZ_DSH_ROOT
+          trap 'python linux/ai/deepseek_harness_manager.py stop --json >/dev/null 2>&1 || true' EXIT
+          python linux/ai/deepseek_harness_manager.py plan --json
+          python linux/ai/deepseek_harness_manager.py status --json
+          python linux/ai/deepseek_harness_manager.py doctor --json || test "$?" -eq 1
+          python linux/ai/deepseek_harness_manager.py install --json
+          python linux/ai/deepseek_harness_manager.py status --json
+          python linux/ai/deepseek_harness_manager.py doctor --json
+          workspace="$PZ_DSH_ROOT/workspace"
+          mkdir -p "$workspace"
+          export PZ_DSH_PORT=38123
+          python linux/ai/deepseek_harness_manager.py start --workspace "$workspace" --auth-route account --json
+          python linux/ai/deepseek_harness_manager.py status --json | python -c "import json,sys; d=json.load(sys.stdin); assert d['state']=='running' and d['authRoute']=='account' and d['quota']=='unknown' and d['sandboxEnforcement']=='unknown'"
+          python linux/ai/deepseek_harness_manager.py stop --json
+          python -c "from pathlib import Path; p=Path('$PZ_DSH_ROOT/logs/dsh.log'); text=p.read_text(); assert p.is_file() and 'fixture-launch-secret' not in text and '?token=fixture' not in text"
+          python linux/ai/deepseek_harness_manager.py uninstall --json
+          test ! -e "$PZ_DSH_ROOT/runtime"
+          test -d "$PZ_DSH_ROOT/homes/account"
+          test -d "$PZ_DSH_ROOT/homes/api"
 
   hosted-qemu-kvm-probe:
     # Check whether an isolated hosted Linux runner can support future real-VM
@@ -528,6 +569,11 @@ jobs:
               /tmp/pz-venv/bin/python -m pytest \
               'tests/test_product_registry_ui.py::test_product_host_controls_fit_and_receive_pointer_at_supported_widths' \
               -q
+            QT_SCALE_FACTOR="$scale" xvfb-run --auto-servernum \
+              --server-args="-screen 0 $screen -dpi 96" \
+              /tmp/pz-venv/bin/python -m pytest \
+              'tests/test_ai_session_ui.py::test_deepseek_harness_public_controls_viewports_theme_and_keyboard' \
+              -q
           done
 
   pester:
@@ -596,3 +642,14 @@ jobs:
       - name: Verify native Windows Credential Manager and DPAPI on the disposable runner
         shell: powershell
         run: python -m pytest tests/test_windows_native_store_smoke.py -q
+
+  deepseek-harness-clean-windows:
+    runs-on: windows-latest
+    needs: lint
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pinned runtime and exercise lifecycle with runner Node/npm hidden
+        shell: pwsh
+        run: .\tests\deepseek-harness-windows-smoke.ps1

@@ -1,10 +1,10 @@
 # DeepSeek Harness no PhaseZero — auditoria e plano v1
 
-Estado: **planejado; nenhuma integração `dsh` implementada ou instalada por esta revisão**.
+Estado: **implementação Experimental nesta branch; revisão, CI e gates externos ainda pendentes. Sem release ou instalação no host.**
 
 Auditoria: 2026-10-20, host Arch Linux, `origin/main` `ddadd6de4fc5a0b8933c2d312e2f8a6dd7f1aff3`.
 
-Escopo: aplicativo oficial [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`@deepseek-ai/dsh`), não apenas modelos DeepSeek. Revalidar upstream, host e branch antes de implementar.
+Escopo: aplicativo oficial [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`@deepseek-ai/dsh`), não apenas modelos DeepSeek. Baseline, upstream, npm, CI e host foram revalidados em 2026-10-20; evidências e lacunas atuais estão no [handoff da implementação](deepseek-harness-implementation-handoff.md).
 
 ## Resultado e fronteiras do produto
 
@@ -65,8 +65,8 @@ Gates mínimos: shell/Python/unit por subsistema; `git diff --check`, scanner de
 - `dsh` oficial não depende do `deepsproxy` para existir; escolha padrão é rota oficial, com conta ou chave API selecionada pelo usuário. Proxy segue alternativo avançado e sujeito aos grants do PhaseZero.
 - `dsh web` aceita `--no-open`; login da conta exige Web/callback em loopback. Publicação LAN/túnel é projeto separado com TLS, autoridade confiável e autenticação, nunca consequência de instalar. [Publicação upstream](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/docs/user/guide/public-deployments.md).
 - Upstream está em prévia sem auditoria; integração PhaseZero não deve afirmar segurança absoluta. Controles reduzem risco; escopo de arquivos autorizado, rede e processos ainda precisam de análise operacional.
-- Esta revisão fez inspeção estática e probes de leitura do host. Não executou `npx`, não abriu sessão, não testou login/modelo, não instalou pacote, não iniciou serviço nem alterou host.
+- O trabalho de implementação usa fixtures e ambientes CI descartáveis. Não executou Harness, login, teste de modelo, instalação ou serviço no host; não alterou sessão KDE nem usou Windows VM ocupada.
 
-## Handoff da próxima sessão
+## Handoff da implementação
 
-Trabalhar DSH-001 + ADR primeiro. Revalidar tag/npm e `main`; criar worktree isolado; ler este plano e `docs/roadmaps/homelab-v1.15.1-remediation.md`. Guardar WIP do checkout principal sem tocar nele. Implementar unidade por commit; registrar SHA, arquivos, testes, efeitos no host, limitações e próximo ID. Não criar release até R5 e gates proporcionais.
+Consultar [handoff da implementação](deepseek-harness-implementation-handoff.md) para estado DSH-001..010, commits, provas, gates ainda abertos, efeitos no host e comandos de reversão. Preservar WIP de outros worktrees. Não criar release até R5 e gates proporcionais.

@@ -148,3 +148,10 @@ def test_pz_entrypoint_shipped_on_path():
         assert marker in content, f"{path} não instala o wrapper pz"
     hosts = (ROOT / "linux/server/homelab-hosts.sh").read_text(encoding="utf-8")
     assert "/usr/lib/phasezero/linux/pz" in hosts, "bridge perdeu fallback do pz remoto"
+
+
+def test_arch_package_ships_pinned_harness_runtime_closure():
+    pkgbuild = (ROOT / "packaging/linux/aur/PKGBUILD").read_text(encoding="utf-8")
+    assert "packaging/deepseek-harness" in pkgbuild
+    assert "cp -a packaging/deepseek-harness/." in pkgbuild
+    assert (ROOT / "packaging/deepseek-harness/package-lock.json").is_file()
