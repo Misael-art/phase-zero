@@ -140,7 +140,11 @@ sessão, API ou proxy prontos. O card distingue tentativa local de autenticaçã
 remota e orienta suporte Bonsai para a mensagem do navegador. Aceite: teste
 temático em 800×600 prova geometria, hit-test e despacho pelas ações públicas
 com estados disponível, vencido e indisponível; testes do gerenciador preservam
-gates da CLI e das credenciais. Homologação no pacote instalado ainda depende
+gates da CLI e das credenciais. Uma observação histórica de provedor desativado
+não veta nova tentativa solicitada pelo usuário após possível recuperação;
+diagnóstico passivo continua sem criar tentativa. Falha ou timeout do login
+orienta sobre a mensagem do navegador e restaura as credenciais anteriores.
+Homologação no pacote instalado ainda depende
 da release. Login remoto, execução e proxy continuam bloqueados até Bonsai
 reativar a aplicação e existir contrato oficial para consumo por outros CLI.
 
