@@ -990,12 +990,25 @@ def _stop_supervisor(timeout: float = 5) -> dict[str, Any]:
     except DshError as exc:
         info = _supervisor_state()
         if not _pid_alive(info.get("pid")):
+            record = supervisor_file()
+            if record.is_file() and not record.is_symlink():
+                record.unlink()
+            saved = _load_json(state_file(), {})
+            if isinstance(saved, dict) and saved.get("state") in {"starting", "running"}:
+                saved["state"] = "stopped"
+                saved["updatedAt"] = utc_now()
+                _atomic_json(state_file(), saved)
             return {"ok": True, "state": "stopped", "reason": "stale supervisor state cleared"}
         raise exc
     deadline = time.monotonic() + timeout
     pid = _supervisor_state().get("pid")
     while time.monotonic() < deadline and _pid_alive(pid):
         time.sleep(0.1)
+    if _pid_alive(pid):
+        raise DshError("stop-timeout", "Harness supervisor did not exit after stop request", "doctor; retry stop")
+    record = supervisor_file()
+    if record.is_file() and not record.is_symlink():
+        record.unlink()
     return result
 
 

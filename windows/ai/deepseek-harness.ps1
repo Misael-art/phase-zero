@@ -559,12 +559,29 @@ function Stop-Runtime {
     $mutex = Get-Mutex
     if (-not $mutex.WaitOne(0)) { throw 'operation-busy' }
     try {
-        try { return (Invoke-Control -ControlAction 'stop') }
+        $state = Read-JsonFile -Path $script:StatePath
+        $sup = Read-JsonFile -Path $script:SupervisorPath
+        $supervisorId = if ($sup -and $sup.pid) { [int]$sup.pid } elseif ($state -and $state.supervisorPid) { [int]$state.supervisorPid } else { 0 }
+        try { $null = Invoke-Control -ControlAction 'stop' }
         catch {
-            $state = Read-JsonFile -Path $script:StatePath
-            if ($state -and (Test-PidAlive $state.supervisorPid)) { throw 'supervisor-unreachable-runtime-preserved' }
-            return @{ ok = $true; state = 'stopped'; reason = 'stale supervisor record; no process was killed' }
+            if (Test-PidAlive $supervisorId) { throw 'supervisor-unreachable-runtime-preserved' }
+            if (Test-Path -LiteralPath $script:SupervisorPath -PathType Leaf) {
+                $record = Get-Item -LiteralPath $script:SupervisorPath -Force
+                if (($record.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-managed-path' }
+                Remove-Item -LiteralPath $script:SupervisorPath -Force
+            }
+            if ($state) { $state.state = 'stopped'; $state.updatedAt = [DateTime]::UtcNow.ToString('o'); Write-PrivateJson -Path $script:StatePath -Value $state }
+            return @{ ok = $true; state = 'stopped'; reason = 'stale supervisor state cleared; no process was killed' }
         }
+        $deadline = [DateTime]::UtcNow.AddSeconds(5)
+        while ((Test-PidAlive $supervisorId) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
+        if (Test-PidAlive $supervisorId) { throw 'stop-timeout' }
+        if (Test-Path -LiteralPath $script:SupervisorPath -PathType Leaf) {
+            $record = Get-Item -LiteralPath $script:SupervisorPath -Force
+            if (($record.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-managed-path' }
+            Remove-Item -LiteralPath $script:SupervisorPath -Force
+        }
+        return @{ ok = $true; state = 'stopped'; reason = 'Harness runtime stopped' }
     } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
 }
 

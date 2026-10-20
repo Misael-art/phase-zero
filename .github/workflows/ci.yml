@@ -433,6 +433,7 @@ jobs:
           python linux/ai/deepseek_harness_manager.py start --workspace "$workspace" --auth-route account --json
           python linux/ai/deepseek_harness_manager.py status --json | python -c "import json,sys; d=json.load(sys.stdin); assert d['state']=='running' and d['authRoute']=='account' and d['quota']=='unknown' and d['sandboxEnforcement']=='unknown'"
           python linux/ai/deepseek_harness_manager.py stop --json
+          python linux/ai/deepseek_harness_manager.py status --json | python -c "import json,sys; d=json.load(sys.stdin); assert d['runtimeState']=='stopped' and d['state']=='installed'"
           python -c "from pathlib import Path; p=Path('$PZ_DSH_ROOT/logs/dsh.log'); text=p.read_text(); assert p.is_file() and 'fixture-launch-secret' not in text and '?token=fixture' not in text"
           python linux/ai/deepseek_harness_manager.py uninstall --json
           test ! -e "$PZ_DSH_ROOT/runtime"

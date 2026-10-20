@@ -99,6 +99,7 @@ try {
     Assert-True ($realStatus.Payload.authRoute -eq 'account' -and $realStatus.Payload.quota -eq 'unknown') 'No-cost smoke claimed account or quota state.'
     $realStop = Invoke-Manager 'stop'
     Assert-True ($realStop.Code -eq 0) 'Real upstream no-credential smoke did not stop cleanly.'
+    Assert-True ((Invoke-Manager 'status').Payload.runtimeState -eq 'stopped') 'Real upstream stop left stale supervisor state.'
     $backup = Join-Path $testRoot 'upstream-bin.js'
     Copy-Item -LiteralPath $entry -Destination $backup
     Copy-Item -LiteralPath $fixture -Destination $entry -Force
@@ -145,6 +146,7 @@ try {
     Assert-True ($stopped.Code -eq 0) 'Owned runtime stop failed.'
     Wait-Stopped
     Assert-True (-not (Get-Process -Id $apiPid -ErrorAction SilentlyContinue)) 'Supervisor process survived stop.'
+    Assert-True ((Invoke-Manager 'status').Payload.runtimeState -eq 'stopped') 'Fixture stop left stale supervisor state.'
 
     $account = Invoke-Manager 'start' $workspace 'account' $port
     Assert-True ($account.Code -eq 0 -and $account.Payload.authRoute -eq 'account') 'Account route did not start explicitly.'

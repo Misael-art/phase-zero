@@ -278,12 +278,14 @@ def test_supervisor_auth_handoff_redacts_persisted_token_and_stops_only_owned_ch
     assert "fixture-visible-secret" not in logged
     assert "apiKey=[redacted]" in logged
 
-    manager._stop_supervisor()
+    stop_payload, exit_code = manager._dispatch(manager.build_parser().parse_args(["stop", "--json"]))
+    assert exit_code == 0
+    assert stop_payload["runtimeState"] == "stopped"
+    assert not manager.supervisor_file().exists()
     deadline = time.monotonic() + 5
     while manager._pid_alive(pid) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not manager._pid_alive(pid)
-    assert manager.status_payload()["runtimeState"] == "crashed-or-stale" or manager.status_payload()["runtimeState"] == "stopped"
 
 
 def test_crash_recovery_and_restart_do_not_claim_account_quota(dsh_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
