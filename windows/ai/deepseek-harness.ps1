@@ -378,9 +378,17 @@ function Install-Runtime {
                 foreach ($name in $envBefore.Keys) { Set-Item -Path ("Env:" + $name) -Value $envBefore[$name] }
             }
             $lockPath = Join-Path $app 'package-lock.json'
-            $lockScript = 'const fs=require("fs"); const [file,pinsFile]=process.argv.slice(1); const lock=JSON.parse(fs.readFileSync(file,"utf8")); const pins=JSON.parse(fs.readFileSync(pinsFile,"utf8")); const expected=pins.harness || {}; const entry=lock.packages && lock.packages["node_modules/@deepseek-ai/dsh"]; if (!entry || entry.version !== expected.version || entry.integrity !== expected.integrity) process.exit(23);'
-            $null = @(& $node -e $lockScript $lockPath $script:PinsPath 2>&1)
-            if ($LASTEXITCODE -ne 0) { throw 'package-integrity-mismatch' }
+            $lockScript = 'const fs=require("fs"); let lock,pins; try { lock=JSON.parse(fs.readFileSync(process.env.PZ_DSH_LOCK_FILE,"utf8")); pins=JSON.parse(fs.readFileSync(process.env.PZ_DSH_PINS_FILE,"utf8")); } catch { console.error("lock-check: parse-or-read-error"); process.exit(24); } const expected=pins.harness || {}; const entry=lock.packages && lock.packages["node_modules/@deepseek-ai/dsh"]; const result={entryFound:Boolean(entry),versionMatches:Boolean(entry) && entry.version === expected.version,integrityMatches:Boolean(entry) && entry.integrity === expected.integrity}; if (!result.entryFound || !result.versionMatches || !result.integrityMatches) { console.error("lock-check: " + JSON.stringify(result)); process.exit(23); }'
+            $env:PZ_DSH_LOCK_FILE = $lockPath; $env:PZ_DSH_PINS_FILE = $script:PinsPath
+            try {
+                $lockOutput = @(& $node -e $lockScript 2>&1); $lockExitCode = $LASTEXITCODE
+            } finally {
+                Remove-Item Env:PZ_DSH_LOCK_FILE,Env:PZ_DSH_PINS_FILE -ErrorAction SilentlyContinue
+            }
+            if ($lockExitCode -ne 0) {
+                if ($env:PZ_DSH_DEBUG) { [Console]::Error.WriteLine(($lockOutput -join "`n")) }
+                throw 'package-integrity-mismatch'
+            }
             $pkg = Get-Content -LiteralPath (Join-Path $app 'node_modules\@deepseek-ai\dsh\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($pkg.version -ne $pins.harness.version -or $pkg.license -ne 'MIT') { throw 'package-metadata-mismatch' }
             $finalName = 'dsh-' + [string]$pins.harness.version + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
