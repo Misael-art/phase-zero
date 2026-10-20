@@ -124,6 +124,26 @@ escopo até contrato oficial e concessão por consumidor verificáveis.
 
 Evidência e rollback: `docs/handoff/bonsai-404-login-20261018.md`.
 
+### AISR-016 — Botão de login Bonsai e erro de autenticação do provedor (2026-10-20)
+
+O operador concluiu o fluxo local de abertura do login, mas o navegador exibiu
+`Authentication is disabled for this application`. A observação atual do usuário
+é distinta do HTTP 404 do npm: o primeiro bloqueia a autenticação remota;
+o segundo impede instalar/atualizar a CLI. A documentação oficial ainda indica
+`@bonsai-ai/cli` e `bonsai login`; não há caminho alternativo oficial comprovado.
+PhaseZero não controla a configuração da aplicação de autenticação Bonsai.
+
+Entrega local: `Login Bonsai` permanece visível e acionável ao lado de
+`Atualizar diagnóstico`, inclusive quando a observação npm está vencida.
+O clique mantém o preflight do gerenciador e o terminal privado; não afirma
+sessão, API ou proxy prontos. O card distingue tentativa local de autenticação
+remota e orienta suporte Bonsai para a mensagem do navegador. Aceite: teste
+temático em 800×600 prova geometria, hit-test e despacho pelas ações públicas
+com estados disponível, vencido e indisponível; testes do gerenciador preservam
+gates da CLI e das credenciais. Homologação no pacote instalado ainda depende
+da release. Login remoto, execução e proxy continuam bloqueados até Bonsai
+reativar a aplicação e existir contrato oficial para consumo por outros CLI.
+
 - AICR-005 `proxies test`: exit 0/2/3, envelope `summary/next`, classificação `upstream-error`/`unreachable`.
 - AICR-006 "sessão salva (não verificada)" até chat ok.
 - AICR-007 runner do 9Router copiado para `INSTALL_ROOT` (independe do checkout em SD).

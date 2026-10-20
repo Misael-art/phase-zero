@@ -6,7 +6,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QPushButton, QScrollArea
+from PySide6.QtWidgets import QApplication, QScrollArea
 from linux.ui_native.app import apply_theme
 from linux.ui_native.main_window import MainWindow
 from linux.ui_native.status_loader import StatusLoader
@@ -35,39 +35,43 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     page._on_status_ready("private.bonsai.status", "", observed)
     app.processEvents()
     assert (window.width(), window.height()) == (800, 600)
-    assert page.bonsai_state.text() == "Login indisponível no provedor"
+    assert page.bonsai_state.text() == "Autenticação desativada pelo Bonsai"
     assert "vencida" in page.bonsai_reason.text()
-    assert "Próximo passo" in page.bonsai_next.text()
-    assert not page.bonsai_login.isEnabled()
-    assert page.bonsai_login.objectName() == "secondaryButton"
-    assert page.bonsai_diagnose.objectName() == "primaryButton"
-    blocked_color = page.bonsai_login.grab().toImage().pixelColor(12, page.bonsai_login.height() // 2)
+    assert "PhaseZero não pode reativá-la" in page.bonsai_reason.text()
+    assert "suporte oficial Bonsai" in page.bonsai_next.text()
+    assert page.bonsai_login.isEnabledTo(window)
+    assert page.bonsai_login.objectName() == "primaryButton"
+    assert page.bonsai_diagnose.objectName() == "secondaryButton"
     observed["authProvider"]["fresh"] = False
     page._on_status_ready("private.bonsai.status", "", observed)
     app.processEvents()
-    assert page.bonsai_state.text() == "Login indisponível; provedor sem verificação atual"
+    assert page.bonsai_state.text() == "Autenticação não verificada"
     assert "não comprova disponibilidade atual" in page.bonsai_reason.text()
     assert "HTTP 404" in page.bonsai_reason.text()
-    assert "não testa login" in page.bonsai_next.text()
-    assert not page.bonsai_login.isEnabled()
-    assert page.bonsai_diagnose.objectName() == "primaryButton"
+    assert "não testa autenticação" in page.bonsai_next.text()
+    assert page.bonsai_login.isEnabledTo(window)
     area = page.findChildren(QScrollArea)[0]
     area.ensureWidgetVisible(page.bonsai_login)
-    app.processEvents()
-    assert page.bonsai_login.isVisible()
+    for _ in range(3):
+        app.processEvents()
     assert area.horizontalScrollBar().maximum() == 0
-    QTest.mouseClick(page.bonsai_login, Qt.LeftButton)
-    assert not requested
-    diagnose = next(button for button in page.findChildren(QPushButton) if button.text() == "Atualizar diagnóstico")
-    area.ensureWidgetVisible(diagnose)
-    app.processEvents()
-    diagnose_hit = app.widgetAt(diagnose.mapToGlobal(diagnose.rect().center()))
-    assert diagnose_hit is diagnose
-    QTest.mouseClick(diagnose_hit, Qt.LeftButton)
-    assert [action.id for action in requested] == ["ai.bonsai-diagnose"]
+    login, diagnose = page.bonsai_login, page.bonsai_diagnose
+    assert login.isVisible() and diagnose.isVisible()
+    assert login.mapToGlobal(login.rect().center()).y() == diagnose.mapToGlobal(diagnose.rect().center()).y()
+    assert login.mapToGlobal(login.rect().center()).x() < diagnose.mapToGlobal(diagnose.rect().center()).x()
+    for button in (login, diagnose):
+        bounds = button.rect()
+        top_left = area.viewport().mapFromGlobal(button.mapToGlobal(bounds.topLeft()))
+        bottom_right = area.viewport().mapFromGlobal(button.mapToGlobal(bounds.bottomRight()))
+        assert area.viewport().rect().contains(top_left)
+        assert area.viewport().rect().contains(bottom_right)
+        hit = app.widgetAt(button.mapToGlobal(bounds.center()))
+        assert hit is button
+        QTest.mouseClick(hit, Qt.LeftButton)
+    assert [action.id for action in requested] == ["ai.claude-bonsai-login", "ai.bonsai-diagnose"]
     assert not selected
     assert not page.bonsai_details.isVisible()
-    # Registry recovery enables the explicit private-terminal action.
+    # Registry recovery changes status, not the button's position or availability.
     observed["loginAvailable"] = False
     observed["loginAttemptAvailable"] = True
     observed["loginTerminalAvailable"] = True
@@ -75,22 +79,15 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     observed["updateObservation"] = {"available": True, "state": "available"}
     page._on_status_ready("private.bonsai.status", "", observed)
     app.processEvents()
-    assert page.bonsai_state.text() == "Login disponível no terminal privado"
+    assert page.bonsai_state.text() == "Tentativa local pronta; autenticação não confirmada"
     assert "terminal privado" in page.bonsai_next.text()
     assert page.bonsai_login.isEnabled()
     assert page.bonsai_login.isEnabledTo(window)
     assert page.bonsai_login.objectName() == "primaryButton"
     assert page.bonsai_diagnose.objectName() == "secondaryButton"
-    area.ensureWidgetVisible(page.bonsai_login)
-    app.processEvents()
-    login_color = page.bonsai_login.grab().toImage().pixelColor(12, page.bonsai_login.height() // 2)
-    assert login_color != blocked_color
-    login_hit = app.widgetAt(page.bonsai_login.mapToGlobal(page.bonsai_login.rect().center()))
-    assert login_hit is page.bonsai_login
-    QTest.mouseClick(login_hit, Qt.LeftButton)
-    assert [action.id for action in requested] == ["ai.bonsai-diagnose", "ai.claude-bonsai-login"]
+    assert [action.id for action in requested] == ["ai.claude-bonsai-login", "ai.bonsai-diagnose"]
     assert not selected
-    assert requested[-1].args == ("ai", "claude", "login", "bonsai", "--terminal")
+    assert requested[0].args == ("ai", "claude", "login", "bonsai", "--terminal")
     observed["loginCompatibility"] = "registry-404-pinned-cli"
     observed["updateObservation"] = {"available": False, "state": "registry-http-error", "httpStatus": 404,
                                      "failureClass": "package-unavailable"}
@@ -99,23 +96,30 @@ with patch.object(MainWindow, "_host_summary"), patch.object(StatusLoader, "fetc
     assert page.bonsai_login.objectName() == "primaryButton"
     assert "npm HTTP 404" in page.bonsai_state.text()
     assert "autenticação depende do Bonsai" in page.bonsai_reason.text()
-    assert "não comprova autenticação" in page.bonsai_next.text()
+    assert "Authentication is disabled for this application" in page.bonsai_next.text()
     assert window.grab().save(sys.argv[2])
     observed["loginCompatibility"] = "none"
     observed["loginTerminalAvailable"] = False
     page._on_status_ready("private.bonsai.status", "", observed)
-    assert not page.bonsai_login.isEnabled()
-    assert page.bonsai_login.objectName() == "secondaryButton"
-    assert page.bonsai_diagnose.objectName() == "primaryButton"
-    assert "execute bonsai login" in page.bonsai_next.text()
+    assert page.bonsai_login.isEnabled()
+    assert page.bonsai_login.objectName() == "primaryButton"
+    assert page.bonsai_diagnose.objectName() == "secondaryButton"
+    assert "verifica novamente" in page.bonsai_next.text()
     observed["loginAttemptAvailable"] = False
     observed["loginAvailable"] = False
     observed["updateObservation"] = {"state": "registry-http-error", "httpStatus": 404}
     page._on_status_ready("private.bonsai.status", "", observed)
-    assert not page.bonsai_login.isEnabled()
+    assert page.bonsai_login.isEnabled()
+    page._on_status_failed("private.bonsai.status", "falha simulada")
+    assert page.bonsai_login.isEnabled()
     QTest.mouseClick(window.mode_switch, Qt.LeftButton)
     app.processEvents()
     assert page.bonsai_details.isVisible()
     assert "provider-cache" in page.bonsai_details.text()
     assert "bonsai/direct" in page.bonsai_details.text()
+    page._on_status_ready("private.bonsai.status", "", {
+        "authProvider": None, "credentialStatus": None, "updateObservation": None,
+    })
+    assert page.bonsai_login.isEnabled()
+    assert page.bonsai_state.text() == "Autenticação não verificada"
     window.close()
