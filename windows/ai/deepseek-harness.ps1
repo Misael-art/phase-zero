@@ -491,11 +491,14 @@ function Start-Runtime {
         $argumentLine = ($arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join ' '
         $supervisorStderrPath = Join-Path $launchDir 'supervisor-stderr.tmp'
         Write-DshDebugStage 'start.supervisor.spawn.begin'
+        # The long-lived supervisor must not inherit the caller's stdout pipe.
+        # Otherwise CLI wrappers that capture start output wait for the supervisor
+        # to stop before seeing the manager's JSON result.
         if ($env:PZ_DSH_DEBUG) {
             Remove-Item -LiteralPath $supervisorStderrPath -Force -ErrorAction SilentlyContinue
-            $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -RedirectStandardError $supervisorStderrPath -PassThru
+            $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -RedirectStandardOutput 'NUL' -RedirectStandardError $supervisorStderrPath -PassThru
         } else {
-            $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -PassThru
+            $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -RedirectStandardOutput 'NUL' -PassThru
         }
         $state.supervisorPid = [int]$process.Id; Write-PrivateJson -Path $script:StatePath -Value $state
         Write-DshDebugStage 'start.supervisor.spawn.complete'
