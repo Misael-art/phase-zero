@@ -40,7 +40,7 @@ function Invoke-Manager {
     $stdoutPath = Join-Path $outputRoot 'stdout.txt'
     $stderrPath = Join-Path $outputRoot 'stderr.txt'
     $process = $null
-    $timeoutSeconds = if ($Name -in @('install','update')) { 1500 } else { 90 }
+    $timeoutSeconds = if ($Name -in @('install','update','uninstall')) { 1500 } else { 90 }
     try {
         $null = New-Item -ItemType Directory -Path $outputRoot -Force
         if ($DebugManager) { $env:PZ_DSH_DEBUG = '1' }
@@ -295,7 +295,7 @@ try {
 
     Copy-Item -LiteralPath $backup -Destination $entry -Force
     Write-SmokeMarker 'safe uninstall'
-    $removed = Invoke-Manager 'uninstall'
+    $removed = Invoke-Manager 'uninstall' -DebugManager
     Assert-True ($removed.Code -eq 0 -and -not $removed.Payload.installed) 'Uninstall failed.'
     Assert-True (-not (Test-Path -LiteralPath $runtime)) 'Uninstall left pinned runtime files.'
     Assert-True ((Test-Path -LiteralPath (Join-Path $testRoot 'homes\api')) -and (Test-Path -LiteralPath (Join-Path $testRoot 'homes\account'))) 'Uninstall removed route homes.'

@@ -881,18 +881,28 @@ function Assert-NoReparseTree {
 }
 
 function Uninstall-Runtime {
+    Write-DshDebugStage 'uninstall.root-validation.begin'
     if (-not (Test-SafeManagedRoot)) { throw 'unsafe-managed-root' }
+    Write-DshDebugStage 'uninstall.root-validation.complete'
+    Write-DshDebugStage 'uninstall.stop.begin'
     $null = Stop-Runtime
+    Write-DshDebugStage 'uninstall.stop.complete'
     if (Test-Path -LiteralPath $script:RuntimeRoot) {
+        Write-DshDebugStage 'uninstall.reparse-check.begin'
         Assert-NoReparseTree -Path $script:RuntimeRoot
+        Write-DshDebugStage 'uninstall.reparse-check.complete'
+        Write-DshDebugStage 'uninstall.runtime-delete.begin'
         Remove-Item -LiteralPath $script:RuntimeRoot -Recurse -Force
+        Write-DshDebugStage 'uninstall.runtime-delete.complete'
     }
+    Write-DshDebugStage 'uninstall.state-delete.begin'
     foreach ($path in @($script:ActivePath,$script:StatePath,$script:SupervisorPath,$script:LogPath)) {
         if (Test-Path -LiteralPath $path -PathType Leaf) {
             if ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'unsafe-managed-path' }
             Remove-Item -LiteralPath $path -Force
         }
     }
+    Write-DshDebugStage 'uninstall.state-delete.complete'
     return (New-Result -Command 'uninstall' -Ok $true -State 'removed' -Reason 'runtime removed; DSH_HOME and workspace data preserved' -NextAction 'install when needed' -Extra @{ installed = $false; preservedData = @((Join-Path $script:HomesRoot 'account'),(Join-Path $script:HomesRoot 'api')) })
 }
 
