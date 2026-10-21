@@ -83,12 +83,13 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
-function Test-ExpectedDshHome {
-    param([string]$Path, [ValidateSet('account','api')][string]$Route)
+function Test-ExpectedDshPath {
+    param([string]$Path, [ValidateSet('account','api')][string]$Route, [string]$Subdirectory = '')
     if (-not $Path -or -not [IO.Path]::IsPathRooted($Path)) { return $false }
     # Windows may report the same temporary root through its 8.3 alias or its
     # long name. The unique smoke-root suffix still proves route isolation.
     $expectedSuffix = [IO.Path]::Combine((Split-Path -Leaf $testRoot), 'homes', $Route)
+    if ($Subdirectory) { $expectedSuffix = Join-Path $expectedSuffix $Subdirectory }
     $normalized = [IO.Path]::GetFullPath($Path).TrimEnd([char[]]@('\','/'))
     return $normalized.EndsWith($expectedSuffix, [StringComparison]::OrdinalIgnoreCase)
 }
@@ -231,12 +232,12 @@ try {
     $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
     $apiChildPid = [int]$captured.processId
     $apiDescendantPid = Wait-FixtureDescendant
-    Assert-True (Test-ExpectedDshHome -Path $captured.dshHome -Route 'api') 'API DSH_HOME was not isolated.'
+    Assert-True (Test-ExpectedDshPath -Path $captured.dshHome -Route 'api') 'API DSH_HOME was not isolated.'
     Assert-True ($captured.permission -eq 'workspace-write' -and $captured.telemetry -eq '1') 'Requested runtime policy was not set.'
     Assert-True ($captured.leakedNames.Count -eq 0) 'Ambient secrets reached the Harness process.'
     Assert-True ($captured.nodeConfigNames.Count -eq 0) 'Ambient Node/npm config reached the Harness process.'
     Assert-True ($captured.nodeOptions -eq '--max-old-space-size=2048') 'Controlled V8 heap limit was not applied.'
-    Assert-True ($captured.cwd -eq (Join-Path $testRoot 'homes\api\launch')) 'Harness did not start in its private empty directory.'
+    Assert-True (Test-ExpectedDshPath -Path $captured.cwd -Route 'api' -Subdirectory 'launch') 'Harness did not start in its private empty directory.'
     Assert-True ($captured.cwd -ne $workspace) 'Workspace .env could affect Harness startup.'
 
     $duplicate = Invoke-Manager 'start' $workspace 'api' $port
@@ -274,7 +275,7 @@ try {
     $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
     $accountChildPid = [int]$captured.processId
     $accountDescendantPid = Wait-FixtureDescendant
-    Assert-True (Test-ExpectedDshHome -Path $captured.dshHome -Route 'account') 'Account route reused API DSH_HOME.'
+    Assert-True (Test-ExpectedDshPath -Path $captured.dshHome -Route 'account') 'Account route reused API DSH_HOME.'
     Assert-True ($captured.route -eq 'account') 'Account route did not stay explicit.'
     $accountStop = Invoke-Manager 'stop'
     Assert-True ($accountStop.Code -eq 0) 'Account route stop failed.'
