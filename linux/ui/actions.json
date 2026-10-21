@@ -2571,6 +2571,18 @@
       "plan_command": "linux/pz ai opencode status"
     },
     {
+      "name": "ai.opencode-auto-permissions",
+      "label": "Aceitar permissões OpenCode",
+      "command": "linux/pz ai opencode permissions-auto",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai opencode status"
+    },
+    {
       "name": "ai.omo",
       "label": "Instalar OMO",
       "command": "linux/pz ai omo setup",

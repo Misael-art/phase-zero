@@ -183,6 +183,7 @@ Usage:
   pz ai opencode verify        Read-only config check; live inference blocked without grant binding
   pz ai opencode run --route=9router -- <args>  Blocked until account-bound grants are enforceable
   pz ai opencode rollback <manifest> Restore an OpenCode route transaction
+  pz ai opencode permissions-auto  Enable auto-accept permissions (CLI + desktop toggle)
   pz ai setup <tool>           Setup AI tool (codex|ollama|webui|claude|desktop|opencode|omo|openclaw|memory|admin|rtk|caveman|headroom|compat|ides|ide-apps|usagebar|codexbar|all)
   pz ai drift [status|sync [--dry-run]]  Compare installed runtime copies with the repo (exit 2 on drift)
   pz ai codexbar <action>      CodexBar CLI + optional KodexBar plasmoid (status|setup|health|auth|watchdog|plasmoid|plasmoid-remove|repair)
@@ -611,7 +612,8 @@ cmd_ai() {
                 install-hook) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" install-hook ;;
                 remove-hook) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" remove-hook ;;
                 setup) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" setup ;;
-                *) pz_error "usage: pz ai opencode (status|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup)"; return 1 ;;
+                permissions-auto|auto-permissions) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" permissions-auto ;;
+                *) pz_error "usage: pz ai opencode (status|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup|permissions-auto)"; return 1 ;;
             esac
             ;;
         doctor)

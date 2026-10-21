@@ -7,9 +7,9 @@ TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 export HOME="$TMP_ROOT/home"
-export XDG_CONFIG_HOME="$HOME/.config"
-export XDG_DATA_HOME="$HOME/.local/share"
-export XDG_STATE_HOME="$HOME/.local/state"
+export XDG_CONFIG_HOME="$TMP_ROOT/home/.config"
+export XDG_DATA_HOME="$TMP_ROOT/home/.local/share"
+export XDG_STATE_HOME="$TMP_ROOT/home/.local/state"
 export PZ_WORKSPACE_ROOT="$TMP_ROOT/workspace"
 export PZ_LOCAL_BIN="$TMP_ROOT/bin"
 export PZ_NPM_PREFIX="$TMP_ROOT/npm"
@@ -83,6 +83,25 @@ fi
 test ! -e "$HOME/.openclaw/config.json"
 
 "$REPO_ROOT/linux/ai/setup-ides.sh" dry-run | jq -e '.tool == "ides"' >/dev/null
+
+# Auto-accept permissions: replace bash "*": ask and flip desktop autoApprove.
+mkdir -p "$XDG_CONFIG_HOME/opencode" "$XDG_CONFIG_HOME/ai.opencode.desktop"
+# Seed the restrictive value on top of the existing config: later assertions
+# still read the MCP entries the earlier setup wrote to this file.
+opencode_cfg="$XDG_CONFIG_HOME/opencode/opencode.json"
+[[ -s "$opencode_cfg" ]] || printf '%s\n' '{}' > "$opencode_cfg"
+jq '.permission = {"bash":{"*":"ask"}}' "$opencode_cfg" > "$opencode_cfg.tmp" && mv "$opencode_cfg.tmp" "$opencode_cfg"
+printf '%s\n' '{"settings.v3":"{\"permissions\":{\"autoApprove\":false}}"}' > "$XDG_CONFIG_HOME/ai.opencode.desktop/default.dat"
+"$REPO_ROOT/linux/ai/setup-opencode.sh" permissions-auto >/dev/null
+jq -e '.permission["*"] == "allow" and .permission.bash == "allow" and .permission.edit == "allow"' \
+    "$XDG_CONFIG_HOME/opencode/opencode.json" >/dev/null
+python3 - "$XDG_CONFIG_HOME/ai.opencode.desktop/default.dat" <<'PY'
+import json, sys
+from pathlib import Path
+data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+settings = json.loads(data["settings.v3"])
+assert settings["permissions"]["autoApprove"] is True, settings
+PY
 timeout 15 "$REPO_ROOT/linux/ai/setup-ides.sh" configure >/dev/null 2>&1 || echo "WARN: setup-ides.sh configure failed (non-fatal)" >&2
 test -f "$PZ_WORKSPACE_ROOT/.vscode/extensions.json"
 test -f "$XDG_CONFIG_HOME/nvim/lua/phasezero_ai.lua"
