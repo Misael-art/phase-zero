@@ -38,6 +38,7 @@ class WindowsVmPage(BasePage):
         "windows.guest-login.status",
         "windows.provision.cancel",
         "windows.provision.discard",
+        "windows.provision.finalize",
         "windows.images.manage",
         "windows.boot.install",
         "windows.shares.enable",
@@ -493,6 +494,15 @@ class WindowsVmPage(BasePage):
             self._set_state("info")
             self.power_button.setText("▶ Iniciar VM")
             self.power_button.setObjectName("primaryButton")
+        elif self._pending_finalize() is not None:
+            # A finished install that never became the configured VM. Offering
+            # "install" here would send the user through an hour they already
+            # spent.
+            self.state_label.setText("● Instalação pronta para ativar")
+            self.state_detail.setText("O Windows já foi instalado; falta ativá-lo como a máquina virtual em uso")
+            self._set_state("warning")
+            self.power_button.setText("Ativar instalação")
+            self.power_button.setObjectName("primaryButton")
         elif configured and disk_exists:
             self.state_label.setText("● Instalação incompleta")
             self.state_detail.setText("O disco existe, mas ainda não contém um Windows inicializável")
@@ -507,7 +517,9 @@ class WindowsVmPage(BasePage):
             self.power_button.setObjectName("primaryButton")
         self.power_button.style().unpolish(self.power_button)
         self.power_button.style().polish(self.power_button)
-        self.power_button.setEnabled(running or (configured and disk_ready))
+        self.power_button.setEnabled(
+            running or (configured and disk_ready) or self._pending_finalize() is not None
+        )
         boot_block = parsed.get("boot") or {}
         if hasattr(self, "dock_entry_button"):
             self.dock_entry_button.setChecked(bool(boot_block.get("dockEntryInstalled")))
@@ -609,6 +621,18 @@ class WindowsVmPage(BasePage):
         box.exec()
         return box.clickedButton() is confirm
 
+    def _pending_finalize(self) -> dict | None:
+        """A completed install awaiting activation, when no VM is ready."""
+        payload = self._payload if isinstance(self._payload, dict) else {}
+        health = payload.get("health") if isinstance(payload.get("health"), dict) else {}
+        if health.get("readyToLaunch"):
+            return None
+        provision = payload.get("provision") if isinstance(payload.get("provision"), dict) else {}
+        pending = provision.get("pendingFinalize")
+        if isinstance(pending, dict) and pending.get("operationId") and not pending.get("running"):
+            return pending
+        return None
+
     def _power_action(self) -> None:
         libvirt = self._payload.get("libvirt") if isinstance(self._payload.get("libvirt"), dict) else {}
         state = str(libvirt.get("state", "missing")).strip().casefold()
@@ -624,6 +648,8 @@ class WindowsVmPage(BasePage):
             or (((self._payload.get("discovery") or {}).get("discoveredUsableDisk") or {}).get("usable"))
         )
         if not (config.get("installed") and disk_ready):
+            if self._pending_finalize() is not None:
+                self.run_action("windows.provision.finalize")
             return
         # CCS-020: QGA indisponível no último ciclo exige confirmação explícita.
         if self._guest_agent_at_risk() and not self._confirm_risky_launch():

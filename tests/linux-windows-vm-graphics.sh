@@ -357,6 +357,12 @@ mkdir -p "$input_by_id"
 touch "$input_by_id/usb-Valve_Software_Steam_Deck_Controller_test-event-kbd"
 touch "$input_by_id/usb-Valve_Software_Steam_Deck_Controller_test-event-mouse"
 touch "$input_by_id/usb-Valve_Software_Steam_Deck_Controller_test-event-joystick"
+# A boot session prefers raw usb-host passthrough when the controller is on
+# USB. Run on a real Deck this suite found the machine's own 28de:1205 and
+# never reached the virtio-input mapping it asserts. Give it a bus with nothing
+# on it; the raw path has its own cases in linux-windows-vm.sh.
+mkdir -p "$TMP_ROOT/usb-none"
+export PZ_WINDOWS_VM_USB_SYSFS_DIR="$TMP_ROOT/usb-none"
 deck_input_launch="$(PZ_WINDOWS_VM_BOOT_SESSION=1 \
     PZ_WINDOWS_VM_INPUT_BY_ID_DIR="$input_by_id" \
     "$REPO_ROOT/linux/pz" windows-vm launch --dry-run --raw-qemu --graphics virtio-gl --experimental 2>/dev/null)"

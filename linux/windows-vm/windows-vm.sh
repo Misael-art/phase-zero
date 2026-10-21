@@ -317,7 +317,15 @@ apply_host_optimizations() {
     [ "$OPTIMIZE_HOST" = "1" ] || return 0
     pz_info "applying Windows VM host optimizations"
     if command -v powerprofilesctl >/dev/null 2>&1; then
-        powerprofilesctl set performance >/dev/null 2>&1 || true
+        # Remembered so cleanup_runtime can put it back. This used to be set
+        # and left: a Deck that had run the VM once stayed on "performance"
+        # for the rest of the session, on battery.
+        PREVIOUS_POWER_PROFILE="$(powerprofilesctl get 2>/dev/null || true)"
+        if [ "$PREVIOUS_POWER_PROFILE" = "performance" ]; then
+            PREVIOUS_POWER_PROFILE=""
+        else
+            powerprofilesctl set performance >/dev/null 2>&1 || PREVIOUS_POWER_PROFILE=""
+        fi
     fi
     sysctl_set_noninteractive vm.swappiness 1
     sysctl_set_noninteractive vm.vfs_cache_pressure 50
@@ -411,65 +419,10 @@ target_user_can_rw() {
     [ -r "$path" ] && [ -w "$path" ]
 }
 
-# The VM is sized for one of two very different hosts, and a single figure
-# cannot serve both.
-#
-# Booted through the GRUB entry the host runs nothing but what carries the VM,
-# so anything not given to the guest is wasted. Launched over a live KDE session
-# the host is running the user's actual work, and sizing from MemTotal ignores
-# that: it asked for 10374 MB with 5 GB free and pushed the host into 8.6 GB of
-# swap during a Windows install.
-windows_vm_boot_mode() {
-    if [ "${PZ_WINDOWS_VM_PROFILE:-}" = "kiosk" ] || [ "${PZ_WINDOWS_VM_PROFILE:-}" = "desktop" ]; then
-        printf '%s' "$PZ_WINDOWS_VM_PROFILE"
-        return 0
-    fi
-    if grep -qw 'phasezero.windowsvm=1' /proc/cmdline 2>/dev/null; then
-        printf 'kiosk'
-    else
-        printf 'desktop'
-    fi
-}
-
-default_ram_mb() {
-    local total avail ram reserve mode floor
-    total="$(awk '/MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 8192)"
-    # MemAvailable is the kernel's own estimate of what can be handed out
-    # without swapping, reclaimable page cache included. MemFree alone would
-    # undercount badly on a warm desktop.
-    avail="$(awk '/MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 0)"
-    [ "$avail" -gt 0 ] 2>/dev/null || avail="$total"
-    # Windows 11 will not run below 4 GiB, so that is the floor whatever the
-    # host has left. Going under it produces a guest that boots into thrashing.
-    floor=4096
-    mode="$(windows_vm_boot_mode)"
-
-    if [ "$mode" = "kiosk" ]; then
-        # Kernel, systemd, SDDM, gamescope, virtiofsd and swtpm all live in this
-        # reserve. An OOM on the host side kills the VM outright, so it is not
-        # squeezed further.
-        reserve="${PZ_WINDOWS_VM_HOST_RESERVE_MB:-2048}"
-        ram=$(( total - reserve ))
-    else
-        # Leave the session responsive: take a share of what is actually free
-        # right now, never more than 70% of the machine.
-        reserve="${PZ_WINDOWS_VM_HOST_RESERVE_MB:-3072}"
-        ram=$(( avail - reserve ))
-        [ "$ram" -gt $(( total * 70 / 100 )) ] && ram=$(( total * 70 / 100 ))
-    fi
-
-    # Round down to a whole GiB: odd sizes gain nothing and make logs harder to
-    # compare between runs.
-    ram=$(( ram / 1024 * 1024 ))
-    if [ "$ram" -lt "$floor" ]; then
-        # Say it out loud rather than quietly handing the guest less than it
-        # needs: at this point the VM and the host cannot both be comfortable.
-        pz_warn "host has ${avail} MiB available; sizing the VM at the ${floor} MiB Windows 11 minimum anyway"
-        pz_warn "close applications or use --ram to choose deliberately"
-        ram="$floor"
-    fi
-    echo "$ram"
-}
+# RAM sizing and the "does it fit right now" check live in memory.sh so the
+# install plan and the launch cannot drift apart again.
+# shellcheck source=memory.sh
+source "$PZ_ROOT/linux/windows-vm/memory.sh"
 
 default_cpus() {
     local total cpus
@@ -1813,11 +1766,16 @@ audio_driver() {
 
 QEMU_ARGS=()
 CLEANUP_PIDS=()
+PREVIOUS_POWER_PROFILE=""
 TPM_PID_FILE=""
 VIRTIOFS_COUNT=0
 
 cleanup_runtime() {
     local pid
+    if [ -n "${PREVIOUS_POWER_PROFILE:-}" ]; then
+        powerprofilesctl set "$PREVIOUS_POWER_PROFILE" >/dev/null 2>&1 || true
+        PREVIOUS_POWER_PROFILE=""
+    fi
     for pid in "${CLEANUP_PIDS[@]:-}"; do
         kill "$pid" >/dev/null 2>&1 || true
     done
@@ -2465,6 +2423,13 @@ launch_vm() {
     local RESCUE_SOURCED=0
     RESCUE_SOURCED=0
     guard_graphics_profile || return 1
+    # Before anything is changed or anyone is asked for a password. The
+    # configured figure is whatever was right when the VM was installed;
+    # starting it into a host that cannot hold it ends with the OOM killer
+    # choosing between the VM and the desktop.
+    if [ "$DRY_RUN" != "1" ]; then
+        windows_vm_memory_guard "$RAM_MB" || return 1
+    fi
     trap cleanup_runtime EXIT INT TERM
     apply_host_optimizations
     if [ -n "$LIBVIRT_DOMAIN" ] && [ "$RAW_QEMU" != "1" ]; then
@@ -2748,6 +2713,14 @@ status_json() {
     boot_grub="$(grub_cfg_entry_state)"
     grep -w 'phasezero.windowsvm=1' /proc/cmdline >/dev/null 2>&1 && current_marker="yes"
     discovery="$(discovery_json configured)"
+    # A completed install that never became the configured VM. Asked of
+    # provision.sh, which owns the operation records; anything but a JSON
+    # object or null is treated as "nothing pending".
+    local pending_finalize
+    pending_finalize="$(bash "$PZ_ROOT/linux/windows-vm/provision.sh" pending-finalize --json 2>/dev/null || true)"
+    if ! jq -e 'type == "object" or type == "null"' <<<"$pending_finalize" >/dev/null 2>&1; then
+        pending_finalize="null"
+    fi
     local session_state_file="$PZ_STATE/windows-vm/session-state.json"
     local session_graceful=true session_reason="" session_ended_at=""
     if [ -r "$session_state_file" ]; then
@@ -2829,6 +2802,7 @@ status_json() {
         --arg grubEntry "$boot_grub" \
         --arg currentMarker "$current_marker" \
         --argjson discovery "$discovery" \
+        --argjson pendingFinalize "$pending_finalize" \
         '{
             status: (
                 if $kvm != "yes" or $qemu == "" or $ovmfCodeExists != "yes" or $ovmfVarsExists != "yes" then "blocked"
@@ -2847,7 +2821,9 @@ status_json() {
                     and $bootArtifactsCurrent == "yes" and ($bootRuntimeStale | not)
                 ),
                 findings: [
-                    if $configInstalled != "yes" then
+                    if $pendingFinalize != null and ($configInstalled != "yes" or $diskExists != "yes" or $diskInstalledLike != "yes") then
+                        {id:"install-awaiting-activation", severity:"warning", message:"Uma instalação do Windows foi concluída, mas ainda não foi ativada nesta máquina virtual.", action:"windows.provision.finalize"}
+                    elif $configInstalled != "yes" then
                         {id:"vm-not-configured", severity:"warning", message:"A máquina virtual ainda não foi configurada.", action:"windows.provision.player"}
                     elif $diskExists != "yes" then
                         {id:"disk-missing", severity:"error", message:"O disco configurado não foi encontrado.", action:"windows.provision.player"}
@@ -2863,6 +2839,7 @@ status_json() {
                 ]
             },
             session: {lastEndedAt:$lastSessionEndedAt, lastGraceful:$lastSessionGraceful, lastReason:$lastSessionReason},
+            provision: {pendingFinalize: $pendingFinalize},
             config: {path: $configFile, installed: ($configInstalled == "yes")},
             vm: {dir: $vmDir, disk: $disk, diskExists: ($diskExists == "yes"), diskSource: $diskSource, installedLike: ($diskInstalledLike == "yes"), iso: $iso, isoExists: ($isoExists == "yes"), ramMb: ($ramMb|tonumber), cpus: ($cpus|tonumber), usbMode: $usbMode, graphicsProfile: $graphicsProfile, netModel: $netModel},
             libvirt: {domain: $libvirtDomain, uri: $libvirtUri, state: $libvirtState, disk: $libvirtDisk, preferred: ($libvirtDomain != ""), network:"default", networkState:$networkState, nicModel:$nicModel},

@@ -1050,6 +1050,18 @@
       "plan_command": "linux/pz windows-vm provision status --operation-id {operation_id} --json"
     },
     {
+      "name": "windows.provision.finalize",
+      "label": "Ativar instalação concluída",
+      "command": "linux/pz windows-vm provision finalize --latest",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Windows VM",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz windows-vm provision pending-finalize --json"
+    },
+    {
       "name": "windows.provision.discard",
       "label": "Descartar instalação",
       "command": "linux/pz windows-vm provision cancel --operation-id {operation_id} --remove-staging",

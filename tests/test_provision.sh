@@ -6,6 +6,15 @@ set -euo pipefail
 PZ_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$PZ_ROOT/linux/lib/common.sh"
 
+# common.sh derives PZ_STATE from XDG_STATE_HOME and ignores a PZ_STATE passed
+# in the environment. Cases below that only set PZ_STATE=... were therefore
+# running against the real ~/.local/state/phasezero: 956 plan files had piled
+# up there on one host, and a new case that called `finalize --latest`
+# activated a real 42 GB install. Everything in this suite gets a throwaway
+# state root unless a case sets its own.
+SUITE_STATE_ROOT="$(mktemp -d)"
+export XDG_STATE_HOME="$SUITE_STATE_ROOT"
+
 PASS=0 FAIL=0
 
 assert_eq() {
@@ -1457,6 +1466,159 @@ if command -v genisoimage >/dev/null 2>&1 || command -v mkisofs >/dev/null 2>&1;
 else
     echo "  (UDF fixture test skipped: genisoimage/mkisofs not installed)"
 fi
+
+echo ""
+echo "=== provision: a finished install that was never activated is found, not reinstalled ==="
+# Only the UI player called finalize. An install driven from the CLI ended as
+# 42 GB of working Windows in staging while status said "needsinstall".
+PEND_T="$(mktemp -d)"
+PEND_STATE="$PEND_T/xdg/phasezero"
+pend_op() {
+    # id state updatedAt [adoptedDisk]
+    local id="$1" dir="$PEND_STATE/operations/$1" vm="$PEND_STATE/windows-vm/vms/$1"
+    mkdir -p "$dir" "$vm"
+    printf 'snapshot\n' > "$vm/golden-clean.qcow2"
+    printf '%s\n' "$vm/golden-clean.qcow2" > "$dir/snapshot_path"
+    printf '%s\n' "$vm" > "$dir/vm_dir"
+    jq -n --arg id "$id" --arg state "$2" --arg ts "$3" --arg adopted "${4:-}" \
+        '{id:$id, state:$state, updatedAt:$ts} + (if $adopted == "" then {} else {adoptedDisk:$adopted} end)' \
+        > "$dir/operation.json"
+}
+pend_json() {
+    PZ_TEST_MODE=1 XDG_STATE_HOME="$PEND_T/xdg" bash "$PROVISION_SCRIPT" pending-finalize --json 2>/dev/null
+}
+
+assert_eq "no operations: nothing pending" "null" "$(pend_json | jq -c '.')"
+pend_op op-20260101-000000-1 failed 2026-01-01T00:00:00Z
+assert_eq "a failed install is not pending activation" "null" "$(pend_json | jq -c '.')"
+pend_op op-20260201-000000-2 completed 2026-02-01T00:00:00Z
+assert_eq "a completed, unadopted install is pending" "op-20260201-000000-2" "$(pend_json | jq -r '.operationId')"
+assert_eq "pending record carries when it completed" "2026-02-01T00:00:00Z" "$(pend_json | jq -r '.completedAt')"
+pend_op op-20260301-000000-3 completed 2026-03-01T00:00:00Z
+assert_eq "the newest completed install wins" "op-20260301-000000-3" "$(pend_json | jq -r '.operationId')"
+
+PEND_ADOPTED="$PEND_T/adopted.qcow2"
+printf 'disk\n' > "$PEND_ADOPTED"
+pend_op op-20260301-000000-3 completed 2026-03-01T00:00:00Z "$PEND_ADOPTED"
+assert_eq "an adopted install is no longer pending" "op-20260201-000000-2" "$(pend_json | jq -r '.operationId')"
+rm -f "$PEND_ADOPTED"
+assert_eq "adopted but the disk is gone: staging is the only copy, pending again" "op-20260301-000000-3" "$(pend_json | jq -r '.operationId')"
+
+rm -f "$PEND_STATE/windows-vm/vms/op-20260301-000000-3/golden-clean.qcow2" \
+      "$PEND_STATE/windows-vm/vms/op-20260201-000000-2/golden-clean.qcow2"
+assert_eq "without a verified snapshot there is nothing to activate" "null" "$(pend_json | jq -c '.')"
+pend_latest_rc=0
+PEND_LATEST_ERR="$(PZ_TEST_MODE=1 XDG_STATE_HOME="$PEND_T/xdg" bash "$PROVISION_SCRIPT" finalize --latest --json 2>&1)" || pend_latest_rc=$?
+assert_eq "finalize --latest with nothing pending fails" "1" "$pend_latest_rc"
+assert_contains "and says so" "$PEND_LATEST_ERR" "nenhuma instalação concluída"
+
+# status is what the page reads. With a pending install it must say so
+# instead of the generic "disk has no Windows".
+pend_op op-20260401-000000-4 completed 2026-04-01T00:00:00Z
+PEND_STATUS="$(XDG_STATE_HOME="$PEND_T/xdg" XDG_CONFIG_HOME="$PEND_T/config" HOME="$PEND_T/home" \
+    bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" status 2>/dev/null || echo '{}')"
+assert_eq "status exposes the pending install" "op-20260401-000000-4" "$(jq -r '.provision.pendingFinalize.operationId // ""' <<< "$PEND_STATUS")"
+assert_eq "status names it as awaiting activation" "1" "$(jq -r '[.health.findings[] | select(.id == "install-awaiting-activation" and .action == "windows.provision.finalize")] | length' <<< "$PEND_STATUS")"
+assert_eq "and drops the generic not-installed finding" "0" "$(jq -r '[.health.findings[] | select(.id == "guest-not-installed" or .id == "vm-not-configured")] | length' <<< "$PEND_STATUS")"
+rm -rf "$PEND_T"
+
+echo ""
+echo "=== memory: plan sizes from what is available and start refuses what cannot fit ==="
+# The plan used to size from MemTotal: 10374 MiB on a 14 GiB Deck with 2 GiB
+# available and the swap nearly full, with no warning. The launch path had
+# already been fixed; this file kept a private copy of the old formula.
+MEM_T="$(mktemp -d)"
+MEM_ISO="$MEM_T/dummy.iso"
+dd if=/dev/urandom bs=1M count=2 of="$MEM_ISO" 2>/dev/null
+mem_host() {
+    # total available swap_free, in MiB
+    printf 'MemTotal: %s kB\nMemAvailable: %s kB\nSwapFree: %s kB\n' \
+        "$(( $1 * 1024 ))" "$(( $2 * 1024 ))" "$(( $3 * 1024 ))" > "$MEM_T/meminfo"
+}
+mem_plan() {
+    PZ_TEST_MODE=1 PZ_PREFLIGHT_JSON="$PREFLIGHT_PASS_FIXTURE" XDG_STATE_HOME="$MEM_T/xdg" \
+        PZ_WINDOWS_VM_PROFILE=desktop PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
+        bash "$PROVISION_SCRIPT" plan --iso "$MEM_ISO" --json "$@" 2>/dev/null || echo "{}"
+}
+
+mem_host 14820 12000 4000
+MEM_ROOMY="$(mem_plan)"
+assert_eq "roomy host: auto size leaves the desktop a reserve" "8192" "$(jq -r '.resources.ramMb' <<< "$MEM_ROOMY")"
+assert_eq "roomy host: plan says it fits" "fits" "$(jq -r '.resources.memory.fit' <<< "$MEM_ROOMY")"
+assert_eq "auto size is labelled auto" "auto" "$(jq -r '.resources.ramSource' <<< "$MEM_ROOMY")"
+assert_eq "roomy host: no memory warning" "0" "$(jq -r '[.warnings[] | select(test("MiB"))] | length' <<< "$MEM_ROOMY")"
+
+mem_host 14820 2100 1000
+MEM_BUSY="$(mem_plan)"
+assert_eq "busy host: auto size falls to the Windows 11 minimum, not 70% of total" "4096" "$(jq -r '.resources.ramMb' <<< "$MEM_BUSY")"
+assert_eq "busy host: minimum still exceeds what is free" "exceed" "$(jq -r '.resources.memory.fit' <<< "$MEM_BUSY")"
+assert_eq "busy host: plan records what was available" "2100" "$(jq -r '.resources.memory.availableMb' <<< "$MEM_BUSY")"
+assert_eq "busy host: the warning names the shortfall" "1" "$(jq -r '[.warnings[] | select(test("memória insuficiente"))] | length' <<< "$MEM_BUSY")"
+assert_eq "busy host: still a plan, not a blocker - the host may change before start" "0" "$(jq -r '.blockers | length' <<< "$MEM_BUSY")"
+
+mem_host 14820 3000 4000
+MEM_TIGHT="$(mem_plan --ram 6144)"
+assert_eq "explicit size is labelled explicit" "explicit" "$(jq -r '.resources.ramSource' <<< "$MEM_TIGHT")"
+assert_eq "covered by swap is tight, not refused" "tight" "$(jq -r '.resources.memory.fit' <<< "$MEM_TIGHT")"
+assert_eq "tight plan warns about swap" "1" "$(jq -r '[.warnings[] | select(test("swap"))] | length' <<< "$MEM_TIGHT")"
+
+# start re-reads the host: a plan written on a roomy host must not start on a
+# full one, and must not leave a lock or an operation behind when it refuses.
+mem_host 14820 12000 4000
+MEM_START_PLAN="$(mem_plan)"
+MEM_START_ID="$(jq -r '.id' <<< "$MEM_START_PLAN")"
+MEM_START_TOKEN="$(jq -r '.confirmToken' <<< "$MEM_START_PLAN")"
+mem_host 14820 2100 1000
+mem_start_rc=0
+MEM_START_ERR="$(PZ_TEST_MODE=1 XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE=desktop \
+    PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
+    bash "$PROVISION_SCRIPT" start --plan-id "$MEM_START_ID" --confirm "$MEM_START_TOKEN" --json 2>&1)" || mem_start_rc=$?
+assert_eq "start refuses a plan that no longer fits" "1" "$mem_start_rc"
+assert_contains "refusal says how much is missing" "$MEM_START_ERR" "memória insuficiente"
+assert_contains "refusal says what to do" "$MEM_START_ERR" "--ram"
+assert_eq "refused start creates no operation" "0" "$(find "$MEM_T/xdg/phasezero/operations" -mindepth 1 -maxdepth 1 -name 'op-*' 2>/dev/null | wc -l)"
+
+# A dedicated GRUB boot has no desktop to protect: MemAvailable there is not
+# the constraint, and the sizing already kept its own reserve.
+MEM_KIOSK_FIT="$(PZ_WINDOWS_VM_PROFILE=kiosk PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" bash -c '
+    . "'"$PZ_ROOT"'/linux/lib/common.sh"; . "'"$PZ_ROOT"'/linux/windows-vm/memory.sh"
+    windows_vm_memory_fit 12288')"
+assert_eq "kiosk boot is not gated on desktop headroom" "fits" "$MEM_KIOSK_FIT"
+mem_override_rc=0
+PZ_WINDOWS_VM_PROFILE=desktop PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
+    PZ_WINDOWS_VM_ALLOW_MEMORY_OVERCOMMIT=1 bash -c '
+    . "'"$PZ_ROOT"'/linux/lib/common.sh"; . "'"$PZ_ROOT"'/linux/windows-vm/memory.sh"
+    windows_vm_memory_guard 12288' >/dev/null 2>&1 || mem_override_rc=$?
+assert_eq "explicit override lets an operator go ahead" "0" "$mem_override_rc"
+
+# launch refuses before it changes anything or asks for a password. It used to
+# check after the host tuning and the share mounts: on a desktop that meant a
+# power profile switched to "performance", an authentication dialog, and then
+# the refusal.
+mkdir -p "$MEM_T/bin" "$MEM_T/home"
+printf '#!/usr/bin/env bash\necho "$*" >> "%s/powerprofilesctl.log"\n[ "$1" = get ] && echo balanced\nexit 0\n' "$MEM_T" > "$MEM_T/bin/powerprofilesctl"
+printf '#!/usr/bin/env bash\necho "$*" >> "%s/admin.log"\nexit 1\n' "$MEM_T" > "$MEM_T/bin/phasezero-admin"
+chmod +x "$MEM_T/bin/powerprofilesctl" "$MEM_T/bin/phasezero-admin"
+mem_host 14820 2100 1000
+mem_launch_rc=0
+MEM_LAUNCH_ERR="$(PATH="$MEM_T/bin:$PATH" HOME="$MEM_T/home" XDG_CONFIG_HOME="$MEM_T/home/.config" \
+    XDG_STATE_HOME="$MEM_T/xdg" PZ_WINDOWS_VM_PROFILE=desktop PZ_WINDOWS_VM_MEMINFO_FILE="$MEM_T/meminfo" \
+    bash "$PZ_ROOT/linux/windows-vm/windows-vm.sh" launch --raw-qemu --headless --ram 12288 2>&1)" || mem_launch_rc=$?
+assert_eq "launch refuses a VM that cannot fit" "1" "$mem_launch_rc"
+assert_contains "launch refusal names the shortfall" "$MEM_LAUNCH_ERR" "memória insuficiente"
+assert_eq "refused launch did not touch the power profile" "0" "$([ -e "$MEM_T/powerprofilesctl.log" ] && echo 1 || echo 0)"
+assert_eq "refused launch did not ask for privilege" "0" "$([ -e "$MEM_T/admin.log" ] && echo 1 || echo 0)"
+
+# The profile launch switches to is put back when the VM is gone.
+MEM_RESTORE="$(PATH="$MEM_T/bin:$PATH" bash -c '
+    eval "$(sed -n "/^cleanup_runtime()/,/^}/p" "'"$PZ_ROOT"'/linux/windows-vm/windows-vm.sh")"
+    CLEANUP_PIDS=(); PREVIOUS_POWER_PROFILE=balanced
+    cleanup_runtime; cleanup_runtime
+    cat "'"$MEM_T"'/powerprofilesctl.log"' 2>/dev/null)"
+assert_eq "cleanup restores the previous power profile, once" "set balanced" "$MEM_RESTORE"
+rm -rf "$MEM_T"
+
+rm -rf "$SUITE_STATE_ROOT"
 
 echo ""
 echo "=== results ==="

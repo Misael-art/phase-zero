@@ -173,6 +173,35 @@ def test_windows_vm_blocks_blank_disk_and_surfaces_stale_boot(ws_page):
     assert not page.repair_boot_button.isHidden()
 
 
+def test_windows_vm_offers_activation_instead_of_reinstall_for_a_finished_install(ws_page):
+    page, _actions = ws_page
+    called: list[str] = []
+    page.run_action = called.append
+    payload = {
+        "status": "needsinstall",
+        "health": {"readyToLaunch": False, "findings": [{"id": "install-awaiting-activation"}]},
+        "provision": {"pendingFinalize": {"operationId": "op-1", "running": False}},
+        "config": {"installed": True},
+        "vm": {"diskExists": True, "installedLike": False},
+        "libvirt": {"state": "missing"},
+        "host": {"qemu": "/usr/bin/qemu"},
+        "access": {},
+        "boot": {},
+    }
+    page._on_status_ready("windows.status", "", payload)
+    assert page.state_label.text() == "● Instalação pronta para ativar"
+    assert page.power_button.text() == "Ativar instalação"
+    assert page.power_button.isEnabled()
+    page.power_button.click()
+    assert called == ["windows.provision.finalize"]
+
+    # Still running in staging: finalize would refuse, so do not offer it.
+    payload["provision"] = {"pendingFinalize": {"operationId": "op-1", "running": True}}
+    page._on_status_ready("windows.status", "", payload)
+    assert page.state_label.text() == "● Instalação incompleta"
+    assert not page.power_button.isEnabled()
+
+
 def test_windows_vm_pending_sync_and_unclean_shutdown_drive_repair_cards(ws_page):
     page, _actions = ws_page
     page._on_status_ready("windows.status", "", {
@@ -379,6 +408,7 @@ def test_windows_vm_category_has_plan_and_provision_actions(by_id):
         "windows.provision.resume",
         "windows.provision.cancel",
         "windows.provision.discard",
+        "windows.provision.finalize",
         "windows.media.inspect",
     }
     for pid in provision_ids:

@@ -166,6 +166,7 @@ def _p(
 HIGH_RISK_IMPACT: dict[str, str] = {
     "system.deps.install": "Instala pacotes do sistema com privilégio de administrador. A lista exibida é o estado atual das dependências, não uma simulação.",
     "windows.provision.cancel": "Interrompe a instalação do Windows em andamento. O disco fica preservado para retomar depois.",
+    "windows.provision.finalize": "Transforma a instalação do Windows que já terminou na máquina virtual em uso. Copia o disco verificado para VirtualMachines; não apaga os arquivos da instalação.",
     "windows.provision.discard": "Apaga os arquivos temporários da instalação cancelada. Não dá para retomar essa instalação depois.",
     "windows.guest-login.auto": "O Windows passa a entrar sem pedir senha. Quem ligar a VM acessa a área de trabalho direto.",
     "windows.guest-login.password": "Desliga o autologin e troca a senha da conta do Windows pela que você informar.",
@@ -350,6 +351,7 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
             _a("windows.provision.watch", "Windows VM", "Acompanhar instalação", "Monitora progresso em tempo real do worker.", ("windows-vm", "provision", "watch", "--operation-id", "{operation_id}"), "media-playback-start", parameters=(_p("operation_id", "ID da operação", placeholder="op-…"),)),
             _a("windows.provision.resume", "Windows VM", "Retomar instalação", "Retoma instalação interrompida do último checkpoint.", ("windows-vm", "provision", "resume", "--operation-id", "{operation_id}"), "media-skip-forward", mutable=True, preview=("windows-vm", "provision", "status", "--operation-id", "{operation_id}", "--json"), parameters=(_p("operation_id", "ID da operação", placeholder="op-…"),), badge="Reparo"),
             _a("windows.provision.cancel", "Windows VM", "Cancelar instalação", "Cancela operação ativa; preserva disco para retomada.", ("windows-vm", "provision", "cancel", "--operation-id", "{operation_id}"), "media-playback-stop", mutable=True, preview=("windows-vm", "provision", "status", "--operation-id", "{operation_id}", "--json"), parameters=(_p("operation_id", "ID da operação", placeholder="op-…"),), badge="Alto risco", risk="high"),
+            _a("windows.provision.finalize", "Windows VM", "Ativar instalação concluída", "Adota a instalação terminada como a VM configurada.", ("windows-vm", "provision", "finalize", "--latest"), "dialog-ok-apply", mutable=True, preview=("windows-vm", "provision", "pending-finalize", "--json")),
             _a("windows.provision.discard", "Windows VM", "Descartar instalação", "Remove staging e libera recursos da instalação cancelada.", ("windows-vm", "provision", "cancel", "--operation-id", "{operation_id}", "--remove-staging"), "edit-delete", mutable=True, preview=("windows-vm", "provision", "status", "--operation-id", "{operation_id}", "--json"), parameters=(_p("operation_id", "ID da operação", placeholder="op-…"),), badge="Alto risco", risk="high", visibility="advanced"),
 
             # Player flow (janela dedicada)
