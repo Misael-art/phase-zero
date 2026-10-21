@@ -249,16 +249,23 @@ function Invoke-Control {
 }
 
 function Get-Status {
-    param([object]$KnownAvailableMemoryBytes)
+    param([object]$KnownAvailableMemoryBytes, [bool]$DebugStatusStages = $false)
+    $debugStatusStages = [bool]$env:PZ_DSH_DEBUG -and $DebugStatusStages
+    if ($debugStatusStages) { Write-DshDebugStage 'status.files.begin' }
     $pins = Get-Pin
+    if ($debugStatusStages) { Write-DshDebugStage 'status.pins.complete' }
     $active = Get-ActiveRuntime
+    if ($debugStatusStages) { Write-DshDebugStage 'status.active.complete' }
     $state = Read-JsonFile -Path $script:StatePath
+    if ($debugStatusStages) { Write-DshDebugStage 'status.state.complete' }
     $sup = Read-JsonFile -Path $script:SupervisorPath
+    if ($debugStatusStages) { Write-DshDebugStage 'status.supervisor.complete' }
     $runtimeState = 'stopped'; $healthy = $false; $httpCode = $null
     $supervisorId = if ($sup -and $sup.pid) { [int]$sup.pid } elseif ($state -and $state.supervisorPid) { [int]$state.supervisorPid } else { 0 }
-    $debugStatusStages = $env:PZ_DSH_DEBUG -and $PSBoundParameters.ContainsKey('KnownAvailableMemoryBytes') -and -not $script:DebugStatusStagesWritten
-    if ($debugStatusStages) { $script:DebugStatusStagesWritten = $true }
-    if (Test-PidAlive $supervisorId) {
+    if ($debugStatusStages) { Write-DshDebugStage 'status.pid.begin' }
+    $supervisorAlive = Test-PidAlive $supervisorId
+    if ($debugStatusStages) { Write-DshDebugStage 'status.pid.complete' }
+    if ($supervisorAlive) {
         try {
             if ($debugStatusStages) { Write-DshDebugStage 'status.control.begin' }
             $control = Invoke-Control -ControlAction 'status' -TimeoutMs 700
@@ -269,7 +276,7 @@ function Get-Status {
             $healthy = [bool]$probe.Healthy; $httpCode = $probe.Status
             if ($healthy -and $control.running) { $runtimeState = 'running' } else { $runtimeState = 'starting-or-unhealthy' }
         } catch {
-            if ($debugStatusStages) { Write-DshDebugStage 'status.control.failed' }
+            if ($debugStatusStages) { Write-DshDebugStage 'status.control-or-http.failed' }
             $runtimeState = 'crashed-or-stale'
         }
     } elseif ($sup) {
@@ -286,6 +293,7 @@ function Get-Status {
     $memory = if ($PSBoundParameters.ContainsKey('KnownAvailableMemoryBytes')) { $KnownAvailableMemoryBytes } else { Get-AvailableMemoryByteCount }
     $memoryBudget = if ($null -eq $memory) { 'unknown' } elseif ($memory -ge $script:MinAvailableMemoryBytes) { 'sufficient' } else { 'insufficient' }
     $next = switch ($overall) { 'not-installed' { 'install' } 'degraded' { 'doctor' } 'running' { 'open' } default { 'choose workspace and auth route, then start' } }
+    if ($debugStatusStages) { Write-DshDebugStage 'status.result.begin' }
     $result = New-Result -Command 'status' -Ok ($installed -and $runtimeState -ne 'crashed-or-stale') -State $overall -Reason $(if ($installed) { '' } else { 'runtime-not-installed' }) -NextAction $next -Extra @{
         installed = $installed; installedVersion = if ($active) { [string]$active.Metadata.version } else { '' }
         runtimeState = $runtimeState; workspace = if ($state) { [string]$state.requestedWorkspace } else { '' }
@@ -296,6 +304,7 @@ function Get-Status {
         healthCheck = @{ loopbackHttp = $httpCode; healthy = $healthy }
         dshHome = $dshHomePath; proxyRoute = 'blocked until request-bound grants are available'
     }
+    if ($debugStatusStages) { Write-DshDebugStage 'status.result.complete' }
     return $result
 }
 
@@ -504,9 +513,10 @@ function Start-Runtime {
         Write-DshDebugStage 'start.supervisor.spawn.complete'
     } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
     $deadline = [DateTime]::UtcNow.AddSeconds($script:ReadyTimeoutSeconds)
-    $script:DebugStatusStagesWritten = $false
     $statusPollCount = 0
     do {
+        $statusPollCount++
+        if ($statusPollCount -le 3) { Write-DshDebugStage ("start.health.poll.$statusPollCount.begin") }
         Start-Sleep -Milliseconds 250
         if (-not (Test-PidAlive $process.Id)) {
             $process.Refresh()
@@ -514,11 +524,15 @@ function Start-Runtime {
             if ($env:PZ_DSH_DEBUG) { [Console]::Error.WriteLine("Supervisor exited before ready; exitCode=$($process.ExitCode)") }
             throw 'runtime-crashed'
         }
-        $statusPollCount++
         if ($statusPollCount -eq 1) { Write-DshDebugStage 'start.health.status.begin' }
-        $status = Get-Status -KnownAvailableMemoryBytes $memory
+        $status = Get-Status -KnownAvailableMemoryBytes $memory -DebugStatusStages ($statusPollCount -le 3)
         if ($statusPollCount -eq 1) { Write-DshDebugStage 'start.health.status.complete' }
-        if ($status.state -eq 'running') { return $status }
+        if ($statusPollCount -le 3) { Write-DshDebugStage ("start.health.evaluate.$statusPollCount.begin") }
+        if ($status.state -eq 'running') {
+            Write-DshDebugStage 'start.health.ready'
+            return $status
+        }
+        if ($statusPollCount -le 3) { Write-DshDebugStage ("start.health.evaluate.$statusPollCount.complete") }
     } while ([DateTime]::UtcNow -lt $deadline)
     Write-DshDebugStage 'start.health.timeout'
     $stopAccepted = $true
