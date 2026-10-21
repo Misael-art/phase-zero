@@ -7,7 +7,7 @@ if ($env:OS -ne 'Windows_NT' -or [Runtime.InteropServices.RuntimeInformation]::O
 
 $repo = Split-Path -Parent $PSScriptRoot
 $cli = Join-Path $repo 'windows\pz.ps1'
-$fixture = Join-Path $PSScriptRoot 'fixtures\deepseek-harness-web-fixture.cjs'
+$fixture = Join-Path $PSScriptRoot 'fixtures\deepseek-harness-web-fixture.mjs'
 $engine = (Get-Process -Id $PID).Path
 $testRoot = Join-Path $env:TEMP ('pz-dsh-clean-' + [guid]::NewGuid().ToString('N'))
 $workspace = Join-Path $env:TEMP ('pz-dsh-workspace-' + [guid]::NewGuid().ToString('N'))
@@ -46,7 +46,7 @@ function Invoke-Manager {
         if ($DebugManager) { $env:PZ_DSH_DEBUG = '1' }
         $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $repo -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
         if (-not $process.WaitForExit($timeoutSeconds * 1000)) {
-            try { $process.Kill() } catch { }
+            try { $process.Kill() } catch { Write-Verbose 'Could not terminate timed-out smoke manager.' }
             $null = $process.WaitForExit(5000)
             throw "Manager $Name exceeded timeout ($timeoutSeconds seconds)."
         }
@@ -62,7 +62,7 @@ function Invoke-Manager {
         }
     } finally {
         if ($process -and -not $process.HasExited) {
-            try { $process.Kill() } catch { }
+            try { $process.Kill() } catch { Write-Verbose 'Could not terminate smoke manager during cleanup.' }
             $null = $process.WaitForExit(5000)
         }
         if ($DebugManager) {

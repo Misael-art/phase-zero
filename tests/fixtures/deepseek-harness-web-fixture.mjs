@@ -1,8 +1,8 @@
 // Local fixture only. Tests temporarily replace the pinned package entrypoint
 // inside a disposable runtime; this is not a Harness implementation.
-const fs = require("node:fs");
-const http = require("node:http");
-const { spawn } = require("node:child_process");
+import fs from "node:fs";
+import http from "node:http";
+import { spawn } from "node:child_process";
 
 const portIndex = process.argv.indexOf("--port");
 const port = Number(portIndex >= 0 ? process.argv[portIndex + 1] : 3080);
