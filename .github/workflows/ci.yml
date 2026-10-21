@@ -583,7 +583,7 @@ jobs:
           Invoke-Pester -Path .\tests -EnableExit
 
       - name: Setup Python for Windows credential-store fixtures
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.14'
 
