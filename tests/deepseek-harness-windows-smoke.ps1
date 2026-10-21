@@ -37,7 +37,12 @@ function Invoke-Manager {
     $oldDebug = $env:PZ_DSH_DEBUG
     try {
         if ($DebugManager) { $env:PZ_DSH_DEBUG = '1' }
-        $lines = @(& $engine @arguments 2>&1)
+        $lines = @(& $engine @arguments 2>&1 | ForEach-Object {
+            $line = [string]$_
+            if ($line -match '^PZ_DSH_STAGE=([a-z0-9.-]{1,80})$') {
+                Write-SmokeMarker ("manager {0} at {1}" -f $Name,$matches[1])
+            } else { $line }
+        })
         $code = $LASTEXITCODE
     } finally {
         if ($DebugManager) {

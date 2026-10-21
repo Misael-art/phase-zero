@@ -61,6 +61,13 @@ function Get-AvailableMemoryByteCount {
     } catch { return $null }
 }
 
+function Write-DshDebugStage {
+    param([string]$Stage)
+    if ($env:PZ_DSH_DEBUG -and $Stage -match '^[a-z0-9.-]{1,80}$') {
+        [Console]::Error.WriteLine("PZ_DSH_STAGE=$Stage")
+    }
+}
+
 function Get-PortValue {
     $portValue = $script:DefaultPort
     if (-not $script:ExplicitPort -and -not $env:PZ_DSH_PORT) {
@@ -225,8 +232,10 @@ function Invoke-Control {
     $client = New-Object Net.Sockets.TcpClient
     $client.ReceiveTimeout = $TimeoutMs; $client.SendTimeout = $TimeoutMs
     try {
-        $client.Connect('127.0.0.1', [int]$info.controlPort)
+        $connect = $client.ConnectAsync('127.0.0.1', [int]$info.controlPort)
+        if (-not $connect.Wait($TimeoutMs)) { throw 'supervisor-unavailable' }
         $stream = $client.GetStream()
+        $stream.ReadTimeout = $TimeoutMs; $stream.WriteTimeout = $TimeoutMs
         $writer = New-Object IO.StreamWriter($stream, (New-Object Text.UTF8Encoding($false)), 1024, $true)
         $reader = New-Object IO.StreamReader($stream, (New-Object Text.UTF8Encoding($false)), $false, 1024, $true)
         $writer.WriteLine((@{ action = $ControlAction; nonce = [string]$info.controlNonce } | ConvertTo-Json -Compress))
@@ -247,13 +256,22 @@ function Get-Status {
     $sup = Read-JsonFile -Path $script:SupervisorPath
     $runtimeState = 'stopped'; $healthy = $false; $httpCode = $null
     $supervisorId = if ($sup -and $sup.pid) { [int]$sup.pid } elseif ($state -and $state.supervisorPid) { [int]$state.supervisorPid } else { 0 }
+    $debugStatusStages = $env:PZ_DSH_DEBUG -and $PSBoundParameters.ContainsKey('KnownAvailableMemoryBytes') -and -not $script:DebugStatusStagesWritten
+    if ($debugStatusStages) { $script:DebugStatusStagesWritten = $true }
     if (Test-PidAlive $supervisorId) {
         try {
+            if ($debugStatusStages) { Write-DshDebugStage 'status.control.begin' }
             $control = Invoke-Control -ControlAction 'status' -TimeoutMs 700
+            if ($debugStatusStages) { Write-DshDebugStage 'status.control.complete' }
+            if ($debugStatusStages) { Write-DshDebugStage 'status.http.begin' }
             $probe = Test-LoopbackHttp -PortNumber (Get-PortValue)
+            if ($debugStatusStages) { Write-DshDebugStage 'status.http.complete' }
             $healthy = [bool]$probe.Healthy; $httpCode = $probe.Status
             if ($healthy -and $control.running) { $runtimeState = 'running' } else { $runtimeState = 'starting-or-unhealthy' }
-        } catch { $runtimeState = 'crashed-or-stale' }
+        } catch {
+            if ($debugStatusStages) { Write-DshDebugStage 'status.control.failed' }
+            $runtimeState = 'crashed-or-stale'
+        }
     } elseif ($sup) {
         $runtimeState = 'crashed-or-stale'
         if ($state -and $state.authRoute -and $state.supervisorDebugCapture) { Save-SupervisorStderr -Route ([string]$state.authRoute) -Enabled }
@@ -457,7 +475,9 @@ function Start-Runtime {
             if ($state.authRoute -ne $AuthRoute -or $state.requestedWorkspace -ne $workspaceFull) { throw 'different-route-running-stop-first' }
             return (Get-Status)
         }
+        Write-DshDebugStage 'start.memory.begin'
         $memory = Get-AvailableMemoryByteCount
+        Write-DshDebugStage 'start.memory.complete'
         if ($null -eq $memory) { throw 'memory-status-unavailable' }
         if ($memory -lt $script:MinAvailableMemoryBytes) { throw 'insufficient-memory' }
         $portValue = Get-PortValue
@@ -470,6 +490,7 @@ function Start-Runtime {
         $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Action','supervise','-InternalSupervisor','-Workspace',$launchDir,'-AuthRoute',$AuthRoute,'-Port',[string]$portValue,'-Runtime',$active.Path)
         $argumentLine = ($arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join ' '
         $supervisorStderrPath = Join-Path $launchDir 'supervisor-stderr.tmp'
+        Write-DshDebugStage 'start.supervisor.spawn.begin'
         if ($env:PZ_DSH_DEBUG) {
             Remove-Item -LiteralPath $supervisorStderrPath -Force -ErrorAction SilentlyContinue
             $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -RedirectStandardError $supervisorStderrPath -PassThru
@@ -477,8 +498,11 @@ function Start-Runtime {
             $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -PassThru
         }
         $state.supervisorPid = [int]$process.Id; Write-PrivateJson -Path $script:StatePath -Value $state
+        Write-DshDebugStage 'start.supervisor.spawn.complete'
     } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
     $deadline = [DateTime]::UtcNow.AddSeconds($script:ReadyTimeoutSeconds)
+    $script:DebugStatusStagesWritten = $false
+    $statusPollCount = 0
     do {
         Start-Sleep -Milliseconds 250
         if (-not (Test-PidAlive $process.Id)) {
@@ -487,9 +511,13 @@ function Start-Runtime {
             if ($env:PZ_DSH_DEBUG) { [Console]::Error.WriteLine("Supervisor exited before ready; exitCode=$($process.ExitCode)") }
             throw 'runtime-crashed'
         }
+        $statusPollCount++
+        if ($statusPollCount -eq 1) { Write-DshDebugStage 'start.health.status.begin' }
         $status = Get-Status -KnownAvailableMemoryBytes $memory
+        if ($statusPollCount -eq 1) { Write-DshDebugStage 'start.health.status.complete' }
         if ($status.state -eq 'running') { return $status }
     } while ([DateTime]::UtcNow -lt $deadline)
+    Write-DshDebugStage 'start.health.timeout'
     $stopAccepted = $true
     try { $null = Invoke-Control -ControlAction 'stop' }
     catch { $stopAccepted = $false }
