@@ -116,6 +116,19 @@ LOCKED_CAPABILITIES: dict[str, str] = {
     "catalog-listing": "A integração permanece fora do catálogo público.",
     "auto-approve-tool-calls": "Aprovação automática de ferramentas é recusada.",
 }
+# Observed on the pinned 6.1.8 runtime with a real tunnel and connector:
+# its Full resolver requires a network declaration in the trusted Codex turn.
+# Codex 0.163 omitted it even with workspace-write + network_access=true.
+# The upstream doctor checks infrastructure, not a working tool turn.
+FULL_RUNTIME_BLOCKER = (
+    f"Full {PIN['version']} ainda sem prova de ferramenta real; no host de referência, "
+    "Codex 0.163 não declarou rede no contexto confiável mesmo com "
+    "workspace-write e network_access=true"
+)
+FULL_RUNTIME_ACTION = (
+    "Mantenha browser-only. Corrija a compatibilidade do runtime ou use um conector MCP "
+    "restrito ao projeto; prove leitura, escrita reversível, aprovação e rollback reais."
+)
 PENDING_GATES = (
     "real-account",
     "clean-host-arch",
@@ -125,21 +138,21 @@ PENDING_GATES = (
     "rollback",
 )
 
-# Plan capability map from the OpenAI developer-mode article, re-read on
-# 2026-10-12: full MCP for Business and Enterprise/Edu, read/fetch for Pro, no
-# developer mode for Free, Go or Plus. An operator attestation is not proof.
+# The older Developer Mode article described Pro as read/fetch-only. Current
+# custom MCP plugin documentation explicitly includes write tools, subject to
+# account/workspace permissions. A plan label alone never verifies those grants.
 PLAN_MCP_CAPABILITY = {
     "free": "none",
     "go": "none",
     "plus": "none",
-    "pro": "read",
+    "pro": "write-unverified",
     "business": "write-beta",
     "enterprise": "write-beta",
     "edu": "write-beta",
 }
 PLAN_LABELS = {"free": "Free", "go": "Go", "plus": "Plus", "pro": "Pro", "business": "Business",
                "enterprise": "Enterprise", "edu": "Edu"}
-PLAN_SOURCE = "https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt"
+PLAN_SOURCE = "https://developers.openai.com/api/docs/guides/custom-mcp-server"
 ELIGIBILITY_MAX_AGE_DAYS = 30
 KEY_ROTATION_DEFAULT_DAYS = 30
 KEY_ROTATION_MAX_DAYS = 90
@@ -373,6 +386,8 @@ def load_sibling(name: str) -> Any:
 class Runner:
     """Process seam; tests replace it, production uses real commands."""
 
+    session_dir = Path("/run/systemd/sessions")
+
     def run(self, args: list[str], *, env: dict[str, str] | None = None,
             timeout: int = 30, input_text: str | None = None) -> tuple[int, str, str]:
         try:
@@ -426,11 +441,42 @@ class Runner:
             return probe.connect_ex(("127.0.0.1", port)) == 0
 
     def other_users(self) -> list[str]:
-        code, out, _ = self.run(["loginctl", "list-users", "--no-legend"], timeout=5)
-        if code != 0:
+        if not hasattr(os, "getuid"):
             return ["unknown"]
-        users = [line.split()[1] for line in out.splitlines() if len(line.split()) >= 2]
-        return [user for user in users if user != getpass.getuser()]
+        code, out, _ = self.run(["loginctl", "list-users", "--no-legend"], timeout=5)
+        own_uid = os.getuid()
+        if code == 0:
+            rows = [line.split() for line in out.splitlines() if line.strip()]
+            if rows and all(row and row[0].isdigit() for row in rows):
+                uids = {int(row[0]) for row in rows}
+                if own_uid in uids:
+                    return [self.uid_label(uid) for uid in sorted(uids - {own_uid})]
+        # logind's D-Bus query can fail inside an otherwise working Codex turn.
+        # Read its runtime session records as a second source; unknown remains
+        # fail-closed if records are absent or cannot be parsed completely.
+        try:
+            entries = [path for path in self.session_dir.iterdir() if path.is_file()]
+            if not entries:
+                return ["unknown"]
+            uids = set()
+            for path in entries:
+                match = re.search(r"(?m)^UID=(\d+)$", path.read_text(encoding="utf-8"))
+                if match is None:
+                    return ["unknown"]
+                uids.add(int(match.group(1)))
+            if own_uid not in uids:
+                return ["unknown"]
+            return [self.uid_label(uid) for uid in sorted(uids - {own_uid})]
+        except OSError:
+            return ["unknown"]
+
+    @staticmethod
+    def uid_label(uid: int) -> str:
+        try:
+            import pwd
+            return pwd.getpwuid(uid).pw_name
+        except (ImportError, KeyError):
+            return f"uid:{uid}"
 
     def launcher_processes(self, binary: Path, data_dir: Path,
                            readonly_path: Path) -> list[dict[str, Any]]:
@@ -516,10 +562,13 @@ class Paths:
         self.autostart_dir = config / "autostart"
         self.autostart_entry = self.autostart_dir / UPSTREAM_AUTOSTART_ENTRY
         self.managed_autostart = self.autostart_dir / MANAGED_AUTOSTART_ENTRY
-        # Stable-path wrapper for the opt-in login entry. The manager itself can
-        # live in a worktree that disappears; the wrapper survives and fails
-        # visibly (desktop notification) instead of silently not launching.
+        # Menu/login wrappers call a private manager snapshot. Neither target
+        # may depend on the source worktree remaining mounted or present.
         self.autostart_bin = self.root / "bin"
+        self.manager_dir = self.root / "manager"
+        self.manager_script = self.manager_dir / "chatgpt_web_bridge.py"
+        self.manager_secret_store = self.manager_dir / "secret_store.py"
+        self.manager_windows_secret_store = self.manager_dir / "windows_credential_store.py"
         self.autostart_wrapper = self.autostart_bin / "chatgpt-web-autostart.sh"
         self.autostart_target = self.autostart_bin / "chatgpt-web-autostart.target"
         self.open_wrapper = self.autostart_bin / "chatgpt-web-open.sh"
@@ -833,15 +882,16 @@ class Bridge:
         if plan_cap == "none":
             blockers.append(
                 f"o plano {PLAN_LABELS.get(str(record.get('plan')), 'informado')} não oferece MCP "
-                "de desenvolvedor (a OpenAI libera em Pro, só leitura, e em Business, Enterprise "
-                "e Edu)")
+                "de desenvolvedor confirmado nesta integração; confira as permissões "
+                "atuais da conta e do workspace")
         if record.get("developerMode") != "yes":
             blockers.append("Developer Mode do workspace não confirmado")
         if record.get("tunnelPermission") not in {"use", "manage"}:
             blockers.append("permissão Tunnels Read + Use não confirmada")
         if record.get("singleUserTrusted") != "yes":
             blockers.append("conta local individual e confiável não confirmada")
-        tools = "none" if blockers else ("read-only" if plan_cap == "read" else "read-only-write-locked")
+        tools = "none" if blockers else ("unverified" if plan_cap == "write-unverified"
+                                          else "read-only-write-locked")
         return {**base, "state": "stale" if stale else "recorded", "plan": record.get("plan"),
                 "recordedAt": record.get("recordedAt"), "planMcpCapability": plan_cap,
                 "webModel": "requires-sign-in", "tools": tools, "blockers": blockers}
@@ -931,6 +981,7 @@ class Bridge:
             "signedIn": self.session_present(self.paths.launcher_data),
             "daemonListening": self.runner.port_in_use(DEFAULT_PORT),
             "eligibility": self.eligibility(state), "runtimeKey": self.key_status(state),
+            "toolsGate": self.tools_steps() if state.get("optIn") else None,
             "lastSmoke": state.get("lastSmoke"), "autostart": self.autostart_status(),
             "lockedCapabilities": LOCKED_CAPABILITIES, "pendingGates": list(PENDING_GATES),
             "usageMeter": "local-estimate-not-official-quota",
@@ -1211,14 +1262,17 @@ class Bridge:
 
     def managed_hook_lines(self) -> tuple[re.Pattern[str], ...]:
         """The interrupt hook upstream installs, accepted only when it runs the managed runtime."""
-        root = re.escape(str(self.paths.root))
+        version = re.escape(str(self.paths.core_home / "versions"
+                                / f"{PIN['version']}-linux-x64"))
         core = re.escape(str(self.paths.core_home))
         config = re.escape(str(self.paths.codex_config))
         return tuple(re.compile(pattern) for pattern in (
             r"\[\[hooks\.Interrupt(\.hooks)?\]\]",
             r'type = "command"',
             r"timeout = \d{1,2}",
-            rf"command = \"'{root}/[^'\"]*/bin/codex-chatgpt-web' '--home' '{core}' "
+            rf"command = \"'{version}/bin/codex-chatgpt-web' '--home' '{core}' "
+            r"'hook' 'interrupt'\"",
+            rf"command = \"'{version}/runtime/bun' '{version}/app/cli\.js' '--home' '{core}' "
             r"'hook' 'interrupt'\"",
             rf'\[hooks\.state\."{config}:interrupt:\d+:\d+"\]',
             r'trusted_hash = "sha256:[0-9a-f]{64}"',
@@ -1260,6 +1314,21 @@ class Bridge:
             "baseline": state.get("routeBaseline"), "route": self.route_status(),
         }
 
+    def ensure_approval_safety(self, config: dict[str, Any]) -> None:
+        if not config.get("autoApproveToolCalls"):
+            return
+        if config.get("mode") == "full":
+            raise BridgeError("aprovação automática ligada no upstream; desligue antes",
+                              "auto-approve")
+        if config.get("mode") == "browser-only":
+            broker = self.paths.core_home / "runtime/turn-broker.sock"
+            if broker.exists():
+                raise BridgeError("broker local inesperado no modo somente Web; interrompa o "
+                                  "launcher e revise a configuração", "unexpected-broker")
+            return
+        raise BridgeError("modo do launcher desconhecido com aprovação automática ligada",
+                          "auto-approve")
+
     def desktop_dir(self) -> Path | None:
         """Install directory of Codex Desktop; its command may be a one-line exec wrapper."""
         launcher = shutil.which(DESKTOP_COMMAND, path=self.env.get("PATH"))
@@ -1293,7 +1362,7 @@ class Bridge:
         route = config.get("openai_base_url")
         if route is not None and route != f"http://127.0.0.1:{DEFAULT_PORT}/v1":
             found.append("openai_base_url aponta para fora do bridge local")
-        hook_command = self.managed_hook_lines()[3]
+        hook_commands_allowed = self.managed_hook_lines()[3:5]
 
         def hook_commands(node: Any) -> list[str]:
             if isinstance(node, dict):
@@ -1305,8 +1374,9 @@ class Bridge:
             return []
 
         for command in hook_commands(config.get("hooks", {})):
-            if not hook_command.fullmatch(f"command = {json.dumps(command)}"):
-                found.append(f"hook fora do runtime gerenciado: {command[:80]}")
+            if not any(pattern.fullmatch(f"command = {json.dumps(command)}")
+                       for pattern in hook_commands_allowed):
+                found.append("hook fora do runtime gerenciado")
         desktop = self.desktop_dir()
         for name, server in (config.get("mcp_servers") or {}).items():
             server = server if isinstance(server, dict) else {}
@@ -1340,9 +1410,9 @@ class Bridge:
             raise BridgeError("launcher parado; a rota apontaria para serviço ausente",
                               "launcher-inactive")
         config = self.upstream_config() or {}
-        if config.get("autoApproveToolCalls"):
-            raise BridgeError("aprovação automática ligada no upstream; desligue antes",
-                              "auto-approve")
+        # Upstream can persist this flag in browser-only mode. Permit that
+        # legacy state only while its local tools broker is absent.
+        self.ensure_approval_safety(config)
         if config.get("mode") == "full":
             self.require_tools_ready(state)
         before = self._config_text()
@@ -1625,8 +1695,44 @@ class Bridge:
             "início no login (opt-in)", self.paths.autostart_target.name, "não iniciou",
             "pz ai chatgpt-web autostart enable --acknowledge-autostart", "autostart run")
 
+    def install_managed_entrypoint(self) -> None:
+        """Snapshot this manager outside disposable worktrees for menu/login launch."""
+        if not self.managed_python().is_file() or not os.access(self.managed_python(), os.X_OK):
+            raise BridgeError("Python estável indisponível para o atalho", "manager-python")
+        source = Path(__file__).resolve()
+        helper = source.with_name("secret_store.py")
+        windows_helper = source.with_name("windows_credential_store.py")
+        try:
+            script_bytes = source.read_bytes()
+            helper_bytes = helper.read_bytes()
+            windows_helper_bytes = windows_helper.read_bytes()
+        except OSError as error:
+            raise BridgeError(f"gerenciador incompleto: {error}", "manager-source") from None
+        if self.paths.manager_dir.is_symlink():
+            raise BridgeError("diretório do gerenciador é um symlink", "manager-path")
+        private_dir(self.paths.manager_dir)
+        atomic_write(self.paths.manager_secret_store, helper_bytes)
+        atomic_write(self.paths.manager_windows_secret_store, windows_helper_bytes)
+        atomic_write(self.paths.manager_script, script_bytes)
+
+    def managed_python(self) -> Path:
+        system_python = Path("/usr/bin/python3")
+        return (system_python if os.name != "nt" and system_python.is_file()
+                else Path(getattr(sys, "_base_executable", sys.executable)))
+
     def autostart_target_text(self) -> str:
-        return f"{sys.executable}\n{Path(__file__).resolve()}\n"
+        return f"{self.managed_python()}\n{self.paths.manager_script}\n"
+
+    def entrypoint_ready(self, target: Path) -> bool:
+        try:
+            return (target.read_text(encoding="utf-8") == self.autostart_target_text()
+                    and self.paths.manager_script.is_file()
+                    and self.paths.manager_secret_store.is_file()
+                    and self.paths.manager_windows_secret_store.is_file()
+                    and self.managed_python().is_file()
+                    and os.access(self.managed_python(), os.X_OK))
+        except OSError:
+            return False
 
     def autostart_entry_text(self) -> str:
         return ("[Desktop Entry]\n"
@@ -1649,7 +1755,7 @@ class Bridge:
         state = ("off" if not record and current is None
                  else "enabled" if record and current == self.autostart_entry_text()
                  and self.paths.autostart_wrapper.is_file()
-                 and self.paths.autostart_target.is_file()
+                 and self.entrypoint_ready(self.paths.autostart_target)
                  else "inconsistent")
         return {"state": state, "entry": str(entry), "optedInAt": (record or {}).get("at"),
                 "startsUpstreamLauncherDirectly": False}
@@ -1663,6 +1769,7 @@ class Bridge:
         if self.package_state().get("unpacked") != "verified":
             raise BridgeError("conclua `setup` antes de ligar o início no login",
                               "install-unverified")
+        self.install_managed_entrypoint()
         self.paths.autostart_dir.mkdir(parents=True, exist_ok=True)
         atomic_write(self.paths.autostart_wrapper, self.autostart_wrapper_text().encode(), 0o755)
         atomic_write(self.paths.autostart_target, self.autostart_target_text().encode(), 0o600)
@@ -1747,7 +1854,7 @@ class Bridge:
         state = ("off" if not record and not present
                  else "installed" if record and all(intact(*item) for item in expected)
                  and len(present) == len(expected) and self.paths.open_wrapper.is_file()
-                 and self.paths.open_target.is_file()
+                 and self.entrypoint_ready(self.paths.open_target)
                  else "inconsistent")
         return {"state": state, "desktopCopy": desktop_copy if record else None,
                 "menu": str(self.paths.applications), "desktop": str(self.user_desktop_dir()),
@@ -1763,6 +1870,7 @@ class Bridge:
         if desktop_copy and not desktop.is_dir():
             raise BridgeError(f"pasta da área de trabalho não encontrada ({desktop}); use "
                               "`--no-desktop-copy`", "desktop-dir-missing")
+        self.install_managed_entrypoint()
         self.shortcuts_remove()
         state = self.load_state()
         private_dir(self.paths.autostart_bin)
@@ -2145,11 +2253,15 @@ class Bridge:
         if self.runner.other_users():
             blockers.append("há outros usuários com sessão neste host")
         if need_broker:
+            capability = self.eligibility(state).get("planMcpCapability")
+            if capability not in {"write-unverified", "write-beta"}:
+                blockers.append("acesso completo pelo conector MCP não comprovado no plano informado")
             config = self.upstream_config() or {}
             if config.get("mode") != "full":
                 blockers.append("launcher não está no modo com ferramentas")
             if config.get("autoApproveToolCalls"):
                 blockers.append("aprovação automática ligada no upstream")
+            blockers.append(FULL_RUNTIME_BLOCKER)
         if blockers:
             raise BridgeError("modo com ferramentas indisponível: " + "; ".join(blockers),
                               "tools-not-ready")
@@ -2162,6 +2274,22 @@ class Bridge:
         eligibility = self.eligibility(state)
         key = self.key_status(state)
         config = self.upstream_config() or {}
+        other_users = self.runner.other_users()
+        trusted_user = (record or {}).get("singleUserTrusted") == "yes"
+        if other_users == ["unknown"]:
+            user_detail = "não foi possível verificar as sessões de outras contas locais"
+        elif other_users:
+            user_detail = "há outra conta local com sessão neste host"
+        elif trusted_user:
+            user_detail = "verificado: somente a conta local atual tem sessão"
+        else:
+            user_detail = "confiança na conta local individual ainda não confirmada"
+        user_action = ("Nenhuma ação necessária." if trusted_user and not other_users
+                       else "Não ative ferramentas enquanto houver outra conta com sessão."
+                       if other_users and other_users != ["unknown"]
+                       else "Verifique as sessões locais antes de ativar ferramentas."
+                       if other_users == ["unknown"]
+                       else "Confirme a conta local individual no comando eligibility.")
         plan = str((record or {}).get("plan"))
         label = PLAN_LABELS.get(plan, "não informado")
         manager = "pz ai chatgpt-web"
@@ -2172,11 +2300,20 @@ class Bridge:
              f"{manager} eligibility --plan … --developer-mode … --tunnel-permission … "
              "--single-user-trusted …"),
             ("plan", bool(record) and eligibility["planMcpCapability"] != "none",
-             f"plano {label}: " + ("MCP de desenvolvedor disponível"
+             f"plano {label}: " + ("permissão MCP sujeita à conta/workspace"
                                    if record and eligibility["planMcpCapability"] != "none" else
-                                   "sem modo desenvolvedor. A OpenAI libera conectores MCP próprios "
-                                   "em Pro (só leitura) e em Business, Enterprise e Edu"),
-             f"Mude para um plano com modo desenvolvedor e registre de novo. Fonte: {PLAN_SOURCE}"),
+                                   "permissão MCP não confirmada nesta integração"),
+             f"Confira MCP no workspace e registre a elegibilidade. Fonte: {PLAN_SOURCE}"),
+            ("plan-full", eligibility.get("planMcpCapability") in
+             {"write-unverified", "write-beta"},
+             "sem exclusão comprovada pelo plano Pro; escrita na conta ainda "
+             "não verificada por chamada MCP real"
+             if eligibility.get("planMcpCapability") == "write-unverified" else
+             "plano informado admite MCP completo; chamada real ainda necessária"
+             if eligibility.get("planMcpCapability") == "write-beta" else
+             "acesso completo não disponível ou não comprovado no plano informado",
+             "Confira permissões do plugin MCP nesta conta. Mantenha o modo Web até "
+             "uma chamada real de escrita reversível ser aprovada e concluída."),
             ("developer-mode", (record or {}).get("developerMode") == "yes",
              "modo desenvolvedor do ChatGPT " + ("confirmado" if (record or {}).get("developerMode")
                                                  == "yes" else "não confirmado"),
@@ -2184,25 +2321,24 @@ class Bridge:
             ("tunnel-permission", (record or {}).get("tunnelPermission") in {"use", "manage"},
              "permissão de túnel na plataforma OpenAI",
              f"{manager} tunnel guide"),
-            ("single-user", (record or {}).get("singleUserTrusted") == "yes"
-             and not self.runner.other_users(),
-             "conta local individual e confiável, sem outros usuários com sessão",
-             "Use somente em conta local individual e registre de novo."),
+            ("single-user", trusted_user and not other_users,
+             user_detail, user_action),
             ("runtime-key", key["state"] == "stored",
              {"absent": "chave de runtime ainda não está no cofre",
               "rotation-overdue": "chave de runtime passou do prazo de rotação",
               "stored": "chave de runtime no cofre do sistema"}[key["state"]],
              f"Crie uma chave restrita a Tunnels Read + Use, com expiração, e rode "
              f"`{manager} tunnel key store` (entrada oculta)."),
-            ("launcher-mode", config.get("mode") == "full",
-             "launcher no modo com ferramentas" if config.get("mode") == "full"
-             else "launcher ainda no modo somente Web",
-             f"`{manager} tunnel key stage`, conclua a página MCP do launcher com o tunnel_id e "
-             f"rode `{manager} tunnel key unstage`."),
             ("auto-approve", not config.get("autoApproveToolCalls"),
              "aprovação automática desligada no launcher" if not config.get("autoApproveToolCalls")
              else "aprovação automática LIGADA no launcher",
              "Desligue a aprovação automática na página MCP do launcher."),
+            ("full-runtime", False, FULL_RUNTIME_BLOCKER, FULL_RUNTIME_ACTION),
+            ("launcher-mode", config.get("mode") == "full",
+             "launcher no modo com ferramentas" if config.get("mode") == "full"
+             else "launcher mantido no modo somente Web enquanto Full está bloqueado",
+             "Mantenha browser-only. Não altere o launcher até resolver full-runtime e "
+             "provar uma chamada MCP real."),
         ]
         listed = [{"id": step, "ok": bool(ok), "detail": detail, "action": action}
                   for step, ok, detail, action in steps]
@@ -2210,8 +2346,9 @@ class Bridge:
         return {"ready": pending is None, "steps": listed, "next": pending,
                 "webModelStillWorks": config.get("mode") == "browser-only",
                 "planSource": PLAN_SOURCE, "lockedCapabilities": LOCKED_CAPABILITIES,
-                "note": "Pronto aqui não prova conta real nem escrita: gates externos seguem "
-                        "pendentes."}
+                "note": "A infraestrutura pode estar saudável, mas Full 6.1.8 falhou em "
+                        "turno real no host de referência até com workspace-write e rede "
+                        "habilitada. Browser-only segue disponível."}
 
     def tools_check(self) -> dict[str, Any]:
         state = self.load_state()
@@ -2236,7 +2373,9 @@ class Bridge:
         return {"ready": not blockers, "blockers": blockers, "doctor": doctor,
                 "capability": self.eligibility(state)["tools"],
                 "lockedCapabilities": LOCKED_CAPABILITIES,
-                "note": "Pronto aqui não prova conta real nem escrita: gates externos seguem pendentes."}
+                "note": "Doctor saudável não prova turno MCP. Full 6.1.8 falhou em "
+                        "turno real no host de referência até com workspace-write e rede "
+                        "habilitada."}
 
     # ---- codex in the dedicated profile ----------------------------------
 
@@ -2250,8 +2389,7 @@ class Bridge:
             raise BridgeError("configuração do perfil tem mudanças inesperadas; rode `route verify`",
                               "config-drift")
         config = self.upstream_config() or {}
-        if config.get("autoApproveToolCalls"):
-            raise BridgeError("aprovação automática ligada no upstream", "auto-approve")
+        self.ensure_approval_safety(config)
         if config.get("mode") == "full":
             self.require_tools_ready(state)
 
@@ -2273,12 +2411,12 @@ class Bridge:
         state = self.load_state()
         self.require_opt_in(state)
         tools = mode == "tools"
-        if tools:
-            self.require_tools_ready(state)
-        elif (self.upstream_config() or {}).get("mode") == "full":
+        if not tools and (self.upstream_config() or {}).get("mode") == "full":
             raise BridgeError("o launcher está no modo com ferramentas; use o atalho "
                               "\"com ferramentas\" (`desktop --mode tools`)", "full-mode")
         self.require_ready(state)
+        if tools:
+            self.require_tools_ready(state)
         launcher = shutil.which(DESKTOP_COMMAND, path=self.env.get("PATH"))
         if not launcher:
             raise BridgeError("Codex Desktop não encontrado no PATH", "desktop-missing")
