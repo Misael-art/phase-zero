@@ -33,22 +33,43 @@ function Invoke-Manager {
     if ($Route) { $arguments += @('--auth-route',$Route) }
     if ($Port) { $arguments += @('--port',[string]$Port) }
     $arguments += '--json'
+    $argumentLine = ($arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join ' '
     $hadDebug = Test-Path Env:PZ_DSH_DEBUG
     $oldDebug = $env:PZ_DSH_DEBUG
+    $outputRoot = Join-Path $env:TEMP ('pz-dsh-cli-output-' + [guid]::NewGuid().ToString('N'))
+    $stdoutPath = Join-Path $outputRoot 'stdout.txt'
+    $stderrPath = Join-Path $outputRoot 'stderr.txt'
+    $process = $null
+    $timeoutSeconds = if ($Name -in @('install','update')) { 1500 } else { 90 }
     try {
+        $null = New-Item -ItemType Directory -Path $outputRoot -Force
         if ($DebugManager) { $env:PZ_DSH_DEBUG = '1' }
-        $lines = @(& $engine @arguments 2>&1 | ForEach-Object {
-            $line = [string]$_
+        $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $repo -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
+        if (-not $process.WaitForExit($timeoutSeconds * 1000)) {
+            try { $process.Kill() } catch { }
+            $null = $process.WaitForExit(5000)
+            throw "Manager $Name exceeded timeout ($timeoutSeconds seconds)."
+        }
+        $code = [int]$process.ExitCode
+        $stdout = if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) { Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction Stop } else { '' }
+        $stderr = if (Test-Path -LiteralPath $stderrPath -PathType Leaf) { Get-Content -LiteralPath $stderrPath -Raw -ErrorAction Stop } else { '' }
+        $lines = @(@($stdout -split '\r?\n') + @($stderr -split '\r?\n'))
+        foreach ($line in $lines) {
+            $line = [string]$line
             if ($line -match '^PZ_DSH_STAGE=([a-z0-9.-]{1,80})$') {
                 Write-SmokeMarker ("manager {0} at {1}" -f $Name,$matches[1])
-            } else { $line }
-        })
-        $code = $LASTEXITCODE
+            }
+        }
     } finally {
+        if ($process -and -not $process.HasExited) {
+            try { $process.Kill() } catch { }
+            $null = $process.WaitForExit(5000)
+        }
         if ($DebugManager) {
             if ($hadDebug) { $env:PZ_DSH_DEBUG = $oldDebug }
             else { Remove-Item Env:PZ_DSH_DEBUG -ErrorAction SilentlyContinue }
         }
+        Remove-Item -LiteralPath $outputRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
     $line = @($lines | Where-Object { $_ -match '^\s*\{' } | Select-Object -Last 1)
     if ($line.Count -eq 0) { throw "Manager $Name returned no JSON (exit $code)." }
@@ -60,6 +81,14 @@ function Invoke-Manager {
 function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
+}
+
+function ConvertTo-ProcessArgument {
+    param([string]$Value)
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $escaped = $Value -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
 }
 
 function Write-SmokeMarker {

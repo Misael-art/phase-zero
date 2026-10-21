@@ -500,9 +500,8 @@ function Start-Runtime {
         $argumentLine = ($arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join ' '
         $supervisorStderrPath = Join-Path $launchDir 'supervisor-stderr.tmp'
         Write-DshDebugStage 'start.supervisor.spawn.begin'
-        # The long-lived supervisor must not inherit the caller's stdout pipe.
-        # Otherwise CLI wrappers that capture start output wait for the supervisor
-        # to stop before seeing the manager's JSON result.
+        # Keep supervisor console output separate from PhaseZero CLI output.
+        # Harness output is captured by the supervisor and redacted before logging.
         if ($env:PZ_DSH_DEBUG) {
             Remove-Item -LiteralPath $supervisorStderrPath -Force -ErrorAction SilentlyContinue
             $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -RedirectStandardOutput 'NUL' -RedirectStandardError $supervisorStderrPath -PassThru
