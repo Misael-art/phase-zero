@@ -56,7 +56,7 @@ function Get-Pin {
 
 function Get-AvailableMemoryByteCount {
     try {
-        $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem -OperationTimeoutSec 3 -ErrorAction Stop
         return ([long]$operatingSystem.FreePhysicalMemory) * 1024L
     } catch { return $null }
 }
@@ -240,6 +240,7 @@ function Invoke-Control {
 }
 
 function Get-Status {
+    param([object]$KnownAvailableMemoryBytes)
     $pins = Get-Pin
     $active = Get-ActiveRuntime
     $state = Read-JsonFile -Path $script:StatePath
@@ -264,7 +265,7 @@ function Get-Status {
     $credentialFile = if ($dshHomePath) { Test-Path -LiteralPath (Join-Path $dshHomePath '.credentials.yaml') -PathType Leaf } else { $false }
     $accountAuth = if ($route -eq 'account' -and $credentialFile) { 'credential file present; session unknown' } else { 'unknown' }
     $apiCredential = if ($route -eq 'api' -and $credentialFile) { 'credential file present; validity unknown' } elseif ($route -eq 'api') { 'not observed' } else { 'not-selected' }
-    $memory = Get-AvailableMemoryByteCount
+    $memory = if ($PSBoundParameters.ContainsKey('KnownAvailableMemoryBytes')) { $KnownAvailableMemoryBytes } else { Get-AvailableMemoryByteCount }
     $memoryBudget = if ($null -eq $memory) { 'unknown' } elseif ($memory -ge $script:MinAvailableMemoryBytes) { 'sufficient' } else { 'insufficient' }
     $next = switch ($overall) { 'not-installed' { 'install' } 'degraded' { 'doctor' } 'running' { 'open' } default { 'choose workspace and auth route, then start' } }
     $result = New-Result -Command 'status' -Ok ($installed -and $runtimeState -ne 'crashed-or-stale') -State $overall -Reason $(if ($installed) { '' } else { 'runtime-not-installed' }) -NextAction $next -Extra @{
@@ -456,7 +457,7 @@ function Start-Runtime {
             if ($state.authRoute -ne $AuthRoute -or $state.requestedWorkspace -ne $workspaceFull) { throw 'different-route-running-stop-first' }
             return (Get-Status)
         }
-    $memory = Get-AvailableMemoryByteCount
+        $memory = Get-AvailableMemoryByteCount
         if ($null -eq $memory) { throw 'memory-status-unavailable' }
         if ($memory -lt $script:MinAvailableMemoryBytes) { throw 'insufficient-memory' }
         $portValue = Get-PortValue
@@ -486,7 +487,7 @@ function Start-Runtime {
             if ($env:PZ_DSH_DEBUG) { [Console]::Error.WriteLine("Supervisor exited before ready; exitCode=$($process.ExitCode)") }
             throw 'runtime-crashed'
         }
-        $status = Get-Status
+        $status = Get-Status -KnownAvailableMemoryBytes $memory
         if ($status.state -eq 'running') { return $status }
     } while ([DateTime]::UtcNow -lt $deadline)
     $stopAccepted = $true
