@@ -57,6 +57,11 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
+function Write-SmokeMarker {
+    param([string]$Message)
+    Write-Information -MessageData ("DeepSeek Harness Windows smoke: " + $Message) -InformationAction Continue
+}
+
 function Wait-Stopped {
     param([int]$TimeoutSeconds = 10)
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
@@ -125,6 +130,7 @@ try {
     Assert-True (-not (Get-Command node -ErrorAction SilentlyContinue)) 'Runner Node unexpectedly visible on clean PATH.'
     Assert-True (-not (Get-Command npm -ErrorAction SilentlyContinue)) 'Runner npm unexpectedly visible on clean PATH.'
 
+    Write-SmokeMarker 'read-only diagnostics'
     $plan = Invoke-Manager 'plan'
     Assert-True ($plan.Code -eq 0 -and $plan.Payload.ok -and -not $plan.Payload.mutatesHost) 'Plan must be ready and read-only.'
     $status = Invoke-Manager 'status'
@@ -133,7 +139,9 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $testRoot)) 'Read-only diagnostics created managed state.'
     Assert-True ($status.Payload.quota -eq 'unknown' -and $doctor.Payload.sandboxEnforcement -eq 'unknown') 'Diagnostics overclaimed external state.'
 
+    Write-SmokeMarker 'pinned installation started'
     $installed = Invoke-Manager 'install' -DebugManager
+    Write-SmokeMarker 'pinned installation returned'
     if ($installed.Code -ne 0 -or -not $installed.Payload.installed) {
         $detail = if ($installed.Diagnostics.Count -gt 0) { "`n" + ($installed.Diagnostics -join "`n") } else { '' }
         throw "Pinned install failed on clean Windows runner ($($installed.Payload.reason)).$detail"
@@ -143,14 +151,18 @@ try {
     $entry = Join-Path $runtime 'app\node_modules\@deepseek-ai\dsh\lib\bin.js'
     $realWorkspace = Join-Path $testRoot 'real-workspace'
     $null = New-Item -ItemType Directory -Path $realWorkspace -Force
+    Write-SmokeMarker 'upstream no-credential start started'
     $realStart = Invoke-Manager 'start' $realWorkspace 'account' $port -DebugManager
+    Write-SmokeMarker 'upstream no-credential start returned'
     if ($realStart.Code -ne 0 -or $realStart.Payload.state -ne 'running') {
         $detail = Get-RedactedFailureDetail -Diagnostics $realStart.Diagnostics -LogPath (Join-Path $testRoot 'logs\dsh.log')
         throw ("Real upstream Web UI failed no-credential smoke start (exit={0}, state={1}, reason={2}, nextAction={3}, errorType={4}). {5}" -f $realStart.Code,$realStart.Payload.state,$realStart.Payload.reason,$realStart.Payload.nextAction,$realStart.Payload.error.errorType,$detail)
     }
     $realStatus = Invoke-Manager 'status'
     Assert-True ($realStatus.Payload.authRoute -eq 'account' -and $realStatus.Payload.quota -eq 'unknown') 'No-cost smoke claimed account or quota state.'
+    Write-SmokeMarker 'upstream no-credential stop started'
     $realStop = Invoke-Manager 'stop'
+    Write-SmokeMarker 'upstream no-credential stop returned'
     Assert-True ($realStop.Code -eq 0) 'Real upstream no-credential smoke did not stop cleanly.'
     Assert-True ((Invoke-Manager 'status').Payload.runtimeState -eq 'stopped') 'Real upstream stop left stale supervisor state.'
     $backup = Join-Path $testRoot 'upstream-bin.js'
@@ -159,11 +171,13 @@ try {
 
     $busyListener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $port)
     $busyListener.Start()
+    Write-SmokeMarker 'occupied port rejection'
     $busy = Invoke-Manager 'start' $workspace 'api' $port
     Assert-True ($busy.Code -ne 0 -and $busy.Payload.reason -eq 'port-occupied') 'Occupied loopback port did not fail closed.'
     Assert-True ($busyListener.LocalEndpoint.Port -eq $port) 'Port conflict handling disturbed unrelated listener.'
     $busyListener.Stop()
 
+    Write-SmokeMarker 'API fixture lifecycle started'
     $api = Invoke-Manager 'start' $workspace 'api' $port -DebugManager
     if ($api.Code -ne 0 -or $api.Payload.state -ne 'running') {
         $detail = Get-RedactedFailureDetail -Diagnostics $api.Diagnostics -LogPath (Join-Path $testRoot 'logs\dsh.log')
@@ -191,6 +205,7 @@ try {
     $doctor = Invoke-Manager 'doctor'
     Assert-True ($doctor.Payload.sandboxEnforcement -eq 'unknown') 'Requested file policy was presented as full sandbox enforcement.'
 
+    Write-SmokeMarker 'authenticated open handoff'
     $opened = Invoke-Manager 'open'
     Assert-True ($opened.Code -eq 0 -and $opened.Payload.opened) 'Authenticated Web UI handoff failed.'
     foreach ($path in @((Join-Path $testRoot 'state.json'),(Join-Path $testRoot 'supervisor.json'),(Join-Path $testRoot 'logs\dsh.log'))) {
@@ -200,6 +215,7 @@ try {
         }
     }
     Assert-True ((Get-Content -LiteralPath (Join-Path $testRoot 'logs\dsh.log') -Raw) -match 'apiKey=\[redacted\]') 'Credential-like Harness output was not redacted.'
+    Write-SmokeMarker 'API fixture stop'
     $stopped = Invoke-Manager 'stop'
     Assert-True ($stopped.Code -eq 0) 'Owned runtime stop failed.'
     Wait-Stopped
@@ -208,6 +224,7 @@ try {
     Assert-True (-not (Get-Process -Id $apiDescendantPid -ErrorAction SilentlyContinue)) 'Harness descendant survived stop.'
     Assert-True ((Invoke-Manager 'status').Payload.runtimeState -eq 'stopped') 'Fixture stop left stale supervisor state.'
 
+    Write-SmokeMarker 'separate account route lifecycle'
     $account = Invoke-Manager 'start' $workspace 'account' $port
     Assert-True ($account.Code -eq 0 -and $account.Payload.authRoute -eq 'account') 'Account route did not start explicitly.'
     $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
@@ -221,6 +238,7 @@ try {
     Assert-True (-not (Get-Process -Id $accountChildPid -ErrorAction SilentlyContinue)) 'Account route child survived stop.'
     Assert-True (-not (Get-Process -Id $accountDescendantPid -ErrorAction SilentlyContinue)) 'Account route descendant survived stop.'
 
+    Write-SmokeMarker 'crash recovery'
     $env:PZ_DSH_FIXTURE_CRASH = '1'
     $crash = Invoke-Manager 'start' $workspace 'api' $port
     Assert-True ($crash.Code -ne 0 -and $crash.Payload.reason -eq 'runtime-crashed') 'Early child crash was not reported.'
@@ -231,6 +249,7 @@ try {
     Wait-Stopped
 
     Copy-Item -LiteralPath $backup -Destination $entry -Force
+    Write-SmokeMarker 'safe uninstall'
     $removed = Invoke-Manager 'uninstall'
     Assert-True ($removed.Code -eq 0 -and -not $removed.Payload.installed) 'Uninstall failed.'
     Assert-True (-not (Test-Path -LiteralPath $runtime)) 'Uninstall left pinned runtime files.'
@@ -259,12 +278,12 @@ try {
         else { Remove-Item -LiteralPath ("Env:" + $name) -ErrorAction SilentlyContinue }
     }
     if (Test-Path -LiteralPath $testRoot) {
-        Write-Host "Removing test-owned disposable root: $testRoot"
+        Write-Information -MessageData "Removing test-owned disposable root: $testRoot" -InformationAction Continue
         try { Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction Stop }
         catch { $cleanupProblems += 'test-root-still-in-use' }
     }
     if (Test-Path -LiteralPath $workspace) {
-        Write-Host "Removing test-owned workspace: $workspace"
+        Write-Information -MessageData "Removing test-owned workspace: $workspace" -InformationAction Continue
         try { Remove-Item -LiteralPath $workspace -Recurse -Force -ErrorAction Stop }
         catch { $cleanupProblems += 'workspace-cleanup-failed' }
     }
