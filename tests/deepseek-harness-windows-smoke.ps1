@@ -307,15 +307,18 @@ try {
 } finally {
     if ($env:PZ_DSH_ROOT -eq $testRoot) {
         try {
-            $cleanupStop = Invoke-Manager 'stop'
-            if ($cleanupStop.Code -ne 0) { $cleanupProblems += "stop-exit-$($cleanupStop.Code)-$($cleanupStop.Payload.reason)" }
-            $deadline = [DateTime]::UtcNow.AddSeconds(8)
-            do {
-                $cleanupStatus = Invoke-Manager 'status'
-                if ($cleanupStatus.Payload.runtimeState -notin @('running','starting-or-unhealthy')) { break }
-                Start-Sleep -Milliseconds 200
-            } while ([DateTime]::UtcNow -lt $deadline)
-            if ($cleanupStatus.Payload.runtimeState -in @('running','starting-or-unhealthy')) { $cleanupProblems += 'runtime-remains-running' }
+            $cleanupStatus = Invoke-Manager 'status'
+            if ($cleanupStatus.Payload.runtimeState -in @('running','starting-or-unhealthy')) {
+                $cleanupStop = Invoke-Manager 'stop'
+                if ($cleanupStop.Code -ne 0) { $cleanupProblems += "stop-exit-$($cleanupStop.Code)-$($cleanupStop.Payload.reason)" }
+                $deadline = [DateTime]::UtcNow.AddSeconds(8)
+                do {
+                    $cleanupStatus = Invoke-Manager 'status'
+                    if ($cleanupStatus.Payload.runtimeState -notin @('running','starting-or-unhealthy')) { break }
+                    Start-Sleep -Milliseconds 200
+                } while ([DateTime]::UtcNow -lt $deadline)
+                if ($cleanupStatus.Payload.runtimeState -in @('running','starting-or-unhealthy')) { $cleanupProblems += 'runtime-remains-running' }
+            }
         } catch { $cleanupProblems += 'manager-stop-or-status-failed' }
     }
     foreach ($name in $testEnvNames) {
