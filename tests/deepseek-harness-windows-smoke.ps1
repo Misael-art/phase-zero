@@ -83,6 +83,16 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
+function Test-ExpectedDshHome {
+    param([string]$Path, [ValidateSet('account','api')][string]$Route)
+    if (-not $Path -or -not [IO.Path]::IsPathRooted($Path)) { return $false }
+    # Windows may report the same temporary root through its 8.3 alias or its
+    # long name. The unique smoke-root suffix still proves route isolation.
+    $expectedSuffix = [IO.Path]::Combine((Split-Path -Leaf $testRoot), 'homes', $Route)
+    $normalized = [IO.Path]::GetFullPath($Path).TrimEnd([char[]]@('\','/'))
+    return $normalized.EndsWith($expectedSuffix, [StringComparison]::OrdinalIgnoreCase)
+}
+
 function ConvertTo-ProcessArgument {
     param([string]$Value)
     if ($Value -notmatch '[\s"]') { return $Value }
@@ -221,7 +231,7 @@ try {
     $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
     $apiChildPid = [int]$captured.processId
     $apiDescendantPid = Wait-FixtureDescendant
-    Assert-True ($captured.dshHome -eq (Join-Path $testRoot 'homes\api')) 'API DSH_HOME was not isolated.'
+    Assert-True (Test-ExpectedDshHome -Path $captured.dshHome -Route 'api') 'API DSH_HOME was not isolated.'
     Assert-True ($captured.permission -eq 'workspace-write' -and $captured.telemetry -eq '1') 'Requested runtime policy was not set.'
     Assert-True ($captured.leakedNames.Count -eq 0) 'Ambient secrets reached the Harness process.'
     Assert-True ($captured.nodeConfigNames.Count -eq 0) 'Ambient Node/npm config reached the Harness process.'
@@ -264,7 +274,7 @@ try {
     $captured = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
     $accountChildPid = [int]$captured.processId
     $accountDescendantPid = Wait-FixtureDescendant
-    Assert-True ($captured.dshHome -eq (Join-Path $testRoot 'homes\account')) 'Account route reused API DSH_HOME.'
+    Assert-True (Test-ExpectedDshHome -Path $captured.dshHome -Route 'account') 'Account route reused API DSH_HOME.'
     Assert-True ($captured.route -eq 'account') 'Account route did not stay explicit.'
     $accountStop = Invoke-Manager 'stop'
     Assert-True ($accountStop.Code -eq 0) 'Account route stop failed.'
