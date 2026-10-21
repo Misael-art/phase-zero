@@ -1,0 +1,967 @@
+#Requires -Version 5.1
+[CmdletBinding()]
+param(
+    [Parameter(Position = 0)][string]$Action = 'status',
+    [string]$Workspace = '',
+    [ValidateSet('', 'account', 'api')][string]$AuthRoute = '',
+    [int]$Port = 3080,
+    [string]$Runtime = '',
+    [switch]$InternalSupervisor,
+    [switch]$Json
+)
+
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$script:RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$script:PinsPath = Join-Path $script:RepoRoot 'packaging\deepseek-harness\pins.json'
+$script:PackagePath = Join-Path $script:RepoRoot 'packaging\deepseek-harness'
+$localAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [IO.Path]::GetTempPath() }
+$script:AppRoot = if ($env:PZ_DSH_ROOT) { [IO.Path]::GetFullPath($env:PZ_DSH_ROOT) } else { Join-Path $localAppData 'PhaseZero\DeepSeekHarness' }
+$script:RuntimeRoot = Join-Path $script:AppRoot 'runtime'
+$script:HomesRoot = Join-Path $script:AppRoot 'homes'
+$script:StatePath = Join-Path $script:AppRoot 'state.json'
+$script:ActivePath = Join-Path $script:AppRoot 'active.json'
+$script:SupervisorPath = Join-Path $script:AppRoot 'supervisor.json'
+$script:LogPath = Join-Path $script:AppRoot 'logs\dsh.log'
+$script:DefaultPort = if ($env:PZ_DSH_PORT) { [int]$env:PZ_DSH_PORT } else { 3080 }
+$script:ExplicitPort = $PSBoundParameters.ContainsKey('Port')
+if ($script:ExplicitPort) { $script:DefaultPort = $Port }
+$script:ReadyTimeoutSeconds = 35
+$script:MinAvailableMemoryBytes = 2147483648L
+$script:LaunchUrl = ''
+$script:SupervisorReady = $false
+
+function Test-SensitiveEnvironmentName {
+    param([string]$Name)
+    if ($Name -match '^(?i)DEEPSEEK_') { return $true }
+    if ($Name -match '^(?i)PZ_DSH_DEBUG$') { return $true }
+    if ($Name -match '^(?i)NPM_CONFIG_' -or $Name -match '^(?i)(NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS)$') { return $true }
+    $sensitiveWords = @('API','AUTH','ACCESS','REFRESH','BEARER','KEY','TOKEN','SECRET','PASSWORD','COOKIE','CREDENTIAL','CREDENTIALS')
+    $words = [regex]::Split($Name, '[^A-Za-z0-9]+')
+    foreach ($word in $words) { if ($sensitiveWords -contains $word) { return $true } }
+    return $false
+}
+
+if ($InternalSupervisor) {
+    Get-ChildItem Env: | Where-Object { Test-SensitiveEnvironmentName -Name $_.Name } |
+        ForEach-Object { Remove-Item -LiteralPath ("Env:" + $_.Name) -ErrorAction SilentlyContinue }
+}
+
+function Get-Pin {
+    if (-not (Test-Path -LiteralPath $script:PinsPath -PathType Leaf)) { throw 'pin-data-invalid' }
+    $pins = Get-Content -LiteralPath $script:PinsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([int]$pins.schemaVersion -ne 1 -or -not $pins.harness.version -or -not $pins.node.version) { throw 'pin-data-invalid' }
+    return $pins
+}
+
+function Get-AvailableMemoryByteCount {
+    try {
+        $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem -OperationTimeoutSec 3 -ErrorAction Stop
+        return ([long]$operatingSystem.FreePhysicalMemory) * 1024L
+    } catch { return $null }
+}
+
+function Write-DshDebugStage {
+    param([string]$Stage)
+    if ($env:PZ_DSH_DEBUG -and $Stage -match '^[a-z0-9.-]{1,80}$') {
+        [Console]::Error.WriteLine("PZ_DSH_STAGE=$Stage")
+    }
+}
+
+function Get-PortValue {
+    $portValue = $script:DefaultPort
+    if (-not $script:ExplicitPort -and -not $env:PZ_DSH_PORT) {
+        $savedState = Read-JsonFile -Path $script:StatePath
+        if ($savedState -and $savedState.port) { $portValue = [int]$savedState.port }
+    }
+    if ($portValue -lt 1024 -or $portValue -gt 65535) { throw 'invalid-port' }
+    return $portValue
+}
+
+function New-Result {
+    param([string]$Command, [bool]$Ok, [string]$State, [string]$Reason = '', [string]$NextAction = '', [hashtable]$Extra = @{})
+    $pins = Get-Pin
+    $portValue = Get-PortValue
+    $value = [ordered]@{
+        schemaVersion = 1; appId = 'app.deepseek-harness'; command = $Command
+        ok = $Ok; state = $State; reason = $Reason; nextAction = $NextAction
+        version = [string]$pins.harness.version; profile = 'web'; port = $portValue
+        authRoute = 'unknown'; accountAuth = 'unknown'; apiCredential = 'unknown'
+        quota = 'unknown'; balance = 'unknown'; sandboxPolicy = 'workspace-write + ask (requested)'
+        sandboxEnforcement = 'unknown'; workspaceSelection = 'confirm in Harness Web UI'
+        plugins = 'opt-in; none enabled by PhaseZero'; telemetry = 'disabled by DSH_TELEMETRY_DISABLED=1'
+    }
+    foreach ($key in $Extra.Keys) { $value[$key] = $Extra[$key] }
+    return $value
+}
+
+function Write-JsonResult {
+    param([System.Collections.IDictionary]$Value, [int]$Code = 0)
+    [Console]::Out.WriteLine(($Value | ConvertTo-Json -Depth 10 -Compress))
+    return $Code
+}
+
+function Set-PrivateAcl {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if ($env:OS -ne 'Windows_NT') { return }
+    $item = Get-Item -LiteralPath $Path -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-reparse-point' }
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    if ($item.PSIsContainer) {
+        $acl = New-Object Security.AccessControl.DirectorySecurity
+        $acl.SetAccessRuleProtection($true, $false)
+        $acl.SetOwner($sid)
+        $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+        $acl.AddAccessRule($rule)
+        Set-Acl -LiteralPath $Path -AclObject $acl
+    } else {
+        $acl = New-Object Security.AccessControl.FileSecurity
+        $acl.SetAccessRuleProtection($true, $false)
+        $acl.SetOwner($sid)
+        $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'Allow')
+        $acl.AddAccessRule($rule)
+        Set-Acl -LiteralPath $Path -AclObject $acl
+    }
+}
+
+function New-PrivateDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-SafeManagedRoot)) { throw 'unsafe-managed-root' }
+    $root = [IO.Path]::GetFullPath($script:AppRoot).TrimEnd('\')
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (-not [string]::Equals($fullPath.TrimEnd('\'), $root, [StringComparison]::OrdinalIgnoreCase) -and
+        -not $fullPath.StartsWith(($root + '\'), [StringComparison]::OrdinalIgnoreCase)) { throw 'unsafe-managed-path' }
+    if (Test-Path -LiteralPath $root) {
+        if (-not (Get-Item -LiteralPath $root -Force).PSIsContainer) { throw 'unsafe-managed-root' }
+    } else { $null = New-Item -ItemType Directory -Path $root -Force }
+    Set-PrivateAcl -Path $root
+    $relative = $fullPath.Substring([Math]::Min($fullPath.Length, $root.Length)).TrimStart('\')
+    $current = $root
+    foreach ($part in @($relative -split '[\\/]+' | Where-Object { $_ })) {
+        $current = Join-Path $current $part
+        if (Test-Path -LiteralPath $current) {
+            if (-not (Get-Item -LiteralPath $current -Force).PSIsContainer) { throw 'unsafe-managed-path' }
+        } else { $null = New-Item -ItemType Directory -Path $current -Force }
+        Set-PrivateAcl -Path $current
+    }
+}
+
+function Test-SafeManagedRoot {
+    $root = [IO.Path]::GetFullPath($script:AppRoot)
+    $volume = [IO.Path]::GetPathRoot($root)
+    if ([string]::Equals($root.TrimEnd('\'), $volume.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    if (Test-Path -LiteralPath $root) {
+        $item = Get-Item -LiteralPath $root -Force
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+    }
+    return $true
+}
+
+function Write-PrivateJson {
+    param([string]$Path, [object]$Value)
+    New-PrivateDirectory -Path (Split-Path -Parent $Path)
+    if (Test-Path -LiteralPath $Path) {
+        $existing = Get-Item -LiteralPath $Path -Force
+        if ($existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-managed-path' }
+    }
+    $temp = Join-Path (Split-Path -Parent $Path) ('.' + [IO.Path]::GetFileName($Path) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    [IO.File]::WriteAllText($temp, ($Value | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding($false)))
+    Set-PrivateAcl -Path $temp
+    if (Test-Path -LiteralPath $Path) {
+        $backup = Join-Path (Split-Path -Parent $Path) ('.' + [IO.Path]::GetFileName($Path) + '.' + [guid]::NewGuid().ToString('N') + '.bak')
+        try {
+            [IO.File]::Replace($temp, $Path, $backup)
+        } finally {
+            if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }
+        }
+    } else { [IO.File]::Move($temp, $Path) }
+}
+
+function Read-JsonFile {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    if ((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { return $null }
+    try { return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { return $null }
+}
+
+function Get-Root {
+    New-PrivateDirectory -Path $script:AppRoot
+    return $script:AppRoot
+}
+
+function Get-ActiveRuntime {
+    $active = Read-JsonFile -Path $script:ActivePath
+    if ($null -eq $active -or [int]$active.schemaVersion -ne 1 -or -not $active.runtimePath) { return $null }
+    $candidate = Join-Path $script:RuntimeRoot ([string]$active.runtimePath)
+    $base = [IO.Path]::GetFullPath($script:RuntimeRoot).TrimEnd('\') + '\'
+    $full = [IO.Path]::GetFullPath($candidate)
+    if (-not $full.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) { return $null }
+    if (-not (Test-Path -LiteralPath $full -PathType Container)) { return $null }
+    if ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { return $null }
+    return [pscustomobject]@{ Path = $full; Metadata = $active }
+}
+
+function Test-PidAlive {
+    param([object]$Id)
+    if ($null -eq $Id -or [int]$Id -le 0) { return $false }
+    try { $null = Get-Process -Id ([int]$Id) -ErrorAction Stop; return $true } catch { return $false }
+}
+
+function Test-LoopbackHttp {
+    param([int]$PortNumber)
+    try {
+        $request = [Net.HttpWebRequest]::Create("http://127.0.0.1:$PortNumber/")
+        $request.Proxy = $null; $request.Timeout = 700; $request.AllowAutoRedirect = $false
+        $request.Host = "127.0.0.1:$PortNumber"
+        $response = $request.GetResponse()
+        $code = [int]$response.StatusCode; $response.Close()
+        return [pscustomobject]@{ Healthy = ($code -in @(200,301,302,303,307,308,401)); Status = $code }
+    } catch [Net.WebException] {
+        if ($_.Exception.Response) {
+            $code = [int]$_.Exception.Response.StatusCode; $_.Exception.Response.Close()
+            return [pscustomobject]@{ Healthy = ($code -in @(301,302,303,307,308,401)); Status = $code }
+        }
+        return [pscustomobject]@{ Healthy = $false; Status = $null }
+    } catch { return [pscustomobject]@{ Healthy = $false; Status = $null } }
+}
+
+function Invoke-Control {
+    param([string]$ControlAction, [int]$TimeoutMs = 1500)
+    $info = Read-JsonFile -Path $script:SupervisorPath
+    if ($null -eq $info -or -not $info.controlPort -or -not $info.controlNonce) { throw 'supervisor-unavailable' }
+    $client = New-Object Net.Sockets.TcpClient
+    $client.ReceiveTimeout = $TimeoutMs; $client.SendTimeout = $TimeoutMs
+    try {
+        $connect = $client.ConnectAsync('127.0.0.1', [int]$info.controlPort)
+        if (-not $connect.Wait($TimeoutMs)) { throw 'supervisor-unavailable' }
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = $TimeoutMs; $stream.WriteTimeout = $TimeoutMs
+        $writer = New-Object IO.StreamWriter($stream, (New-Object Text.UTF8Encoding($false)), 1024, $true)
+        $reader = New-Object IO.StreamReader($stream, (New-Object Text.UTF8Encoding($false)), $false, 1024, $true)
+        $writer.WriteLine((@{ action = $ControlAction; nonce = [string]$info.controlNonce } | ConvertTo-Json -Compress))
+        $writer.Flush()
+        $line = $reader.ReadLine()
+        if (-not $line) { throw 'supervisor-unavailable' }
+        $result = $line | ConvertFrom-Json
+        if (-not $result.ok) { throw ([string]$result.code) }
+        return $result
+    } finally { $client.Dispose() }
+}
+
+function Get-Status {
+    param([object]$KnownAvailableMemoryBytes, [bool]$DebugStatusStages = $false)
+    $debugStatusStages = [bool]$env:PZ_DSH_DEBUG -and $DebugStatusStages
+    if ($debugStatusStages) { Write-DshDebugStage 'status.files.begin' }
+    $pins = Get-Pin
+    if ($debugStatusStages) { Write-DshDebugStage 'status.pins.complete' }
+    $active = Get-ActiveRuntime
+    if ($debugStatusStages) { Write-DshDebugStage 'status.active.complete' }
+    $state = Read-JsonFile -Path $script:StatePath
+    if ($debugStatusStages) { Write-DshDebugStage 'status.state.complete' }
+    $sup = Read-JsonFile -Path $script:SupervisorPath
+    if ($debugStatusStages) { Write-DshDebugStage 'status.supervisor.complete' }
+    $runtimeState = 'stopped'; $healthy = $false; $httpCode = $null
+    $supervisorId = if ($sup -and $sup.pid) { [int]$sup.pid } elseif ($state -and $state.supervisorPid) { [int]$state.supervisorPid } else { 0 }
+    if ($debugStatusStages) { Write-DshDebugStage 'status.pid.begin' }
+    $supervisorAlive = Test-PidAlive $supervisorId
+    if ($debugStatusStages) { Write-DshDebugStage 'status.pid.complete' }
+    if ($supervisorAlive) {
+        try {
+            if ($debugStatusStages) { Write-DshDebugStage 'status.control.begin' }
+            $control = Invoke-Control -ControlAction 'status' -TimeoutMs 700
+            if ($debugStatusStages) { Write-DshDebugStage 'status.control.complete' }
+            if ($debugStatusStages) { Write-DshDebugStage 'status.http.begin' }
+            $probe = Test-LoopbackHttp -PortNumber (Get-PortValue)
+            if ($debugStatusStages) { Write-DshDebugStage 'status.http.complete' }
+            $healthy = [bool]$probe.Healthy; $httpCode = $probe.Status
+            if ($healthy -and $control.running) { $runtimeState = 'running' } else { $runtimeState = 'starting-or-unhealthy' }
+        } catch {
+            if ($debugStatusStages) { Write-DshDebugStage 'status.control-or-http.failed' }
+            $runtimeState = 'crashed-or-stale'
+        }
+    } elseif ($sup) {
+        $runtimeState = 'crashed-or-stale'
+        if ($state -and $state.authRoute -and $state.supervisorDebugCapture) { Save-SupervisorStderr -Route ([string]$state.authRoute) -Enabled }
+    }
+    $installed = ($null -ne $active -and [string]$active.Metadata.version -eq [string]$pins.harness.version)
+    $overall = if (-not $installed) { 'not-installed' } elseif ($runtimeState -eq 'running') { 'running' } elseif ($runtimeState -eq 'crashed-or-stale') { 'degraded' } else { 'installed' }
+    $route = if ($state -and $state.authRoute) { [string]$state.authRoute } else { 'unknown' }
+    $dshHomePath = if ($route -in @('account','api')) { Join-Path $script:HomesRoot $route } else { '' }
+    $credentialFile = if ($dshHomePath) { Test-Path -LiteralPath (Join-Path $dshHomePath '.credentials.yaml') -PathType Leaf } else { $false }
+    $accountAuth = if ($route -eq 'account' -and $credentialFile) { 'credential file present; session unknown' } else { 'unknown' }
+    $apiCredential = if ($route -eq 'api' -and $credentialFile) { 'credential file present; validity unknown' } elseif ($route -eq 'api') { 'not observed' } else { 'not-selected' }
+    $memory = if ($PSBoundParameters.ContainsKey('KnownAvailableMemoryBytes')) { $KnownAvailableMemoryBytes } else { Get-AvailableMemoryByteCount }
+    $memoryBudget = if ($null -eq $memory) { 'unknown' } elseif ($memory -ge $script:MinAvailableMemoryBytes) { 'sufficient' } else { 'insufficient' }
+    $next = switch ($overall) { 'not-installed' { 'install' } 'degraded' { 'doctor' } 'running' { 'open' } default { 'choose workspace and auth route, then start' } }
+    if ($debugStatusStages) { Write-DshDebugStage 'status.result.begin' }
+    $result = New-Result -Command 'status' -Ok ($installed -and $runtimeState -ne 'crashed-or-stale') -State $overall -Reason $(if ($installed) { '' } else { 'runtime-not-installed' }) -NextAction $next -Extra @{
+        installed = $installed; installedVersion = if ($active) { [string]$active.Metadata.version } else { '' }
+        runtimeState = $runtimeState; workspace = if ($state) { [string]$state.requestedWorkspace } else { '' }
+        workspaceSelection = if ($state -and $state.workspaceSelection) { [string]$state.workspaceSelection } else { 'not-selected' }
+        authRoute = $route; accountAuth = $accountAuth; apiCredential = $apiCredential
+        processId = if ($runtimeState -eq 'running') { $supervisorId } else { $null }
+        availableMemoryBytes = $memory; requiredMemoryBytes = $script:MinAvailableMemoryBytes; memoryBudget = $memoryBudget
+        healthCheck = @{ loopbackHttp = $httpCode; healthy = $healthy }
+        dshHome = $dshHomePath; proxyRoute = 'blocked until request-bound grants are available'
+    }
+    if ($debugStatusStages) { Write-DshDebugStage 'status.result.complete' }
+    return $result
+}
+
+function Get-Plan {
+    $pins = Get-Pin
+    $platformId = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+    $resource = $pins.node.platforms.'win32-x64'
+    $free = $null
+    try { $drive = New-Object IO.DriveInfo([IO.Path]::GetPathRoot($script:AppRoot)); $free = [long]$drive.AvailableFreeSpace } catch { $free = $null }
+    $memory = Get-AvailableMemoryByteCount
+    $rootSafe = Test-SafeManagedRoot
+    $supported = ($env:OS -eq 'Windows_NT' -and $platformId -eq 'X64' -and $null -ne $resource -and $rootSafe)
+    $enoughDisk = $null -ne $free -and $free -ge 536870912L
+    $memoryBudget = if ($null -eq $memory) { 'unknown' } elseif ($memory -ge $script:MinAvailableMemoryBytes) { 'sufficient' } else { 'insufficient' }
+    $ready = $supported -and $enoughDisk -and $memoryBudget -eq 'sufficient'
+    $reason = if (-not $rootSafe) { 'unsafe-managed-root' } elseif (-not $supported) { 'unsupported-platform-or-architecture' } elseif ($null -eq $free) { 'disk-status-unavailable' } elseif (-not $enoughDisk) { 'insufficient-disk-space' } elseif ($null -eq $memory) { 'memory-status-unavailable' } elseif (-not $ready) { 'insufficient-memory' } else { '' }
+    $next = if (-not $rootSafe) { 'choose a dedicated non-reparse PZ_DSH_ROOT' } elseif ($null -eq $free) { 'check disk availability and retry diagnostics' } elseif ($ready) { 'install' } elseif ($null -eq $memory -or $memory -lt $script:MinAvailableMemoryBytes) { 'use Windows x64 with at least 512 MiB free and 2 GiB available memory' } else { 'use Windows x64 with at least 512 MiB free' }
+    return (New-Result -Command 'plan' -Ok $ready -State $(if ($ready) { 'ready' } else { 'blocked' }) -Reason $reason -NextAction $next -Extra @{
+        platform = 'windows'; architecture = $platformId; nodeVersion = [string]$pins.node.version
+        nodeArchive = [string]$resource.url; nodeSha256 = [string]$resource.sha256
+        packageIntegrity = [string]$pins.harness.integrity; registry = [string]$pins.harness.registry
+        freeBytes = $free; requiredFreeBytes = 536870912L; availableMemoryBytes = $memory
+        requiredMemoryBytes = $script:MinAvailableMemoryBytes; memoryBudget = $memoryBudget
+        mutatesHost = $false; startsRuntime = $false
+    })
+}
+
+function Get-Mutex {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $digest = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($script:AppRoot))).Replace('-', '').Substring(0,16)
+    return New-Object Threading.Mutex($false, "Local\PhaseZeroDSH-$identity-$digest")
+}
+
+function Test-ZipSafe {
+    param([string]$Path)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        foreach ($entry in $zip.Entries) {
+            $name = $entry.FullName.Replace('\','/')
+            $parts = $name.Split('/')
+            if ([IO.Path]::IsPathRooted($name) -or $name -match '^[A-Za-z]:' -or $parts -contains '..' -or (($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) { throw 'archive-path-unsafe' }
+        }
+    } finally { $zip.Dispose() }
+}
+
+function ConvertTo-ProcessArgument {
+    param([string]$Value)
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $escaped = $Value -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
+function Install-Runtime {
+    param([bool]$Update = $false)
+    $pins = Get-Pin
+    $plan = Get-Plan
+    if (-not $plan.ok) { throw ([string]$plan.reason) }
+    $mutex = Get-Mutex
+    if (-not $mutex.WaitOne(0)) { throw 'operation-busy' }
+    try {
+        $state = Read-JsonFile -Path $script:StatePath
+        if ($state -and (Test-PidAlive $state.supervisorPid)) { throw 'runtime-running' }
+        $current = Get-ActiveRuntime
+        if ($current -and -not $Update) { return (Get-Status) }
+        New-PrivateDirectory -Path $script:RuntimeRoot
+        $stage = Join-Path $script:RuntimeRoot ('.stage-' + [guid]::NewGuid().ToString('N'))
+        New-PrivateDirectory -Path $stage
+        try {
+            $resource = $pins.node.platforms.'win32-x64'
+            $archive = Join-Path $stage 'node.zip'
+            try { Invoke-WebRequest -Uri ([string]$resource.url) -OutFile $archive -UseBasicParsing -TimeoutSec 90 }
+            catch { Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue; throw 'download-failed' }
+            $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($hash -ne ([string]$resource.sha256).ToLowerInvariant()) { throw 'integrity-mismatch' }
+            Test-ZipSafe -Path $archive
+            $extract = Join-Path $stage 'extract'; New-PrivateDirectory -Path $extract
+            Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+            $nodeSource = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
+            if (-not $nodeSource -or -not (Test-Path -LiteralPath (Join-Path $nodeSource.FullName 'node.exe'))) { throw 'node-archive-invalid' }
+            $nodeRoot = Join-Path $stage 'node'; Move-Item -LiteralPath $nodeSource.FullName -Destination $nodeRoot
+            Remove-Item -LiteralPath $archive,$extract -Recurse -Force
+            $app = Join-Path $stage 'app'; New-PrivateDirectory -Path $app
+            Copy-Item -LiteralPath (Join-Path $script:PackagePath 'package.json') -Destination $app
+            Copy-Item -LiteralPath (Join-Path $script:PackagePath 'package-lock.json') -Destination $app
+            $npmUserConfig = Join-Path $stage 'npm-userconfig'
+            $npmGlobalConfig = Join-Path $stage 'npm-globalconfig'
+            [IO.File]::WriteAllText($npmUserConfig, '', (New-Object Text.UTF8Encoding($false)))
+            [IO.File]::WriteAllText($npmGlobalConfig, '', (New-Object Text.UTF8Encoding($false)))
+            $node = Join-Path $nodeRoot 'node.exe'; $npm = Join-Path $nodeRoot 'npm.cmd'
+            $lockPath = Join-Path $app 'package-lock.json'
+            $registryNetworkOptions = @('--fetch-timeout=120000','--fetch-retries=1','--fetch-retry-mintimeout=1000','--fetch-retry-maxtimeout=5000')
+            $lockScript = 'const fs=require("fs"); let lock,pins; try { lock=JSON.parse(fs.readFileSync(process.env.PZ_DSH_LOCK_FILE,"utf8")); pins=JSON.parse(fs.readFileSync(process.env.PZ_DSH_PINS_FILE,"utf8")); } catch { console.error("lock-check: parse-or-read-error"); process.exit(24); } const expected=pins.harness || {}; const entry=lock.packages && lock.packages["node_modules/@deepseek-ai/dsh"]; const result={entryFound:Boolean(entry),versionMatches:Boolean(entry) && entry.version === expected.version,integrityMatches:Boolean(entry) && entry.integrity === expected.integrity}; if (!result.entryFound || !result.versionMatches || !result.integrityMatches) { console.error("lock-check: " + JSON.stringify(result)); process.exit(23); }'
+            $envBefore = @{}; Get-ChildItem Env: | ForEach-Object { $envBefore[$_.Name] = $_.Value }
+            try {
+                Get-ChildItem Env: | Where-Object { Test-SensitiveEnvironmentName -Name $_.Name } | ForEach-Object { Remove-Item -LiteralPath ("Env:" + $_.Name) -ErrorAction SilentlyContinue }
+                $env:npm_config_cache = Join-Path $stage 'npm-cache'
+                $env:npm_config_update_notifier = 'false'; $env:npm_config_audit = 'false'; $env:npm_config_fund = 'false'; $env:CI = '1'
+                $env:PATH = $nodeRoot + ';' + $env:PATH
+                $version = (& $node --version 2>&1 | Out-String).Trim()
+                if ($LASTEXITCODE -ne 0 -or $version -ne ('v' + [string]$pins.node.version)) { throw 'node-version-mismatch' }
+                Push-Location $app
+                try {
+                    $null = @(& $npm ci --ignore-scripts --no-audit --no-fund --userconfig $npmUserConfig --globalconfig $npmGlobalConfig --registry ([string]$pins.harness.registry) @registryNetworkOptions 2>&1)
+                    if ($LASTEXITCODE -ne 0) { throw 'registry-or-dependency-failed' }
+                    $null = @(& $npm rebuild --foreground-scripts --no-audit --no-fund --userconfig $npmUserConfig --globalconfig $npmGlobalConfig --registry ([string]$pins.harness.registry) @registryNetworkOptions node-pty koffi '@deepseek-ai/dsh-subprocess-local' 2>&1)
+                    if ($LASTEXITCODE -ne 0) { throw 'allowed-build-hook-failed' }
+                    $env:PZ_DSH_LOCK_FILE = $lockPath; $env:PZ_DSH_PINS_FILE = $script:PinsPath
+                    try {
+                        $lockOutput = @(& $node -e $lockScript 2>&1); $lockExitCode = $LASTEXITCODE
+                    } finally {
+                        Remove-Item Env:PZ_DSH_LOCK_FILE,Env:PZ_DSH_PINS_FILE -ErrorAction SilentlyContinue
+                    }
+                    if ($lockExitCode -ne 0) {
+                        if ($env:PZ_DSH_DEBUG) { [Console]::Error.WriteLine(($lockOutput -join "`n")) }
+                        throw 'package-integrity-mismatch'
+                    }
+                } finally { Pop-Location }
+            } finally {
+                foreach ($name in @((Get-ChildItem Env: | Select-Object -ExpandProperty Name))) { Remove-Item -LiteralPath ("Env:" + $name) -ErrorAction SilentlyContinue }
+                foreach ($name in $envBefore.Keys) { Set-Item -Path ("Env:" + $name) -Value $envBefore[$name] }
+            }
+            $pkg = Get-Content -LiteralPath (Join-Path $app 'node_modules\@deepseek-ai\dsh\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($pkg.version -ne $pins.harness.version -or $pkg.license -ne 'MIT') { throw 'package-metadata-mismatch' }
+            $finalName = 'dsh-' + [string]$pins.harness.version + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
+            $final = Join-Path $script:RuntimeRoot $finalName
+            Move-Item -LiteralPath $stage -Destination $final
+            $active = @{ schemaVersion = 1; version = [string]$pins.harness.version; nodeVersion = [string]$pins.node.version; runtimePath = $finalName; installedAt = [DateTime]::UtcNow.ToString('o'); sourceCommit = [string]$pins.harness.commit }
+            try { Write-PrivateJson -Path $script:ActivePath -Value $active }
+            catch {
+                $selected = Get-ActiveRuntime
+                if (-not $selected -or $selected.Path -ne [IO.Path]::GetFullPath($final)) {
+                    Remove-Item -LiteralPath $final -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                throw
+            }
+            return (Get-Status)
+        } catch {
+            if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+            throw
+        }
+    } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
+}
+
+function Test-PortOccupied {
+    param([int]$PortNumber)
+    $client = New-Object Net.Sockets.TcpClient
+    try { $task = $client.ConnectAsync('127.0.0.1', $PortNumber); return $task.Wait(200) -and $client.Connected } catch { return $false } finally { $client.Dispose() }
+}
+
+function Get-LaunchEnvironment {
+    param([string]$DshHome)
+    $envMap = @{}
+    Get-ChildItem Env: | ForEach-Object {
+        if (-not (Test-SensitiveEnvironmentName -Name $_.Name)) { $envMap[$_.Name] = $_.Value }
+    }
+    $envMap['DSH_HOME'] = $DshHome; $envMap['DSH_TELEMETRY_DISABLED'] = '1'
+    $envMap['DSH_PERMISSION_MODE'] = 'workspace-write'
+    $envMap['NODE_OPTIONS'] = '--max-old-space-size=2048'
+    return $envMap
+}
+
+function Start-Runtime {
+    if ($AuthRoute -notin @('account','api')) { throw 'auth-route-required' }
+    if (-not $Workspace -or -not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw 'workspace-unavailable' }
+    $workspaceFull = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $Workspace).Path)
+    $active = Get-ActiveRuntime
+    if (-not $active -or $active.Metadata.version -ne (Get-Pin).harness.version) { throw 'runtime-not-installed' }
+    $mutex = Get-Mutex
+    if (-not $mutex.WaitOne(0)) { throw 'operation-busy' }
+    try {
+        $state = Read-JsonFile -Path $script:StatePath
+        if ($state -and (Test-PidAlive $state.supervisorPid)) {
+            try { $null = Invoke-Control -ControlAction 'status' -TimeoutMs 700 }
+            catch { throw 'supervisor-unhealthy' }
+            if ($state.authRoute -ne $AuthRoute -or $state.requestedWorkspace -ne $workspaceFull) { throw 'different-route-running-stop-first' }
+            return (Get-Status)
+        }
+        Write-DshDebugStage 'start.memory.begin'
+        $memory = Get-AvailableMemoryByteCount
+        Write-DshDebugStage 'start.memory.complete'
+        if ($null -eq $memory) { throw 'memory-status-unavailable' }
+        if ($memory -lt $script:MinAvailableMemoryBytes) { throw 'insufficient-memory' }
+        $portValue = Get-PortValue
+        if (Test-PortOccupied -PortNumber $portValue) { throw 'port-occupied' }
+        $launchDir = Join-Path (Join-Path $script:HomesRoot $AuthRoute) 'launch'
+        New-PrivateDirectory -Path $launchDir
+        $state = @{ schemaVersion = 1; requestedWorkspace = $workspaceFull; workspace = ''; workspaceSelection = 'confirm in Harness Web UI'; authRoute = $AuthRoute; state = 'starting'; port = $portValue; profile = 'web'; supervisorPid = $null; supervisorDebugCapture = [bool]$env:PZ_DSH_DEBUG; sandboxPolicy = 'workspace-write + ask (requested)'; sandboxEnforcement = 'unknown'; plugins = @(); updatedAt = [DateTime]::UtcNow.ToString('o') }
+        Write-PrivateJson -Path $script:StatePath -Value $state
+        $engine = (Get-Process -Id $PID).Path
+        $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Action','supervise','-InternalSupervisor','-Workspace',$launchDir,'-AuthRoute',$AuthRoute,'-Port',[string]$portValue,'-Runtime',$active.Path)
+        $argumentLine = ($arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join ' '
+        $supervisorStderrPath = Join-Path $launchDir 'supervisor-stderr.tmp'
+        Write-DshDebugStage 'start.supervisor.spawn.begin'
+        # Keep supervisor console output separate from PhaseZero CLI output.
+        # Harness output is captured by the supervisor and redacted before logging.
+        if ($env:PZ_DSH_DEBUG) {
+            Remove-Item -LiteralPath $supervisorStderrPath -Force -ErrorAction SilentlyContinue
+            $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -RedirectStandardOutput 'NUL' -RedirectStandardError $supervisorStderrPath -PassThru
+        } else {
+            $process = Start-Process -FilePath $engine -ArgumentList $argumentLine -WorkingDirectory $launchDir -WindowStyle Hidden -RedirectStandardOutput 'NUL' -PassThru
+        }
+        $state.supervisorPid = [int]$process.Id; Write-PrivateJson -Path $script:StatePath -Value $state
+        Write-DshDebugStage 'start.supervisor.spawn.complete'
+    } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
+    $deadline = [DateTime]::UtcNow.AddSeconds($script:ReadyTimeoutSeconds)
+    $statusPollCount = 0
+    do {
+        $statusPollCount++
+        if ($statusPollCount -le 3) { Write-DshDebugStage ("start.health.poll.$statusPollCount.begin") }
+        Start-Sleep -Milliseconds 250
+        if (-not (Test-PidAlive $process.Id)) {
+            $process.Refresh()
+            Save-SupervisorStderr -Route $AuthRoute -Emit -Enabled ([bool]$env:PZ_DSH_DEBUG)
+            if ($env:PZ_DSH_DEBUG) { [Console]::Error.WriteLine("Supervisor exited before ready; exitCode=$($process.ExitCode)") }
+            throw 'runtime-crashed'
+        }
+        if ($statusPollCount -eq 1) { Write-DshDebugStage 'start.health.status.begin' }
+        $status = Get-Status -KnownAvailableMemoryBytes $memory -DebugStatusStages ($statusPollCount -le 3)
+        if ($statusPollCount -eq 1) { Write-DshDebugStage 'start.health.status.complete' }
+        if ($statusPollCount -le 3) { Write-DshDebugStage ("start.health.evaluate.$statusPollCount.begin") }
+        if ($status.state -eq 'running') {
+            Write-DshDebugStage 'start.health.ready'
+            return $status
+        }
+        if ($statusPollCount -le 3) { Write-DshDebugStage ("start.health.evaluate.$statusPollCount.complete") }
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Write-DshDebugStage 'start.health.timeout'
+    $stopAccepted = $true
+    try { $null = Invoke-Control -ControlAction 'stop' }
+    catch { $stopAccepted = $false }
+    if (-not $stopAccepted -or -not $process.WaitForExit(5000)) {
+        try {
+            if (-not $process.HasExited) { $process.Kill() }
+            $null = $process.WaitForExit(5000)
+        } catch {
+            if (-not $process.HasExited) { throw 'runtime-cleanup-failed' }
+        }
+    }
+    if (-not $process.HasExited) { throw 'runtime-cleanup-failed' }
+    $process.Refresh()
+    Save-SupervisorStderr -Route $AuthRoute -Emit -Enabled ([bool]$env:PZ_DSH_DEBUG)
+    throw 'health-timeout'
+}
+
+function ConvertTo-RedactedLogLine {
+    param([string]$Line)
+    $line = [regex]::Replace($Line, '([?&](?:token|launchToken)=)[^&\s"'']+', '$1[redacted]', 'IgnoreCase')
+    $line = [regex]::Replace($line, '(?i)(["'']?\b(?:deepseek[\s_-]+)?(?:api[\s_-]*key|access[\s_-]*token|refresh[\s_-]*token|launch[\s_-]*token|client[\s_-]*secret|secret|password|cookie|authorization|bearer|token)\b["'']?\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|[^\s,;}]+)', '$1[redacted]')
+    $line = [regex]::Replace($line, '(?i)\bBearer\s+\S+', 'Bearer [redacted]')
+    $line = [regex]::Replace($line, '\bsk-[A-Za-z0-9_-]{8,}', '[redacted-api-key]')
+    return $line
+}
+
+function Save-SupervisorStderr {
+    param([string]$Route, [switch]$Emit, [switch]$Enabled)
+    if (-not $Enabled -or $Route -notin @('account','api')) { return }
+    $launchDir = Join-Path (Join-Path $script:HomesRoot $Route) 'launch'
+    $capturePath = Join-Path $launchDir 'supervisor-stderr.tmp'
+    if (-not (Test-Path -LiteralPath $capturePath -PathType Leaf)) { return }
+    try {
+        $lines = @(Get-Content -LiteralPath $capturePath -Tail 20 -ErrorAction Stop)
+        $safe = @($lines | ForEach-Object { ConvertTo-RedactedLogLine -Line ([string]$_) }) -join ' | '
+        if ($safe.Length -gt 2000) { $safe = $safe.Substring(0,2000) }
+        if ($safe) {
+            New-PrivateDirectory -Path (Split-Path -Parent $script:LogPath)
+            $entry = "Supervisor stderr (redacted): $safe$([Environment]::NewLine)"
+            [IO.File]::AppendAllText($script:LogPath, $entry, (New-Object Text.UTF8Encoding($false)))
+            if ($Emit) { [Console]::Error.WriteLine($entry.TrimEnd()) }
+        }
+    } catch { Write-Verbose 'Could not persist redacted supervisor stderr.' }
+    try { Remove-Item -LiteralPath $capturePath -Force -ErrorAction Stop }
+    catch { Write-Verbose 'Could not remove temporary supervisor stderr.' }
+}
+
+function Receive-RuntimeOutput {
+    param([object]$Collector, [switch]$CaptureLaunchUrl)
+    $line = $null
+    while ($Collector.TryDequeue([ref]$line)) {
+        $line = [string]$line
+        if ($CaptureLaunchUrl -and $line -match '(?i)dsh web:' -and $line -match 'https?://[^\s"'']+') {
+            $candidate = $matches[0].TrimEnd('.,;)')
+            try {
+                $uri = [Uri]$candidate
+                if ($uri.Host -in @('127.0.0.1','localhost') -and $uri.Port -eq $script:Port -and $uri.Query -match '(?i)(token|launchToken)=') {
+                    $script:LaunchUrl = $candidate
+                    $script:SupervisorReady = $true
+                    $info = Read-JsonFile -Path $script:SupervisorPath
+                    if ($info) { $info.ready = $true; Write-PrivateJson -Path $script:SupervisorPath -Value $info }
+                    $state = Read-JsonFile -Path $script:StatePath
+                    if ($state) { $state.state = 'running'; $state.updatedAt = [DateTime]::UtcNow.ToString('o'); Write-PrivateJson -Path $script:StatePath -Value $state }
+                }
+            } catch { Write-Verbose 'Ignoring a non-parseable launch URL from Harness output.' }
+        }
+        [IO.File]::AppendAllText($script:LogPath, (ConvertTo-RedactedLogLine $line) + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
+        $line = $null
+    }
+}
+
+function Initialize-ProcessJobSupport {
+    if ('PhaseZero.DeepSeekHarnessProcessJob' -as [type]) { return }
+    Add-Type -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+namespace PhaseZero {
+    public static class DeepSeekHarnessProcessJob {
+        private const uint KillOnJobClose = 0x2000;
+        private const int JobObjectExtendedLimitInfoClass = 9;
+        private const int JobObjectBasicAccountingInfoClass = 1;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BasicLimitInformation {
+            public long PerProcessUserTimeLimit;
+            public long PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize;
+            public UIntPtr MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass;
+            public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoCounters {
+            public ulong ReadOperationCount;
+            public ulong WriteOperationCount;
+            public ulong OtherOperationCount;
+            public ulong ReadTransferCount;
+            public ulong WriteTransferCount;
+            public ulong OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ExtendedLimitInformation {
+            public BasicLimitInformation BasicLimitInformation;
+            public IoCounters IoInfo;
+            public UIntPtr ProcessMemoryLimit;
+            public UIntPtr JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed;
+            public UIntPtr PeakJobMemoryUsed;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BasicAccountingInformation {
+            public long TotalUserTime;
+            public long TotalKernelTime;
+            public long ThisPeriodTotalUserTime;
+            public long ThisPeriodTotalKernelTime;
+            public uint TotalPageFaultCount;
+            public uint TotalProcesses;
+            public uint ActiveProcesses;
+            public uint TotalTerminatedProcesses;
+        }
+
+        [DllImport("kernel32.dll", EntryPoint = "CreateJobObjectW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetInformationJobObject(IntPtr job, int informationClass, ref ExtendedLimitInformation information, uint length);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool QueryInformationJobObject(IntPtr job, int informationClass, ref BasicAccountingInformation information, uint length, IntPtr returnLength);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        public static IntPtr CreateKillOnCloseJob() {
+            IntPtr job = CreateJobObject(IntPtr.Zero, null);
+            if (job == IntPtr.Zero) return IntPtr.Zero;
+            ExtendedLimitInformation information = new ExtendedLimitInformation();
+            information.BasicLimitInformation.LimitFlags = KillOnJobClose;
+            if (SetInformationJobObject(job, JobObjectExtendedLimitInfoClass, ref information,
+                (uint)Marshal.SizeOf(typeof(ExtendedLimitInformation)))) return job;
+            CloseHandle(job);
+            return IntPtr.Zero;
+        }
+
+        public static bool Assign(IntPtr job, IntPtr process) { return AssignProcessToJobObject(job, process); }
+        public static bool Terminate(IntPtr job) { return TerminateJobObject(job, 1); }
+        public static uint ActiveProcessCount(IntPtr job) {
+            BasicAccountingInformation information = new BasicAccountingInformation();
+            if (!QueryInformationJobObject(job, JobObjectBasicAccountingInfoClass, ref information,
+                (uint)Marshal.SizeOf(typeof(BasicAccountingInformation)), IntPtr.Zero)) return UInt32.MaxValue;
+            return information.ActiveProcesses;
+        }
+        public static bool Close(IntPtr job) { return job == IntPtr.Zero || CloseHandle(job); }
+    }
+
+    public sealed class DeepSeekHarnessOutputCollector {
+        private readonly ConcurrentQueue<string> lines = new ConcurrentQueue<string>();
+        public readonly DataReceivedEventHandler Handler;
+
+        public DeepSeekHarnessOutputCollector() {
+            Handler = new DataReceivedEventHandler(Collect);
+        }
+
+        private void Collect(object sender, DataReceivedEventArgs eventArgs) {
+            if (eventArgs != null && eventArgs.Data != null) lines.Enqueue(eventArgs.Data);
+        }
+
+        public bool TryDequeue(out string line) { return lines.TryDequeue(out line); }
+    }
+}
+'@
+}
+
+function Start-Supervisor {
+    param([string]$LaunchDirectory, [string]$Route, [int]$PortNumber, [string]$RuntimeDirectory)
+    Initialize-ProcessJobSupport
+    New-PrivateDirectory -Path $LaunchDirectory
+    New-PrivateDirectory -Path (Split-Path -Parent $script:LogPath)
+    $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $controlPort = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
+    $nonceBytes = New-Object byte[] 32
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create(); $rng.GetBytes($nonceBytes); $rng.Dispose()
+    $nonce = [BitConverter]::ToString($nonceBytes).Replace('-', '').ToLowerInvariant()
+    Write-PrivateJson -Path $script:SupervisorPath -Value @{ schemaVersion = 1; pid = $PID; port = $PortNumber; controlPort = $controlPort; controlNonce = $nonce; startedAt = [DateTime]::UtcNow.ToString('o'); ready = $false }
+    $node = Join-Path $RuntimeDirectory 'node\node.exe'
+    $dsh = Join-Path $RuntimeDirectory 'app\node_modules\@deepseek-ai\dsh\lib\bin.js'
+    if (-not (Test-Path -LiteralPath $node -PathType Leaf) -or -not (Test-Path -LiteralPath $dsh -PathType Leaf)) { throw 'runtime-incomplete' }
+    $routeHome = Join-Path $script:HomesRoot $Route
+    New-PrivateDirectory -Path $routeHome
+    $psi = New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName = $node
+    $psi.Arguments = ((@($dsh,'--profile','web','--host','127.0.0.1','--port',[string]$PortNumber,'--no-open') | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join ' ')
+    $psi.WorkingDirectory = $LaunchDirectory; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+    foreach ($key in @($psi.EnvironmentVariables.Keys)) {
+        if (Test-SensitiveEnvironmentName -Name ([string]$key)) { $psi.EnvironmentVariables.Remove([string]$key) }
+    }
+    $launchEnvironment = Get-LaunchEnvironment -DshHome $routeHome
+    foreach ($key in $launchEnvironment.Keys) { $psi.EnvironmentVariables[[string]$key] = $launchEnvironment[$key] }
+    $script:Port = $PortNumber; $script:LaunchUrl = ''; $script:SupervisorReady = $false
+    $child = New-Object Diagnostics.Process; $child.StartInfo = $psi
+    $outputCollector = New-Object PhaseZero.DeepSeekHarnessOutputCollector
+    $errorCollector = New-Object PhaseZero.DeepSeekHarnessOutputCollector
+    $child.add_OutputDataReceived($outputCollector.Handler); $child.add_ErrorDataReceived($errorCollector.Handler)
+    $stopRequested = $false
+    $jobHandle = [IntPtr]::Zero
+    try {
+        $jobHandle = [PhaseZero.DeepSeekHarnessProcessJob]::CreateKillOnCloseJob()
+        if ($jobHandle -eq [IntPtr]::Zero) { throw 'runtime-process-control-unavailable' }
+        if (-not $child.Start()) { throw 'runtime-start-failed' }
+        if (-not [PhaseZero.DeepSeekHarnessProcessJob]::Assign($jobHandle, $child.Handle)) {
+            try {
+                if (-not $child.HasExited) { $child.Kill() }
+                if (-not $child.WaitForExit(5000)) { throw 'runtime-process-cleanup-failed' }
+            } catch {
+                if (-not $child.HasExited) { throw 'runtime-process-cleanup-failed' }
+            }
+            throw 'runtime-process-control-unavailable'
+        }
+        $child.BeginOutputReadLine(); $child.BeginErrorReadLine()
+        while (-not $child.HasExited -and -not $stopRequested) {
+            Receive-RuntimeOutput -Collector $outputCollector -CaptureLaunchUrl
+            Receive-RuntimeOutput -Collector $errorCollector
+            if ($listener.Pending()) {
+                $client = $listener.AcceptTcpClient()
+                try {
+                    $reader = New-Object IO.StreamReader($client.GetStream())
+                    $writer = New-Object IO.StreamWriter($client.GetStream()); $writer.AutoFlush = $true
+                    $line = $reader.ReadLine(); $request = $line | ConvertFrom-Json
+                    if (-not [string]::Equals([string]$request.nonce, $nonce, [StringComparison]::Ordinal)) { $reply = @{ ok = $false; code = 'unauthorized' } }
+                    elseif ($request.action -eq 'status') { $reply = @{ ok = $true; ready = $script:SupervisorReady; running = -not $child.HasExited } }
+                    elseif ($request.action -eq 'open') {
+                        $url = if ($script:LaunchUrl) { $script:LaunchUrl } else { "http://127.0.0.1:$PortNumber/" }
+                        try {
+                            Start-Process -FilePath $url | Out-Null
+                            $script:LaunchUrl = ''; $reply = @{ ok = $true; opened = $true }
+                        } catch { $reply = @{ ok = $false; code = 'browser-unavailable' } }
+                    }
+                    elseif ($request.action -eq 'stop') {
+                        try {
+                            if (-not [PhaseZero.DeepSeekHarnessProcessJob]::Terminate($jobHandle)) { throw 'runtime-process-stop-failed' }
+                            $deadline = [DateTime]::UtcNow.AddSeconds(5)
+                            do {
+                                $activeProcesses = [PhaseZero.DeepSeekHarnessProcessJob]::ActiveProcessCount($jobHandle)
+                                if ($activeProcesses -eq [uint32]::MaxValue) { throw 'runtime-process-stop-failed' }
+                                if ($activeProcesses -eq 0) {
+                                    $null = $child.WaitForExit(1000); $child.Refresh()
+                                    if ($child.HasExited) { $stopRequested = $true; break }
+                                }
+                                Start-Sleep -Milliseconds 100
+                            } while ([DateTime]::UtcNow -lt $deadline)
+                            if ($stopRequested) { $reply = @{ ok = $true; stopping = $true } }
+                            else { $reply = @{ ok = $false; code = 'runtime-process-stop-failed' } }
+                        } catch { $reply = @{ ok = $false; code = 'runtime-process-stop-failed' } }
+                    } else { $reply = @{ ok = $false; code = 'unknown-action' } }
+                    $writer.WriteLine(($reply | ConvertTo-Json -Compress))
+                } catch { Write-Verbose 'Ignoring malformed local supervisor request.' }
+                finally { if ($client) { $client.Dispose() } }
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        $child.WaitForExit()
+        Receive-RuntimeOutput -Collector $outputCollector -CaptureLaunchUrl
+        Receive-RuntimeOutput -Collector $errorCollector
+        $state = Read-JsonFile -Path $script:StatePath
+        if ($state) { $state.state = if ($stopRequested) { 'stopped' } else { 'crashed' }; $state.updatedAt = [DateTime]::UtcNow.ToString('o'); Write-PrivateJson -Path $script:StatePath -Value $state }
+    } finally {
+        $listener.Stop()
+        if ($jobHandle -ne [IntPtr]::Zero) { $null = [PhaseZero.DeepSeekHarnessProcessJob]::Close($jobHandle) }
+        $child.Dispose()
+    }
+}
+
+function Stop-Runtime {
+    $mutex = Get-Mutex
+    if (-not $mutex.WaitOne(0)) { throw 'operation-busy' }
+    try {
+        $state = Read-JsonFile -Path $script:StatePath
+        $sup = Read-JsonFile -Path $script:SupervisorPath
+        $supervisorId = if ($sup -and $sup.pid) { [int]$sup.pid } elseif ($state -and $state.supervisorPid) { [int]$state.supervisorPid } else { 0 }
+        try { $null = Invoke-Control -ControlAction 'stop' }
+        catch {
+            if (Test-PidAlive $supervisorId) {
+                if ([string]$_.Exception.Message -eq 'runtime-process-stop-failed') { throw 'runtime-process-stop-failed' }
+                throw 'supervisor-unreachable-runtime-preserved'
+            }
+            if (Test-Path -LiteralPath $script:SupervisorPath -PathType Leaf) {
+                $record = Get-Item -LiteralPath $script:SupervisorPath -Force
+                if (($record.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-managed-path' }
+                Remove-Item -LiteralPath $script:SupervisorPath -Force
+            }
+            if ($state -and $state.authRoute -and $state.supervisorDebugCapture) { Save-SupervisorStderr -Route ([string]$state.authRoute) -Enabled }
+            if ($state) { $state.state = 'stopped'; $state.updatedAt = [DateTime]::UtcNow.ToString('o'); Write-PrivateJson -Path $script:StatePath -Value $state }
+            return @{ ok = $true; state = 'stopped'; reason = 'stale supervisor state cleared; no process was killed' }
+        }
+        $deadline = [DateTime]::UtcNow.AddSeconds(5)
+        while ((Test-PidAlive $supervisorId) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
+        if (Test-PidAlive $supervisorId) { throw 'stop-timeout' }
+        if ($state -and $state.authRoute -and $state.supervisorDebugCapture) { Save-SupervisorStderr -Route ([string]$state.authRoute) -Enabled }
+        if (Test-Path -LiteralPath $script:SupervisorPath -PathType Leaf) {
+            $record = Get-Item -LiteralPath $script:SupervisorPath -Force
+            if (($record.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-managed-path' }
+            Remove-Item -LiteralPath $script:SupervisorPath -Force
+        }
+        return @{ ok = $true; state = 'stopped'; reason = 'Harness runtime stopped' }
+    } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
+}
+
+function Get-Doctor {
+    $status = Get-Status
+    $checks = @(
+        @{ id = 'pinned-lock'; state = if (Test-Path (Join-Path $script:PackagePath 'package-lock.json')) { 'ok' } else { 'missing' } },
+        @{ id = 'runtime'; state = if ($status.installed) { 'ok' } else { 'missing' } },
+        @{ id = 'loopback'; state = $status.runtimeState; httpStatus = $status.healthCheck.loopbackHttp },
+        @{ id = 'workspace'; state = if ($status.workspace) { 'requested; confirm in Harness Web UI' } else { 'not-selected' } },
+        @{ id = 'sandbox-enforcement'; state = 'unknown'; reason = 'no live sandbox probe; file policy does not restrict network or processes' },
+        @{ id = 'account-session'; state = 'unknown' }, @{ id = 'api-validity-and-quota'; state = 'unknown' },
+        @{ id = 'proxy-and-9router'; state = 'blocked; request-bound grants unavailable' }, @{ id = 'autostart'; state = 'disabled' }
+        @{ id = 'memory-budget'; state = $status.memoryBudget; availableBytes = $status.availableMemoryBytes; requiredBytes = $status.requiredMemoryBytes }
+    )
+    $status.command = 'doctor'; $status.checks = $checks; $status.logPath = $script:LogPath
+    if ($status.memoryBudget -eq 'insufficient') { $status.ok = $false; $status.state = 'degraded'; $status.reason = 'insufficient-memory' }
+    $status.nextAction = 'review unknown account and sandbox gates before using tools'
+    return $status
+}
+
+function Assert-NoReparseTree {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $root = Get-Item -LiteralPath $Path -Force
+    if (($root.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-managed-path' }
+    foreach ($item in Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction Stop) {
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'unsafe-managed-path' }
+    }
+}
+
+function Uninstall-Runtime {
+    Write-DshDebugStage 'uninstall.root-validation.begin'
+    if (-not (Test-SafeManagedRoot)) { throw 'unsafe-managed-root' }
+    Write-DshDebugStage 'uninstall.root-validation.complete'
+    Write-DshDebugStage 'uninstall.stop.begin'
+    $null = Stop-Runtime
+    Write-DshDebugStage 'uninstall.stop.complete'
+    if (Test-Path -LiteralPath $script:RuntimeRoot) {
+        Write-DshDebugStage 'uninstall.reparse-check.begin'
+        Assert-NoReparseTree -Path $script:RuntimeRoot
+        Write-DshDebugStage 'uninstall.reparse-check.complete'
+        Write-DshDebugStage 'uninstall.runtime-delete.begin'
+        Remove-Item -LiteralPath $script:RuntimeRoot -Recurse -Force
+        Write-DshDebugStage 'uninstall.runtime-delete.complete'
+    }
+    Write-DshDebugStage 'uninstall.state-delete.begin'
+    foreach ($path in @($script:ActivePath,$script:StatePath,$script:SupervisorPath,$script:LogPath)) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            if ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'unsafe-managed-path' }
+            Remove-Item -LiteralPath $path -Force
+        }
+    }
+    Write-DshDebugStage 'uninstall.state-delete.complete'
+    return (New-Result -Command 'uninstall' -Ok $true -State 'removed' -Reason 'runtime removed; DSH_HOME and workspace data preserved' -NextAction 'install when needed' -Extra @{ installed = $false; preservedData = @((Join-Path $script:HomesRoot 'account'),(Join-Path $script:HomesRoot 'api')) })
+}
+
+function Invoke-Action {
+    switch ($Action.ToLowerInvariant()) {
+        'plan' { return (Get-Plan) }
+        'status' { return (Get-Status) }
+        'doctor' { return (Get-Doctor) }
+        'install' { return (Install-Runtime) }
+        'update' { return (Install-Runtime -Update $true) }
+        'start' { return (Start-Runtime) }
+        'open' { $null = Invoke-Control -ControlAction 'open'; $result = Get-Status; $result.command = 'open'; $result.opened = $true; $result.reason = 'authenticated local Web UI handoff requested'; return $result }
+        'stop' { $stop = Stop-Runtime; $result = Get-Status; $result.command = 'stop'; $result.reason = [string]$stop.reason; $result.nextAction = 'start when needed'; return $result }
+        'uninstall' { return (Uninstall-Runtime) }
+        default { throw 'unknown-command' }
+    }
+}
+
+if ($InternalSupervisor) {
+    try { Start-Supervisor -LaunchDirectory $Workspace -Route $AuthRoute -PortNumber $Port -RuntimeDirectory $Runtime; exit 0 }
+    catch {
+        try {
+            $message = ConvertTo-RedactedLogLine -Line ([string]$_.Exception.Message)
+            $message = [regex]::Replace($message, '\s+', ' ')
+            if ($message.Length -gt 300) { $message = $message.Substring(0,300) }
+            $entry = "PhaseZero supervisor error: type=$($_.Exception.GetType().Name) message=$message$([Environment]::NewLine)"
+            [IO.File]::AppendAllText($script:LogPath, $entry, (New-Object Text.UTF8Encoding($false)))
+        } catch { [Console]::Error.WriteLine('Supervisor error could not be persisted to the redacted log.') }
+        exit 1
+    }
+}
+
+$commandName = $Action.ToLowerInvariant()
+if ($commandName -eq 'supervise') { $commandName = 'start' }
+try {
+    $result = Invoke-Action
+    # Plan/status are reports; JSON carries blocked/degraded state. Keep their
+    # process exit code successful when the diagnostic itself completed.
+    $exitCode = if ($Action.ToLowerInvariant() -in @('plan','status')) { 0 } elseif ($result.ok -eq $false) { 1 } else { 0 }
+} catch {
+    if ($env:PZ_DSH_DEBUG) { [Console]::Error.WriteLine($_.Exception.ToString() + "`n" + $_.ScriptStackTrace) }
+    $code = [string]$_.Exception.Message
+    if ($code -notmatch '^[a-z0-9-]{3,64}$') { $code = 'operation-failed' }
+    $next = switch ($code) {
+        'runtime-not-installed' { 'install' }
+        'port-occupied' { 'select another PZ_DSH_PORT or stop its owner' }
+        'workspace-unavailable' { 'choose an existing folder' }
+        'auth-route-required' { 'choose account or api explicitly' }
+        'registry-or-dependency-failed' { 'check registry and retry; prior version remains active' }
+        'integrity-mismatch' { 'keep current runtime; review pinned checksum' }
+        'runtime-crashed' { 'doctor; inspect redacted local log' }
+        'health-timeout' { 'doctor; inspect redacted local log' }
+        'different-route-running-stop-first' { 'stop current runtime, then choose the other route' }
+        'runtime-process-control-unavailable' { 'Windows cannot supervise Harness descendants; runtime was not started' }
+        'runtime-process-stop-failed' { 'runtime remains active; inspect doctor and retry stop' }
+        'supervisor-unreachable-runtime-preserved' { 'doctor; no process was killed' }
+        default { 'doctor' }
+    }
+    $result = New-Result -Command $commandName -Ok $false -State 'blocked' -Reason $code -NextAction $next -Extra @{ error = @{ code = $code; message = $code; errorType = $_.Exception.GetType().Name } }
+    $exitCode = 2
+}
+exit (Write-JsonResult -Value $result -Code $exitCode)

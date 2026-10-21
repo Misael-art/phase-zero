@@ -334,7 +334,11 @@ def test_hidden_ai_dev_page_probes_only_when_opened(qapp):
             page.block_while_running(False)
             assert calls == []
             window.show_category("IA & Dev")
-        assert calls == [("ai.status", ["ai", "status"]), ("private.bonsai.status", ["ai", "claude", "bonsai-status"])]
+        assert calls == [
+            ("ai.status", ["ai", "status"]),
+            ("private.bonsai.status", ["ai", "claude", "bonsai-status"]),
+            ("private.deepseek-harness.status", ["ai", "deepseek-harness", "status", "--json"]),
+        ]
     finally:
         window.close()
         host_patcher.stop()
@@ -381,13 +385,17 @@ def test_add_connection_lists_supported_channel_requirements_and_maturity(qapp):
                 "accountChannel_login", "accountChannel_maturity",
             }
         ]
-        assert len(channels) == 4
+        assert len(channels) == 6
         copy = " ".join(label.text() for label in dialog.findChildren(QLabel))
         assert "Requisitos:" in copy
         assert "Tipo de login:" in copy
         assert "Maturidade:" in copy
         assert "esta lista não inicia login nem recebe credenciais" in copy
         assert "Provedores no 9Router" in copy
+        assert "DeepSeek Harness · conta" in copy
+        assert "DeepSeek Harness · chave API" in copy
+        assert "não são importados" in copy
+        assert "nenhum probe de inferência automático" in copy
 
         dialog.show()
         qapp.processEvents()

@@ -749,6 +749,51 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
         )
     )
 
+    # Official DeepSeek Harness is its own experimental app, not the legacy
+    # browser proxy and not a DeepSeek model selection.
+    actions.extend([
+        _a("ai.deepseek-harness-status", "IA & Dev", "Status DeepSeek Harness",
+           "Estado local do app oficial Harness, separado do DeepSeek Proxy e de modelos.",
+           ("ai", "deepseek-harness", "status", "--json"), "system-search",
+           badge="Experimental", visibility="standard"),
+        _a("ai.deepseek-harness-plan", "IA & Dev", "Planejar DeepSeek Harness",
+           "Read-only: versões fixadas, arquitetura e espaço disponível.",
+           ("ai", "deepseek-harness", "plan", "--json"), "document-preview",
+           badge="Experimental", visibility="advanced"),
+        _a("ai.deepseek-harness-install", "IA & Dev", "Instalar DeepSeek Harness",
+           "Prepara Node e Harness no diretório gerenciado do usuário; não inicia o runtime.",
+           ("ai", "deepseek-harness", "install", "--json"), "system-software-install",
+           mutable=True, preview=("ai", "deepseek-harness", "plan", "--json"), badge="Experimental"),
+        _a("ai.deepseek-harness-update", "IA & Dev", "Atualizar DeepSeek Harness",
+           "Aplica apenas pins revisados; mantém runtime anterior até ativação concluída.",
+           ("ai", "deepseek-harness", "update", "--json"), "system-software-update",
+           mutable=True, preview=("ai", "deepseek-harness", "status", "--json"), badge="Experimental", visibility="advanced"),
+        _a("ai.deepseek-harness-start", "IA & Dev", "Conectar e abrir Harness",
+           "Escolhe rota conta/API e pasta. Inicia apenas após confirmação; não envia inferência.",
+           ("ai", "deepseek-harness", "start", "--workspace", "{workspace}", "--auth-route", "{authRoute}", "--json"),
+           "media-playback-start", mutable=True,
+           preview=("ai", "deepseek-harness", "status", "--json"),
+           parameters=(_p("workspace", "Pasta de trabalho", "path"),
+                       _p("authRoute", "Rota de autenticação", "choice", choices=("account", "api"))),
+           badge="Experimental", visibility="standard"),
+        _a("ai.deepseek-harness-open", "IA & Dev", "Abrir Web UI autenticada",
+           "Abre a URL de lançamento uma vez; token permanece em memória e não entra nos logs.",
+           ("ai", "deepseek-harness", "open", "--json"), "internet-web-browser",
+           badge="Experimental", visibility="standard"),
+        _a("ai.deepseek-harness-stop", "IA & Dev", "Parar DeepSeek Harness",
+           "Encerra apenas o processo supervisor e o filho que este iniciou.",
+           ("ai", "deepseek-harness", "stop", "--json"), "media-playback-stop",
+           mutable=True, preview=("ai", "deepseek-harness", "status", "--json"), badge="Experimental", visibility="standard"),
+        _a("ai.deepseek-harness-doctor", "IA & Dev", "Diagnosticar DeepSeek Harness",
+           "Read-only: runtime, pasta, porta, sandbox, credenciais e gates desconhecidos.",
+           ("ai", "deepseek-harness", "doctor", "--json"), "tools-report-bug",
+           badge="Experimental", visibility="advanced"),
+        _a("ai.deepseek-harness-uninstall", "IA & Dev", "Remover DeepSeek Harness",
+           "Remove somente runtime e estado PhaseZero; preserva DSH_HOME e pastas escolhidas.",
+           ("ai", "deepseek-harness", "uninstall", "--json"), "edit-delete",
+           mutable=True, preview=("ai", "deepseek-harness", "status", "--json"), badge="Experimental", visibility="advanced"),
+    ])
+
     # Proxy health/auth can be inspected, but inference stays disabled until
     # account grants are enforced by each request and fallback is rejected.
     proxy_rows = [

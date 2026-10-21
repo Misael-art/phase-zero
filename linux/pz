@@ -183,6 +183,7 @@ Usage:
   pz ai opencode verify        Read-only config check; live inference blocked without grant binding
   pz ai opencode run --route=9router -- <args>  Blocked until account-bound grants are enforceable
   pz ai opencode rollback <manifest> Restore an OpenCode route transaction
+  pz ai deepseek-harness <action>  Experimental official Harness (plan|status|install|update|start|open|stop|doctor|uninstall)
   pz ai setup <tool>           Setup AI tool (codex|ollama|webui|claude|desktop|opencode|omo|openclaw|memory|admin|rtk|caveman|headroom|compat|ides|ide-apps|usagebar|codexbar|all)
   pz ai drift [status|sync [--dry-run]]  Compare installed runtime copies with the repo (exit 2 on drift)
   pz ai codexbar <action>      CodexBar CLI + optional KodexBar plasmoid (status|setup|health|auth|watchdog|plasmoid|plasmoid-remove|repair)
@@ -613,6 +614,11 @@ cmd_ai() {
                 setup) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" setup ;;
                 *) pz_error "usage: pz ai opencode (status|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup)"; return 1 ;;
             esac
+            ;;
+        deepseek-harness|dsh)
+            shift
+            PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+                python3 "$PZ_ROOT/linux/ai/deepseek_harness_manager.py" "${@:-status}"
             ;;
         doctor)
             local mcp_doctor codexbar_health codexbar_status

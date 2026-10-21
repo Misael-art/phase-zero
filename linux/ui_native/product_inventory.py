@@ -45,6 +45,7 @@ _AI_APPS = {
     "ollama": "ollama", "webui": "open-webui", "usagebar": "usagebar",
     "codexbar": "codexbar", "bonsai": "claude-code", "claude": "claude-code", "9router": "9router",
     "odysseus": "odysseus", "hermes": "hermes", "omniroute": "omniroute",
+    "deepseek-harness": "deepseek-harness",
 }
 _PROXIES = {"kimi": "kimiproxy", "qwen": "qwen-proxy", "deeps": "deepseek-proxy", "mimo": "mimo-proxy"}
 _EXTRA_APPS = {
@@ -54,7 +55,18 @@ _EXTRA_APPS = {
     "odysseus": "Odysseus", "ollama": "Ollama", "omo": "Oh My OpenCode",
     "omniroute": "OmniRoute", "open-webui": "Open WebUI", "opencode": "OpenCode",
     "qwen-code-desktop": "Qwen Code Desktop", "qwen-proxy": "Qwen Proxy",
+    "deepseek-harness": "DeepSeek Harness",
     "9router": "9Router", "usagebar": "UsageBar",
+}
+_EXTRA_APP_METADATA = {
+    "deepseek-harness": {
+        "risk": "high",
+        "license": "MIT",
+        "sources": [
+            {"kind": "npm", "name": "@deepseek-ai/dsh · exact pin in packaging/deepseek-harness/pins.json"},
+            {"kind": "repository", "name": "deepseek-ai/deepseek-harness"},
+        ],
+    },
 }
 _DESKTOP_ENTRY_HINTS = {
     "app.claude-desktop": ("claude-desktop",),
@@ -64,7 +76,10 @@ _DESKTOP_ENTRY_HINTS = {
 # Existing contexts can offer the same app without owning a second installer.
 # `server.llm` keeps its model/server workflow, but delegates the package setup
 # to the canonical Ollama installer.
-_CANONICAL_APP_ACTIONS = {"app.ollama": "ai.ollama"}
+_CANONICAL_APP_ACTIONS = {
+    "app.ollama": "ai.ollama",
+    "app.deepseek-harness": "ai.deepseek-harness-install",
+}
 _INSTALL_AUTHORITY_BY_ACTION = {
     "ai.ollama": "linux/ai/setup-ollama.sh",
     "server.llm": "linux/ai/setup-ollama.sh",
@@ -84,6 +99,7 @@ _PRODUCT_SEARCH_TERMS = {
     "app.vscodium": ("programar", "editor de código", "desenvolver software"),
     "app.claude-code": ("agente de código", "assistente de código", "programar com IA"),
     "app.opencode": ("agente de código", "agente de programação", "programar com IA"),
+    "app.deepseek-harness": ("agente DeepSeek", "Harness oficial", "web UI DeepSeek"),
 }
 
 
@@ -291,10 +307,13 @@ def inventory_manifest(root: Path) -> dict[str, object]:
     products.extend(
         ({"appId": f"app.{key}", "name": name, "capabilityId": None,
           "description": "", "group": "Inteligência artificial",
-          "requires": [], "conflicts": [], "risk": "normal", "license": "unknown",
+          "requires": [], "conflicts": [],
+          "risk": _EXTRA_APP_METADATA.get(key, {}).get("risk", "normal"),
+          "license": _EXTRA_APP_METADATA.get(key, {}).get("license", "unknown"),
           "compatibility": {"distros": [], "gpu": [], "desktops": [],
                             "sessions": [], "init": [], "immutable": "unknown",
-                            "container": "unknown"}, "sources": [],
+                            "container": "unknown"},
+          "sources": _EXTRA_APP_METADATA.get(key, {}).get("sources", []),
           **({"desktopEntries": list(_DESKTOP_ENTRY_HINTS[f"app.{key}"])}
              if f"app.{key}" in _DESKTOP_ENTRY_HINTS else {})})
         for key, name in sorted(_EXTRA_APPS.items())
