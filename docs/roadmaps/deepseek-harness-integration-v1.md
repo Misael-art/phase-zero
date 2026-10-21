@@ -1,10 +1,10 @@
 # DeepSeek Harness no PhaseZero — auditoria e plano v1
 
-Estado: **implementação Experimental nesta branch; revisão, CI e gates externos ainda pendentes. Sem release ou instalação no host.**
+Estado: **implementação Experimental; CI e scanner passaram no SHA de implementação `50e555063d5eabe5d51f32350611cf06ce5ceb96`. PR draft #127. Sem release ou instalação no host. Gates externos de conta, sandbox, usabilidade e custo seguem abertos.**
 
-Auditoria: 2026-10-20, host Arch Linux, `origin/main` `ddadd6de4fc5a0b8933c2d312e2f8a6dd7f1aff3`.
+Auditoria: 2026-10-21, host Manjaro/Arch Linux, `origin/main` `ddadd6de4fc5a0b8933c2d312e2f8a6dd7f1aff3`.
 
-Escopo: aplicativo oficial [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`@deepseek-ai/dsh`), não apenas modelos DeepSeek. Baseline, upstream, npm, CI e host foram revalidados em 2026-10-20; evidências e lacunas atuais estão no [handoff da implementação](deepseek-harness-implementation-handoff.md).
+Escopo: aplicativo oficial [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`@deepseek-ai/dsh`), não apenas modelos DeepSeek. Baseline, upstream, npm, CI e host foram revalidados em 2026-10-21; evidências e lacunas atuais estão no [handoff da implementação](deepseek-harness-implementation-handoff.md).
 
 ## Resultado e fronteiras do produto
 
@@ -17,7 +17,7 @@ Escopo: aplicativo oficial [DeepSeek Harness](https://github.com/deepseek-ai/dee
 
 No host auditado, `phasezero-deepsproxy.service` estava `active` na porta 3012. Isso **não** valida Harness nem inferência com API oficial. A UI atual organiza OpenCode, Claude, MCPs, agentes e Bonsai em `linux/ui_native/pages/ai_dev.py`; DeepSeek Proxy aparece no inventário/catálogo, sem jornada para Harness. O catálogo bloqueia uso gerenciado do proxy até enforcement de grants por requisição. Não contornar esse bloqueio ao integrar `dsh`.
 
-Upstream observado: tag `dsh-v0.2.1-rc.2`, commit `687f282e8625c6b8d11ff58211a90524be2e4317`; npm `@deepseek-ai/dsh@0.2.1-rc.2`, integrity `sha512-tvY+yhfKRifthbqPe/OK0AYxM5ZkvqfYq/jMYgJcEUxiRRL1Vwra3Ti5TB6AXgSWQdiPHYh/Vp6SJa9yHwMNuw==`. `latest` apontava à mesma prévia; **não usar `latest` como pin**. O repositório declara Node `^22.19.0 || >=24.0.0`, licença MIT e prévia com mudanças incompatíveis. [README](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/README.md), [aviso de segurança](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/SAFETY.md), [pacote npm](https://www.npmjs.com/package/@deepseek-ai/dsh/v/0.2.1-rc.2).
+Upstream observado pela primeira vez em 2026-10-20: tag `dsh-v0.2.1-rc.2`, commit `687f282e8625c6b8d11ff58211a90524be2e4317`; npm `@deepseek-ai/dsh@0.2.1-rc.2`, integrity `sha512-tvY+yhfKRifthbqPe/OK0AYxM5ZkvqfYq/jMYgJcEUxiRRL1Vwra3Ti5TB6AXgSWQdiPHYh/Vp6SJa9yHwMNuw==`. A rechecagem de 2026-10-21 confirmou os mesmos tag, integridade e dist-tags; isso não transforma o pin em recomendação móvel. **Não usar `latest` como pin**. O repositório declara Node `^22.19.0 || >=24.0.0`, licença MIT e prévia com mudanças incompatíveis. [README](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/README.md), [aviso de segurança](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/SAFETY.md), [pacote npm](https://www.npmjs.com/package/@deepseek-ai/dsh/v/0.2.1-rc.2).
 
 O upstream afirma que o produto pode executar comandos gerados pelo modelo, carregar plugins e acessar arquivos, processos, rede e credenciais disponíveis; não passou por auditoria de segurança. Política própria de arquivos inicia em `workspace-write` com aprovação `ask`; `read-only` e `danger-full-access` existem. Limites importantes: política de arquivos não restringe rede/processos; sandbox Windows pode reportar enforcement `partial`; um runner indisponível falha fechado. [Política](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/packages/sandbox/sandbox-policy/README.md), [backend local](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/packages/sandbox/sandbox-local/README.md), [defaults](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.2/packages/bundle/base/cordis.patch.yml).
 
