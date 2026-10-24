@@ -93,14 +93,19 @@ if ((${#missing[@]})); then
         echo 'Pending system upgrades. Run normal pacman -Syu first, then retry.' >&2
         exit 75
     fi
-    if command -v phasezero-admin >/dev/null; then
+    if command -v phasezero-admin >/dev/null && phasezero-admin --backend >/dev/null 2>&1; then
         phasezero-admin pacman -S --needed --noconfirm -- "${PACKAGES[@]}"
-    elif command -v bigsudo >/dev/null; then
+    elif command -v bigsudo >/dev/null && ! grep -q 'PHASEZERO_ADMIN_FALLBACK' "$(command -v bigsudo)" 2>/dev/null; then
         bigsudo pacman -S --needed --noconfirm -- "${PACKAGES[@]}"
     elif command -v pkexec >/dev/null; then
         pkexec pacman -S --needed --noconfirm -- "${PACKAGES[@]}"
+    elif command -v su >/dev/null; then
+        # Package names are a fixed internal list. su prompts for root password
+        # on a TTY; no password is stored or placed in process arguments.
+        [[ -t 0 ]] || { echo 'su needs an interactive terminal; configure polkit/bridge.' >&2; exit 77; }
+        su -c "pacman -S --needed --noconfirm -- ${PACKAGES[*]}"
     else
-        echo 'Admin bridge unavailable. Run linux/pz ai setup admin or install polkit/pkexec.' >&2
+        echo 'No admin method. Set up polkit/pkexec or run linux/pz ai setup admin after prerequisites.' >&2
         exit 77
     fi
 fi

@@ -4,7 +4,7 @@
 
 `main` auditada em `ddadd6de4fc5a0b8933c2d312e2f8a6dd7f1aff3`; release beta `v1.22.11` aponta ao mesmo SHA. [Auditoria versionada](../audits/status-20261024/README.md) contém evidências, capturas, lacunas e critérios de aceite. GitHub contém código e releases; **não contém** contas, tokens, VM guest, dados de Homelab nem os 18 WIPs preservados somente no cartão de continuidade. Clone de `main` basta para começar desenvolvimento da base publicada. Para continuar qualquer WIP do cartão, transportar e verificar o cartão antes de apagar o host de origem.
 
-Este wrapper/handoff está na branch `codex/clean-host-dev-bootstrap` até o PR ser mergeado. Em host novo, após clone de `main`, execute `git fetch origin codex/clean-host-dev-bootstrap` e `git switch --track origin/codex/clean-host-dev-bootstrap` antes de usar os comandos abaixo. Se usar ZIP sem Git, baixe o ZIP **dessa branch**. Após merge, `main` passa a incluir o wrapper.
+Este wrapper/handoff está na branch `codex/clean-host-dev-bootstrap`, [PR #129](https://github.com/Misael-art/phase-zero/pull/129), até merge. Em host novo, após clone de `main`, execute `git fetch origin codex/clean-host-dev-bootstrap` e `git switch --track origin/codex/clean-host-dev-bootstrap` antes de usar os comandos abaixo. Se usar ZIP sem Git, baixe o ZIP **dessa branch**. Após merge, `main` passa a incluir o wrapper.
 
 Não interpretar CI/fixture verde como homologação física de conta, proxy, VM ou segundo host. Nenhum instalador do produto, VM, container ou serviço deve iniciar no bootstrap de desenvolvimento.
 
@@ -22,7 +22,7 @@ bash tools/dev-bootstrap.sh install --profile ui --yes
 bash tools/dev-bootstrap.sh doctor --profile ui
 ```
 
-`plan` e `doctor` somente leem. `install --yes` instala pacotes mínimos com `phasezero-admin`, `bigsudo` ou `pkexec`; se nenhum existir, falha com instrução para preparar a bridge (`linux/pz ai setup admin`) ou polkit. Evita `pacman -Sy` isolado, recusa upgrades pendentes, root direto, pouca RAM/disco e prefixo temporário. Instala pip **somente em venv de usuário** sob `${XDG_DATA_HOME:-~/.local/share}/phasezero-dev/`; `core` é menor, `ui` adiciona PySide6/Xvfb/qemu-img para testes UI/VM em fixture. Não instala Docker, serviço, modelo, guest ou workload. O instalador mostra caminho do venv anterior para rollback; não apaga automaticamente versões antigas. Para reverter, remover apenas o link `venv-core` ou `venv-ui` e apontá-lo ao venv anterior, após verificar o destino. Pacotes do sistema instalados pelo pacman exigem revisão individual antes de remover.
+`plan` e `doctor` somente leem. `install --yes` instala pacotes mínimos com `phasezero-admin`, `bigsudo` real ou `pkexec`; num Arch mínimo sem esses três, usa `su` interativo com a lista fixa de pacotes. Root bloqueado ou ausência de TTY impede esse primeiro passo; habilitar polkit/bridge pelo administrador e repetir. Evita `pacman -Sy` isolado, recusa upgrades pendentes, root direto, pouca RAM/disco e prefixo temporário. Instala pip **somente em venv de usuário** sob `${XDG_DATA_HOME:-~/.local/share}/phasezero-dev/`; `core` é menor, `ui` adiciona PySide6/Xvfb/qemu-img para testes UI/VM em fixture. Não instala Docker, serviço, modelo, guest ou workload. O instalador mostra caminho do venv anterior para rollback; não apaga automaticamente versões antigas. Para reverter, remover apenas o link `venv-core` ou `venv-ui` e apontá-lo ao venv anterior, após verificar o destino. Pacotes do sistema instalados pelo pacman exigem revisão individual antes de remover.
 
 Antes de testes longos, reservar temporários persistentes do usuário, **uma variável por export**:
 
@@ -77,6 +77,7 @@ Roadmaps de referência: [apps/IA/contas](../roadmaps/apps-dev-ai-accounts-v1.md
 - Bash syntax, ShellCheck, YAML parse e `git diff --check` verdes. CI inclui contrato hermético de prévia e criação real de venv em container Arch descartável; execução remota deve ser conferida no PR.
 - PowerShell Windows não foi executado neste host Linux; Parser/Pester do job Windows são o gate de CI, e teste físico em Windows limpo permanece aberto. Prévia e guarda de consentimento têm teste Pester.
 - Diff textual revisado por padrões de segredo; `gitleaks` local indisponível. O job remoto `security-secret-scan` precisa passar antes de merge. Captura de Contas revisada visualmente: estado vazio, sem identidade ou token.
+- Cartão de continuidade: `checks/verify_continuity.py` passou novamente em 2026-10-24, validando 18 worktrees, bundle, patches, untracked, gitdir e pacote; `sha256sum -c checks/SHA256SUMS` também passou para todas as 41 entradas. Isso prova integridade da cópia atual, **não** redundância física. O novo PR está no GitHub, fora do bundle anterior; buscar branch remota para obtê-lo.
 - Um primeiro pytest local falhou porque o diretório de `PYTEST_DEBUG_TEMPROOT` definido manualmente ainda não existia; após `mkdir -p` conforme o exemplo acima, 29/29 passaram. Não tratar esse erro de preparação do teste como bug do produto.
 
 ## Handoff obrigatório ao encerrar próxima frente
