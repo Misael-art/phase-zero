@@ -1,23 +1,27 @@
 Describe 'Contributor bootstrap safety' {
-    $script = Join-Path $PSScriptRoot '..\tools\dev-bootstrap.ps1'
     It 'plans without creating environment' {
+        $bootstrap = Join-Path $PSScriptRoot '..\tools\dev-bootstrap.ps1'
         $sandbox = Join-Path $TestDrive 'plan-only'
         $old = $env:PZ_DEV_HOME
         try {
             $env:PZ_DEV_HOME = $sandbox
-            $output = & $script -Action Plan -Profile Core | Out-String
-            $output | Should Match 'Git.Git'
-            $output | Should Match 'No PhaseZero service'
-            (Test-Path -LiteralPath $sandbox) | Should Be $false
+            $output = & $bootstrap -Action Plan -Profile Core | Out-String
+            if ($output -notmatch 'Git.Git' -or $output -notmatch 'No PhaseZero service') {
+                throw 'Plan omitted expected package/scope details.'
+            }
+            if (Test-Path -LiteralPath $sandbox) { throw 'Plan created environment.' }
         } finally { $env:PZ_DEV_HOME = $old }
     }
     It 'requires explicit consent for installation' {
+        $bootstrap = Join-Path $PSScriptRoot '..\tools\dev-bootstrap.ps1'
         $sandbox = Join-Path $TestDrive 'guard'
         $old = $env:PZ_DEV_HOME
         try {
             $env:PZ_DEV_HOME = $sandbox
-            { & $script -Action Install -Profile Core } | Should Throw
-            (Test-Path -LiteralPath $sandbox) | Should Be $false
+            $threw = $false
+            try { & $bootstrap -Action Install -Profile Core | Out-Null } catch { $threw = $true }
+            if (-not $threw) { throw 'Install accepted missing -Yes.' }
+            if (Test-Path -LiteralPath $sandbox) { throw 'Guard created environment.' }
         } finally { $env:PZ_DEV_HOME = $old }
     }
 }

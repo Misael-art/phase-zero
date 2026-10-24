@@ -2,14 +2,14 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Plan', 'Install', 'Doctor', 'PythonPath')][string]$Action = 'Doctor',
-    [ValidateSet('Core', 'Ui')][string]$Profile = 'Core',
+    [Alias('Profile')][ValidateSet('Core', 'Ui')][string]$DevProfile = 'Core',
     [switch]$Yes
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $dataRoot = if ($env:PZ_DEV_HOME) { $env:PZ_DEV_HOME } else { Join-Path $env:LOCALAPPDATA 'PhaseZero\dev' }
-$pointer = Join-Path $dataRoot ('venv-' + $Profile.ToLowerInvariant() + '.txt')
-$requirements = Join-Path $root ('requirements\dev-' + $Profile.ToLowerInvariant() + '.txt')
+$pointer = Join-Path $dataRoot ('venv-' + $DevProfile.ToLowerInvariant() + '.txt')
+$requirements = Join-Path $root ('requirements\dev-' + $DevProfile.ToLowerInvariant() + '.txt')
 
 function Get-SelectedVenv {
     if (-not (Test-Path -LiteralPath $pointer -PathType Leaf)) { return $null }
@@ -30,8 +30,9 @@ function Get-RealPython {
     }
     return $null
 }
-function Refresh-Path {
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+function Update-SessionPath {
+    $env:Path = $env:Path + ';' +
+        [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
         [Environment]::GetEnvironmentVariable('Path', 'User')
 }
 function Get-Winget {
@@ -41,19 +42,19 @@ function Get-Winget {
     if (Test-Path -LiteralPath $alias) { return $alias }
     return $null
 }
-function Ensure-Winget {
+function Install-Winget {
     $winget = Get-Winget
     if ($winget) { return $winget }
     $bundle = Join-Path $dataRoot 'Microsoft.DesktopAppInstaller.msixbundle'
     New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
-    Write-Host 'App Installer absent; fetching Microsoft official package.'
+    Write-Information 'App Installer absent; fetching Microsoft official package.' -InformationAction Continue
     try {
         Invoke-WebRequest -Uri 'https://aka.ms/getwinget' -OutFile $bundle -UseBasicParsing
         Add-AppxPackage -Path $bundle
     } finally {
         Remove-Item -LiteralPath $bundle -ErrorAction SilentlyContinue
     }
-    Refresh-Path
+    Update-SessionPath
     $winget = Get-Winget
     if (-not $winget) { throw 'App Installer installed, but winget unavailable. Reopen terminal and retry.' }
     return $winget
@@ -61,15 +62,15 @@ function Ensure-Winget {
 function Install-WingetPackage([string]$winget, [string]$id) {
     & $winget install --exact --id $id --accept-package-agreements --accept-source-agreements --disable-interactivity
     if ($LASTEXITCODE -ne 0) { throw "winget install failed: $id (exit $LASTEXITCODE)" }
-    Refresh-Path
+    Update-SessionPath
 }
 
 if ($Action -ne 'PythonPath') {
-    Write-Host "PhaseZero dev: action=$Action profile=$Profile"
-    Write-Host 'Packages: Git.Git, Python.Python.3.13 (if missing); Ui adds Pester 3.4.0 and PSScriptAnalyzer 1.25.0.'
-    Write-Host "Python requirements: $requirements"
-    Write-Host "Environment root: $dataRoot"
-    Write-Host 'No PhaseZero service, VM, login, product package or boot mutation.'
+    Write-Output "PhaseZero dev: action=$Action profile=$DevProfile"
+    Write-Output 'Packages: Git.Git, Python.Python.3.13 (if missing); Ui adds Pester 3.4.0 and PSScriptAnalyzer 1.25.0.'
+    Write-Output "Python requirements: $requirements"
+    Write-Output "Environment root: $dataRoot"
+    Write-Output 'No PhaseZero service, VM, login, product package or boot mutation.'
 }
 if ($Action -eq 'Plan') { return }
 if ($Action -eq 'PythonPath') {
@@ -88,14 +89,14 @@ if ($Action -eq 'Doctor') {
     if ($LASTEXITCODE -ne 0) { throw 'venv dependencies inconsistent.' }
     & $venvPython -c 'import pytest, pytest_timeout, PIL, argon2'
     if ($LASTEXITCODE -ne 0) { throw 'Core Python dependencies missing.' }
-    if ($Profile -eq 'Ui') {
+    if ($DevProfile -eq 'Ui') {
         & $venvPython -c 'import importlib.metadata as m; assert m.version("PySide6") == "6.11.1"'
         if ($LASTEXITCODE -ne 0) { throw 'PySide6 missing.' }
         if (-not (Get-Module -ListAvailable -Name Pester) -or -not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
             throw 'Pester or PSScriptAnalyzer missing.'
         }
     }
-    Write-Host 'ready: true'
+    Write-Output 'ready: true'
     return
 }
 if (-not $Yes) { throw 'Install requires -Yes after reviewing Plan.' }
@@ -105,20 +106,20 @@ if ([int64]$os.FreePhysicalMemory -lt 786432) {
     throw 'Insufficient available memory (<768 MiB); installation deferred.'
 }
 $driveRoot = [IO.Path]::GetPathRoot($dataRoot)
-$minimumBytes = if ($Profile -eq 'Ui') { 3GB } else { 1GB }
+$minimumBytes = if ($DevProfile -eq 'Ui') { 3GB } else { 1GB }
 if ([IO.DriveInfo]::new($driveRoot).AvailableFreeSpace -lt $minimumBytes) {
-    throw "Insufficient free disk for $Profile profile."
+    throw "Insufficient free disk for $DevProfile profile."
 }
 $winget = $null
 if (-not (Get-Command git.exe -ErrorAction SilentlyContinue) -or -not (Get-RealPython)) {
-    $winget = Ensure-Winget
+    $winget = Install-Winget
     if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) { Install-WingetPackage $winget 'Git.Git' }
     if (-not (Get-RealPython)) { Install-WingetPackage $winget 'Python.Python.3.13' }
 }
 $python = Get-RealPython
 if (-not $python) { throw 'Real Python not on PATH after installation. Reopen terminal; rerun Install.' }
 if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) { throw 'Git not on PATH after installation. Reopen terminal; rerun Install.' }
-if ($Profile -eq 'Ui') {
+if ($DevProfile -eq 'Ui') {
     if (-not (Get-Module -ListAvailable -Name Pester | Where-Object { $_.Version -eq [Version]'3.4.0' })) {
         Install-Module Pester -RequiredVersion 3.4.0 -Force -Scope CurrentUser -SkipPublisherCheck
     }
@@ -127,8 +128,8 @@ if ($Profile -eq 'Ui') {
     }
 }
 New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
-$slotA = Join-Path $dataRoot ('venv-' + $Profile.ToLowerInvariant() + '-a')
-$slotB = Join-Path $dataRoot ('venv-' + $Profile.ToLowerInvariant() + '-b')
+$slotA = Join-Path $dataRoot ('venv-' + $DevProfile.ToLowerInvariant() + '-a')
+$slotB = Join-Path $dataRoot ('venv-' + $DevProfile.ToLowerInvariant() + '-b')
 $selected = Get-SelectedVenv
 $stage = if ($selected -eq $slotA) { $slotB } else { $slotA }
 if ($stage -eq $selected) { throw 'Refusing to overwrite active venv.' }
@@ -144,7 +145,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'pip check failed.' }
     & $venvPython -c 'import pytest, pytest_timeout, PIL, argon2'
     if ($LASTEXITCODE -ne 0) { throw 'Core import check failed.' }
-    if ($Profile -eq 'Ui') {
+    if ($DevProfile -eq 'Ui') {
         & $venvPython -c 'import importlib.metadata as m; assert m.version("PySide6") == "6.11.1"'
         if ($LASTEXITCODE -ne 0) { throw 'PySide6 import check failed.' }
     }
@@ -155,7 +156,7 @@ try {
     } else {
         Move-Item -LiteralPath $newPointer -Destination $pointer
     }
-    Write-Host "ready: true; Python: $venvPython"
+    Write-Output "ready: true; Python: $venvPython"
 } catch {
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     throw
