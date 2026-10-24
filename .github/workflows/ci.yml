@@ -120,9 +120,6 @@ jobs:
           done < <(bash tools/list-shell-scripts.sh)
           echo "bash -n: all shell scripts passed"
 
-      - name: Contributor bootstrap stays read-only before consent
-        run: bash tests/dev-bootstrap.sh
-
       - name: Validate homelab registry and compose lock JSON
         run: |
           set -euo pipefail
@@ -358,6 +355,9 @@ jobs:
           fi
           grep -Eq '^\[multilib\]' /etc/pacman.conf
           pacman -Sy
+
+      - name: Contributor bootstrap stays read-only before consent
+        run: bash tests/dev-bootstrap.sh
 
       - name: Profile manifests resolve in official Arch repos
         run: |
