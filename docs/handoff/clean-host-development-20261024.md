@@ -12,6 +12,8 @@ Não interpretar CI/fixture verde como homologação física de conta, proxy, VM
 
 Em 2026-10-24, WIP de código dos 18 worktrees foi copiado para o repositório GitHub **privado** [`Misael-art/phase-zero-continuity-20261024`](https://github.com/Misael-art/phase-zero-continuity-20261024), release [`rescue-20261024`](https://github.com/Misael-art/phase-zero-continuity-20261024/releases/tag/rescue-20261024). Requer login na conta GitHub autorizada. Inclui bundle/gitdir, quatro patches, dois arquivos de untracked selecionados, manifestos e instruções de restauração. O tar de 107642880 bytes tem SHA-256 `6b24e25ad4b7824aa81adfea305087db699c0a8f5b74189b3355de1b32200a80`; upload e download remoto foram conferidos por hash. O resgate foi varrido com Gitleaks 8.18.4 sem achados, prova limitada ao conteúdo varrido.
 
+Asset adicional `phasezero-additional-wip-20261024.tar.gz` (SHA-256 `e0a353d41fb42b0e56b1d8fcddd66dc174c333b8593598417c5d6c3dd96ecd73`) guarda quatro patches de stash antigos e código avulso do snapshot `pz-wip-preserved-20260924-pr102`. Exclui expressamente `.mimosa/` e `uber-defesa-privada/`. Gitleaks 8.18.4 no conteúdo extraído: zero achados. Restaurar somente após inspeção; não pressupor que o material antigo ainda se aplica ao HEAD atual.
+
 No host novo, instalar `gh` pelo gerenciador de pacotes oficial ou baixar os dois assets pelo navegador já autenticado. Com `gh`, executar em diretório separado do clone:
 
 ```bash
@@ -19,8 +21,11 @@ gh auth login
 gh release download rescue-20261024 -R Misael-art/phase-zero-continuity-20261024 -D phasezero-rescue
 cd phasezero-rescue
 sha256sum -c phasezero-code-rescue-20261024.SHA256SUMS
+sha256sum -c phasezero-additional-wip-20261024.SHA256SUMS
 mkdir extracted
 tar -xf phasezero-code-rescue-20261024.tar -C extracted
+mkdir additional
+tar -xzf phasezero-additional-wip-20261024.tar.gz -C additional
 ```
 
 No Windows, conferir SHA-256 via `Get-FileHash` ou Git Bash. Ler README do repositório privado e manifestos extraídos antes de restaurar. Inspecionar bundle e patches em worktrees separados; não aplicar WIP diretamente em `main`. O resgate **não** inclui `.mimosa/`, `uber-defesa-privada/`, VMs/ISOs, credenciais, sessões, ai-memory ou estado de serviços. Essas partes não podem ser reconstruídas só com GitHub. Windows VM local foi declarada descartável pelo operador.
