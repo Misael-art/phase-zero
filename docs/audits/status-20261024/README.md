@@ -38,3 +38,7 @@ Todas geradas do SHA principal, em Xvfb 1280×800, tema escuro, HOME/XDG isolado
 7. **P1 — entrega:** resolver #115 (conflito documental) e #63 (CI vermelho e decisão explícita sobre permissão automática), alinhar README/canal stable vs beta, `pz ai help` e roadmaps com SHA atual. Só promover release estável após gates aplicáveis.
 
 Esta auditoria não altera código, serviço, conta, boot nem VM. Screenshots e hashes são evidência local, não certificação geral.
+
+## Atualização de continuidade após a auditoria
+
+O limite descrito acima era verdadeiro no momento da coleta. Depois, o WIP de código dos 18 worktrees foi publicado em [resgate GitHub privado](https://github.com/Misael-art/phase-zero-continuity-20261024/releases/tag/rescue-20261024), com upload e download conferidos por SHA-256. [Handoff de host limpo](../../handoff/clean-host-development-20261024.md) traz acesso, hash, restauração e exclusões. O resgate não inclui estado privado do host, contas, VM ou dados de serviços.

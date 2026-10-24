@@ -2,11 +2,28 @@
 
 ## Ponto de partida e limite da prova
 
-`main` auditada em `ddadd6de4fc5a0b8933c2d312e2f8a6dd7f1aff3`; release beta `v1.22.11` aponta ao mesmo SHA. [Auditoria versionada](../audits/status-20261024/README.md) contém evidências, capturas, lacunas e critérios de aceite. GitHub contém código e releases; **não contém** contas, tokens, VM guest, dados de Homelab nem os 18 WIPs preservados somente no cartão de continuidade. Clone de `main` basta para começar desenvolvimento da base publicada. Para continuar qualquer WIP do cartão, transportar e verificar o cartão antes de apagar o host de origem.
+`main` auditada em `ddadd6de4fc5a0b8933c2d312e2f8a6dd7f1aff3`; release beta `v1.22.11` aponta ao mesmo SHA. [Auditoria versionada](../audits/status-20261024/README.md) contém evidências, capturas, lacunas e critérios de aceite. Clone de `main` basta para começar desenvolvimento da base publicada. Para continuar WIP sem acesso ao cartão, usar o resgate privado verificado abaixo. GitHub **não contém** contas, tokens, VM guest, dados de Homelab nem configuração do host.
 
 Este wrapper/handoff está na branch `codex/clean-host-dev-bootstrap`, [PR #129](https://github.com/Misael-art/phase-zero/pull/129), até merge. Em host novo, após clone de `main`, execute `git fetch origin codex/clean-host-dev-bootstrap` e `git switch --track origin/codex/clean-host-dev-bootstrap` antes de usar os comandos abaixo. Se usar ZIP sem Git, baixe o ZIP **dessa branch**. Após merge, `main` passa a incluir o wrapper.
 
 Não interpretar CI/fixture verde como homologação física de conta, proxy, VM ou segundo host. Nenhum instalador do produto, VM, container ou serviço deve iniciar no bootstrap de desenvolvimento.
+
+## Resgate remoto do trabalho local, sem cartão
+
+Em 2026-10-24, WIP de código dos 18 worktrees foi copiado para o repositório GitHub **privado** [`Misael-art/phase-zero-continuity-20261024`](https://github.com/Misael-art/phase-zero-continuity-20261024), release [`rescue-20261024`](https://github.com/Misael-art/phase-zero-continuity-20261024/releases/tag/rescue-20261024). Requer login na conta GitHub autorizada. Inclui bundle/gitdir, quatro patches, dois arquivos de untracked selecionados, manifestos e instruções de restauração. O tar de 107642880 bytes tem SHA-256 `6b24e25ad4b7824aa81adfea305087db699c0a8f5b74189b3355de1b32200a80`; upload e download remoto foram conferidos por hash. O resgate foi varrido com Gitleaks 8.18.4 sem achados, prova limitada ao conteúdo varrido.
+
+No host novo, instalar `gh` pelo gerenciador de pacotes oficial ou baixar os dois assets pelo navegador já autenticado. Com `gh`, executar em diretório separado do clone:
+
+```bash
+gh auth login
+gh release download rescue-20261024 -R Misael-art/phase-zero-continuity-20261024 -D phasezero-rescue
+cd phasezero-rescue
+sha256sum -c phasezero-code-rescue-20261024.SHA256SUMS
+mkdir extracted
+tar -xf phasezero-code-rescue-20261024.tar -C extracted
+```
+
+No Windows, conferir SHA-256 via `Get-FileHash` ou Git Bash. Ler README do repositório privado e manifestos extraídos antes de restaurar. Inspecionar bundle e patches em worktrees separados; não aplicar WIP diretamente em `main`. O resgate **não** inclui `.mimosa/`, `uber-defesa-privada/`, VMs/ISOs, credenciais, sessões, ai-memory ou estado de serviços. Essas partes não podem ser reconstruídas só com GitHub. Windows VM local foi declarada descartável pelo operador.
 
 ## Primeiro uso, Arch / Manjaro / BigLinux
 
@@ -60,7 +77,7 @@ Instala Git/Python pelo winget; caso winget falte, tenta o App Installer oficial
 
 | Prioridade | Frente | Ação concreta | Aceite necessário |
 |---|---|---|---|
-| P0 | Preservação | Conferir WIP Bonsai/WinVM no cartão; revisar segredos; publicar só commits pertinentes em PRs próprios. Criar segunda cópia verificada do cartão em mídia independente antes de formatar. | `checks/verify_continuity.py`, SHA256SUMS, HEAD/diff/untracked e restore de amostra em outra mídia. GitHub-only não cobre WIP até publicar. |
+| P0 | Preservação | Recuperar resgate privado, conferir WIP Bonsai/WinVM, revisar segredos e publicar commits pertinentes em PRs próprios. | Hash remoto do tar, manifestos, bundle/patches em worktrees isolados e testes específicos antes de cada PR. Estado privado do host permanece fora do resgate. |
 | P0 | IA/Contas | PXA-006/008/009: provar sessão/cota reais; grant vinculado a consumidor **e requisição**; fallback pago bloqueado. | G3 no provedor real, logs sem segredo e teste negativo de consumidor sem grant. Gateway saudável ≠ cada provider pronto. |
 | P0 | WinVM | Integrar #114 antes de #116; revisar WIP de integridade esparsa. Não reusar guest apagado. | G2 Windows descartável: first boot, OVMF/TPM, QGA/rede, boot direto, tela/resolução, GPU fallback; ledger de RAM/disco e rollback. |
 | P1 | ChatGPT Web | Integrar #117 antes de #122, com escopo/grants e recuperação após reboot. | Prova real read/write somente dentro da autorização, revogação e ausência de fallback indevido. Full ainda não certificado. |
