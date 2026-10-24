@@ -36,6 +36,11 @@ Conflict rules:
 
 ## Active roadmaps
 
+- Contributor on clean host: read `docs/handoff/clean-host-development-20261024.md`
+  before preparing a new development machine. Use `tools/dev-bootstrap.sh` on
+  Arch family or `tools/dev-bootstrap.ps1` on Windows. The contributor wrapper
+  installs tooling only; product services, VMs and host boot remain separate.
+
 - Homelab v1.15.1 remediation: read
   `docs/roadmaps/homelab-v1.15.1-remediation.md` before any Homelab, server,
   AI-appliance, release, or host-package work. Treat its anti-pollution rules,
