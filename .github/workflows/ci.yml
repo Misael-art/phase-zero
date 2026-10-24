@@ -342,7 +342,7 @@ jobs:
       - name: Base tools on the clean host
         run: |
           set -euo pipefail
-          pacman -Syu --noconfirm --needed base-devel python python-pytest jq git sudo
+          pacman -Syu --noconfirm --needed base-devel python python-pip python-pytest jq git sudo ripgrep shellcheck
           # Product-declared extra repos (profiles archRepos) are enabled by
           # the installer at runtime; CI enables them here so the live
           # resolution gate proves the full story on disposable iron.
@@ -356,6 +356,9 @@ jobs:
           grep -Eq '^\[multilib\]' /etc/pacman.conf
           pacman -Sy
 
+      - name: Contributor bootstrap stays read-only before consent
+        run: bash tests/dev-bootstrap.sh
+
       - name: Profile manifests resolve in official Arch repos
         run: |
           set -euo pipefail
@@ -367,6 +370,12 @@ jobs:
           useradd -m builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
           su builder -c "cd '$GITHUB_WORKSPACE' && bash packaging/linux/arch/build-arch.sh"
+
+      - name: Create isolated contributor venv in disposable Arch
+        run: |
+          set -euo pipefail
+          su builder -c "cd '$GITHUB_WORKSPACE' && bash tools/dev-bootstrap.sh install --profile core --yes"
+          su builder -c "cd '$GITHUB_WORKSPACE' && bash tools/dev-bootstrap.sh doctor --profile core"
 
       - name: Install the asset, prove entrypoints and fail-closed status
         run: |
@@ -489,7 +498,7 @@ jobs:
             libxcb-xfixes0 libxcb-xkb1 libx11-xcb1 qemu-utils
           python3 -m venv /tmp/pz-venv
           # Same pin as homelab-python-test: PySide6 6.12.0 segfaults at exit.
-          /tmp/pz-venv/bin/pip install -q pytest pytest-timeout 'PySide6==6.11.1' pillow argon2-cffi
+          /tmp/pz-venv/bin/pip install -q -r requirements/dev-ui.txt
 
       - name: Run pytest (offscreen)
         run: |
