@@ -798,6 +798,7 @@ class Bridge:
         return {"repaired": True, "stoppedLaunchers": stopped,
                 "quarantinedAutostart": str(quarantined) if quarantined else None,
                 "autostartSettingTurnedOff": settings,
+                "loginEntryRestored": self.restore_autostart(),
                 "liveCodexRouteTouched": self.live_route_touched(),
                 "isolation": self.isolation()}
 
@@ -1586,6 +1587,8 @@ class Bridge:
                  + ("movido para quarentena" if fixed["quarantinedAutostart"] else "ausente"))
         done("pacote", "baixado e conferido com o pin" if self.fetch()["downloaded"]
              else "já presente e conferido com o pin")
+        if self.restore_autostart():
+            done("início no login", "entrada PhaseZero ausente foi recriada (opt-in já registrado)")
         if not self.launcher_active():
             self.install()
             if (self.session_present(self.paths.launcher_data) is not True
@@ -1777,6 +1780,27 @@ class Bridge:
         state["autostart"] = {"at": iso(self.clock())}
         self.save_state(state)
         return self.autostart_status()
+
+    def restore_autostart(self) -> bool:
+        """Rewrite a recorded opt-in whose PhaseZero files went missing or stale.
+
+        Only absent files are recreated; an entry whose content was changed by
+        someone else is left alone, so `autostart run` keeps refusing it.
+        """
+        state = self.load_state()
+        if (not state.get("autostart") or not state.get("optIn")
+                or self.autostart_status()["state"] != "inconsistent"
+                or self.package_state().get("unpacked") != "verified"):
+            return False
+        entry = self.paths.managed_autostart
+        if entry.exists() and entry.read_text(encoding="utf-8") != self.autostart_entry_text():
+            return False
+        self.install_managed_entrypoint()
+        self.paths.autostart_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write(self.paths.autostart_wrapper, self.autostart_wrapper_text().encode(), 0o755)
+        atomic_write(self.paths.autostart_target, self.autostart_target_text().encode(), 0o600)
+        atomic_write(entry, self.autostart_entry_text().encode(), 0o600)
+        return self.autostart_status()["state"] == "enabled"
 
     def autostart_disable(self) -> dict[str, Any]:
         state = self.load_state()
@@ -2659,7 +2683,7 @@ def render(command: str, result: dict[str, Any]) -> str:
         lines.append("  início no login: "
                      + {"off": "desligado (ligue com `autostart enable --acknowledge-autostart`)",
                         "enabled": "ligado, pelo unit isolado",
-                        "inconsistent": "INCONSISTENTE; rode `autostart disable`"}[autostart])
+                        "inconsistent": "INCONSISTENTE; rode `repair` (ou `autostart disable`)"}[autostart])
         lines.append("Bloqueado por desenho: escrita local, autostart do launcher upstream, "
                      "rota do ~/.codex, catálogo.")
     elif command == "smoke":

@@ -551,6 +551,23 @@ def test_login_autostart_is_opt_in_and_never_starts_the_upstream_launcher_direct
     assert not bridge.paths.autostart_target.exists()
 
 
+def test_repair_restores_a_deleted_login_entry_but_never_a_tampered_one(host):
+    bridge, _, _ = host
+    bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
+                                    "unpacked": "verified"}
+    assert bridge.restore_autostart() is False  # no recorded opt-in: nothing to restore
+    assert bridge.autostart_enable(True)["state"] == "enabled"
+
+    bridge.paths.managed_autostart.unlink()
+    assert bridge.autostart_status()["state"] == "inconsistent"
+    assert bridge.repair()["loginEntryRestored"] is True
+    assert bridge.autostart_status()["state"] == "enabled"
+
+    bridge.paths.managed_autostart.write_text("[Desktop Entry]\nExec=/tmp/other\n")
+    assert bridge.repair()["loginEntryRestored"] is False
+    assert bridge.autostart_status()["state"] == "inconsistent"
+
+
 def _run_wrapper(wrapper: Path, home: Path) -> subprocess.CompletedProcess:
     fake_bin = home / "fakebin"
     fake_bin.mkdir(exist_ok=True)
