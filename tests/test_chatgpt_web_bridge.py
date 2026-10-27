@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 from linux.ai import chatgpt_web_bridge as bridge_module
+
+PINNED = bridge_module.PIN["version"]
 from linux.ai.chatgpt_web_bridge import (
     APPROVAL_LINE,
     DEFAULT_PORT,
@@ -172,7 +174,7 @@ def host(tmp_path):
 def configure(bridge: Bridge, runner: FakeRunner, route_active: bool) -> None:
     """A browser-only install as upstream leaves it."""
     paths = bridge.paths
-    cli = paths.core_home / "versions/6.1.8-linux-x64/bin/codex-chatgpt-web"
+    cli = paths.core_home / f"versions/{PINNED}-linux-x64/bin/codex-chatgpt-web"
     cli.parent.mkdir(parents=True)
     cli.write_text("#!/bin/sh\n")
     (paths.core_home / "config.json").write_text(json.dumps(
@@ -254,7 +256,7 @@ def test_unit_seals_live_codex_home_and_autostart_directory(host):
 def test_diff_accepts_interrupt_hook_only_for_the_managed_runtime(host):
     bridge, _, _ = host
     core = bridge.paths.core_home
-    managed = (f"command = \"'{core}/versions/6.1.8-linux-x64/bin/codex-chatgpt-web' "
+    managed = (f"command = \"'{core}/versions/{PINNED}-linux-x64/bin/codex-chatgpt-web' "
                f"'--home' '{core}' 'hook' 'interrupt'\"")
     foreign = "command = \"'/usr/bin/evil' '--home' '/tmp' 'hook' 'interrupt'\""
     after = OWNED_CONFIG + "\n".join([
@@ -271,7 +273,7 @@ def test_diff_accepts_interrupt_hook_only_for_the_managed_runtime(host):
 
 def test_route_accepts_current_upstream_bun_hook_without_trusting_other_commands(host):
     bridge, _, _ = host
-    version = bridge.paths.core_home / "versions/6.1.8-linux-x64"
+    version = bridge.paths.core_home / f"versions/{PINNED}-linux-x64"
     core = bridge.paths.core_home
     managed = (f"command = \"'{version}/runtime/bun' '{version}/app/cli.js' "
                f"'--home' '{core}' 'hook' 'interrupt'\"")
@@ -283,7 +285,7 @@ def test_route_accepts_current_upstream_bun_hook_without_trusting_other_commands
 
     for changed in (managed.replace("/app/cli.js", "/app/other.js"),
                     managed.replace("/runtime/bun", "/runtime/other"),
-                    managed.replace("6.1.8-linux-x64", "6.1.9-linux-x64"),
+                    managed.replace(f"{PINNED}-linux-x64", "0.0.1-linux-x64"),
                     managed.replace("'hook' 'interrupt'", "'hook' 'restart'")):
         hostile = text.replace(managed, changed)
         assert bridge.classify_diff(OWNED_CONFIG, hostile)["unexpected"] == ["+" + changed]
@@ -490,7 +492,7 @@ url = "http://127.0.0.1:49374/mcp"
 [[hooks.Interrupt]]
 [[hooks.Interrupt.hooks]]
 type = "command"
-command = "'{core}/versions/6.1.8-linux-x64/bin/codex-chatgpt-web' '--home' '{core}' 'hook' 'interrupt'"
+command = "'{core}/versions/{PINNED}-linux-x64/bin/codex-chatgpt-web' '--home' '{core}' 'hook' 'interrupt'"
 """
     assert bridge.policy_violations(desktop_written) == []
 
@@ -1489,3 +1491,18 @@ def test_setup_after_a_reset_restarts_the_launcher_before_configuring_again(host
 
     assert order == ["restart", "upstream-setup"]
     assert result["ready"] is True and result["stage"] == "web-model"
+
+
+def test_launcher_classification_survives_wiped_environment_and_rewritten_argv():
+    # 6.1.14 wipes /proc/<pid>/environ and child argv: only the tree and mounts remain.
+    tree = {100: {"parent": 1, "marked": False, "sealed": True},
+            101: {"parent": 100, "marked": False, "sealed": True},   # zygote
+            102: {"parent": 101, "marked": False, "sealed": True},   # renderer
+            200: {"parent": 1, "marked": False, "sealed": False},    # started outside the unit
+            300: {"parent": 1, "marked": True, "sealed": True}}      # older launcher, env intact
+    result = bridge_module.classify_launchers(tree, unit_pid=100)
+    assert result == [{"pid": 100, "managed": True}, {"pid": 200, "managed": False},
+                      {"pid": 300, "managed": True}]
+    unsealed = {100: {"parent": 1, "marked": False, "sealed": False}}
+    assert bridge_module.classify_launchers(unsealed, unit_pid=100) == [
+        {"pid": 100, "managed": False}]

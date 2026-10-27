@@ -83,24 +83,25 @@ DEFAULT_PORT = 17841
 # never resolved: changing this pin requires a new audit.
 PIN: dict[str, Any] = {
     "repository": "miuuyy/codex-chatgpt-web",
-    "version": "6.1.8",
-    "tag": "v6.1.8",
-    "tagObject": "09af1a06b2bde862ec41d3ca01b0a7577a14fa56",
-    "commit": "7cc8b8d8aadbbf729bd2bd43ca47fa15ea9965c0",
-    "checksumsSha256": "703cce52455053666f8ac9b16fb9e3bbf6cc5e5cd414e1c3ef19a943bffb8c8a",
-    "auditedAt": "2026-10-12",
+    "version": "6.1.14",
+    "tag": "v6.1.14",
+    # v6.1.14 is a lightweight tag: it points straight at the commit.
+    "tagObject": None,
+    "commit": "cfeaf04bc7f54cea29e1ff2adbcad63bd038b119",
+    "checksumsSha256": "3b1d80ae815044ead043dba234ca4ef9edbbc2fa779cf5a689715fe35d76fca3",
+    "auditedAt": "2026-10-27",
     "platformSigned": False,
     "assets": {
         "linux-x86_64": {
-            "name": "codex-web-gpt-6.1.8-linux-x64.AppImage",
-            "size": 186153944,
-            "sha256": "b334c762098b15f7745e156932858a96de2abc21fe4dd86764c122300e431938",
+            "name": "codex-web-gpt-6.1.14-linux-x64.AppImage",
+            "size": 191617657,
+            "sha256": "59560086b338ce7267df3b29d6347801f11d01b44e8631c644fab3812a886b17",
         },
         # Recorded for the future Windows adapter; this manager is Linux-only.
         "windows-x86_64": {
-            "name": "codex-web-gpt-6.1.8-win-x64.exe",
-            "size": 150965610,
-            "sha256": "18743bfb6b3e200bf36823a57e1d9d58b17a99fed16dd8701b03a49801d113d1",
+            "name": "codex-web-gpt-6.1.14-win-x64.exe",
+            "size": 154029016,
+            "sha256": "bfe978f82e9d59fa617d196130b417d10a3034180e6b6beb72720123bd034831",
         },
     },
 }
@@ -386,6 +387,13 @@ def load_sibling(name: str) -> Any:
     return module
 
 
+def classify_launchers(processes: dict[int, dict[str, Any]],
+                       unit_pid: int) -> list[dict[str, Any]]:
+    """Main launcher processes (parent is not a launcher) and whether each is isolated."""
+    return [{"pid": pid, "managed": bool((pid == unit_pid or info["marked"]) and info["sealed"])}
+            for pid, info in sorted(processes.items()) if info["parent"] not in processes]
+
+
 class Runner:
     """Process seam; tests replace it, production uses real commands."""
 
@@ -486,30 +494,36 @@ class Runner:
         """This user's launcher main processes, flagged by whether they are isolated.
 
         Chromium moves itself into its own ``app-*.scope``, so the cgroup says
-        nothing. Isolation is read from the process itself: the managed data
-        directory in its environment and ``readonly_path`` mounted read-only in
-        its mount namespace.
+        nothing, and since 6.1.14 the launcher wipes its own environment and
+        rewrites child ``argv``. Isolation is read from the process tree instead:
+        a main process (parent is not a launcher) is managed when it is the
+        unit's main PID, or still carries the managed data directory in its
+        environment, and has ``readonly_path`` mounted read-only.
         """
         marker = f"CODEX_WEB_GPT_LAUNCHER_DATA_DIR={data_dir}".encode()
-        found: list[dict[str, Any]] = []
+        code, out, _ = self.run(["systemctl", "--user", "show", "-p", "MainPID", "--value",
+                                 UNIT_NAME], timeout=15)
+        unit_pid = int(out.strip()) if code == 0 and out.strip().isdigit() else 0
+        processes: dict[int, dict[str, Any]] = {}
         for entry in Path("/proc").iterdir():
             if not entry.name.isdigit():
                 continue
             try:
                 if entry.stat().st_uid != os.getuid() or Path(os.readlink(entry / "exe")) != binary:
                     continue
-                arguments = (entry / "cmdline").read_bytes().split(b"\0")
+                status = (entry / "status").read_text(encoding="utf-8", errors="replace")
                 environ = (entry / "environ").read_bytes().split(b"\0")
                 mounts = (entry / "mountinfo").read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            if any(argument.startswith(b"--type=") for argument in arguments):
-                continue
+            parent = next((int(line.split()[1]) for line in status.splitlines()
+                           if line.startswith("PPid:")), 0)
             sealed = any(len(fields) > 5 and fields[4] == str(readonly_path)
                          and "ro" in fields[5].split(",")
                          for fields in (line.split() for line in mounts.splitlines()))
-            found.append({"pid": int(entry.name), "managed": marker in environ and sealed})
-        return found
+            processes[int(entry.name)] = {"parent": parent, "marked": marker in environ,
+                                          "sealed": sealed}
+        return classify_launchers(processes, unit_pid)
 
     def terminate(self, pid: int, timeout: float = 20.0) -> bool:
         try:
