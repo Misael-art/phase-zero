@@ -3044,3 +3044,22 @@ manager anterior em
 Pacote instalado 1.22.8-1 não contém a
 copy nova da UI; publicar pacote depois da revisão. Sem reiniciar ou mudar
 launcher, túnel, credenciais, VM, KDE ou boot.
+
+### PXA-010: reprova do Full com Codex 0.164 — 2026-10-27
+
+Teste controlado autorizado pelo operador, em repositório descartável fora do
+PhaseZero. Backup em `journal/full-probe-20261027T…`. Launcher reconfigurado
+para `--full` (túnel existente, chave do cofre materializada em tmpfs e apagada
+em seguida, aprovação automática desligada); `doctor.ok:true`, túnel pronto.
+Turno real com Codex 0.164.0, `workspace-write` e `network_access=true` falhou
+igual ao 0.163: `ChatGPT web turn is missing network access in trusted Codex
+environment context`.
+
+Causa exata, por captura do request com provider local falso (sem gastar
+mensagem): o resolver Full do runtime 6.1.8 procura `<network_access>` (ou
+“network access is enabled”) no `<environment_context>` confiável. Codex
+0.163+ descreve permissões em `<permission_profile>` e declara rede apenas na
+mensagem developer. Não é questão de configuração; depende de runtime upstream
+compatível ou de Codex anterior ao novo formato. Rollback para `browser-only`
+feito; `smoke` voltou a `PONG`, `~/.codex` intocado. Bloqueio mantido com o
+motivo atualizado.

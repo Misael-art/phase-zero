@@ -117,13 +117,15 @@ LOCKED_CAPABILITIES: dict[str, str] = {
     "auto-approve-tool-calls": "Aprovação automática de ferramentas é recusada.",
 }
 # Observed on the pinned 6.1.8 runtime with a real tunnel and connector:
-# its Full resolver requires a network declaration in the trusted Codex turn.
-# Codex 0.163 omitted it even with workspace-write + network_access=true.
+# its Full resolver reads network access only from <network_access> inside the
+# trusted <environment_context>. Codex 0.163 and 0.164 describe permissions in
+# <permission_profile> and state network only in the developer message, so the
+# turn fails with "missing network access" even with workspace-write and
+# network_access=true (re-probed 2026-10-27 with Codex 0.164.0).
 # The upstream doctor checks infrastructure, not a working tool turn.
 FULL_RUNTIME_BLOCKER = (
-    f"Full {PIN['version']} ainda sem prova de ferramenta real; no host de referência, "
-    "Codex 0.163 não declarou rede no contexto confiável mesmo com "
-    "workspace-write e network_access=true"
+    f"Full {PIN['version']} ainda sem prova de ferramenta real; Codex 0.163/0.164 não "
+    "declaram rede no contexto confiável (<environment_context>) que o runtime exige (só em <permission_profile>)"
 )
 FULL_RUNTIME_ACTION = (
     "Mantenha browser-only. Corrija a compatibilidade do runtime ou use um conector MCP "
