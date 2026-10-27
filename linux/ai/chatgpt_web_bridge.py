@@ -125,7 +125,8 @@ LOCKED_CAPABILITIES: dict[str, str] = {
 # The upstream doctor checks infrastructure, not a working tool turn.
 FULL_RUNTIME_BLOCKER = (
     f"Full {PIN['version']} ainda sem prova de ferramenta real; Codex 0.163/0.164 não "
-    "declaram rede no contexto confiável (<environment_context>) que o runtime exige (só em <permission_profile>)"
+    "declarou rede no contexto confiável (<environment_context>) que o runtime exige, "
+    "mesmo com workspace-write e network_access=true"
 )
 FULL_RUNTIME_ACTION = (
     "Mantenha browser-only. Corrija a compatibilidade do runtime ou use um conector MCP "
