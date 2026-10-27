@@ -3107,3 +3107,21 @@ Achados corrigidos:
 Escrita local continua bloqueada: o perfil dedicado usa sandbox somente leitura.
 A permissão do conector na conta está como "Permitir tudo"; o limite efetivo é
 o sandbox do Codex, não o cartão de aprovação do ChatGPT.
+
+### PXA-010: atalhos e sandbox herdado — 2026-10-27
+
+- Atalhos de menu e área de trabalho tinham sumido do host (arquivos apagados
+  por fora, registro intacto). O `setup` agora instala por padrão e o `repair`
+  recria os que faltam. Não sobrescreve arquivo alterado por terceiros e
+  respeita `shortcuts remove`. O atalho principal segue o modo do launcher
+  (Web ou com ferramentas).
+- Sandbox do perfil dedicado: `pz ai chatgpt-web sandbox inherit|isolated`.
+  O padrão `inherit` copia `sandbox_mode`, `approval_policy` e
+  `[sandbox_workspace_write]` do `~/.codex/config.toml`, que só é lido. O
+  opt-in `isolated` fixa o modo somente leitura. O `CODEX_HOME` continua
+  separado: compartilhá-lo faria o Codex normal passar pelo bridge. `smoke` e
+  `ask` rodam sempre somente leitura.
+- Prova real no host: com `inherit`, o sandbox herdado foi
+  `danger-full-access` e a escrita no workspace funcionou. Com `isolated`, o
+  sandbox ficou `read-only` e a escrita foi recusada. Ao final, o host voltou
+  ao padrão `inherit`.

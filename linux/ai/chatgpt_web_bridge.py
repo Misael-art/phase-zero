@@ -112,7 +112,8 @@ PIN: dict[str, Any] = {
 # Capabilities that stay off until real-account, clean-host (Arch and Windows),
 # permission, failure and rollback gates are proven outside this code.
 LOCKED_CAPABILITIES: dict[str, str] = {
-    "local-write": "Codex roda em sandbox read-only neste perfil; escrita local segue bloqueada.",
+    "local-write": "Escrita local segue o sandbox do perfil: herdado do Codex normal por padrão "
+                   "(`sandbox inherit`) ou somente leitura (`sandbox isolated`).",
     "upstream-autostart": "O autostart do próprio launcher fica bloqueado; iniciar no login "
                           "só pelo opt-in `autostart enable`, sempre pelo unit isolado.",
     "account-auto-switch": "Não há troca automática de conta ou modelo.",
@@ -198,6 +199,11 @@ OWNED_CONFIG = (
     'sandbox_mode = "read-only"\n'
     f"{APPROVAL_LINE}\n"
 )
+SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
+APPROVAL_POLICIES = ("on-request", "on-failure", "never")
+SANDBOX_PROFILES = ("inherit", "isolated")
+SANDBOX_BLOCK_BEGIN = "# PhaseZero sandbox herdado do Codex normal (gerenciado)."
+SANDBOX_BLOCK_END = "# Fim do sandbox herdado."
 FORBIDDEN_CODEX_ARGS = (
     "-s", "--sandbox", "-a", "--ask-for-approval", "--full-auto", "--yolo",
     "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust",
@@ -1032,6 +1038,7 @@ class Bridge:
                 "quarantinedAutostart": str(quarantined) if quarantined else None,
                 "autostartSettingTurnedOff": settings,
                 "loginEntryRestored": self.restore_autostart(),
+                "shortcutsRestored": self.restore_shortcuts(),
                 "liveCodexRouteTouched": self.live_route_touched(),
                 "isolation": self.isolation()}
 
@@ -1589,11 +1596,15 @@ class Bridge:
         except tomllib.TOMLDecodeError as error:
             return [f"config.toml inválido: {error}"]
         found: list[str] = []
-        if config.get("sandbox_mode") != "read-only":
-            found.append("sandbox_mode deixou de ser read-only")
-        if config.get("approval_policy") != APPROVAL_POLICY:
-            found.append(f"approval_policy deixou de ser {APPROVAL_POLICY}")
-        found += [f"chave não permitida: {key}" for key in FORBIDDEN_PROFILE_KEYS if key in config]
+        sandbox = self.sandbox_profile()
+        if config.get("sandbox_mode") not in {sandbox["sandbox"], "read-only"}:
+            found.append(f"sandbox_mode diferente do perfil ({sandbox['sandbox']})")
+        if config.get("approval_policy") not in {sandbox["approval"], APPROVAL_POLICY}:
+            found.append(f"approval_policy diferente do perfil ({sandbox['approval']})")
+        allowed = {"sandbox_workspace_write"} if (
+            config.get("sandbox_workspace_write") == sandbox["workspaceWrite"]) else set()
+        found += [f"chave não permitida: {key}" for key in FORBIDDEN_PROFILE_KEYS
+                  if key in config and key not in allowed]
         route = config.get("openai_base_url")
         if route is not None and route != f"http://127.0.0.1:{DEFAULT_PORT}/v1":
             found.append("openai_base_url aponta para fora do bridge local")
@@ -1825,6 +1836,8 @@ class Bridge:
              else "já presente e conferido com o pin")
         if self.restore_autostart():
             done("início no login", "entrada PhaseZero ausente foi recriada (opt-in já registrado)")
+        if self.restore_shortcuts():
+            done("atalhos", "menu e área de trabalho prontos (ChatGPT Web no Codex)")
         if not self.launcher_active():
             self.install()
             if (self.session_present(self.paths.launcher_data) is not True
@@ -1861,6 +1874,10 @@ class Bridge:
             # Already configured: upstream's setup would collide with its own daemon's port.
             self.route_enable()
             done("modelo web", "rota religada no perfil dedicado; ~/.codex intocado")
+        sandbox = self.apply_sandbox()
+        done("sandbox", f"{sandbox['sandbox']} / aprovação {sandbox['approval']} ("
+             + ("herdado do Codex normal" if sandbox["profile"] == "inherit"
+                else "isolado, somente leitura") + ")")
         if not self.route_verify()["ok"]:
             raise BridgeError("configuração do perfil tem mudanças inesperadas; rode `route verify`",
                               "config-drift")
@@ -1888,7 +1905,8 @@ class Bridge:
         reply_file.unlink(missing_ok=True)
         command, env = self.codex_command(
             ["exec", "--skip-git-repo-check", "--ephemeral", "-C", str(scratch), "-m", model,
-             "-o", str(reply_file), f"Responda somente com a palavra: {SMOKE_TOKEN}"])
+             "-o", str(reply_file), f"Responda somente com a palavra: {SMOKE_TOKEN}"],
+            isolated=True)
         code, out, err = self.runner.run(command, env=env, timeout=SMOKE_TIMEOUT_SECONDS,
                                          input_text="")
         try:
@@ -2080,8 +2098,8 @@ class Bridge:
                     "Codex Desktop em janela separada com os modelos ChatGPT Web, somente "
                     "leitura. O Codex normal não muda."),
             "tools": ("ChatGPT Web no Codex — com ferramentas (experimental)",
-                      "Bloqueado até túnel, chave e elegibilidade estarem prontos. Sandbox "
-                      "somente leitura e aprovação por ação."),
+                      "Usa o conector pelo túnel; abre só com `tools enable` concluído. "
+                      "Sandbox conforme `pz ai chatgpt-web sandbox`."),
         }[mode]
         return ("[Desktop Entry]\n"
                 "Type=Application\n"
@@ -2144,8 +2162,33 @@ class Bridge:
             # Executable: KDE refuses to launch a desktop icon it does not trust.
             atomic_write(path, self.shortcut_entry_text(mode).encode(), 0o755)
         state["shortcuts"] = {"at": iso(self.clock()), "desktopCopy": desktop_copy}
+        state.pop("shortcutsRemoved", None)
         self.save_state(state)
         return self.shortcuts_status()
+
+    def restore_shortcuts(self) -> bool:
+        """Recreate shortcuts that went missing; install them once by default.
+
+        Never overwrites an entry someone else changed, and never comes back
+        after `shortcuts remove` (recorded as `shortcutsRemoved`).
+        """
+        state = self.load_state()
+        if (not state.get("optIn") or state.get("shortcutsRemoved")
+                or self.package_state().get("unpacked") != "verified"):
+            return False
+        status = self.shortcuts_status()
+        if status["state"] == "installed":
+            return False
+        record = state.get("shortcuts") or {}
+        desktop_copy = bool(record.get("desktopCopy", True)) and self.user_desktop_dir().is_dir()
+        for path, mode in self.shortcut_files(True):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if text != self.shortcut_entry_text(mode) and "X-PhaseZero-Managed=chatgpt-web" not in text:
+                return False
+        return self.shortcuts_install(desktop_copy=desktop_copy)["state"] == "installed"
 
     def shortcuts_remove(self) -> dict[str, Any]:
         state = self.load_state()
@@ -2162,6 +2205,14 @@ class Bridge:
         self.save_state(state)
         return self.shortcuts_status()
 
+    def shortcuts_remove_by_user(self) -> dict[str, Any]:
+        """`shortcuts remove`: also stops setup and repair from bringing them back."""
+        result = self.shortcuts_remove()
+        state = self.load_state()
+        state["shortcutsRemoved"] = {"at": iso(self.clock())}
+        self.save_state(state)
+        return result
+
     def shortcut_run(self, mode: str) -> dict[str, Any]:
         """What a shortcut executes: no terminal, so every refusal becomes a notification."""
         label = "com ferramentas" if mode == "tools" else "janela"
@@ -2173,6 +2224,8 @@ class Bridge:
                 self.require_tools_ready(self.load_state())
             if not (self.launcher_active() and self.runner.port_in_use(DEFAULT_PORT)):
                 self.setup(login_wait=0)
+            if mode == "web" and (self.upstream_config() or {}).get("mode") == "full":
+                mode = "tools"  # the main shortcut follows the launcher's current mode
             return self.desktop(mode)
         except BridgeError as error:
             body = f"{error}" + {"shortcuts-off": ""}.get(error.code,
@@ -2325,7 +2378,7 @@ class Bridge:
         reply_file.unlink(missing_ok=True)
         command, env = self.codex_command(
             ["exec", "--skip-git-repo-check", "--ephemeral", "-C", str(scratch),
-             "-o", str(reply_file), prompt])
+             "-o", str(reply_file), prompt], isolated=True)
         code, out, err = self.runner.run(command, env=env, timeout=ASK_TIMEOUT_SECONDS,
                                          input_text="")
         try:
@@ -2504,6 +2557,90 @@ class Bridge:
                                  else "presente; pare o launcher e repita" if upstream_copy
                                  else "ausente"),
                 "manual": "Revogue a chave também na plataforma OpenAI; a remoção local não a invalida."}
+
+    # ---- sandbox profile -------------------------------------------------
+
+    def sandbox_profile(self) -> dict[str, Any]:
+        """Sandbox the dedicated profile uses: the normal Codex's (default) or read-only.
+
+        `inherit` copies sandbox_mode, approval_policy and [sandbox_workspace_write]
+        from the user's ~/.codex/config.toml, read only. The Codex home itself
+        stays separate: sharing it would route the normal Codex through the bridge.
+        """
+        choice = (self.load_state().get("sandbox") or {}).get("profile", "inherit")
+        if choice == "isolated":
+            return {"profile": "isolated", "sandbox": "read-only", "approval": APPROVAL_POLICY,
+                    "workspaceWrite": None, "source": "perfil dedicado"}
+        try:
+            live = tomllib.loads((self.paths.live_codex_home / "config.toml")
+                                 .read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            live = {}
+        sandbox = live.get("sandbox_mode")
+        approval = live.get("approval_policy")
+        table = live.get("sandbox_workspace_write")
+        return {"profile": "inherit",
+                "sandbox": sandbox if sandbox in SANDBOX_MODES else "read-only",
+                "approval": approval if approval in APPROVAL_POLICIES else APPROVAL_POLICY,
+                "workspaceWrite": ({key: value for key, value in table.items()
+                                    if key in {"network_access", "writable_roots",
+                                               "exclude_tmpdir_env_var", "exclude_slash_tmp"}}
+                                   if isinstance(table, dict) and sandbox == "workspace-write"
+                                   else None),
+                "source": str(self.paths.live_codex_home / "config.toml")}
+
+    def sandbox_block(self, profile: dict[str, Any]) -> str:
+        table = profile["workspaceWrite"]
+        if not table:
+            return ""
+        lines = [SANDBOX_BLOCK_BEGIN, "[sandbox_workspace_write]"]
+        lines += [f"{key} = {json.dumps(value)}" for key, value in table.items()]
+        return "\n".join(lines + [SANDBOX_BLOCK_END]) + "\n"
+
+    def apply_sandbox(self) -> dict[str, Any]:
+        """Write the chosen sandbox into the dedicated config.toml; idempotent."""
+        profile = self.sandbox_profile()
+        text = self._config_text()
+        if not text:
+            return profile
+        text = re.sub(r"(?ms)^" + re.escape(SANDBOX_BLOCK_BEGIN) + r".*?^"
+                      + re.escape(SANDBOX_BLOCK_END) + r"\n?", "", text)
+        lines = text.splitlines(keepends=True)
+        for index, line in enumerate(lines):
+            if line.startswith("["):
+                break
+            if re.match(r"^sandbox_mode\s*=", line):
+                lines[index] = f'sandbox_mode = "{profile["sandbox"]}"\n'
+            elif re.match(r"^approval_policy\s*=", line):
+                lines[index] = f'approval_policy = "{profile["approval"]}"\n'
+        text = "".join(lines)
+        block = self.sandbox_block(profile)
+        if block:
+            text = text.rstrip("\n") + "\n\n" + block
+        if text != self._config_text():
+            atomic_write(self.paths.codex_config, text.encode())
+        return profile
+
+    def sandbox_set(self, choice: str) -> dict[str, Any]:
+        state = self.load_state()
+        self.require_opt_in(state)
+        if choice not in SANDBOX_PROFILES:
+            raise BridgeError("use `inherit` ou `isolated`", "usage")
+        state["sandbox"] = {"profile": choice, "at": iso(self.clock())}
+        self.save_state(state)
+        return self.sandbox_status(applied=True)
+
+    def sandbox_status(self, applied: bool = False) -> dict[str, Any]:
+        profile = self.apply_sandbox() if applied else self.sandbox_profile()
+        try:
+            current = tomllib.loads(self._config_text() or "")
+        except tomllib.TOMLDecodeError:
+            current = {}
+        return {**profile, "applied": current.get("sandbox_mode") == profile["sandbox"]
+                and current.get("approval_policy") == profile["approval"],
+                "codexHome": str(self.paths.codex_home),
+                "note": "Escrita e rede seguem este sandbox nos turnos do Codex Desktop e do "
+                        "`codex`; `smoke` e `ask` sempre rodam somente leitura."}
 
     # ---- tools mode (Full) ------------------------------------------------
 
@@ -2889,7 +3026,8 @@ class Bridge:
                 "visibleModels": labels, "guidance": guidance,
                 "notified": notified, "liveCodexRouteTouched": self.live_route_touched()}
 
-    def codex_command(self, args: list[str]) -> tuple[list[str], dict[str, str]]:
+    def codex_command(self, args: list[str],
+                      isolated: bool = False) -> tuple[list[str], dict[str, str]]:
         state = self.load_state()
         self.require_opt_in(state)
         for index, arg in enumerate(args):
@@ -2912,7 +3050,9 @@ class Bridge:
         env["CODEX_HOME"] = str(self.paths.codex_home)
         chosen = any(arg.split("=", 1)[0] in {"-m", "--model"} for arg in args)
         model = [] if chosen else ["--model", self.default_model()]
-        return [codex, "--sandbox", "read-only", "--ask-for-approval", APPROVAL_POLICY,
+        sandbox = self.sandbox_profile() if not isolated else {
+            "sandbox": "read-only", "approval": APPROVAL_POLICY}
+        return [codex, "--sandbox", sandbox["sandbox"], "--ask-for-approval", sandbox["approval"],
                 *model, *args], env
 
 
@@ -2972,6 +3112,8 @@ def build_parser() -> argparse.ArgumentParser:
     autostart = sub.add_parser("autostart", help="início no login (opt-in)")
     autostart.add_argument("action", choices=("status", "enable", "disable", "run"))
     autostart.add_argument("--acknowledge-autostart", action="store_true")
+    sandbox = sub.add_parser("sandbox", help="sandbox do perfil: herdado (padrão) ou isolado")
+    sandbox.add_argument("action", choices=("status", "inherit", "isolated"))
     tools = sub.add_parser("tools", help="ferramentas pelo conector (sandbox somente leitura)")
     tools.add_argument("action", choices=("status", "check", "enable", "disable"))
     tools.add_argument("--tunnel-id", help="túnel OpenAI (só na primeira ativação)")
@@ -3014,7 +3156,7 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
         if args.action == "run":
             return bridge.shortcut_run(args.mode)
         return {"status": bridge.shortcuts_status,
-                "remove": bridge.shortcuts_remove}[args.action]()
+                "remove": bridge.shortcuts_remove_by_user}[args.action]()
     if command == "history":
         if args.action == "status":
             return bridge.history_status()
@@ -3055,6 +3197,9 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
             return bridge.autostart_enable(args.acknowledge_autostart)
         return {"status": bridge.autostart_status, "disable": bridge.autostart_disable,
                 "run": bridge.autostart_run}[args.action]()
+    if command == "sandbox":
+        return (bridge.sandbox_status(applied=True) if args.action == "status"
+                else bridge.sandbox_set(args.action))
     if command == "tools":
         if args.action == "enable":
             return bridge.tools_enable(args.tunnel_id)
@@ -3065,7 +3210,7 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
 
 
 FRIENDLY_COMMANDS = {"setup", "status", "smoke", "repair", "desktop", "shortcuts", "ask",
-                     "tools"}
+                     "tools", "sandbox"}
 STAGE_LABELS = {
     "off": "desligado (rode `setup`)",
     "opted-in": "aceito, pacote ainda não instalado",
@@ -3152,6 +3297,16 @@ def render(command: str, result: dict[str, Any]) -> str:
             lines += ["Próximo passo:", f"  {result['next']['action']}"]
         if result["webModelStillWorks"]:
             lines.append("O modo Web (sem ferramentas) continua funcionando normalmente.")
+    elif command == "sandbox":
+        lines += [f"Sandbox do ChatGPT Web: {result['sandbox']} / aprovação {result['approval']}"
+                  + (" (herdado do Codex normal)" if result["profile"] == "inherit"
+                     else " (isolado, somente leitura)"),
+                  f"  {mark(result['applied'])} aplicado em {result['codexHome']}/config.toml",
+                  f"  origem: {result['source']}"]
+        if result["profile"] == "inherit" and result["sandbox"] == "danger-full-access":
+            lines.append("  ⚠ sem sandbox: o modelo Web pode ler e escrever em todo o host, como "
+                         "o seu Codex normal. Para isolar: `sandbox isolated`.")
+        lines.append(f"  {result['note']}")
     elif command == "ask":
         lines.append(f"{mark(result['ok'])} {result['model']} — {result['commits']} commits de "
                      f"{result['repo']} ({result['bytesSent']} bytes enviados, sem ferramentas "

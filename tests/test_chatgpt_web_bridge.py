@@ -401,7 +401,8 @@ def test_setup_relinks_a_configured_route_without_rerunning_upstream_setup(host)
     result = bridge.setup(lambda step, detail: seen.append(step))
 
     assert result["ready"] is True and result["stage"] == "web-model"
-    assert seen == ["isolamento", "pacote", "launcher", "login", "modelo web", "bridge"]
+    assert seen == ["isolamento", "pacote", "atalhos", "launcher", "login", "modelo web",
+                    "sandbox", "bridge"]
     calls = upstream_calls(runner)
     assert "route connect" in calls
     assert not any(call.startswith("setup") for call in calls)
@@ -1604,3 +1605,54 @@ def test_tunnel_left_outside_the_running_full_launcher_breaks_isolation(host, mo
     config = bridge.paths.core_home / "config.json"
     config.write_text(json.dumps({**json.loads(config.read_text()), "mode": "browser-only"}))
     assert bridge.orphan_tunnels() == [900]
+
+
+def test_sandbox_inherits_the_normal_codex_by_default_and_can_be_isolated(host, monkeypatch):
+    bridge, runner, home = ready_host(host, monkeypatch)
+    live = bridge.paths.live_codex_home
+    live.mkdir(parents=True, exist_ok=True)
+    (live / "config.toml").write_text(
+        'sandbox_mode = "workspace-write"\napproval_policy = "on-failure"\n'
+        '[sandbox_workspace_write]\nnetwork_access = true\nwritable_roots = ["/srv/x"]\n')
+
+    profile = bridge.sandbox_status(applied=True)
+    assert profile["profile"] == "inherit" and profile["applied"] is True
+    text = bridge.paths.codex_config.read_text()
+    assert 'sandbox_mode = "workspace-write"' in text
+    assert 'approval_policy = "on-failure"' in text and "network_access = true" in text
+    assert bridge.policy_violations(text) == []
+    assert bridge.route_verify()["ok"] is True
+    command, _ = bridge.codex_command(["exec", "oi"])
+    assert command[1:5] == ["--sandbox", "workspace-write", "--ask-for-approval", "on-failure"]
+    smoke, _ = bridge.codex_command(["exec", "oi"], isolated=True)
+    assert smoke[1:3] == ["--sandbox", "read-only"]
+    assert bridge.live_route_touched() is False  # ~/.codex was only read
+
+    isolated = bridge.sandbox_set("isolated")
+    assert isolated["sandbox"] == "read-only" and isolated["applied"] is True
+    text = bridge.paths.codex_config.read_text()
+    assert 'sandbox_mode = "read-only"' in text and "sandbox_workspace_write" not in text
+    assert bridge.policy_violations(text) == []
+    # Something else widening the dedicated profile is still caught.
+    assert bridge.policy_violations(text.replace('"read-only"', '"danger-full-access"'))
+
+
+def test_shortcuts_come_back_unless_the_user_removed_them(host, monkeypatch):
+    bridge, runner, home = ready_host(host, monkeypatch)
+    bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
+                                    "unpacked": "verified"}
+    assert bridge.restore_shortcuts() is True  # installed by default
+    entries = [path for path, _ in bridge.shortcut_files(False)]
+    for path in entries:
+        path.unlink()
+    assert bridge.shortcuts_status()["state"] == "inconsistent"
+    assert bridge.repair()["shortcutsRestored"] is True
+    assert bridge.shortcuts_status()["state"] == "installed"
+
+    entries[0].write_text("[Desktop Entry]\nExec=/tmp/other\n")
+    assert bridge.restore_shortcuts() is False  # someone else's file stays
+
+    bridge.shortcuts_remove_by_user()
+    assert bridge.restore_shortcuts() is False
+    assert bridge.shortcuts_install(desktop_copy=False)["state"] == "installed"
+    assert "shortcutsRemoved" not in bridge.load_state()
