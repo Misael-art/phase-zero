@@ -76,6 +76,8 @@ def test_bridge_card_offers_the_everyday_commands_once_opted_in(qapp, monkeypatc
         "chatgptWebOpen": ("ai", "chatgpt-web", "desktop"),
         "chatgptWebSetup": ("ai", "chatgpt-web", "setup", "--login-wait", "0"),
         "chatgptWebTools": ("ai", "chatgpt-web", "tools", "status"),
+        "chatgptWebToolsOn": ("ai", "chatgpt-web", "tools", "enable"),
+        "chatgptWebToolsOff": ("ai", "chatgpt-web", "tools", "disable"),
         "chatgptWebSmoke": ("ai", "chatgpt-web", "smoke"),
         "chatgptWebDisable": ("ai", "chatgpt-web", "disable"),
     }
@@ -87,13 +89,15 @@ def test_bridge_card_offers_the_everyday_commands_once_opted_in(qapp, monkeypatc
     by_name = {name: requested[index] for index, name in enumerate(expected)}
     assert by_name["chatgptWebOpen"].mutable is False
     assert by_name["chatgptWebTools"].mutable is False
-    for name in ("chatgptWebSetup", "chatgptWebSmoke", "chatgptWebDisable"):
+    for name in ("chatgptWebSetup", "chatgptWebSmoke", "chatgptWebDisable",
+                 "chatgptWebToolsOn", "chatgptWebToolsOff"):
         action = by_name[name]
         assert action.mutable is True and action.impact
         assert action.preview_args == ("ai", "chatgpt-web", "status")
     assert "1 mensagem" in buttons["chatgptWebSmoke"].text()
     assert buttons["chatgptWebTools"].text() == "Ver requisitos"
     assert "~/.codex" in by_name["chatgptWebDisable"].impact
+    assert len({action.id for action in requested}) == len(requested)
 
 
 def test_bridge_card_reports_state_and_why_tools_are_blocked(qapp, monkeypatch, tmp_path):

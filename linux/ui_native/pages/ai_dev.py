@@ -89,6 +89,11 @@ _BRIDGE_BUTTONS = (
      "Inicia o launcher isolado e o bridge local e religa a rota no perfil dedicado. "
      "O ~/.codex do seu Codex normal não é alterado."),
     ("chatgptWebTools", "Ver requisitos", ("tools", "status"), False, ""),
+    ("chatgptWebToolsOn", "Ligar ferramentas", ("tools", "enable"), True,
+     "Troca o launcher isolado para o modo com ferramentas, confere túnel e conector e "
+     "volta sozinho ao modo Web se algo falhar. O Codex segue no sandbox somente leitura."),
+    ("chatgptWebToolsOff", "Desligar ferramentas", ("tools", "disable"), True,
+     "Volta ao modo Web e encerra o túnel. O ~/.codex do seu Codex normal não é alterado."),
     ("chatgptWebSmoke", "Testar modelo (1 mensagem)", ("smoke",), True,
      "Envia um turno real pelo bridge. Gasta uma mensagem da sua conta ChatGPT."),
     ("chatgptWebDisable", "Desligar", ("disable",), True,
@@ -366,7 +371,10 @@ class AiDevPage(BasePage):
         actions.setVerticalSpacing(8)
         for index, (name, label, command, mutable, impact) in enumerate(_BRIDGE_BUTTONS):
             action = ActionSpec(
-                id=f"private.chatgpt-web.{command[0]}", category="IA & Dev",
+                id="private.chatgpt-web." + "-".join(part for part in command
+                                                     if not part.startswith("-")
+                                                     and not part.isdigit()),
+                category="IA & Dev",
                 title=f"ChatGPT Web no Codex — {label}", description=impact or label,
                 args=(*_BRIDGE_ARGS, *command), icon="applications-development",
                 mutable=mutable, preview_args=(*_BRIDGE_ARGS, "status") if mutable else None,
@@ -463,9 +471,9 @@ class AiDevPage(BasePage):
             elif gate_detail:
                 self.bridge_tools.setText(f"Com ferramentas: bloqueado — {gate_detail}.")
             else:
-                self.bridge_tools.setText("Com ferramentas: configurado, mas chamada MCP "
-                                          "real ainda não verificada. Cada ação local exige "
-                                          "permissão do seu plano e aprovação.")
+                self.bridge_tools.setText("Com ferramentas: ativo — o conector lê o workspace "
+                                          "da tarefa; escrita local recusada (sandbox somente "
+                                          "leitura). Abrir já usa este modo.")
         elif isinstance(blockers, list) and blockers:
             self.bridge_tools.setText(f"Com ferramentas: bloqueado — {blockers[0]}.")
         elif gate_id == "plan-full":

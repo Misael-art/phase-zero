@@ -49,6 +49,7 @@ Design rules enforced here, not only documented:
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import difflib
 import getpass
@@ -69,6 +70,7 @@ import tempfile
 import time
 import tomllib
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
@@ -77,6 +79,7 @@ from typing import Any, Callable
 SCHEMA_VERSION = 1
 PRODUCT_ID = "codex-chatgpt-web"
 UNIT_NAME = "pz-chatgpt-web-launcher.service"
+LAUNCHER_SCOPE_GLOB = "app-codex-web-gpt-launcher-*.scope"
 DEFAULT_PORT = 17841
 
 # Audited as text on 2026-10-12. Moving references such as /releases/latest are
@@ -117,22 +120,36 @@ LOCKED_CAPABILITIES: dict[str, str] = {
     "catalog-listing": "A integração permanece fora do catálogo público.",
     "auto-approve-tool-calls": "Aprovação automática de ferramentas é recusada.",
 }
-# Observed on the pinned 6.1.8 runtime with a real tunnel and connector:
-# its Full resolver reads network access only from <network_access> inside the
-# trusted <environment_context>. Codex 0.163 and 0.164 describe permissions in
-# <permission_profile> and state network only in the developer message, so the
-# turn fails with "missing network access" even with workspace-write and
-# network_access=true (re-probed 2026-10-27 with Codex 0.164.0).
-# The upstream doctor checks infrastructure, not a working tool turn.
+# Runtimes before 6.1.10 read network access only from <network_access> inside
+# the trusted <environment_context>; Codex 0.163+ moved permissions to
+# <permission_profile>, so every Full turn failed with "missing network access"
+# (host probes 2026-10-16 with Codex 0.163 and 2026-10-27 with 0.164). 6.1.10+
+# reads the native rollout record instead. Re-probed on 2026-10-27 with 6.1.14
+# and Codex 0.164 under the dedicated read-only sandbox: a real connector call
+# read a file and a write attempt was refused by the sandbox.
+FULL_RUNTIME_MIN_VERSION = (6, 1, 10)
+TUNNEL_ID = re.compile(r"tunnel_[0-9a-f]{16,64}")
 FULL_RUNTIME_BLOCKER = (
     f"Full {PIN['version']} ainda sem prova de ferramenta real; Codex 0.163/0.164 não "
     "declarou rede no contexto confiável (<environment_context>) que o runtime exige, "
     "mesmo com workspace-write e network_access=true"
 )
 FULL_RUNTIME_ACTION = (
-    "Mantenha browser-only. Corrija a compatibilidade do runtime ou use um conector MCP "
-    "restrito ao projeto; prove leitura, escrita reversível, aprovação e rollback reais."
+    "Mantenha browser-only. Atualize o pin para um runtime 6.1.10 ou mais novo; prove "
+    "leitura, recusa de escrita e rollback reais."
 )
+TUNNEL_READY_WAIT_SECONDS = 120
+CONNECTOR_CHECK_TIMEOUT = 30
+
+
+def version_tuple(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", value)[:3])
+
+
+def full_runtime_supported(version: str | None = None) -> bool:
+    return version_tuple(version or PIN["version"]) >= FULL_RUNTIME_MIN_VERSION
+
+
 PENDING_GATES = (
     "real-account",
     "clean-host-arch",
@@ -387,6 +404,54 @@ def load_sibling(name: str) -> Any:
     return module
 
 
+def cdp_evaluate(ws_url: str, expression: str, timeout: float) -> Any:
+    """Minimal DevTools `Runtime.evaluate` over a loopback WebSocket (stdlib only)."""
+    parsed = urllib.parse.urlsplit(ws_url)
+    if parsed.hostname not in {"127.0.0.1", "localhost"} or parsed.scheme != "ws":
+        raise ValueError("DevTools fora do loopback")
+    key = base64.b64encode(os.urandom(16)).decode()
+    with socket.create_connection((parsed.hostname, parsed.port or 80), timeout=timeout) as sock:
+        sock.sendall((f"GET {parsed.path} HTTP/1.1\r\nHost: {parsed.netloc}\r\n"
+                      "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                      f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())
+        reader = sock.makefile("rb")
+        if b" 101 " not in reader.readline():
+            raise ValueError("DevTools recusou o WebSocket")
+        while reader.readline() not in (b"\r\n", b""):
+            pass
+        payload = json.dumps({"id": 1, "method": "Runtime.evaluate",
+                              "params": {"expression": expression, "awaitPromise": True,
+                                         "returnByValue": True}}).encode()
+        mask = os.urandom(4)
+        header = bytes([0x81])
+        size = len(payload)
+        header += (bytes([0x80 | size]) if size < 126 else bytes([0x80 | 126]) + struct.pack(">H", size)
+                   if size < 65536 else bytes([0x80 | 127]) + struct.pack(">Q", size))
+        sock.sendall(header + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+        message = b""
+        while True:
+            first, second = reader.read(2)
+            length = second & 0x7F
+            if length == 126:
+                length = struct.unpack(">H", reader.read(2))[0]
+            elif length == 127:
+                length = struct.unpack(">Q", reader.read(8))[0]
+            data = reader.read(length)
+            opcode = first & 0x0F
+            if opcode == 0x8:
+                raise ValueError("DevTools fechou a conexão")
+            if opcode in (0x1, 0x0):
+                message += data
+                if first & 0x80:
+                    reply = json.loads(message)
+                    message = b""
+                    if reply.get("id") == 1:
+                        result = reply.get("result", {})
+                        if "exceptionDetails" in result:
+                            raise ValueError("script do conector falhou")
+                        return result.get("result", {}).get("value")
+
+
 def classify_launchers(processes: dict[int, dict[str, Any]],
                        unit_pid: int) -> list[dict[str, Any]]:
     """Main launcher processes (parent is not a launcher) and whether each is isolated."""
@@ -450,6 +515,70 @@ class Runner:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             probe.settimeout(0.5)
             return probe.connect_ex(("127.0.0.1", port)) == 0
+
+    def tunnel_ready(self, profile: Path) -> bool | None:
+        """Ask the tunnel client's own health endpoint; None when it cannot be found.
+
+        The upstream `tunnel status` and `doctor` misreport a launcher-owned
+        tunnel as stopped when they run outside the launcher, so the endpoint
+        named in the profile is the evidence used here.
+        """
+        try:
+            url_file = Path(json.loads(profile.read_text(encoding="utf-8"))["health"]["url_file"])
+            base = url_file.read_text(encoding="utf-8").strip()
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if not base.startswith("http://127.0.0.1:"):
+            return None
+        try:
+            with urllib.request.urlopen(base + "/readyz", timeout=5) as response:
+                return response.status == 200 and response.read(64).strip() == b"ready"
+        except (OSError, urllib.error.URLError):
+            return False
+
+    def connector_status(self, devtools_file: Path, tunnel_id: str) -> dict[str, Any]:
+        """Read the ChatGPT connector bound to `tunnel_id` through the launcher's session.
+
+        Runs a read-only script inside the launcher's own chatgpt.com page over
+        its loopback DevTools port. Tokens and cookies stay in that page; only
+        connector metadata comes back.
+        """
+        script = ("(async()=>{const s=await (await fetch('/api/auth/session')).json();"
+                  "if(!s.accessToken)return {signedIn:false};"
+                  "const h={Authorization:'Bearer '+s.accessToken};"
+                  "const g=async u=>{const r=await fetch(u,{headers:h});return r.ok?r.json():null};"
+                  "const p=await g('/backend-api/ps/plugins/installed');"
+                  "const ids=((p&&p.plugins)||[]).filter(x=>x.scope==='USER'&&x.connector_id)"
+                  ".map(x=>x.connector_id);const out=[];"
+                  "for(const id of ids){const c=await g('/backend-api/aip/connectors/'+id);"
+                  "if(!c||!c.tunnel_id)continue;"
+                  "const l=((await g('/backend-api/aip/connectors/'+id+'/link'))||{}).link||{};"
+                  "out.push({name:c.name,tunnelId:c.tunnel_id,authStatus:l.auth_status,"
+                  "privacy:l.apps_privacy_control,actions:(l.actions||[]).length,"
+                  "readOnly:!!l.is_read_only});}"
+                  "return {signedIn:true,listed:!!p,connectors:out};})()")
+        try:
+            port = int(devtools_file.read_text(encoding="utf-8").split()[0])
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as resp:
+                pages = json.loads(resp.read())
+            target = next(page["webSocketDebuggerUrl"] for page in pages
+                          if page.get("type") == "page"
+                          and str(page.get("url", "")).startswith("https://chatgpt.com"))
+            value = cdp_evaluate(target, script, CONNECTOR_CHECK_TIMEOUT)
+        except (OSError, ValueError, StopIteration, KeyError, urllib.error.URLError) as error:
+            return {"ok": None, "detail": f"sessão do launcher inacessível: {error}"}
+        if not isinstance(value, dict) or not value.get("signedIn"):
+            return {"ok": False, "detail": "launcher sem sessão ChatGPT"}
+        bound = [item for item in value.get("connectors", []) if item.get("tunnelId") == tunnel_id]
+        if not bound:
+            return {"ok": False, "detail": "nenhum conector ChatGPT ligado a este túnel"
+                    + ("" if value.get("listed") else " (lista de conectores indisponível)")}
+        active = [item for item in bound if item.get("authStatus") == "ACTIVE"
+                  and item.get("actions") and not item.get("readOnly")]
+        return {"ok": bool(active), "connector": (active or bound)[0].get("name"),
+                "permission": (active or bound)[0].get("privacy"),
+                "detail": "conector ativo e ligado ao túnel" if active
+                else "conector ligado ao túnel, mas inativo ou sem ações"}
 
     def other_users(self) -> list[str]:
         if not hasattr(os, "getuid"):
@@ -552,9 +681,63 @@ class Runner:
             except OSError:
                 continue
             # Exact name: the launcher ("codex-web-gpt-l") carries the same CODEX_HOME.
-            if needle in environ and comm == "codex":
+            if needle in environ and comm == "codex" and not self.launcher_owned(int(entry.name)):
                 found.append(int(entry.name))
         return found
+
+    def tunnel_clients(self, binary: Path) -> list[dict[str, Any]]:
+        """tunnel-client processes from the managed core home, with the launcher scope PID.
+
+        The client re-parents to the user manager, so its cgroup scope
+        (`app-codex-web-gpt-launcher-<pid>.scope`) is what ties it to a launcher.
+        """
+        found: list[dict[str, Any]] = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                if entry.stat().st_uid != os.getuid() or Path(os.readlink(entry / "exe")) != binary:
+                    continue
+                cgroup = (entry / "cgroup").read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            owner = re.search(r"app-codex-web-gpt-launcher-(\d+)\.scope", cgroup)
+            found.append({"pid": int(entry.name), "scopePid": int(owner[1]) if owner else None})
+        return found
+
+    def stop_launcher_scopes(self) -> list[str]:
+        """Stop the launcher's own `app-*.scope` units that outlive the managed unit.
+
+        Chromium moves the launcher into such a scope, and the tunnel-client it
+        spawns stays there after the unit stops, keeping the tunnel online.
+        """
+        code, out, _ = self.run(["systemctl", "--user", "list-units", "--type=scope",
+                                 "--plain", "--no-legend", LAUNCHER_SCOPE_GLOB], timeout=15)
+        scopes = [line.split()[0] for line in out.splitlines()
+                  if code == 0 and line.split()] if code == 0 else []
+        for scope in scopes:
+            self.run(["systemctl", "--user", "stop", scope], timeout=60)
+        return scopes
+
+    def launcher_owned(self, pid: int) -> bool:
+        """In Full mode the launcher's tunnel-client runs its own `codex app-server`.
+
+        That child stops with the launcher; only a Codex the user opened must
+        block a restart.
+        """
+        seen = 0
+        while pid > 1 and seen < 32:
+            try:
+                status = Path(f"/proc/{pid}/status").read_text(encoding="utf-8", errors="replace")
+                pid = next(int(line.split()[1]) for line in status.splitlines()
+                           if line.startswith("PPid:"))
+                comm = Path(f"/proc/{pid}/comm").read_text().strip()
+            except (OSError, StopIteration, ValueError):
+                return False
+            if comm in {"tunnel-client", "codex-web-gpt-l"}:
+                return True
+            seen += 1
+        return False
 
 
 class Paths:
@@ -757,12 +940,44 @@ class Bridge:
             return None
         return bool(row and row[0])
 
+    def orphan_tunnels(self) -> list[int]:
+        """tunnel-clients not owned by the running isolated launcher in Full mode.
+
+        One left behind keeps the OpenAI tunnel and its `codex app-server`
+        reachable after `tools disable`, `disable` or a launcher restart.
+        """
+        clients = self.runner.tunnel_clients(self.paths.core_home / "bin" / "tunnel-client")
+        if not clients:
+            return []
+        full = (self.upstream_config() or {}).get("mode") == "full"
+        owners = {item["pid"] for item in self.launcher_processes() if item["managed"]} if full else set()
+        return [item["pid"] for item in clients if item["scopePid"] not in owners]
+
+    def stop_orphan_tunnels(self) -> list[int]:
+        """Stop each orphan with its launcher scope, so its app-server and MCP go too."""
+        orphans = self.orphan_tunnels()
+        managed = {item["pid"] for item in self.launcher_processes() if item["managed"]}
+        clients = {item["pid"]: item for item in
+                   self.runner.tunnel_clients(self.paths.core_home / "bin" / "tunnel-client")}
+        for pid in orphans:
+            owner = clients.get(pid, {}).get("scopePid")
+            if owner and owner not in managed:
+                self.runner.run(["systemctl", "--user", "stop",
+                                 f"app-codex-web-gpt-launcher-{owner}.scope"], timeout=60)
+        survivors = [pid for pid in self.orphan_tunnels() if not self.runner.terminate(pid)]
+        if survivors:
+            raise BridgeError("tunnel-client órfão não encerrou (PIDs "
+                              + ", ".join(map(str, survivors)) + ")", "orphan-tunnel")
+        return orphans
+
     def isolation(self) -> dict[str, Any]:
         strays = self.stray_launchers()
         entry = self.paths.autostart_entry
         autostart = str(entry) if entry.exists() or entry.is_symlink() else None
         launcher_state = self._read_json(self.paths.launcher_state) or {}
-        return {"ok": not strays and not autostart, "unmanagedLaunchers": strays,
+        orphans = self.orphan_tunnels()
+        return {"ok": not strays and not autostart and not orphans, "unmanagedLaunchers": strays,
+                "orphanTunnels": orphans,
                 "upstreamAutostartEntry": autostart,
                 "launcherAutostartSetting": bool(launcher_state.get("autoStart")),
                 "defaultProfileSession": self.session_present(self.paths.default_profile),
@@ -800,6 +1015,7 @@ class Bridge:
                 raise BridgeError(f"launcher fora do isolamento (PID {pid}) não encerrou",
                                   "stray-launcher")
             stopped.append(pid)
+        orphans = self.stop_orphan_tunnels()
         quarantined = None
         entry = self.paths.autostart_entry
         if entry.exists() or entry.is_symlink():
@@ -812,7 +1028,7 @@ class Bridge:
                                                  self.paths.default_profile)
                     if profile.is_dir() and not self.launcher_active()
                     and self.force_autostart_off(profile)]
-        return {"repaired": True, "stoppedLaunchers": stopped,
+        return {"repaired": True, "stoppedLaunchers": stopped, "stoppedTunnels": orphans,
                 "quarantinedAutostart": str(quarantined) if quarantined else None,
                 "autostartSettingTurnedOff": settings,
                 "loginEntryRestored": self.restore_autostart(),
@@ -1251,6 +1467,7 @@ class Bridge:
             raise BridgeError("restaure a rota antes de encerrar o launcher (`route disable`)",
                               "route-active")
         code, out, err = self.runner.run(["systemctl", "--user", "stop", UNIT_NAME], timeout=90)
+        self.runner.stop_launcher_scopes()
         # The main process leaves the unit's cgroup for its own scope; make sure it is gone.
         survivors = [item["pid"] for item in self.launcher_processes() if item["managed"]
                      and not self.runner.terminate(item["pid"])]
@@ -1579,8 +1796,10 @@ class Bridge:
                               + ", ".join(map(str, running)) + ") antes de reiniciar o launcher",
                               "codex-running")
         self.runner.run(["systemctl", "--user", "stop", UNIT_NAME], timeout=90)
+        self.runner.stop_launcher_scopes()
         survivors = [item["pid"] for item in self.launcher_processes()
                      if not self.runner.terminate(item["pid"])]
+        self.stop_orphan_tunnels()
         if survivors or self.launcher_active():
             raise BridgeError("launcher não encerrou para reiniciar", "stop-failed")
         self.launch()
@@ -1628,7 +1847,7 @@ class Bridge:
                        "e rode `setup` de novo; o que já foi feito é reaproveitado.",
                        "login-required")
         done("login", "sessão ChatGPT presente no perfil do launcher")
-        if (self.upstream_config() or {}).get("mode") != "browser-only":
+        if (self.upstream_config() or {}).get("mode") not in {"browser-only", "full"}:
             if not self.upstream_config() and self.runner.port_in_use(DEFAULT_PORT):
                 # A daemon from a previous configuration still holds the port.
                 self.restart_launcher()
@@ -2228,6 +2447,10 @@ class Bridge:
         """Materialise the key on tmpfs for the launcher's file import only."""
         state = self.load_state()
         self.require_tools_ready(state, need_broker=False)
+        return {"path": self.key_stage_unchecked(state), "mode": "0600",
+                "next": "Importe pelo launcher (cópia de arquivo) e rode `tunnel key unstage`."}
+
+    def key_stage_unchecked(self, state: dict[str, Any]) -> str:
         if not self.paths.runtime:
             raise BridgeError("XDG_RUNTIME_DIR ausente; sem local temporário privado", "no-runtime-dir")
         module = load_sibling("secret_store")
@@ -2242,8 +2465,7 @@ class Bridge:
             raise BridgeError("diretório temporário não aplica permissões", "runtime-perms")
         target = self.paths.runtime / "runtime-key"
         atomic_write(target, secret.encode())
-        return {"path": str(target), "mode": "0600",
-                "next": "Importe pelo launcher (cópia de arquivo) e rode `tunnel key unstage`."}
+        return str(target)
 
     def key_unstage(self) -> dict[str, Any]:
         target = self.paths.runtime / "runtime-key" if self.paths.runtime else None
@@ -2283,6 +2505,161 @@ class Bridge:
                                  else "ausente"),
                 "manual": "Revogue a chave também na plataforma OpenAI; a remoção local não a invalida."}
 
+    # ---- tools mode (Full) ------------------------------------------------
+
+    def tunnel_profile(self) -> Path:
+        tunnel = (self.upstream_config() or {}).get("tunnel") or {}
+        return (Path(tunnel.get("profileDir") or self.paths.core_home / "tunnel" / "profiles")
+                / f"{tunnel.get('profileName') or 'codex-chatgpt-web'}.yaml")
+
+    def tunnel_ready(self) -> bool | None:
+        return self.runner.tunnel_ready(self.tunnel_profile())
+
+    def tunnel_id(self, state: dict[str, Any]) -> str | None:
+        """The OpenAI tunnel for tools: recorded, or the one upstream already has."""
+        recorded = state.get("tunnelId")
+        if isinstance(recorded, str) and TUNNEL_ID.fullmatch(recorded):
+            return recorded
+        found = ((self.upstream_config() or {}).get("tunnel") or {}).get("tunnelId")
+        return found if isinstance(found, str) and TUNNEL_ID.fullmatch(found) else None
+
+    def connector_status(self) -> dict[str, Any]:
+        tunnel = self.tunnel_id(self.load_state())
+        if not tunnel:
+            return {"ok": False, "detail": "túnel não registrado"}
+        return self.runner.connector_status(self.paths.launcher_data / "DevToolsActivePort",
+                                            tunnel)
+
+    def _reconfigure_upstream(self, args: list[str]) -> tuple[int, str, str]:
+        """Run upstream `setup` while no daemon holds the port, then restart for real.
+
+        The launcher only starts the daemon from a stored configuration, so it
+        is restarted once with the configuration set aside (port free for
+        setup) and again after setup so the new mode starts.
+        """
+        config = self.paths.core_home / "config.json"
+        aside = config.with_name("config.json.pz-reconfigure")
+        os.replace(config, aside)
+        try:
+            self.restart_launcher()
+            self._wait(self.descriptor_ready, DESCRIPTOR_WAIT_SECONDS,
+                       "launcher não ficou pronto a tempo", "launcher-timeout")
+            self._wait(lambda: not self.runner.port_in_use(DEFAULT_PORT), DAEMON_WAIT_SECONDS,
+                       f"porta {DEFAULT_PORT} continua ocupada", "port-busy")
+        finally:
+            os.replace(aside, config)
+        result = self.upstream_cli(["setup", *args, "--browser-host-descriptor",
+                                    str(self.paths.descriptor), "--acknowledge-unofficial",
+                                    "--port", str(DEFAULT_PORT)], timeout=600)
+        self.restart_launcher()
+        self._wait(self.descriptor_ready, DESCRIPTOR_WAIT_SECONDS,
+                   "launcher não ficou pronto a tempo", "launcher-timeout")
+        self._wait(lambda: self.runner.port_in_use(DEFAULT_PORT), DAEMON_WAIT_SECONDS,
+                   f"bridge não abriu 127.0.0.1:{DEFAULT_PORT}", "daemon-timeout")
+        return result
+
+    def _snapshot_configs(self, label: str) -> Path:
+        private_dir(self.paths.journal)
+        folder = private_dir(self.paths.journal
+                             / f"{label}-{self.clock().strftime('%Y%m%dT%H%M%SZ')}")
+        for source, name in ((self.paths.core_home / "config.json", "core-config.json"),
+                             (self.paths.codex_config, "codex-config.toml")):
+            if source.is_file():
+                atomic_write(folder / name, source.read_bytes())
+        return folder
+
+    def _restore_configs(self, folder: Path) -> None:
+        for name, target in (("core-config.json", self.paths.core_home / "config.json"),
+                             ("codex-config.toml", self.paths.codex_config)):
+            if (folder / name).is_file():
+                atomic_write(target, (folder / name).read_bytes())
+        self.restart_launcher()
+
+    def tools_enable(self, tunnel_id: str | None = None) -> dict[str, Any]:
+        """Switch the isolated launcher to Full, verify tunnel and connector, or roll back.
+
+        Codex keeps the dedicated read-only sandbox: tools can read the task's
+        workspace, local writes stay refused. The runtime key only exists on
+        tmpfs for the duration of upstream's setup.
+        """
+        state = self.load_state()
+        self.require_tools_ready(state, need_broker=False)
+        if not full_runtime_supported():
+            raise BridgeError(FULL_RUNTIME_BLOCKER, "full-runtime")
+        if tunnel_id is not None and not TUNNEL_ID.fullmatch(tunnel_id):
+            raise BridgeError("tunnel id inválido (esperado tunnel_…)", "usage")
+        tunnel = tunnel_id or self.tunnel_id(state)
+        if not tunnel:
+            raise BridgeError("informe o túnel uma vez: `tools enable --tunnel-id tunnel_…` "
+                              f"(veja `{'pz ai chatgpt-web'} tunnel guide`)", "tunnel-missing")
+        if not self.launcher_active() or self.session_present(self.paths.launcher_data) is not True:
+            raise BridgeError("rode `setup` antes: launcher ativo e logado são necessários",
+                              "launcher-inactive")
+        config = self.upstream_config() or {}
+        if (config.get("mode") == "full" and config.get("tunnel", {}).get("tunnelId") == tunnel
+                and self.tunnel_ready() is True and self.connector_status().get("ok") is True):
+            return {"enabled": True, "changed": False, "tunnelId": tunnel,
+                    "connector": self.connector_status(), "sandbox": "read-only"}
+        backup = self._snapshot_configs("tools-enable")
+        staged = self.key_stage_unchecked(state)
+        try:
+            code, out, err = self._reconfigure_upstream(
+                ["--full", "--tunnel-id", tunnel, "--runtime-key-file", staged])
+        except BridgeError:
+            self.key_unstage()
+            self._restore_configs(backup)
+            raise
+        self.key_unstage()
+        problem = None
+        config = self.upstream_config() or {}
+        if code != 0 or config.get("mode") != "full":
+            problem = "setup upstream falhou: " + (err or out).strip()[-300:]
+        elif config.get("autoApproveToolCalls"):
+            problem = "upstream ligou aprovação automática"
+        else:
+            try:
+                self._wait(lambda: self.tunnel_ready() is True, TUNNEL_READY_WAIT_SECONDS,
+                           "túnel não ficou pronto", "tunnel-timeout")
+            except BridgeError as error:
+                problem = str(error)
+        connector = self.connector_status() if not problem else {}
+        if not problem and connector.get("ok") is not True:
+            problem = f"conector: {connector.get('detail')}"
+        if not problem and not self.route_verify()["ok"]:
+            problem = "configuração do perfil tem mudanças inesperadas"
+        if problem:
+            self._restore_configs(backup)
+            raise BridgeError(f"ferramentas não ativadas ({problem}); modo Web restaurado; "
+                              f"backup em {backup}", "tools-enable-failed")
+        state = self.load_state()
+        state["tunnelId"] = tunnel
+        state["toolsEnabled"] = {"at": iso(self.clock()), "backup": str(backup),
+                                 "runtime": PIN["version"]}
+        self.save_state(state)
+        return {"enabled": True, "changed": True, "tunnelId": tunnel, "connector": connector,
+                "sandbox": "read-only", "backup": str(backup),
+                "liveCodexRouteTouched": self.live_route_touched()}
+
+    def tools_disable(self) -> dict[str, Any]:
+        """Back to the Web-only model; the tunnel goes offline with the Full daemon."""
+        state = self.load_state()
+        self.require_opt_in(state)
+        if (self.upstream_config() or {}).get("mode") != "full":
+            return {"enabled": False, "changed": False}
+        backup = self._snapshot_configs("tools-disable")
+        code, out, err = self._reconfigure_upstream(["--browser-only"])
+        if code != 0 or (self.upstream_config() or {}).get("mode") != "browser-only":
+            self._restore_configs(backup)
+            raise BridgeError("não voltou ao modo Web: " + (err or out).strip()[-300:],
+                              "tools-disable-failed")
+        stopped = self.stop_orphan_tunnels()
+        state = self.load_state()
+        state.pop("toolsEnabled", None)
+        self.save_state(state)
+        return {"enabled": False, "changed": True, "backup": str(backup),
+                "stoppedTunnels": stopped, "tunnelReady": self.tunnel_ready(),
+                "liveCodexRouteTouched": self.live_route_touched()}
+
     def require_tools_ready(self, state: dict[str, Any], need_broker: bool = True) -> None:
         self.require_opt_in(state)
         blockers = list(self.eligibility(state)["blockers"])
@@ -2302,6 +2679,8 @@ class Bridge:
                 blockers.append("launcher não está no modo com ferramentas")
             if config.get("autoApproveToolCalls"):
                 blockers.append("aprovação automática ligada no upstream")
+        if not full_runtime_supported(str((self.upstream_config() or {}).get("releaseVersion")
+                                          or PIN["version"])):
             blockers.append(FULL_RUNTIME_BLOCKER)
         if blockers:
             raise BridgeError("modo com ferramentas indisponível: " + "; ".join(blockers),
@@ -2374,22 +2753,35 @@ class Bridge:
              "aprovação automática desligada no launcher" if not config.get("autoApproveToolCalls")
              else "aprovação automática LIGADA no launcher",
              "Desligue a aprovação automática na página MCP do launcher."),
-            ("full-runtime", False, FULL_RUNTIME_BLOCKER, FULL_RUNTIME_ACTION),
+            ("full-runtime", full_runtime_supported(),
+             f"runtime {PIN['version']} lê as permissões nativas do Codex"
+             if full_runtime_supported() else FULL_RUNTIME_BLOCKER, FULL_RUNTIME_ACTION),
             ("launcher-mode", config.get("mode") == "full",
              "launcher no modo com ferramentas" if config.get("mode") == "full"
-             else "launcher mantido no modo somente Web enquanto Full está bloqueado",
-             "Mantenha browser-only. Não altere o launcher até resolver full-runtime e "
-             "provar uma chamada MCP real."),
+             else "launcher no modo somente Web",
+             f"{manager} tools enable"),
         ]
+        if config.get("mode") == "full":
+            tunnel = self.tunnel_ready()
+            connector = self.connector_status()
+            steps += [
+                ("tunnel", tunnel is True,
+                 "túnel pronto (health do tunnel-client)" if tunnel
+                 else "túnel não respondeu pronto", f"{manager} tools enable"),
+                ("connector", connector.get("ok") is True,
+                 f"conector {connector.get('connector', '')} ativo e ligado ao túnel".replace("  ", " ")
+                 if connector.get("ok") else str(connector.get("detail")),
+                 "No ChatGPT (janela do launcher): Configurações → Plugins → conector do "
+                 "túnel; reconecte-o e rode `tools check`."),
+            ]
         listed = [{"id": step, "ok": bool(ok), "detail": detail, "action": action}
                   for step, ok, detail, action in steps]
         pending = next((item for item in listed if not item["ok"]), None)
         return {"ready": pending is None, "steps": listed, "next": pending,
                 "webModelStillWorks": config.get("mode") == "browser-only",
                 "planSource": PLAN_SOURCE, "lockedCapabilities": LOCKED_CAPABILITIES,
-                "note": "A infraestrutura pode estar saudável, mas Full 6.1.8 falhou em "
-                        "turno real no host de referência até com workspace-write e rede "
-                        "habilitada. Browser-only segue disponível."}
+                "note": "Ferramentas rodam no sandbox somente leitura do perfil dedicado; "
+                        "escrita local segue bloqueada. `tools disable` volta ao modo Web."}
 
     def tools_check(self) -> dict[str, Any]:
         state = self.load_state()
@@ -2405,18 +2797,26 @@ class Bridge:
                 doctor = json.loads(out)
             except ValueError:
                 doctor = {"ok": False, "detail": (err or out).strip()[:300]}
-            if code != 0 or not doctor.get("ok"):
+            failing = [check for check in doctor.get("checks", [])
+                       if isinstance(check, dict) and check.get("status") == "error"
+                       and check.get("id") != "tunnel-runtime"]
+            if (code != 0 and not doctor.get("checks")) or failing:
                 blockers.append("doctor upstream reportou falha"
                                 + (": " + self.route_status()["hint"]
                                    if self.route_status().get("desktopRewroteConfig") else ""))
+            if self.upstream_config().get("mode") == "full":
+                if self.tunnel_ready() is not True:
+                    blockers.append("túnel não respondeu pronto")
+                connector = self.connector_status()
+                if connector.get("ok") is not True:
+                    blockers.append(f"conector: {connector.get('detail')}")
         else:
             blockers.append("runtime upstream não configurado")
         return {"ready": not blockers, "blockers": blockers, "doctor": doctor,
                 "capability": self.eligibility(state)["tools"],
                 "lockedCapabilities": LOCKED_CAPABILITIES,
-                "note": "Doctor saudável não prova turno MCP. Full 6.1.8 falhou em "
-                        "turno real no host de referência até com workspace-write e rede "
-                        "habilitada."}
+                "note": "O health do túnel e o conector na conta são conferidos aqui; o "
+                        "doctor upstream marca como parado um túnel do launcher."}
 
     # ---- codex in the dedicated profile ----------------------------------
 
@@ -2533,7 +2933,8 @@ def build_parser() -> argparse.ArgumentParser:
                  "repair", "adopt-session", "smoke"):
         sub.add_parser(name)
     desktop = sub.add_parser("desktop", help="Codex Desktop no perfil dedicado")
-    desktop.add_argument("--mode", choices=("web", "tools"), default="web")
+    desktop.add_argument("--mode", choices=("auto", "web", "tools"), default="auto",
+                         help="auto segue o modo do launcher (Web ou com ferramentas)")
     shortcuts = sub.add_parser("shortcuts", help="atalhos locais de menu e área de trabalho")
     shortcuts.add_argument("action", choices=("status", "install", "remove", "run"))
     shortcuts.add_argument("--mode", choices=("web", "tools"), default="web")
@@ -2571,8 +2972,9 @@ def build_parser() -> argparse.ArgumentParser:
     autostart = sub.add_parser("autostart", help="início no login (opt-in)")
     autostart.add_argument("action", choices=("status", "enable", "disable", "run"))
     autostart.add_argument("--acknowledge-autostart", action="store_true")
-    tools = sub.add_parser("tools")
-    tools.add_argument("action", choices=("status", "check"))
+    tools = sub.add_parser("tools", help="ferramentas pelo conector (sandbox somente leitura)")
+    tools.add_argument("action", choices=("status", "check", "enable", "disable"))
+    tools.add_argument("--tunnel-id", help="túnel OpenAI (só na primeira ativação)")
     codex = sub.add_parser("codex")
     codex.add_argument("args", nargs=argparse.REMAINDER)
     return parser
@@ -2602,7 +3004,10 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
     if command == "smoke":
         return bridge.smoke()
     if command == "desktop":
-        return bridge.desktop(args.mode)
+        mode = args.mode
+        if mode == "auto":
+            mode = "tools" if (bridge.upstream_config() or {}).get("mode") == "full" else "web"
+        return bridge.desktop(mode)
     if command == "shortcuts":
         if args.action == "install":
             return bridge.shortcuts_install(desktop_copy=not args.no_desktop_copy)
@@ -2651,6 +3056,10 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
         return {"status": bridge.autostart_status, "disable": bridge.autostart_disable,
                 "run": bridge.autostart_run}[args.action]()
     if command == "tools":
+        if args.action == "enable":
+            return bridge.tools_enable(args.tunnel_id)
+        if args.action == "disable":
+            return bridge.tools_disable()
         return bridge.tools_steps() if args.action == "status" else bridge.tools_check()
     raise BridgeError(f"comando desconhecido: {command}", "usage")
 
@@ -2722,6 +3131,18 @@ def render(command: str, result: dict[str, Any]) -> str:
         lines += [f"  {item}" for item in result["entries"]]
         lines.append("  Fora do catálogo público; o Codex Desktop normal não foi alterado.")
     elif command == "tools":
+        if "enabled" in result:
+            if not result["enabled"]:
+                return ("✓ modo Web (sem ferramentas); túnel desligado com o daemon Full"
+                        if result["changed"] else "✓ ferramentas já estavam desligadas")
+            connector = result.get("connector") or {}
+            return "\n".join([
+                "✓ ferramentas ativas" + ("" if result["changed"] else " (já estavam)"),
+                f"  ✓ túnel {result['tunnelId']} pronto",
+                f"  ✓ conector {connector.get('connector', '?')} ligado ao túnel "
+                f"(permissão na conta: {connector.get('permission', '?')})",
+                "  ✓ Codex no sandbox somente leitura: ferramentas leem, escrita local recusada",
+                "Use: pz ai chatgpt-web desktop --mode tools   |   desligar: tools disable"])
         if "steps" not in result:
             return json.dumps(result, ensure_ascii=False, indent=2)
         lines.append("ChatGPT Web com ferramentas (experimental) — "

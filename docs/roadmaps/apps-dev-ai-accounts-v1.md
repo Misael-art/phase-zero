@@ -3063,3 +3063,47 @@ mensagem developer. Não é questão de configuração; depende de runtime upstr
 compatível ou de Codex anterior ao novo formato. Rollback para `browser-only`
 feito; `smoke` voltou a `PONG`, `~/.codex` intocado. Bloqueio mantido com o
 motivo atualizado.
+
+### PXA-010: ferramentas liberadas com runtime 6.1.14 — 2026-10-27
+
+Pin atualizado para `miuuyy/codex-chatgpt-web` v6.1.14 (commit `cfeaf04`,
+tag leve). O hash do AppImage confere com `checksums.txt` e com o digest do
+release no GitHub. O pacote continua sem assinatura de plataforma. Desde a
+6.1.10, o runtime lê as permissões nativas no registro (rollout) do Codex, o que
+elimina o `missing network access` do Codex 0.163/0.164.
+
+Prova real no host, com Codex 0.164.0 e conector `Codex Native2` (túnel
+`tunnel_6ad2…`), em repositório descartável:
+
+- leitura por `codex_exec` no sandbox somente leitura do perfil dedicado: ok;
+- escrita no workspace com sandbox somente leitura: recusada (`Read-only file
+  system`);
+- com `workspace-write`, só para teste: escrita no workspace ok e escrita fora
+  das raízes recusada (exit 1);
+- `tools disable` encerra o túnel; `tools enable` religa e confere tudo.
+
+Automação nova: `tools enable [--tunnel-id]` e `tools disable`. A troca usa
+backup em `journal/`; a chave só fica em tmpfs durante o setup do upstream. Em
+qualquer falha, a configuração volta sozinha ao modo Web. A saúde do túnel é
+lida no `/readyz` do tunnel-client, porque o `doctor` do upstream marca como
+parado um túnel do launcher. O conector na conta é conferido de forma somente
+leitura pela sessão do próprio launcher (DevTools em loopback), sem exportar
+tokens.
+
+Achados corrigidos:
+
+1. A 6.1.14 zera o próprio `environ` e reescreve o `argv` dos filhos. O
+   isolamento passa a ser lido pela árvore de processos, pelo MainPID do unit e
+   pelo mount somente leitura.
+2. O `tunnel-client` sobrevivia ao reinício do launcher no `app-*.scope`
+   antigo, mantendo o túnel e um `codex app-server` online mesmo no modo Web.
+   Agora ele é tratado como violação de isolamento, os escopos são parados com o
+   unit e o `repair` encerra órfãos.
+3. O `codex app-server` do próprio túnel bloqueava o reinício como se fosse um
+   Codex do usuário.
+4. A entrada de início no login, quando apagada, agora é recriada pelo
+   `repair`/`setup` se o opt-in já estiver registrado.
+
+Escrita local continua bloqueada: o perfil dedicado usa sandbox somente leitura.
+A permissão do conector na conta está como "Permitir tudo"; o limite efetivo é
+o sandbox do Codex, não o cartão de aprovação do ChatGPT.
