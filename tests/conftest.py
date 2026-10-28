@@ -19,6 +19,11 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Qt UI tests assert exact window geometry. On a live Wayland/X11 session the
+# compositor may round or constrain sizes (948 vs 949 under fractional
+# scaling), so default to the same offscreen platform CI uses.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
