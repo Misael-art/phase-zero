@@ -976,6 +976,25 @@ else
     check AI_IDE "AI-capable IDE/editor available" WARN "install VS Code/Cursor/Windsurf/Zed/Neovim"
 fi
 
+# One install per app: duplicates drift apart in version and leave the user
+# guessing which copy runs. Unacknowledged ones are a conflict to resolve.
+dup_status="$(run python3 "$PZ_ROOT/linux/audit/duplicates.py" scan --json 2>/dev/null || true)"
+dup_blocking="$(jq -r '.blocking // [] | join(", ")' <<< "$dup_status" 2>/dev/null || true)"
+dup_broken="$(jq -r '.brokenShims // [] | map(.path) | join(", ")' <<< "$dup_status" 2>/dev/null || true)"
+if [ -n "$dup_blocking" ]; then
+    check DUP01 "No duplicate app installs" WARN \
+        "duplicado: ${dup_blocking} — veja: linux/pz host duplicates scan"
+else
+    check DUP01 "No duplicate app installs" PASS "nenhuma duplicidade não aceita"
+fi
+if [ -n "$dup_broken" ]; then
+    check DUP02 "Launchers point to installed apps" WARN "lançador quebrado: ${dup_broken}"
+fi
+oc_health="$(run python3 "$PZ_ROOT/linux/ai/opencode_9router_manager.py" status 2>/dev/null || true)"
+if jq -e '.configuration.present and (.configuration.health.loads | not)' <<< "$oc_health" >/dev/null 2>&1; then
+    check OC01 "OpenCode config loads" FAIL "provider quebrado impede o OpenCode de abrir — rode: linux/pz ai opencode heal"
+fi
+
 # Optional dependencies degrade a service without breaking the product, so
 # absence is reported rather than treated as a fault. The distinction that
 # matters to the user is whether PhaseZero can install it here: on a

@@ -102,6 +102,68 @@ exit 1
         os.chmod(path, 0o700)
         return path
 
+    def _write_config(self, value: dict) -> Path:
+        config_dir = self.home / ".config/opencode"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        path = config_dir / "opencode.json"
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return path
+
+    def test_heal_drops_router_provider_whose_key_file_vanished(self) -> None:
+        key = self.home / ".config/phasezero/ai-proxies/9router.key"
+        path = self._write_config(
+            {
+                "model": "9router/Default",
+                "agent": {"explorer": {"model": "9router/Default"}, "keep": {"model": "opencode/x"}},
+                "provider": {
+                    "9router": {"options": {"apiKey": f"{{file:{key}}}", "baseURL": "http://127.0.0.1:20128/v1"}},
+                    "local": {"options": {"baseURL": "http://localhost:20128/v1"}},
+                    "ollama": {"options": {"baseURL": "http://127.0.0.1:11434/v1"}},
+                },
+            }
+        )
+        manager = OC.OpenCodeManager()
+        health = manager.status()["configuration"]["health"]
+        self.assertFalse(health["loads"])
+        self.assertEqual([str(key)], health["danglingFileRefs"])
+
+        preview = manager.heal(dry_run=True)
+        self.assertEqual(["9router", "local"], preview["removedProviders"])
+        self.assertFalse(preview["changed"])
+        before = path.read_bytes()
+        self.assertEqual(before, path.read_bytes())
+
+        result = manager.heal()
+        self.assertTrue(result["ok"])
+        self.assertTrue(Path(result["backup"]).is_file())
+        self.assertEqual(before, Path(result["backup"]).read_bytes())
+        healed = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(["ollama"], list(healed["provider"]))
+        self.assertNotIn("model", healed)
+        self.assertNotIn("model", healed["agent"]["explorer"])
+        self.assertEqual("opencode/x", healed["agent"]["keep"]["model"])
+        self.assertTrue(manager.config_health()["loads"])
+
+    def test_heal_keeps_router_provider_while_router_is_installed(self) -> None:
+        key = self.home / ".config/phasezero/ai-proxies/9router.key"
+        key.parent.mkdir(parents=True, exist_ok=True)
+        key.write_text("redacted", encoding="utf-8")
+        router = self.home / ".local/share/phasezero/ai-proxies/9router/bin/9router"
+        router.parent.mkdir(parents=True)
+        router.write_text("", encoding="utf-8")
+        self._write_config(
+            {"provider": {"9router": {"options": {"apiKey": f"{{file:{key}}}", "baseURL": "http://127.0.0.1:20128/v1"}}}}
+        )
+        result = OC.OpenCodeManager().heal()
+        self.assertEqual([], result["removedProviders"])
+        self.assertFalse(result["changed"])
+
+    def test_repair_alias_heals_instead_of_installing_router(self) -> None:
+        self._write_config({"provider": {"x": {"options": {"apiKey": "{file:/nonexistent/key}"}}}})
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(0, OC.main(["repair"]))
+        self.assertEqual(["x"], json.loads(out.getvalue())["removedProviders"])
+
     def test_jsonc_parser_preserves_comment_markers_inside_strings(self) -> None:
         value = OC.parse_jsonc('{// comment\n"url":"https://example.test/a//b",/*x*/"items":[1,],}')
         self.assertEqual("https://example.test/a//b", value["url"])
