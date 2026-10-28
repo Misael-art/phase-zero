@@ -976,6 +976,26 @@ else
     check AI_IDE "AI-capable IDE/editor available" WARN "install VS Code/Cursor/Windsurf/Zed/Neovim"
 fi
 
+# $XDG_RUNTIME_DIR is a small RAM-backed tmpfs. When something fills it the
+# user systemd manager can no longer create transient units, so every app
+# launched from the menu fails with "Unit app-...service not found".
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -d "$runtime_dir" ]; then
+    runtime_use="$(df --output=pcent "$runtime_dir" 2>/dev/null | tail -1 | tr -dc '0-9' || true)"
+    # Skip mount points (e.g. the document portal FUSE): they use no tmpfs space.
+    runtime_top="$( { for entry in "$runtime_dir"/* "$runtime_dir"/.[!.]*; do
+            [ -e "$entry" ] && ! mountpoint -q "$entry" && du -xsh "$entry" 2>/dev/null
+        done || true; } | sort -h | tail -1 | tr '\t' ' ' || true)"
+    if [ "${runtime_use:-0}" -ge 95 ] 2>/dev/null; then
+        check RUN01 "Runtime dir has free space" FAIL \
+            "${runtime_dir} ${runtime_use}% cheio — apps não abrem pelo menu; maior: ${runtime_top:-?}"
+    elif [ "${runtime_use:-0}" -ge 80 ] 2>/dev/null; then
+        check RUN01 "Runtime dir has free space" WARN "${runtime_dir} ${runtime_use}% cheio; maior: ${runtime_top:-?}"
+    else
+        check RUN01 "Runtime dir has free space" PASS "${runtime_use:-?}% usado"
+    fi
+fi
+
 # One install per app: duplicates drift apart in version and leave the user
 # guessing which copy runs. Unacknowledged ones are a conflict to resolve.
 dup_status="$(run python3 "$PZ_ROOT/linux/audit/duplicates.py" scan --json 2>/dev/null || true)"
