@@ -62,7 +62,13 @@ controller_present() {
 # Steam Input claims the same device and expects to own it. Two mappers on one
 # controller produce doubled input, not a merged map, so the desktop profile
 # stays out of the way whenever Steam or a gamescope session is up.
+# A frontend (RetroFE) that swapped Steam's Desktop profile for a gamepad
+# profile owns the controller until its session ends and it restores the
+# Desktop profile; a second mapper meanwhile would fight that restore.
+RETROFE_SESSION_FILE="${PZ_RETROFE_SESSION_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/retrofe/input-session/steam-desktop-session.json}"
+
 conflicting_session() {
+    [ -f "$RETROFE_SESSION_FILE" ] && { printf 'retrofe-game-session\n'; return 0; }
     pgrep -x steam >/dev/null 2>&1 && { printf 'steam\n'; return 0; }
     pgrep -f steamwebhelper >/dev/null 2>&1 && { printf 'steam\n'; return 0; }
     pgrep -x gamescope >/dev/null 2>&1 && { printf 'gamescope\n'; return 0; }

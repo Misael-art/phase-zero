@@ -996,6 +996,17 @@ if [ -d "$runtime_dir" ]; then
     fi
 fi
 
+# A game frontend swaps the Deck to a gamepad profile and suspends KDE
+# shortcuts; if that outlives the game the desktop has no trackpad mouse,
+# keyboard or button shortcuts.
+input_state="$(run bash "$PZ_ROOT/linux/steamdeck/input-restore.sh" status 2>/dev/null || true)"
+case "$(jq -r '.mode // empty' <<< "$input_state" 2>/dev/null)" in
+    stuck) check INPUT01 "Desktop controls restored after games" FAIL \
+        "controle preso no modo jogo — rode: linux/pz steamdeck input restore (ou toque em Restaurar controles)" ;;
+    game) check INPUT01 "Desktop controls restored after games" INFO "jogo ativo; perfil de controle esperado" ;;
+    desktop) check INPUT01 "Desktop controls restored after games" PASS "trackpad, teclado e atalhos no modo Desktop" ;;
+esac
+
 # One install per app: duplicates drift apart in version and leave the user
 # guessing which copy runs. Unacknowledged ones are a conflict to resolve.
 dup_status="$(run python3 "$PZ_ROOT/linux/audit/duplicates.py" scan --json 2>/dev/null || true)"
