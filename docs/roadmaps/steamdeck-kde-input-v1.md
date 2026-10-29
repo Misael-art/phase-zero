@@ -66,6 +66,10 @@ abriu um diálogo por comportamento do wrapper; não repetir esse diagnóstico.
 
 ### Handoff desta intervenção
 
+- Implementação publicada: `3d56e0f5` (base `c3a384e3`), na branch registrada
+  `codex/clean-host-dev-bootstrap`, [PR #129](https://github.com/Misael-art/phase-zero/pull/129)
+  ainda draft. Hooks de arquivos/segredos/tamanho passaram sem achados; CI do
+  SHA publicado permanece gate remoto, sem inferência de aprovação física.
 - Host físico: BigLinux/Manjaro, Jupiter, PipeWire 1.6.8; kernel cmdline ainda
   contém `steamzero.gamemode=1` embora KDE esteja ativo. Não usar esse flag
   como prova de que Gaming Mode está em execução. SteamZero não foi alterado.
