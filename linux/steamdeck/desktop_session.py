@@ -211,15 +211,17 @@ def protect_input():
 
 def keyboard_restore():
     errors = []
-    for key, value in (("VirtualKeyboardEnabled", "true"), ("VirtualKeyboardMode", "2")):
+    # NonMouseInput: automatic opening follows touchscreen input, never a
+    # physical mouse/trackpad. Explicit keyboard shortcuts remain available.
+    for key, value in (("VirtualKeyboardEnabled", "true"), ("VirtualKeyboardMode", "1")):
         current = run("kreadconfig6", "--file", "kwinrc", "--group", "Wayland", "--key", key).stdout.strip()
         if current != value and run("kwriteconfig6", "--notify", "--file", "kwinrc", "--group", "Wayland",
                                     "--key", key, value).returncode:
             errors.append(key)
     props = properties("/VirtualKeyboard", "org.kde.kwin.VirtualKeyboard")
-    if props.get("mode") != "2":
+    if props.get("mode") != "1":
         if run("qdbus6", "org.kde.KWin", "/VirtualKeyboard", "org.freedesktop.DBus.Properties.Set",
-               "org.kde.kwin.VirtualKeyboard", "mode", "2").returncode:
+               "org.kde.kwin.VirtualKeyboard", "mode", "1").returncode:
             errors.append("keyboard-mode")
     if props.get("available") != "true":
         result = run("bash", str(HERE / "input-actions.sh"), "configure", timeout=20)

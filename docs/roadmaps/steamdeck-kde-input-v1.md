@@ -2,6 +2,20 @@
 
 ## Desktop resilience — 2026-10-29
 
+### Correção de abertura automática — 29/10/2026
+
+Operador confirmou teclado físico e mouse USB funcionando na sessão atual.
+Relatou abertura indevida do teclado virtual por mouse. Causa: política de
+recuperação fixava modo 2 (`Always`), escolhido antes para recuperação imediata
+de entrada. Comportamento solicitado: abertura automática apenas pelo toque na
+tela. Guardião agora persiste/restaura modo 1 (`NonMouseInput`); mouse/trackpad
+não abrem automaticamente. Atalhos de abertura explícita permanecem disponíveis.
+KWin e kwinrc foram conferidos em modo 1, painel fechado e provider disponível,
+inclusive após reentrada do guardião. Regressão verifica convergência idempotente
+de modo 2 para 1, sem `forceActivate`. Evidências antigas de modo 2 abaixo são
+históricas; não representam a política atual. USB após cold boot e touchscreen
+continuam gates separados da confirmação USB nesta sessão.
+
 Frente atual: branch registrada `codex/clean-host-dev-bootstrap`, base `c3a384e3`, mesmo
 checkout canônico. Escopo solicitado: boot direto KDE, Steam → desktop,
 RetroFE/emuladores → desktop, teclado USB/mouse, teclado virtual, trackpads,
@@ -62,7 +76,7 @@ abriu um diálogo por comportamento do wrapper; não repetir esse diagnóstico.
 | SDK-005 | Diagnóstico I²C, retry FTS restrito e persistência preparada; ShellCheck, udev e unit parsing | in_progress: elevação, reparo e toque físico pendentes |
 | SDK-006 | UCM Mic preferido, controles fallback, snapshot de áudio, preservação de mute intencional e falha de PipeWire | in_progress: audição/voz e reboot pendentes |
 | SDK-007 | Supervisor scc cede ao Steam/jogo; fixture de entrada/saída e encerramento do filho próprio | in_progress: transição física com frontend/jogo pendente |
-| SDK-008 | Keyboard modo 2 persistido, provider visível no KWin; watcher presente, tolera touchscreen tardio | in_progress: caractere real em app, terminal e diálogo admin pendente |
+| SDK-008 | Keyboard modo 1 persistido/restaurado, abertura automática restrita ao toque; watcher tolera touchscreen tardio | in_progress: abertura/digitação por touchscreen e cold boot pendentes; teclado/mouse USB confirmados pelo operador nesta sessão |
 
 ### Handoff desta intervenção
 

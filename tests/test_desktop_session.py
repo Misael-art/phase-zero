@@ -15,6 +15,30 @@ desktop = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(desktop)
 
 
+def test_keyboard_recovery_keeps_automatic_opening_touch_only():
+    saved = {"VirtualKeyboardEnabled": "true", "VirtualKeyboardMode": "2"}
+    runtime = {"available": "true", "mode": "2"}
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "kreadconfig6":
+            return subprocess.CompletedProcess(args, 0, saved[args[-1]], "")
+        if args[0] == "kwriteconfig6":
+            saved[args[-2]] = args[-1]
+        if args[0] == "qdbus6" and args[-2] == "mode":
+            runtime["mode"] = args[-1]
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    with patch.object(desktop, "run", run), patch.object(desktop, "properties", side_effect=lambda *args: dict(runtime)):
+        assert desktop.keyboard_restore() == []
+        assert saved["VirtualKeyboardMode"] == "1" and runtime["mode"] == "1"
+        assert desktop.keyboard_restore() == []
+    assert sum(args[0] == "kwriteconfig6" for args in calls) == 1
+    assert sum(args[0] == "qdbus6" for args in calls) == 1
+    assert not any("forceActivate" in args for args in calls)
+
+
 def test_reused_pid_from_previous_boot_cannot_hold_desktop_in_game_mode(tmp_path):
     ticks = Path(f"/proc/{os.getpid()}/stat").read_text().rsplit(")", 1)[1].split()[19]
     owner = {"pid": os.getpid(), "start_ticks": ticks, "boot_id": "previous-boot"}

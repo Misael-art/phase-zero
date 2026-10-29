@@ -208,8 +208,9 @@ fixtures with backup; preserve live locks, ambiguous locks and current fixtures.
   the registered backend and its existing Steam/KDE guardians. Do not create a
   second audio policy or discard original preferences after failed recovery.
 - Preserve intentional desktop mute/volume changes; restore the pre-game/login
-  baseline on transitions. Keep the virtual keyboard available, including input
-  through trackpad, and retry late touchscreen enumeration without input grabs.
+  baseline on transitions. Virtual keyboard opens automatically only from the
+  touchscreen, never mouse/trackpad/USB input; explicit shortcuts remain usable.
+  Retry late touchscreen enumeration without input grabs.
 - Help/status never request elevation. Before opening an admin dialog, ensure
   an input path is usable; do not repeatedly prompt an operator unable to type.
   Mock/CI success does not certify physical USB, touch, speech or cold boot.
