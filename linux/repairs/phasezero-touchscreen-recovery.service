@@ -8,7 +8,7 @@ ConditionPathExists=/sys/bus/i2c/devices/i2c-FTS3528:00
 [Service]
 Type=oneshot
 # Fixed system tools and sysfs targets only; no user-writable runtime at boot.
-ExecStart=/bin/sh -c 'test "$(cat /sys/devices/virtual/dmi/id/product_name)" = Jupiter || exit 0; printf on > /sys/devices/platform/AMDI0010:01/power/control; if ! test -L /sys/bus/i2c/devices/i2c-FTS3528:00/driver; then printf i2c-FTS3528:00 > /sys/bus/i2c/drivers_probe; fi'
+ExecStart=/bin/sh -c 'test "$(cat /sys/devices/virtual/dmi/id/product_name)" = Jupiter || exit 0; printf on > /sys/devices/platform/AMDI0010:01/power/control; if ! test -L /sys/bus/i2c/devices/i2c-FTS3528:00/driver; then printf i2c-FTS3528:00 > /sys/bus/i2c/drivers_probe; fi; udevadm settle --timeout=10; grep -q FTS3528 /proc/bus/input/devices'
 TimeoutStartSec=15
 
 [Install]

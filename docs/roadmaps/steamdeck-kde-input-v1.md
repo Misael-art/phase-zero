@@ -16,6 +16,20 @@ de modo 2 para 1, sem `forceActivate`. Evidências antigas de modo 2 abaixo são
 históricas; não representam a política atual. USB após cold boot e touchscreen
 continuam gates separados da confirmação USB nesta sessão.
 
+Tentativa administrativa autenticada nesta revisão: controle de energia passou
+para `on`/`active`, mas novo probe FTS repetiu timeout; driver/nó continuaram
+ausentes. Regra/unidade de persistência não foram instaladas porque o reparo
+recusou esse gate. Fallback explícito `reparo-entrada.sh --reset-touch-bus`
+prepara rebind somente de `AMDI0010:01`: exige driver esperado, nenhum processo
+usando `/dev/i2c-*` e nenhum outro cliente I²C registrado no adaptador. Consulta
+topológica comprovou somente FTS; firmware_node ACPI não é cliente I²C. USB e
+Valve HID ficam fora da árvore. Fallback não roda automaticamente no boot.
+Modelo de remoção/reinstanciação documentado pelo
+[kernel](https://docs.kernel.org/i2c/instantiating-devices.html); esse modelo não
+comprova recuperação do hardware. Resultado físico do fallback continua gate.
+Unidade preparada de boot também verifica presença FTS e falha se ausente,
+em vez de reportar sucesso por apenas concluir a escrita de `drivers_probe`.
+
 Frente atual: branch registrada `codex/clean-host-dev-bootstrap`, base `c3a384e3`, mesmo
 checkout canônico. Escopo solicitado: boot direto KDE, Steam → desktop,
 RetroFE/emuladores → desktop, teclado USB/mouse, teclado virtual, trackpads,

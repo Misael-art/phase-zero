@@ -5,8 +5,8 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 I2CBUS=/sys/devices/platform/AMDI0010:01
 TOUCH=/sys/bus/i2c/devices/i2c-FTS3528:00
 case "${1:-}" in
-    --help|-h) echo 'usage: reparo-entrada.sh [--status|--persist] (admin only for repair)'; exit 0 ;;
-    ''|--status|--persist|--root) ;;
+    --help|-h) echo 'usage: reparo-entrada.sh [--status|--persist|--reset-touch-bus] (admin only for repair)'; exit 0 ;;
+    ''|--status|--persist|--reset-touch-bus|--root) ;;
     *) echo 'Argumento desconhecido; use --help.' >&2; exit 2 ;;
 esac
 if [ "${1:-}" = --status ]; then
@@ -17,9 +17,37 @@ if [ "${1:-}" = --status ]; then
 fi
 if [ "${1:-}" = "--root" ]; then
     [ "$EUID" = 0 ] || exit 77
-    case "${2:-}" in ''|--persist) ;; *) exit 2 ;; esac
+    case "${2:-}" in ''|--persist|--reset-touch-bus) ;; *) exit 2 ;; esac
     [ "$(cat /sys/devices/virtual/dmi/id/product_name)" = Jupiter ] || exit 69
     [ -d "$I2CBUS" ] && [ -e "$TOUCH" ] || exit 69
+    if [ "${2:-}" = --reset-touch-bus ]; then
+        # Explicit, bounded fallback after a failed client probe. Only this
+        # dedicated FTS adapter may be rebound; never a shared/unknown bus.
+        driver=/sys/bus/platform/drivers/i2c_designware
+        [ "$(readlink -f "$I2CBUS/driver")" = "$driver" ] || exit 69
+        command -v fuser >/dev/null || { echo 'fuser ausente; reset recusado.' >&2; exit 69; }
+        for adapter in "$I2CBUS"/i2c-*; do
+            [ -d "$adapter" ] || continue
+            if fuser "/dev/${adapter##*/}" >/dev/null 2>&1; then
+                echo 'Barramento em uso por processo; reset recusado.' >&2
+                exit 69
+            fi
+            for client in "$adapter"/*; do
+                [ "$(readlink -f "$client/subsystem")" = /sys/bus/i2c ] || continue
+                [ -f "$client/modalias" ] || continue
+                [ "${client##*/}" = i2c-FTS3528:00 ] || {
+                    echo 'Outro dispositivo compartilha I2C; reset recusado.' >&2; exit 69;
+                }
+            done
+        done
+        # Reattach even if a later command fails; USB and Valve HID are outside
+        # this platform device's subtree and never participate in the reset.
+        trap 'if [ ! -L "$I2CBUS/driver" ]; then printf "%s" AMDI0010:01 > "$driver/bind"; fi' EXIT
+        printf '%s' AMDI0010:01 > "$driver/unbind"
+        sleep 0.2
+        printf '%s' AMDI0010:01 > "$driver/bind"
+        trap - EXIT
+    fi
     printf on > "$I2CBUS/power/control"
     # Boot timeout can leave the I2C device without a HID child. Retry exactly
     # that device; no bus unbind, USB reset or controller firmware transition.
