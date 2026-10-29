@@ -1,5 +1,105 @@
 # Steam Deck KDE input v1
 
+## Desktop resilience — 2026-10-29
+
+Frente atual: branch registrada `codex/clean-host-dev-bootstrap`, base `c3a384e3`, mesmo
+checkout canônico. Escopo solicitado: boot direto KDE, Steam → desktop,
+RetroFE/emuladores → desktop, teclado USB/mouse, teclado virtual, trackpads,
+touchscreen, áudio e microfone. Restrições da sessão histórica abaixo continuam
+históricas; esta intervenção não executa reboot, logout, restart de KWin/SDDM,
+GRUB ou VM. Não há release nem merge autorizados por estes testes.
+
+### Diagnóstico e hipóteses
+
+| Caminho | Evidência neste host | Resultado |
+| --- | --- | --- |
+| Touchscreen FTS3528 / I²C | Boot de 29/10 16:28 registra `AMDI0010:01: controller timed out`; dispositivo I²C existe sem driver, sem nó FTS em `/proc/bus/input/devices`; power control `auto`, runtime `suspended` | Falha anterior ao KDE. Causa elétrica/firmware do timeout ainda não demonstrada. Retry restrito preparado; não aplicado sem entrada física utilizável para autenticação. |
+| USB físico / dock | `usbhid` e xHCI carregados; sem blacklist ou regra local desabilitando teclado/mouse; nenhum teclado/mouse USB externo enumerado na coleta. Hub e storage aparecem/desconectam no journal | Não há prova de grab nem de defeito USB resolvido. Cabo, alimentação, hub, enumeração e estágio login/desktop precisam de teste com periféricos conectados. |
+| Mapper do desktop | Unit antiga executava daemon diretamente, contornando checks de conflito no login. Arquivo de sessão do RetroFE era tratado como dono vivo sem identidade | Unit passa pelo supervisor; entrega controle ao Steam/jogo e retoma após saída. Boot ID + start ticks evitam PID reutilizado; filhos de emulador mantêm lease. |
+| Microfone | Perfil Pro Audio expõe PCM, mas `Int Mic` e `DMIC Enable` estavam off. UCM `HiFi (Mic, Speaker)` disponível após reboot | Preferir perfil UCM observado; fallback Pro Audio habilita apenas controles ALSA observados. Não confundir fonte enumerada com voz inteligível. |
+| Áudio | JamesDSP padrão estava mudo e em 0%; preferência não coberta pelo guardião anterior | Saídas local e JamesDSP desmutadas; volume zero elevado para 35%. Snapshot anterior preservado no ledger de backups. Preferências saudáveis persistem por nome, não por índice PipeWire. |
+| Teclado virtual | Provider Plasma carregado; modo 1, `visible=false`. Ajuste D-Bus para modo 2 produziu `visible=true`, sem trocar PID do KWin | Configuração persistida. Digitação e campos de apps sem protocolo text-input continuam gates físicos; terminal recebe watcher sem grab, tolerante a hotplug. |
+| Recuperação Steam | Falha/API indisponível impedia recuperação do snapshot local de teclado | Recuperar KDE/áudio independentemente; manter backup Steam e repetir sua restauração separadamente. |
+| Atalhos desktop | Nove entradas PhaseZero confirmadas em KGlobalAccel neste boot | Preservados. Sem instalar novo esquema nem reiniciar KGlobalAccel. Atalho não comprova evento físico. |
+| Proveniência | `pz` não está instalado no PATH; entradas existentes apontam ao checkout. Units de controller/terminal não existiam antes da intervenção | Serviço de recuperação e watcher instalados no usuário, apontando à raiz canônica. Nenhum pacote de produto instalado. |
+
+### Contrato e implementação
+
+`linux/steamdeck/desktop_session.py` é backend do comando existente
+`pz steamdeck input`, não outro gerenciador de controles. `input install`
+registra `~/.config/phasezero/desktop-session.json` e instala
+`phasezero-input-restore.service` em `graphical-session.target`. Preferências
+ficam em `~/.local/state/phasezero/desktop-session/preferences.json`, com
+escrita atômica e recusa de symlink. Guardião restaura no login/saída do último
+consumidor, preserva ajustes intencionais de mute/volume no desktop e recusa
+substituir baseline saudável por placa interna desaparecida. Dispositivos
+desconectados ficam fora da restauração corrente; preferências permanecem.
+Em BigLinux, a unit ordena após a reconciliação inicial de microfone da distro
+e WirePlumber, evitando disputar preferências durante o início da sessão.
+
+RetroFE continua dono dos leases e guardiões Steam/KDE existentes. Seu módulo
+`desktop_environment.py` registra a preferência imediatamente antes da troca
+e usa o mesmo backend ao restaurar. Sem registro PhaseZero, mantém recuperação
+standalone existente. Registro inválido ou restauração incompleta preserva o
+snapshot e produz erro. Receita reproduzível das alterações externas:
+`linux/emulation/retrofe-desktop-recovery.patch`; aplicar somente após backup,
+checagem de contexto e com frontend fechado. Não inclui ROM, conta ou mídia.
+
+Recuperação I²C: `bash linux/repairs/reparo-entrada.sh --status` é leitura.
+`--persist` requer admin, valida Jupiter, tenta apenas `i2c-FTS3528:00` e só
+instala regra/unidade de boot após o nó reaparecer. Unidade usa comandos fixos
+do sistema, sem executar checkout gravável pelo usuário como root no boot.
+Não desabilita USB nem reassocia controle Valve. Não foi aplicada neste host:
+operador informou indisponibilidade de teclado para senha. `bigsudo --help`
+abriu um diálogo por comportamento do wrapper; não repetir esse diagnóstico.
+
+### Matriz de aceite
+
+| ID | Implementação / evidência | Estado |
+| --- | --- | --- |
+| SDK-003 | Backend, baseline persistente, retomada no login e pós-jogo; fixtures de transição e falha; serviço ativo no host | in_progress: cold boot físico pendente |
+| SDK-004 | Nenhum grab/reset USB; reabilitação KWin de teclado/ponteiro/touch; teste com USB simulado desabilitado | in_progress: USB físico/login/retirada do dock pendentes |
+| SDK-005 | Diagnóstico I²C, retry FTS restrito e persistência preparada; ShellCheck, udev e unit parsing | in_progress: elevação, reparo e toque físico pendentes |
+| SDK-006 | UCM Mic preferido, controles fallback, snapshot de áudio, preservação de mute intencional e falha de PipeWire | in_progress: audição/voz e reboot pendentes |
+| SDK-007 | Supervisor scc cede ao Steam/jogo; fixture de entrada/saída e encerramento do filho próprio | in_progress: transição física com frontend/jogo pendente |
+| SDK-008 | Keyboard modo 2 persistido, provider visível no KWin; watcher presente, tolera touchscreen tardio | in_progress: caractere real em app, terminal e diálogo admin pendente |
+
+### Handoff desta intervenção
+
+- Host físico: BigLinux/Manjaro, Jupiter, PipeWire 1.6.8; kernel cmdline ainda
+  contém `steamzero.gamemode=1` embora KDE esteja ativo. Não usar esse flag
+  como prova de que Gaming Mode está em execução. SteamZero não foi alterado.
+- Antes/depois: teclado provider já carregado → modo 2/visível; áudio mute/0%
+  → desmutado/35% onde estava zero; microfone UCM ativo; FTS continua ausente.
+  `phasezero-input-restore` e `phasezero-terminal-keyboard` ativos, habilitados
+  no login; guardião RetroFE existente preservado. Sem root/reboot/logout.
+- Validação: 77 pytest, 14 casos de auditoria isolada RetroFE e cinco suites
+  shell (controller, teclado, terminal, serviços desktop e cursor) passaram.
+  Receita RetroFE reproduziu quatro fontes alterados byte a byte.
+  Auditoria RetroFE tinha erro preexistente de chamada de teste com assinatura
+  antiga; chamada corrigida, sem afrouxar a asserção de PID de outro boot.
+  Suite shell de controller também dependia do Steam/systemd reais apesar de
+  HOME isolado; agora usa comandos fake e confirma timers sem tocar unidades
+  reais. Recusa antiga por Steam ativo não conta como gate aprovado.
+- Continuidade: código PhaseZero + receita RetroFE em Git; preimagens, hashes,
+  testes e limites RetroFE em `Manifests/desktop-session-resilience-20261029.json`
+  e histórico `romtool record-artifacts` da raiz emulation.
+- Próximo passo físico: confirmar teclado virtual entregando caractere;
+  executar reparo FTS `--persist` com bridge oficial; conectar teclado/mouse
+  USB; testar login direto KDE, Steam → KDE e última saída de frontend/jogo.
+  Só então agendar cold boot com periféricos conectados. Não reiniciar para
+  testar enquanto operador não tiver entrada de recuperação confirmada.
+
+Rollback: desabilitar apenas os dois novos serviços de usuário; registro e
+baseline PhaseZero podem ser preservados para diagnóstico. Preferências de
+áudio anteriores e kwinrc estão no ledger `pz_backup_file`. Reverter arquivos
+RetroFE somente se hashes atuais coincidirem com o manifesto, usando preimagens
+ou receita reversa. Se futuramente instalados, regra/unidade FTS gerenciadas
+podem ser desabilitadas/removidas pelo administrador após checar marcadores;
+nunca reiniciar o barramento USB para reverter este reparo.
+
+---
+
 Correção do teclado virtual touch e diagnóstico do cursor no KDE Plasma
 Wayland. Não é trabalho de Homelab nem da VM Windows. Não autoriza reboot,
 logout, reinício de KWin/Plasma/SDDM, Switch Desktop, alteração de GRUB ou

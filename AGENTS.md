@@ -195,6 +195,25 @@ Do not sweep `/run/user`, terminate agents, or reset desktop services to recover
 space. Use the on-demand terminal repair: archive only inactive, verified test
 fixtures with backup; preserve live locks, ambiguous locks and current fixtures.
 
+## Steam Deck desktop input safety
+
+- Physical USB keyboard/mouse and touchscreen remain available during every
+  controller mode. Never grab, disable, unbind or reset them to switch a game
+  profile. Touchscreen recovery targets FTS I2C only, never Valve HID or USB.
+- Temporary controller ownership requires live PID, start ticks and boot ID;
+  retain emulator children until the last consumer exits. File existence alone
+  never proves ownership. Desktop mapper yields to Steam/game owners at login
+  and while running, not only during manual start.
+- `pz steamdeck input` owns PhaseZero desktop preference recovery. RetroFE uses
+  the registered backend and its existing Steam/KDE guardians. Do not create a
+  second audio policy or discard original preferences after failed recovery.
+- Preserve intentional desktop mute/volume changes; restore the pre-game/login
+  baseline on transitions. Keep the virtual keyboard available, including input
+  through trackpad, and retry late touchscreen enumeration without input grabs.
+- Help/status never request elevation. Before opening an admin dialog, ensure
+  an input path is usable; do not repeatedly prompt an operator unable to type.
+  Mock/CI success does not certify physical USB, touch, speech or cold boot.
+
 ## Coleção Projects: continuidade e organização
 
 - Política comum: [../AGENTS.md](../AGENTS.md), especialmente autonomia, testes, GitHub e recursos (§§5–10); raiz/branch em [registro central](../.workspace/projects.json). A orientação atual de raiz única substitui recomendações históricas de criar worktrees/clones por tarefa; os contratos técnicos e gates deste projeto permanecem obrigatórios. Em outro host, preserve este mesmo método em um único checkout registrado, sem recriar caminhos antigos.

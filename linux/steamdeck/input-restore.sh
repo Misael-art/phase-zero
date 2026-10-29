@@ -60,21 +60,22 @@ kwin_keyboard_enabled() {
 # Owners recorded in the frontend state that are still alive mean a game is
 # running and the gamepad profile is expected, not stuck.
 game_session_alive() {
-    [ -f "$RETROFE_STEAM_STATE" ] || return 1
-    local pid
-    for pid in $(jq -r '[.owners[]? | .pid, (.children[]?.pid)] | .[]' "$RETROFE_STEAM_STATE" 2>/dev/null); do
-        kill -0 "$pid" 2>/dev/null && return 0
-    done
-    return 1
+    local lease
+    lease="$(python3 "$DIR/desktop_session.py" lease)" || return 2
+    jq -e '.active == true or .externalGameActive == true' <<<"$lease" >/dev/null
 }
 
 input_status() {
-    local steam_pending=false guard_pending=false game=false stuck=false
+    local steam_pending=false guard_pending=false game=false stuck=false lease_error=false health
     [ -f "$RETROFE_STEAM_STATE" ] && steam_pending=true
     [ -f "$RETROFE_GUARD_STATE" ] && guard_pending=true
-    game_session_alive && game=true
+    if game_session_alive; then game=true
+    elif [ "$?" -eq 2 ]; then lease_error=true
+    fi
     if { $steam_pending || $guard_pending; } && ! $game; then stuck=true; fi
+    health="$(python3 "$DIR/desktop_session.py" health)" || health='null'
     jq -n \
+        --argjson health "$health" --argjson leaseError "$lease_error" \
         --argjson steamPending "$steam_pending" --argjson guardPending "$guard_pending" \
         --argjson game "$game" --argjson stuck "$stuck" \
         --arg recovery "$(unit_state "$RECOVERY_UNIT")" \
@@ -82,10 +83,17 @@ input_status() {
         --arg kwinKeyboard "$(kwin_keyboard_enabled)" \
         --arg root "$(retrofe_root)" \
         --argjson launcher "$([ -f "$LAUNCHER_PATH" ] && echo true || echo false)" \
-        '{
+        ' (($health.keyboard.available == "true") and
+            ($health.touchscreen != "missing") and
+            (all($health.devices[]?; .enabled == "true")) and
+            ($health.audio != null)) as $ready | {
             tool: "steamdeck-input",
             mode: (if $game then "game" elif $stuck then "stuck" else "desktop" end),
-            ok: ($stuck | not),
+            ok: (($stuck | not) and ($leaseError | not) and $ready),
+            ownershipRecovered: (($stuck | not) and ($leaseError | not)),
+            desktopReady: $ready,
+            health: $health,
+            leaseError: $leaseError,
             gameSessionAlive: $game,
             steamGamepadProfilePending: $steamPending,
             kdeShortcutsSuspended: $guardPending,
@@ -102,11 +110,17 @@ notify() {
 }
 
 input_restore() {
-    local tool errors=0
-    if game_session_alive && [ "${1:-}" != "--force" ]; then
+    local tool errors=0 lease
+    lease="$(python3 "$DIR/desktop_session.py" lease)" || {
+        pz_warn "estado de sessão ilegível; recuperação preservada para diagnóstico"
+        return 1
+    }
+    if jq -e '.active or .externalGameActive' <<<"$lease" >/dev/null && [ "${1:-}" != "--force" ]; then
         pz_warn "jogo ainda ativo; o perfil de controle volta ao Desktop quando ele fechar (use --force para restaurar já)"
         return 0
     fi
+    # Restore local controls before any potentially slow Steam API operation.
+    python3 "$DIR/desktop_session.py" reconcile || errors=$((errors + 1))
     tool="$(steam_input_tool)"
     if [ -n "$tool" ]; then
         if python3 "$tool" --root "$(retrofe_root)" session-recover; then
@@ -118,19 +132,18 @@ input_restore() {
         # Restart the frontend guardian so it keeps retrying after us.
         [ "$(unit_state "$RECOVERY_UNIT")" = active ] || systemctl --user restart "$RECOVERY_UNIT" 2>/dev/null || true
     fi
-    if [ "$(kwin_keyboard_enabled)" != true ]; then
-        bash "$PZ_ROOT/linux/pz" steamdeck keyboard configure >/dev/null 2>&1 &&
-            pz_info "teclado virtual do KWin religado" || errors=$((errors + 1))
-    fi
     if systemctl --user cat "$TERMINAL_UNIT" >/dev/null 2>&1 && [ "$(unit_state "$TERMINAL_UNIT")" != active ]; then
         systemctl --user restart "$TERMINAL_UNIT" >/dev/null 2>&1 && pz_info "watcher do teclado no terminal religado" || true
     fi
     if [ "$errors" -eq 0 ] && input_status | jq -e '.ok' >/dev/null; then
-        notify "Controles restaurados" "Trackpad, teclado e atalhos do Desktop ativos."
+        if [ "${1:-}" != --background ]; then
+            notify "Configuração do desktop restaurada" "Teste teclado, ponteiro, áudio e microfone."
+        fi
         return 0
     fi
-    notify --urgency=critical "Controles ainda não restaurados" \
-        "Use a tela touch: menu > Restaurar controles. Se o Steam estiver fechado, abra o Steam."
+    if [ "${1:-}" != --background ]; then
+        notify --urgency=critical "Restauração incompleta" "Consulte pz steamdeck input status. Estado anterior preservado."
+    fi
     return 1
 }
 
@@ -154,5 +167,11 @@ case "${1:-status}" in
     status) input_status ;;
     restore|recover) shift; input_restore "$@" ;;
     install-launcher) install_launcher ;;
-    *) printf 'usage: input-restore.sh (status|restore [--force]|install-launcher)\n' >&2; exit 2 ;;
+    install)
+        tool="$(steam_input_tool)"
+        [ -z "$tool" ] || python3 "$tool" --root "$(retrofe_root)" session-recovery-ensure
+        exec python3 "$DIR/desktop_session.py" install
+        ;;
+    watch|reconcile) exec python3 "$DIR/desktop_session.py" "$1" ;;
+    *) printf 'usage: input-restore.sh (status|restore [--force]|install|watch|reconcile|install-launcher)\n' >&2; exit 2 ;;
 esac

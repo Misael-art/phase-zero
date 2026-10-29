@@ -11,6 +11,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def live_owner():
+    fields = Path(f"/proc/{os.getpid()}/stat").read_text().rsplit(")", 1)[1].split()
+    return {"pid": os.getpid(), "start_ticks": fields[19],
+            "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(), "children": []}
+
+
 def run(script: str, *args: str, env: dict[str, str]) -> subprocess.CompletedProcess:
     return subprocess.run(["bash", str(ROOT / script), *args], capture_output=True, text=True,
                           env={**os.environ, **env}, timeout=60, check=False)
@@ -31,12 +37,13 @@ def input_status(tmp_path: Path, state: dict | None) -> dict:
 
 def test_desktop_mode_when_no_game_session(tmp_path):
     status = input_status(tmp_path, None)
-    assert status["mode"] == "desktop" and status["ok"]
+    assert status["mode"] == "desktop" and status["ownershipRecovered"]
+    assert status["ok"] == status["desktopReady"]
 
 
 def test_live_game_keeps_gamepad_profile_on_purpose(tmp_path):
-    status = input_status(tmp_path, {"owners": {"1": {"pid": os.getpid(), "children": []}}})
-    assert status["mode"] == "game" and status["ok"]
+    status = input_status(tmp_path, {"owners": {"1": live_owner()}})
+    assert status["mode"] == "game" and status["gameSessionAlive"]
 
 
 def test_dead_owner_with_pending_profile_is_stuck(tmp_path):
@@ -48,7 +55,7 @@ def test_restore_waits_for_a_running_game(tmp_path):
     state_dir = tmp_path / "retrofe"
     state_dir.mkdir()
     (state_dir / "steam-desktop-session.json").write_text(
-        json.dumps({"owners": {"1": {"pid": os.getpid(), "children": []}}}))
+        json.dumps({"owners": {"1": live_owner()}}))
     result = run("linux/steamdeck/input-restore.sh", "restore",
                  env={"PZ_RETROFE_STATE_DIR": str(state_dir), "PZ_RETROFE_ROOT": str(tmp_path)})
     assert result.returncode == 0
@@ -56,8 +63,8 @@ def test_restore_waits_for_a_running_game(tmp_path):
 
 
 def test_controller_desktop_defers_to_game_session(tmp_path):
-    session = tmp_path / "session.json"
-    session.write_text("{}")
+    session = tmp_path / "steam-desktop-session.json"
+    session.write_text(json.dumps({"owners": {"1": live_owner()}}))
     script = (f'source "{ROOT}/linux/steamdeck/controller-desktop.sh" status >/dev/null; '
               'conflicting_session')
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30,

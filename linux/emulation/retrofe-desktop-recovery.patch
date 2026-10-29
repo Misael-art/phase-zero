@@ -1,0 +1,157 @@
+--- a/Tools/launchers/retrofe/desktop_environment.py
++++ b/Tools/launchers/retrofe/desktop_environment.py
+@@ -53,7 +53,33 @@
+     return value or None
+
+
++def phasezero_reconcile(action: str = "reconcile") -> list[str]:
++    """Use the registered PhaseZero backend; never maintain a second audio policy.
++
++    Registration is opt-in through `pz steamdeck input install`. A standalone
++    RetroFE retains its existing snapshot recovery when PhaseZero is absent.
++    """
++    config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "phasezero/desktop-session.json"
++    if config.is_symlink():
++        raise RuntimeError("Registro PhaseZero symlink; preservado.")
++    if not config.exists():
++        return []
++    value = json.loads(config.read_text())
++    command = value.get("command")
++    if (value.get("schema_version") != 1 or value.get("managed_by") != "phasezero-input"
++            or not isinstance(command, list) or len(command) != 2
++            or not all(isinstance(v, str) and Path(v).is_absolute() for v in command)):
++        raise RuntimeError("Registro de recuperação PhaseZero inválido; preservado.")
++    result = _run([*command, action], timeout=30)
++    if result.returncode:
++        raise RuntimeError("Recuperação PhaseZero pendente: " + (result.stderr or result.stdout)[-300:])
++    return ["phasezero-desktop-policy"]
++
++
+ def capture() -> dict:
++    # Capture immediately before the first profile swap, rather than depending
++    # on the background guardian's last polling interval.
++    phasezero_reconcile("capture")
+     return {
+         "schema_version": 1,
+         "captured_at": time.time(),
+@@ -67,7 +93,12 @@
+     """Record the desktop before the first concurrent session; keep the
+     oldest snapshot so a second game never captures a degraded desktop."""
+     path = state_dir / SNAPSHOT_NAME
+-    if path.exists() or path.is_symlink():
++    if path.is_symlink():
++        raise RuntimeError("Snapshot do desktop é symlink; preservado.")
++    if path.exists():
++        previous = json.loads(path.read_text(encoding="utf-8"))
++        if not isinstance(previous, dict) or previous.get("schema_version") != 1:
++            raise RuntimeError("Snapshot do desktop desconhecido; preservado.")
+         return
+     tmp = path.with_suffix(".tmp")
+     tmp.write_text(json.dumps(capture(), indent=2), encoding="utf-8")
+@@ -86,7 +117,7 @@
+     saved = json.loads(path.read_text(encoding="utf-8"))
+     repaired, failed = [], []
+     if saved.get("kwin_virtual_keyboard") == "true" and _kwin_keyboard_enabled() != "true":
+-        ok = _run(["kwriteconfig6", "--file", "kwinrc", "--group", "Wayland",
++        ok = _run(["kwriteconfig6", "--notify", "--file", "kwinrc", "--group", "Wayland",
+                    "--key", "VirtualKeyboardEnabled", "true"]).returncode == 0
+         if ok:
+             _run(["qdbus6", "org.kde.KWin", "/KWin", "reconfigure"])
+@@ -101,6 +132,8 @@
+                 failed.append(unit)
+     if failed:
+         raise RuntimeError("Desktop parcialmente restaurado; pendente: " + ", ".join(failed))
++    # Do not discard the original snapshot while shared restoration is pending.
++    repaired.extend(phasezero_reconcile())
+     path.unlink(missing_ok=True)
+     return repaired
+
+--- a/Tools/launchers/retrofe/steam-input.py
++++ b/Tools/launchers/retrofe/steam-input.py
+@@ -801,9 +801,11 @@
+             steam_desktop_session.release(recover=True)
+         except (OSError, ValueError, RuntimeError) as exc:
+             errors.append(str(exc))
+-    # Only once Steam and KDE are back: the snapshot describes the desktop.
++    # Local keyboard/audio must recover even while Steam cannot restore its
++    # profile. Keep Steam's original selection independently for later retry.
+     pending = steam_desktop_session.snapshot()
+-    if ok and not pending:
++    game_alive = bool(pending) and any(steam_desktop_session.owner_active(o) for o in pending["owners"].values())
++    if ok and not game_alive:
+         try:
+             repaired = desktop_environment.restore(steam_desktop_session.state_directory())
+             if repaired:
+--- a/Tools/launchers/retrofe/test_desktop_environment.py
++++ b/Tools/launchers/retrofe/test_desktop_environment.py
+@@ -1,4 +1,5 @@
+ import json
++import os
+ import subprocess
+ import tempfile
+ import unittest
+@@ -34,7 +35,12 @@
+
+ class DesktopEnvironmentTests(unittest.TestCase):
+     def setUp(self):
+-        self.dir = Path(tempfile.mkdtemp())
++        temporary = tempfile.TemporaryDirectory(prefix="retrofe-desktop-test-")
++        self.addCleanup(temporary.cleanup)
++        self.dir = Path(temporary.name)
++        isolated = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.dir / "config")})
++        isolated.start()
++        self.addCleanup(isolated.stop)
+         self.host = FakeHost(units={"phasezero-terminal-keyboard.service": True})
+         patches = [mock.patch.object(de, "_run", self.host.run),
+                    mock.patch.object(de.shutil, "which", lambda name: "/usr/bin/" + name)]
+@@ -76,6 +82,27 @@
+                 de.restore(self.dir)
+         self.assertTrue((self.dir / de.SNAPSHOT_NAME).exists())
+
++    def test_registered_backend_failure_preserves_original_desktop_snapshot(self):
++        de.save_once(self.dir)
++        with mock.patch.object(de, "phasezero_reconcile", side_effect=RuntimeError("Steam unavailable")):
++            with self.assertRaises(RuntimeError):
++                de.restore(self.dir)
++        self.assertTrue((self.dir / de.SNAPSHOT_NAME).exists())
++
++    def test_invalid_shared_backend_is_not_executed(self):
++        config = self.dir / "config/phasezero/desktop-session.json"
++        config.parent.mkdir(parents=True)
++        config.write_text(json.dumps({"schema_version": 1, "managed_by": "phasezero-input", "command": "shell payload"}))
++        with self.assertRaises(RuntimeError):
++            de.phasezero_reconcile()
++
++    def test_invalid_pre_game_snapshot_does_not_get_silently_reused(self):
++        target = self.dir / de.SNAPSHOT_NAME
++        target.write_text('{"schema_version": 99}')
++        with self.assertRaises(RuntimeError):
++            de.save_once(self.dir)
++        self.assertEqual('{"schema_version": 99}', target.read_text())
++
+
+ if __name__ == "__main__":
+     unittest.main()
+--- a/Tools/audits/validate-session-safety.py
++++ b/Tools/audits/validate-session-safety.py
+@@ -88,7 +88,7 @@
+     def test_pid_reused_in_another_boot_cannot_hold_gamepad(self):
+         owner = {"pid":os.getpid(),"start_ticks":steam.proc_identity(os.getpid()),"boot_id":"previous-boot","children":[]}
+         self.assertFalse(steam.owner_active(owner))
+-        self.assertFalse(kde.guard_owner_alive(owner))
++        self.assertFalse(kde.guard_owner_alive(str(owner["pid"]), owner))
+     def test_live_child_retains_gamepad_if_supervisor_dies(self):
+         child = {"pid":os.getpid(),"start_ticks":steam.proc_identity(os.getpid()),"boot_id":steam.boot_id()}
+         owner = {"pid":99999999,"start_ticks":"0","boot_id":steam.boot_id(),"children":[child]}
+@@ -107,9 +107,10 @@
+         self.assertEqual(bus.call_count,2)
+         self.assertFalse(guard_path.exists())
+     def test_kde_recovery_runs_when_steam_is_unavailable(self):
+-        with patch.object(bootstrap.runpy,"run_path",return_value={"recover_guard":lambda _: (True,"KDE restored")}) as loaded, patch.object(steam,"snapshot",return_value=self.state), patch.object(bootstrap,"process_running",return_value=True), patch.object(steam,"release",side_effect=RuntimeError("Steam unavailable")):
++        with patch.object(bootstrap.runpy,"run_path",return_value={"recover_guard":lambda _: (True,"KDE restored")}) as loaded, patch.object(steam,"snapshot",return_value=self.state), patch.object(bootstrap,"process_running",return_value=True), patch.object(steam,"release",side_effect=RuntimeError("Steam unavailable")), patch.object(bootstrap.desktop_environment,"restore",return_value=["keyboard"]) as local_restore:
+             with self.assertRaises(RuntimeError): bootstrap.recover_session_once(ROOT)
+         loaded.assert_called_once()
++        local_restore.assert_called_once()
+     def fixture(self):
+         root = self.directory / "frontend"
+         (root/"Config").mkdir(parents=True)
