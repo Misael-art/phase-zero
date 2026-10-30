@@ -200,3 +200,95 @@ Ordem sugerida por impacto. Para cada item: teste primeiro (deve falhar), depois
   shellcheck -S warning linux/pz linux/ai/*.sh linux/server/ai-policy-broker.sh   # base: 15 avisos
   python linux/ui/generate_actions.py /tmp/a.json && diff -q /tmp/a.json linux/ui/actions.json
   ```
+
+## 5. Contas Codex por perfil — 2026-10-29
+
+**Objetivo/IDs:** PXA-006/010, gestão no painel de múltiplos perfis Codex
+Desktop/CLI e suas sessões ChatGPT Web, sem substituir contas existentes.
+Owner: `linux/ai/codex_profiles.py`, no domínio de Contas e conexões; bridge
+existente continua proprietário do setup/rota/túnel Web.
+
+**Continuidade:** raiz única `/home/misael/Projects/PhaseZero`, branch
+`codex/clean-host-dev-bootstrap`, PR draft
+[#129](https://github.com/Misael-art/phase-zero/pull/129). HEAD inicial
+`83c50a60b8c0a7ab7c95941b1b06be482d4b8d0d`; implementação `47e4012`
+(`feat(ai): add isolated Codex account profiles to accounts panel`). Commit
+deste handoff segue a implementação. Sem merge/release.
+
+**Arquivos:** backend `linux/ai/codex_profiles.py`; roteador `linux/pz`;
+instanciação/ownership em `linux/ai/chatgpt_web_bridge.py`;
+`linux/ui_native/codex_profiles_panel.py` integrado a `pages/accounts.py`;
+testes `test_codex_profiles`, `test_codex_profiles_panel` e ajuste do fake do
+bridge. Jornada, contrato e limites detalhados no
+[roadmap](../roadmaps/apps-dev-ai-accounts-v1.md#contas-codex-no-painel--incremento-de-2026-10-29)
+e superfície de escrita em `docs/host-surface.md`.
+
+**Resultado:** nome/cor/ID persistentes, Desktop/CLI por conta, Web e navegador
+com armazenamento próprio, atalhos por modo, arquivar/restaurar sem apagar
+sessões, e recuperação do daemon Web ao abrir novamente. Cadastro envia
+metadados por stdin e retorna resumo redigido ao runner. Não há troca
+automática por cota. IDs locais não certificam identidade no provedor.
+
+Dois defeitos estruturais tratados: parada Web antes percorria todos os
+`app-codex-web-gpt-launcher-*.scope`; agora filtra somente owners do perfil.
+Caminhos muito longos causavam `listen EINVAL` no socket `ipc/ipc.sock`, com
+Desktop preso no carregamento. Execução passa a usar raiz curta
+`$XDG_DATA_HOME/phasezero/codex/<id>`; metadados continuam em
+`phasezero/ai-accounts/codex-profiles`. Abertura recusa socket acima de 107
+bytes. Nenhum symlink de credenciais é necessário.
+
+**Testes:**
+
+- Fixture: 139 testes focados passaram em `test_codex_profiles.py`,
+  `test_codex_profiles_panel.py`, `test_chatgpt_web_bridge.py`,
+  `test_accounts_page.py`, `test_account_contract.py` e
+  `test_product_inventory.py`. Incluem processos CLI simultâneos, persistência,
+  ambiente/rotas limpos, isolamento de scopes/unidades, perfil desconhecido,
+  metadados inválidos, redirecionamento por symlink, socket UTF-8, ausência de
+  download automático e privacidade. Após ajuste final de foco/refresh,
+  22 testes das páginas de contas/perfis passaram novamente.
+- Host de desenvolvimento: `tools/dev-bootstrap.sh doctor --profile ui`
+  pronto; Bash syntax, ShellCheck de `linux/pz` com exclusões oficiais do CI,
+  compilação Python e `git diff --check` passaram. Hooks de stage/commit
+  aprovaram arquivos explícitos. Gitleaks local indisponível; varredura do CI
+  ainda necessária.
+- Aplicativo real: launcher `linux/ui/native.sh --smoke-test --category
+  'Contas e conexões'` abriu com Python/PySide do sistema e produziu captura,
+  sem erro. Quatro atalhos de perfil em fixture e atalho real do painel
+  passaram `desktop-file-validate`.
+- Codex Desktop instalado, CLI 0.166.0: duas instâncias em Xvfb atingiram
+  **Entrar no ChatGPT**, com portas 22104/22108 e diretórios Electron próprios.
+  Capturas individuais revisadas. Primeiro ensaio com `--disable-gpu` falhou;
+  ensaio seguinte revelou limite IPC. Verificação final usou raiz curta e
+  ANGLE/SwiftShader, sem mudar flags da instalação do operador. Receber HTML
+  no servidor local não foi tratado como prova de tela pronta.
+
+**Estado do host:** BigLinux/Manjaro, `misael-jupiter`. Atalho **PhaseZero —
+Contas Codex** criado no menu e na área de trabalho do usuário, apontando ao
+launcher da raiz canônica. Pacote instalado continua 1.22.11; o novo painel é
+acessível por esse atalho de desenvolvimento. Instalações nativa e Web
+anteriores foram referenciadas, sem leitura/cópia dos tokens, logout ou mudança
+de rota. Nenhuma nova conta real cadastrada automaticamente, daemon de produto
+instalado, reinício de sessão ou operação de boot executados.
+
+Evidência local regenerável:
+`~/.cache/phasezero-dev/evidence/codex-profiles-20261029/` (capturas, script e
+receipt). Fixtures do Codex não receberam autenticação real. Processos de
+teste encerrados; ausência de `auth.json` e de processos usando as duas raízes
+anônimas foi conferida antes de removê-las. Logs/receipts/capturas preservados. Diretórios pytest compartilhados não foram varridos.
+
+**CI/limites:** SHA anterior tinha `shell-lint` falho no PR; checks do novo SHA
+devem ser consultados após push. Fixture/Xvfb não homologam login A/B, identidade
+igual entre Desktop e Web, cota, túnel por conta, retenção de sessão após reboot,
+integração com IDE ou Windows. Apelido/cor identificam painel e atalhos; classe
+e título das janelas continuam pertencendo ao launcher instalado. Registros
+agregados de Contas permanecem redigidos; CLI administrativa privada não deve
+ser publicada com identificação local.
+
+**Próximo passo exato:** abrir **PhaseZero — Contas Codex**, identificar conta
+existente e adicionar outra. Entrar pelo Desktop em cada conta; conferir
+identidade exibida pelo Codex; preparar/login Web do ID correspondente e
+conferir identidade no ChatGPT. Provar uso simultâneo e reabertura após logout
+da sessão/reboot sem mistura de conta. Esse passo exige ação de autenticação
+do operador. Para comandos deste checkout, usar `linux/pz ai codex-profiles`;
+`pz` do pacote antigo pode não conhecer a nova família.
