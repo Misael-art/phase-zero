@@ -145,7 +145,7 @@ class FakeRunner:
     def tunnel_clients(self, binary):
         return list(self.tunnels)
 
-    def stop_launcher_scopes(self):
+    def stop_launcher_scopes(self, owners):
         stopped = sorted({f"app-codex-web-gpt-launcher-{item['scopePid']}.scope"
                           for item in self.tunnels if item["scopePid"]})
         self.tunnels = []

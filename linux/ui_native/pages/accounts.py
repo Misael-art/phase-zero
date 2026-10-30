@@ -19,6 +19,7 @@ from linux.ai.secret_store import SecretStoreUnavailable
 
 from ..a11y_events import announce_accessible
 from ..command_runner import CommandRunner
+from ..codex_profiles_panel import CodexProfilesPanel
 from ..models import ActionSpec
 from ..preferences import UiPreferences
 from ..widgets import SectionHeader
@@ -324,6 +325,17 @@ class AccountsPage(BasePage):
         add_connection.setObjectName("addAccountConnection")
         add_connection.clicked.connect(self._show_channel_catalog)
         layout.addWidget(add_connection)
+        self._privacy_toggle = QCheckBox("Ocultar identidade das contas")
+        self._privacy_toggle.setObjectName("hideAccountIdentity")
+        self._privacy_toggle.setAccessibleName("Ocultar identidade das contas nesta tela")
+        self._privacy_toggle.setChecked(self.preferences.hide_account_identity)
+        self._privacy_toggle.toggled.connect(self._set_identity_hidden)
+        layout.addWidget(self._privacy_toggle)
+        self.codex_profiles = CodexProfilesPanel(
+            self.runner, hidden=self.preferences.hide_account_identity, parent=self,
+        )
+        self.codex_profiles.action_requested.connect(self.action_requested.emit)
+        layout.addWidget(self.codex_profiles)
         credential_heading = QLabel("Chaves de API")
         credential_heading.setObjectName("accountCredentialsHeading")
         layout.addWidget(credential_heading)
@@ -349,12 +361,6 @@ class AccountsPage(BasePage):
         self._credentials_layout.setSpacing(6)
         layout.addWidget(credentials)
         self._render_credentials()
-        self._privacy_toggle = QCheckBox("Ocultar identidade das contas")
-        self._privacy_toggle.setObjectName("hideAccountIdentity")
-        self._privacy_toggle.setAccessibleName("Ocultar identidade das contas nesta tela")
-        self._privacy_toggle.setChecked(self.preferences.hide_account_identity)
-        self._privacy_toggle.toggled.connect(self._set_identity_hidden)
-        layout.addWidget(self._privacy_toggle)
         cards = QWidget()
         self._cards_layout = QVBoxLayout(cards)
         self._cards_layout.setContentsMargins(0, 0, 0, 0)
@@ -372,6 +378,9 @@ class AccountsPage(BasePage):
 
     def _show_channel_catalog(self) -> None:
         AccountChannelsDialog(self).exec()
+
+    def consume_action_values(self, action: ActionSpec) -> dict[str, str]:
+        return self.codex_profiles.consume_action_values(action)
 
     def _show_add_api_credential(self) -> None:
         if self.credential_vault is None or self._credential_busy:
@@ -534,6 +543,8 @@ class AccountsPage(BasePage):
         self.preferences.set_hide_account_identity(hidden)
         self._render_cards()
         self._render_credentials()
+        if hasattr(self, "codex_profiles"):
+            self.codex_profiles.set_hidden(hidden)
 
     def refresh_accounts(self) -> None:
         self._generation += 1

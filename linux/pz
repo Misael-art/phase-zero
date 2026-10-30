@@ -242,6 +242,7 @@ Usage:
   pz ai workspaces doctor      Unified Hermes/Odysseus/9Router readiness audit
   pz ai workspaces plan        Safe read-only deployment plan and blockers
   pz ai auth status            Redacted registry for AI accounts and sessions
+  pz ai codex-profiles list     Codex accounts: isolated Desktop, CLI and Web profiles
   pz ai operations status      Persistent Control Center operation summary
   pz ai operations resume-info Safe retry metadata for interrupted operations
   pz doctor                    Run full system diagnostics
@@ -676,6 +677,10 @@ cmd_ai() {
         routing|ai-router|task-router)
             shift
             python3 "$PZ_ROOT/linux/ai/routing_manager.py" "$@"
+            ;;
+        codex-profiles)
+            shift
+            python3 "$PZ_ROOT/linux/ai/codex_profiles.py" "${@:-list}"
             ;;
         chatgpt-web)
             # Experimental and opt-in (PXA-010): kept out of help and catalog on purpose.

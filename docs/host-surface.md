@@ -104,6 +104,14 @@ Legenda: **✅ coberto** = toda mutação passa por um chokepoint · **⚠️ pa
 | segredos rotacionados | `rotate-secrets.sh` | ✅ `pz_backup_file` + `pz_rollback_register` |
 | admin bridge (`phasezero-admin`, `bigsudo`) | `setup-admin-bridge.sh` | ✅ `pz_write_managed_file` |
 | AppImages/ícones de desktop apps | `desktop-apps.sh` | ⚠️ ver dívida |
+| metadados de contas Codex, configuração inicial por perfil, ícones/wrappers/atalhos e reutilização do arquivo público Web | `ai/codex_profiles.py` | ✅ `pz_hostbackup.backup_file` / `ledger_record`, domínio `ai-codex-profiles`; metadados em `$XDG_DATA_HOME/phasezero/ai-accounts/codex-profiles`, execução em `$XDG_DATA_HOME/phasezero/codex/<id>` |
+
+Login e atualização de credenciais/sessões continuam pertencendo ao Codex,
+Chromium e ao manager Web existente. O gerenciador de perfis não lê nem copia
+seus tokens. Seus registros contêm apenas identificação local. Arquivar faz
+backup dos atalhos antes de remover; não apaga sessões nem para aplicativos.
+Atalho `PhaseZero — Contas Codex` aponta ao launcher da raiz canônica; pacote
+instalado do Control Center e suas entradas originais não são substituídos.
 
 ### `boot`
 

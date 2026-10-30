@@ -3125,3 +3125,89 @@ o sandbox do Codex, não o cartão de aprovação do ChatGPT.
   `danger-full-access` e a escrita no workspace funcionou. Com `isolated`, o
   sandbox ficou `read-only` e a escrita foi recusada. Ao final, o host voltou
   ao padrão `inherit`.
+
+### Contas Codex no painel — incremento de 2026-10-29
+
+PXA-006/010: implementação Linux de perfis de conta em **Contas e conexões →
+Contas Codex**. Backend `linux/ai/codex_profiles.py`, acionado por
+`pz ai codex-profiles`, usa o domínio de contas existente. Não substitui o
+cofre de chaves nem introduz um login universal. Registro v1 contém apenas ID
+opaco, apelido, cor, slot persistente e estado de arquivamento.
+
+Jornada:
+
+1. Identificar a **Conta atual** com nome/cor. Ela referencia a instalação
+   nativa e o bridge existentes, sem mover ou copiar suas sessões.
+2. **Adicionar conta Codex**, escolher apelido/cor e **Abrir Desktop**. Fazer
+   login na conta desejada na janela do Codex. Desktop e CLI desse perfil
+   usam o mesmo `CODEX_HOME`; contas diferentes conservam diretórios próprios.
+3. **Preparar / login Web** abre terminal e o fluxo do bridge existente.
+   Aceite experimental e login ChatGPT são próprios daquele perfil. A janela
+   Web Desktop também pode pedir seu primeiro login Codex. Entrar na mesma
+   conta pretendida; o cadastro local não prova identidade de provedor.
+4. **Navegador** abre Codex no site usando perfil Chromium/Chrome exclusivo,
+   com autenticação independente. Não importa cookies do navegador pessoal.
+5. **Criar atalhos** disponibiliza Desktop, CLI, Web Desktop e Navegador no
+   menu e na área de trabalho existente, identificados por apelido, cor e
+   `C<slot>`. Nome/cor atualizam atalhos gerenciados já existentes.
+6. **Arquivar** remove os atalhos gerenciados e bloqueia novas aberturas desse
+   ID. Preserva credenciais, dados e aplicativos abertos. **Restaurar** mantém
+   ID/slot. Arquivamento não equivale a logout ou revogação no provedor.
+
+| Estado | Local/contrato |
+|---|---|
+| Metadados | `$XDG_DATA_HOME/phasezero/ai-accounts/codex-profiles/profiles.json`, 0600; lock entre processos, backup central antes de alterar |
+| Dados de perfil | `$XDG_DATA_HOME/phasezero/codex/<id>/`, 0700; raiz curta para sockets Unix |
+| Desktop/CLI nativos | `<id>/native/`; login ChatGPT gerido pelo Codex, arquivo próprio de credenciais; configuração inicial workspace-write/on-request |
+| Bridge Web | `<id>/web/{codex-home,core-home,launcher-data}`; autenticações, baseline, journal, chave e runtime próprios |
+| Electron | `<id>/desktop/{native,web}/`; configuração/cache/estado separados e porta fixa para não trocar armazenamento após reinício |
+| Navegador | `<id>/browser/`; perfil persistente dedicado |
+| Instância Web | `pz-chatgpt-web-<id>.service`; porta `24000 + 4 × slot`; runtime e autostart identificados por ID |
+| Desktop local | Nativo `22100 + 4 × slot`, Web `22101 + 4 × slot`; porta ocupada não provoca seleção de outra conta |
+
+ID aleatório permanece estável mesmo com apelidos iguais, alteração de cor ou
+arquivamento. Slot não é reutilizado. Até 64 perfis adicionais; não há rotação
+automática de contas, inferência de cota ou promessa de sessão permanente.
+Expiração/revogação continua exigindo novo login pelo fluxo do provedor.
+
+Variáveis de rota/chave OpenAI, `CODEX_HOME` e instância Electron herdadas são
+removidas antes de selecionar o perfil. Âncoras de XDG preservam o registro
+canônico quando um comando parte de outra janela isolada. Raiz Web e perfil
+nativo devem corresponder ao mesmo ID; redirecionamentos por symlink são
+recusados. Encerramento/reinício do bridge filtra somente os scopes dos seus
+processos, inclusive no perfil legado. Abrir Web após encerramento do daemon
+reaplica o setup existente com sessão salva e `login_wait=0`, sem novo opt-in
+automático e sem tocar outro perfil.
+
+Instalação reutiliza `setup-codex.sh`, o pacote Desktop local preparado e o
+manager Web fixado em 6.1.14. Arquivo Web público já presente é copiado somente
+após conferir tamanho/SHA-256; sessão nunca acompanha essa cópia. Downloads
+acima de 70 MB continuam manuais, com URL/hash/destino informados. Abertura de
+perfil Desktop exige launcher Linux com suporte a múltiplas instâncias e
+armazenamento Electron separado. Caminhos IPC acima de 107 bytes são recusados
+antes da abertura, evitando spinner causado por socket Unix inválido.
+
+Comandos de suporte:
+
+```bash
+pz ai codex-profiles list
+pz ai codex-profiles add --label "Conta B" --color roxo
+pz ai codex-profiles open ID --surface desktop
+pz ai codex-profiles terminal ID --task login
+pz ai codex-profiles cli ID
+pz ai codex-profiles web ID status
+pz ai codex-profiles shortcuts ID
+pz ai codex-profiles install-panel-shortcut
+```
+
+`ID` é o valor retornado pelo cadastro; `current` seleciona a instalação
+existente. Para logout nativo explícito: `pz ai codex-profiles cli ID logout`.
+Web e navegador conservam seus fluxos próprios de saída. A CLI de perfis e
+sua lista são superfícies locais privadas; não publicar a saída com apelidos.
+Painel envia apelido/cor por stdin, sem incluí-los no comando ou no histórico
+do runner, e usa `--redacted` nas prévias/resultados administrativos. Exportação
+agregada de Contas continua redigida. Identificação visual local fica no painel
+e nos atalhos; launcher instalado mantém sua própria classe/título de janela.
+Windows, login real em duas
+contas, igualdade de identidade entre superfícies, cotas e sessões depois de
+reboot não estão homologados por fixtures ou Xvfb.

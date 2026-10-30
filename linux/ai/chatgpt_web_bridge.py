@@ -60,6 +60,7 @@ import os
 import platform
 import re
 import shutil
+import shlex
 import signal
 import socket
 import sqlite3
@@ -282,6 +283,16 @@ class BridgeError(RuntimeError):
     def __init__(self, message: str, code: str = "blocked") -> None:
         super().__init__(message)
         self.code = code
+
+
+def desktop_profiles_supported() -> bool:
+    """Linux launcher capability: Electron storage plus persistent port selection."""
+    try:
+        text = Path("/opt/codex-desktop/start.sh").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return all(marker in text for marker in (
+        "CODEX_MULTI_LAUNCH_PORT_RANGE", "CODEX_ELECTRON_USER_DATA_DIR", "--new-instance"))
 
 
 def now() -> dt.datetime:
@@ -625,7 +636,7 @@ class Runner:
             return f"uid:{uid}"
 
     def launcher_processes(self, binary: Path, data_dir: Path,
-                           readonly_path: Path) -> list[dict[str, Any]]:
+                           readonly_path: Path, *, unit_name: str = UNIT_NAME) -> list[dict[str, Any]]:
         """This user's launcher main processes, flagged by whether they are isolated.
 
         Chromium moves itself into its own ``app-*.scope``, so the cgroup says
@@ -637,7 +648,7 @@ class Runner:
         """
         marker = f"CODEX_WEB_GPT_LAUNCHER_DATA_DIR={data_dir}".encode()
         code, out, _ = self.run(["systemctl", "--user", "show", "-p", "MainPID", "--value",
-                                 UNIT_NAME], timeout=15)
+                                 unit_name], timeout=15)
         unit_pid = int(out.strip()) if code == 0 and out.strip().isdigit() else 0
         processes: dict[int, dict[str, Any]] = {}
         for entry in Path("/proc").iterdir():
@@ -711,16 +722,19 @@ class Runner:
             found.append({"pid": int(entry.name), "scopePid": int(owner[1]) if owner else None})
         return found
 
-    def stop_launcher_scopes(self) -> list[str]:
+    def stop_launcher_scopes(self, owners: list[int]) -> list[str]:
         """Stop the launcher's own `app-*.scope` units that outlive the managed unit.
 
         Chromium moves the launcher into such a scope, and the tunnel-client it
         spawns stays there after the unit stops, keeping the tunnel online.
         """
+        expected = {f"app-codex-web-gpt-launcher-{pid}.scope" for pid in owners if pid > 1}
+        if not expected:
+            return []
         code, out, _ = self.run(["systemctl", "--user", "list-units", "--type=scope",
                                  "--plain", "--no-legend", LAUNCHER_SCOPE_GLOB], timeout=15)
         scopes = [line.split()[0] for line in out.splitlines()
-                  if code == 0 and line.split()] if code == 0 else []
+                  if code == 0 and line.split() and line.split()[0] in expected] if code == 0 else []
         for scope in scopes:
             self.run(["systemctl", "--user", "stop", scope], timeout=60)
         return scopes
@@ -750,8 +764,24 @@ class Paths:
     def __init__(self, env: dict[str, str]) -> None:
         home = Path(env.get("HOME") or Path.home())
         data = Path(env.get("XDG_DATA_HOME") or home / ".local/share")
+        instance = env.get("PZ_CHATGPT_WEB_INSTANCE", "")
+        if instance and not re.fullmatch(r"pz-[0-9a-f]{12}", instance):
+            raise BridgeError("ID de instância Web inválido", "instance-id")
+        self.instance = instance
+        slot = env.get("PZ_CHATGPT_WEB_SLOT", "")
+        if instance and (not re.fullmatch(r"[1-9][0-9]?", slot) or not 1 <= int(slot) <= 64):
+            raise BridgeError("Slot Web inválido", "instance-slot")
+        self.port = DEFAULT_PORT if not instance else 24000 + int(slot) * 4
+        self.unit_name = UNIT_NAME if not instance else f"pz-chatgpt-web-{instance}.service"
+        self.shortcut_entries = (SHORTCUT_ENTRIES if not instance else
+                                 {mode: f"phasezero-chatgpt-web-{instance}-{mode}.desktop"
+                                  for mode in SHORTCUT_ENTRIES})
         self.home = home
-        self.root = Path(env.get("PZ_CHATGPT_WEB_ROOT") or data / "phasezero/chatgpt-web")
+        expected_root = (data / "phasezero/codex" / instance / "web"
+                         if instance else data / "phasezero/chatgpt-web")
+        self.root = Path(env.get("PZ_CHATGPT_WEB_ROOT") or expected_root)
+        if instance and self.root.resolve() != expected_root.resolve():
+            raise BridgeError("Raiz Web não corresponde ao ID da conta", "instance-root")
         self.state = self.root / "state.json"
         self.packages = self.root / "packages" / PIN["version"]
         self.core_home = self.root / "core-home"
@@ -759,15 +789,18 @@ class Paths:
         self.codex_home = self.root / "codex-home"
         self.codex_config = self.codex_home / "config.toml"
         self.journal = self.root / "journal"
-        self.live_codex_home = Path(env.get("PZ_LIVE_CODEX_HOME") or home / ".codex")
+        expected_native = self.root.parent / "native" if instance else home / ".codex"
+        self.live_codex_home = Path(env.get("PZ_LIVE_CODEX_HOME") or expected_native)
+        if instance and self.live_codex_home.resolve() != expected_native.resolve():
+            raise BridgeError("Perfil nativo não corresponde ao ID da conta", "instance-native")
         runtime = env.get("XDG_RUNTIME_DIR")
-        self.runtime = Path(runtime) / "pz-chatgpt-web" if runtime else None
+        self.runtime = Path(runtime) / ("pz-chatgpt-web" + (f"-{instance}" if instance else "")) if runtime else None
 
         self.app = self.packages / "app"
         config = Path(env.get("XDG_CONFIG_HOME") or home / ".config")
         self.autostart_dir = config / "autostart"
         self.autostart_entry = self.autostart_dir / UPSTREAM_AUTOSTART_ENTRY
-        self.managed_autostart = self.autostart_dir / MANAGED_AUTOSTART_ENTRY
+        self.managed_autostart = self.autostart_dir / (f"phasezero-chatgpt-web-{instance}.desktop" if instance else MANAGED_AUTOSTART_ENTRY)
         # Menu/login wrappers call a private manager snapshot. Neither target
         # may depend on the source worktree remaining mounted or present.
         self.autostart_bin = self.root / "bin"
@@ -781,8 +814,8 @@ class Paths:
         self.open_target = self.autostart_bin / "chatgpt-web-open.target"
         self.applications = data / "applications"
         self.user_dirs = config / "user-dirs.dirs"
-        self.default_profile = home / UPSTREAM_DEFAULT_PROFILE
-        self.default_core = home / UPSTREAM_DEFAULT_CORE
+        self.default_profile = self.root / "unmanaged-profile" if instance else home / UPSTREAM_DEFAULT_PROFILE
+        self.default_core = self.root / "unmanaged-core" if instance else home / UPSTREAM_DEFAULT_CORE
         self.descriptor = self.core_home / "runtime" / "launcher-browser.json"
         self.launcher_state = self.launcher_data / "launcher-state.json"
 
@@ -876,7 +909,7 @@ class Bridge:
         return "verified" if tree_digest(self.paths.app) == record["tree"] else "mismatch"
 
     def launcher_active(self) -> bool:
-        code, out, _ = self.runner.run(["systemctl", "--user", "is-active", UNIT_NAME], timeout=10)
+        code, out, _ = self.runner.run(["systemctl", "--user", "is-active", self.paths.unit_name], timeout=10)
         return code == 0 and out.strip() in {"active", "activating"}
 
     def upstream_config(self) -> dict[str, Any] | None:
@@ -921,7 +954,8 @@ class Bridge:
 
     def launcher_processes(self) -> list[dict[str, Any]]:
         return self.runner.launcher_processes(self.paths.app / LAUNCHER_BINARY,
-                                              self.paths.launcher_data, self.paths.autostart_dir)
+                                              self.paths.launcher_data, self.paths.autostart_dir,
+                                              **({"unit_name": self.paths.unit_name} if self.paths.instance else {}))
 
     def session_present(self, profile: Path) -> bool | None:
         """Whether the launcher profile holds a ChatGPT session. Reads cookie names only."""
@@ -975,6 +1009,13 @@ class Bridge:
             raise BridgeError("tunnel-client órfão não encerrou (PIDs "
                               + ", ".join(map(str, survivors)) + ")", "orphan-tunnel")
         return orphans
+
+    def launcher_scope_owners(self) -> list[int]:
+        """Capture this profile's owners before stopping its unit, never all scopes."""
+        owners = {item["pid"] for item in self.launcher_processes() if item["managed"]}
+        owners.update(item["scopePid"] for item in self.runner.tunnel_clients(
+            self.paths.core_home / "bin" / "tunnel-client") if item.get("scopePid"))
+        return sorted(owners)
 
     def isolation(self) -> dict[str, Any]:
         strays = self.stray_launchers()
@@ -1044,6 +1085,8 @@ class Bridge:
 
     def adopt_session(self) -> dict[str, Any]:
         """Move the launcher's own default profile into the managed directory."""
+        if self.paths.instance:
+            raise BridgeError("Novo perfil exige login próprio; adoção de sessão é bloqueada.", "instance-adopt")
         state = self.load_state()
         self.require_opt_in(state)
         if self.launcher_active() or self.stray_launchers():
@@ -1172,9 +1215,9 @@ class Bridge:
         for tool in ("systemctl", "systemd-run", "unsquashfs"):
             add(f"tool-{tool}", shutil.which(tool, path=self.env.get("PATH")) is not None, tool)
         active = self.launcher_active()
-        busy = self.runner.port_in_use(DEFAULT_PORT)
+        busy = self.runner.port_in_use(self.paths.port)
         add("port", active or not busy,
-            f"127.0.0.1:{DEFAULT_PORT} " + ("em uso pelo launcher" if active and busy
+            f"127.0.0.1:{self.paths.port} " + ("em uso pelo launcher" if active and busy
                                             else "ocupada por outro processo" if busy else "livre"))
         others = self.runner.other_users()
         add("single-user-host", not others if others != ["unknown"] else None,
@@ -1212,7 +1255,7 @@ class Bridge:
         return {
             "product": PRODUCT_ID, "experimental": True, "optIn": bool(state.get("optIn")),
             "stage": stage, "pin": {k: PIN[k] for k in ("version", "tag", "commit", "auditedAt")},
-            "package": package, "launcher": {"active": active, "unit": UNIT_NAME,
+            "package": package, "launcher": {"active": active, "unit": self.paths.unit_name, "port": self.paths.port,
                                              "hardening": state.get("hardening")},
             "upstreamMode": mode,
             "autoApproveToolCalls": bool((config or {}).get("autoApproveToolCalls")),
@@ -1220,7 +1263,7 @@ class Bridge:
             "liveCodexRouteTouched": self.live_route_touched(),
             "isolation": self.isolation(),
             "signedIn": self.session_present(self.paths.launcher_data),
-            "daemonListening": self.runner.port_in_use(DEFAULT_PORT),
+            "daemonListening": self.runner.port_in_use(self.paths.port),
             "eligibility": self.eligibility(state), "runtimeKey": self.key_status(state),
             "toolsGate": self.tools_steps() if state.get("optIn") else None,
             "lastSmoke": state.get("lastSmoke"), "autostart": self.autostart_status(),
@@ -1294,6 +1337,10 @@ class Bridge:
         asset = self.asset()
         if self.package_state()["state"] == "verified":
             return {"package": "verified", "downloaded": False}
+        if self.paths.instance or self.env.get("PZ_CHATGPT_WEB_NO_DOWNLOAD") == "1":
+            raise BridgeError(
+                f"Download manual necessário ({asset['size']} bytes): {self.asset_url(asset)}; "
+                f"SHA-256 {asset['sha256']}; destino {self.paths.package(asset)}", "manual-download")
         blocked = set(self.preflight()["blocked"]) & {"filesystem-permissions", "disk", "platform"}
         if blocked:
             raise BridgeError("preflight bloqueou: " + ", ".join(sorted(blocked)), "preflight")
@@ -1370,7 +1417,9 @@ class Bridge:
     def seed_codex_home(self) -> None:
         private_dir(self.paths.codex_home)
         if not self.paths.codex_config.exists():
-            atomic_write(self.paths.codex_config, OWNED_CONFIG.encode())
+            extra = ('\ncli_auth_credentials_store = "file"\nforced_login_method = "chatgpt"\n'
+                     if self.paths.instance else "")
+            atomic_write(self.paths.codex_config, (OWNED_CONFIG + extra).encode())
 
     def migrate_owned_config(self, state: dict[str, Any]) -> bool:
         """Replace the approval policy Codex no longer accepts, in config and baseline alike."""
@@ -1410,7 +1459,7 @@ class Bridge:
                               "package-unverified")
         self.migrate_owned_config(state)
         if self.launcher_active():
-            return {"launcher": "already-active", "unit": UNIT_NAME}
+            return {"launcher": "already-active", "unit": self.paths.unit_name}
         if package["unpacked"] != "verified":
             raise BridgeError("launcher não instalado ou alterado após a verificação; rode `install`",
                               "install-unverified")
@@ -1429,7 +1478,7 @@ class Bridge:
         bundled = str(self.paths.app / "usr/lib")
         env["LD_LIBRARY_PATH"] = bundled + (f":{env['LD_LIBRARY_PATH']}"
                                             if env.get("LD_LIBRARY_PATH") else "")
-        command = ["systemd-run", "--user", "--collect", "--quiet", f"--unit={UNIT_NAME}",
+        command = ["systemd-run", "--user", "--collect", "--quiet", f"--unit={self.paths.unit_name}",
                    "--description=PhaseZero ChatGPT Web launcher (experimental)",
                    "-p", "KillMode=mixed", "-p", "TimeoutStopSec=45", "-p", "Restart=no"]
         for prop in self.hardening_properties():
@@ -1451,7 +1500,7 @@ class Bridge:
                 break
             time.sleep(min(1.0, self.settle_seconds))
         if not self.launcher_active():
-            _, log, _ = self.runner.run(["journalctl", "--user", "-u", UNIT_NAME, "-n", "8",
+            _, log, _ = self.runner.run(["journalctl", "--user", "-u", self.paths.unit_name, "-n", "8",
                                          "--no-pager", "-o", "cat"], timeout=10)
             self.save_state(state)
             raise BridgeError("launcher encerrou logo após iniciar: " + log.strip()[-400:],
@@ -1463,7 +1512,7 @@ class Bridge:
                               "autostartDirectory": "read-only", "autostart": False}
         state["launchedAt"] = iso(self.clock())
         self.save_state(state)
-        return {"launcher": "started", "unit": UNIT_NAME, "hardening": state["hardening"],
+        return {"launcher": "started", "unit": self.paths.unit_name, "hardening": state["hardening"],
                 "next": "Entre no ChatGPT dentro da janela do launcher e rode `setup`."}
 
     def stop_launcher(self) -> dict[str, Any]:
@@ -1473,15 +1522,16 @@ class Bridge:
         if route.get("active") is not False:
             raise BridgeError("restaure a rota antes de encerrar o launcher (`route disable`)",
                               "route-active")
-        code, out, err = self.runner.run(["systemctl", "--user", "stop", UNIT_NAME], timeout=90)
-        self.runner.stop_launcher_scopes()
+        owners = self.launcher_scope_owners()
+        code, out, err = self.runner.run(["systemctl", "--user", "stop", self.paths.unit_name], timeout=90)
+        self.runner.stop_launcher_scopes(owners)
         # The main process leaves the unit's cgroup for its own scope; make sure it is gone.
         survivors = [item["pid"] for item in self.launcher_processes() if item["managed"]
                      and not self.runner.terminate(item["pid"])]
         if code != 0 or self.launcher_active() or survivors:
             raise BridgeError(f"launcher não encerrou: {(err or out).strip()[:300]}", "stop-failed")
-        if self.runner.port_in_use(DEFAULT_PORT):
-            raise BridgeError(f"porta {DEFAULT_PORT} ainda ocupada após encerrar", "port-residual")
+        if self.runner.port_in_use(self.paths.port):
+            raise BridgeError(f"porta {self.paths.port} ainda ocupada após encerrar", "port-residual")
         return {"launcher": "stopped", "residualPort": False}
 
     # ---- route -----------------------------------------------------------
@@ -1550,7 +1600,7 @@ class Bridge:
             "target": str(self.paths.codex_config), "writes": False,
             "liveCodexHomeAffected": False,
             "willManage": list(MANAGED_ROUTE_KEYS),
-            "expectedRoute": f"http://127.0.0.1:{DEFAULT_PORT}",
+            "expectedRoute": f"http://127.0.0.1:{self.paths.port}",
             "conflicts": [key for key, found in present.items()
                           if found and not self.route_status().get("active")],
             "baseline": state.get("routeBaseline"), "route": self.route_status(),
@@ -1606,7 +1656,7 @@ class Bridge:
         found += [f"chave não permitida: {key}" for key in FORBIDDEN_PROFILE_KEYS
                   if key in config and key not in allowed]
         route = config.get("openai_base_url")
-        if route is not None and route != f"http://127.0.0.1:{DEFAULT_PORT}/v1":
+        if route is not None and route != f"http://127.0.0.1:{self.paths.port}/v1":
             found.append("openai_base_url aponta para fora do bridge local")
         hook_commands_allowed = self.managed_hook_lines()[3:5]
 
@@ -1777,7 +1827,7 @@ class Bridge:
         atomic_write(backup, before.encode())
         code, out, err = self.upstream_cli(
             ["setup", "--browser-only", "--browser-host-descriptor", str(self.paths.descriptor),
-             "--acknowledge-unofficial", "--port", str(DEFAULT_PORT)], timeout=600)
+             "--acknowledge-unofficial", "--port", str(self.paths.port)], timeout=600)
         after = self._config_text()
         check = self.classify_diff(before, after)
         config = self.upstream_config() or {}
@@ -1806,8 +1856,9 @@ class Bridge:
             raise BridgeError("feche o Codex do perfil dedicado (PIDs "
                               + ", ".join(map(str, running)) + ") antes de reiniciar o launcher",
                               "codex-running")
-        self.runner.run(["systemctl", "--user", "stop", UNIT_NAME], timeout=90)
-        self.runner.stop_launcher_scopes()
+        owners = self.launcher_scope_owners()
+        self.runner.run(["systemctl", "--user", "stop", self.paths.unit_name], timeout=90)
+        self.runner.stop_launcher_scopes(owners)
         survivors = [item["pid"] for item in self.launcher_processes()
                      if not self.runner.terminate(item["pid"])]
         self.stop_orphan_tunnels()
@@ -1848,7 +1899,7 @@ class Bridge:
         done("launcher", "ativo no unit isolado (~/.codex e autostart somente leitura)")
         self._wait(self.descriptor_ready, DESCRIPTOR_WAIT_SECONDS,
                    "launcher não ficou pronto a tempo; veja `journalctl --user -u "
-                   f"{UNIT_NAME}`", "launcher-timeout")
+                   f"{self.paths.unit_name}`", "launcher-timeout")
         if self.session_present(self.paths.launcher_data) is not True:
             report("login", "entre no ChatGPT na janela do Codex Web GPT; aguardando até "
                             f"{int(login_wait // 60)} min")
@@ -1861,7 +1912,7 @@ class Bridge:
                        "login-required")
         done("login", "sessão ChatGPT presente no perfil do launcher")
         if (self.upstream_config() or {}).get("mode") not in {"browser-only", "full"}:
-            if not self.upstream_config() and self.runner.port_in_use(DEFAULT_PORT):
+            if not self.upstream_config() and self.runner.port_in_use(self.paths.port):
                 # A daemon from a previous configuration still holds the port.
                 self.restart_launcher()
                 self._wait(self.descriptor_ready, DESCRIPTOR_WAIT_SECONDS,
@@ -1881,11 +1932,11 @@ class Bridge:
         if not self.route_verify()["ok"]:
             raise BridgeError("configuração do perfil tem mudanças inesperadas; rode `route verify`",
                               "config-drift")
-        if not self.runner.port_in_use(DEFAULT_PORT):
+        if not self.runner.port_in_use(self.paths.port):
             self.restart_launcher()
-            self._wait(lambda: self.runner.port_in_use(DEFAULT_PORT), DAEMON_WAIT_SECONDS,
-                       f"bridge não abriu 127.0.0.1:{DEFAULT_PORT}", "daemon-timeout")
-        done("bridge", f"respondendo em 127.0.0.1:{DEFAULT_PORT}")
+            self._wait(lambda: self.runner.port_in_use(self.paths.port), DAEMON_WAIT_SECONDS,
+                       f"bridge não abriu 127.0.0.1:{self.paths.port}", "daemon-timeout")
+        done("bridge", f"respondendo em 127.0.0.1:{self.paths.port}")
         self.runner.notify(NOTIFY_TITLE + " — pronto",
                            "Modelo Web ativo no perfil dedicado.\n"
                            "Abra com: pz ai chatgpt-web desktop\n"
@@ -1933,6 +1984,19 @@ class Bridge:
                 f"# PhaseZero ChatGPT Web — {purpose}. Este caminho é estável;\n"
                 f"# o gerenciador pode mudar. Alvo atual em {target}.\n"
                 "set -eu\n"
+                + "".join(f"export {key}={shlex.quote(value)}\n" for key, value in {
+                    "PZ_CHATGPT_WEB_ROOT": str(self.paths.root),
+                    "PZ_LIVE_CODEX_HOME": str(self.paths.live_codex_home),
+                    "PZ_CHATGPT_WEB_INSTANCE": self.paths.instance,
+                    "PZ_CHATGPT_WEB_SLOT": self.env.get("PZ_CHATGPT_WEB_SLOT", "0"),
+                    "PZ_CHATGPT_WEB_NO_DOWNLOAD": self.env.get("PZ_CHATGPT_WEB_NO_DOWNLOAD", ""),
+                    **{"PZ_CODEX_ACCOUNTS_" + key: self.env.get("PZ_CODEX_ACCOUNTS_" + key)
+                       or self.env.get(key) or str(self.paths.home / folder)
+                       for key, folder in (("XDG_DATA_HOME", ".local/share"),
+                                           ("XDG_CONFIG_HOME", ".config"),
+                                           ("XDG_STATE_HOME", ".local/state"),
+                                           ("XDG_CACHE_HOME", ".cache"))},
+                }.items()) +
                 "DIR=$(dirname \"$0\")\n"
                 f"TARGET=\"$DIR/{target}\"\n"
                 "PY=$(sed -n '1p' \"$TARGET\" 2>/dev/null || true)\n"
@@ -2095,12 +2159,14 @@ class Bridge:
     def shortcut_entry_text(self, mode: str) -> str:
         name, comment = {
             "web": ("ChatGPT Web no Codex",
-                    "Codex Desktop em janela separada com os modelos ChatGPT Web, somente "
-                    "leitura. O Codex normal não muda."),
+                    "Codex Desktop em janela separada com os modelos ChatGPT Web. "
+                    "Sandbox conforme preferência deste perfil."),
             "tools": ("ChatGPT Web no Codex — com ferramentas (experimental)",
                       "Usa o conector pelo túnel; abre só com `tools enable` concluído. "
                       "Sandbox conforme `pz ai chatgpt-web sandbox`."),
         }[mode]
+        if self.paths.instance:
+            name += " · " + self.paths.instance
         return ("[Desktop Entry]\n"
                 "Type=Application\n"
                 f"Name={name}\n"
@@ -2115,7 +2181,7 @@ class Bridge:
     def shortcut_files(self, desktop_copy: bool) -> list[tuple[Path, str]]:
         folders = [self.paths.applications] + ([self.user_desktop_dir()] if desktop_copy else [])
         return [(folder / name, mode) for folder in folders
-                for mode, name in SHORTCUT_ENTRIES.items()]
+                for mode, name in self.paths.shortcut_entries.items()]
 
     def shortcuts_status(self) -> dict[str, Any]:
         record = self.load_state().get("shortcuts")
@@ -2172,6 +2238,9 @@ class Bridge:
         Never overwrites an entry someone else changed, and never comes back
         after `shortcuts remove` (recorded as `shortcutsRemoved`).
         """
+        if self.paths.instance:
+            # The account panel owns named/coloured shortcuts for managed profiles.
+            return False
         state = self.load_state()
         if (not state.get("optIn") or state.get("shortcutsRemoved")
                 or self.package_state().get("unpacked") != "verified"):
@@ -2222,7 +2291,7 @@ class Bridge:
                                   "`pz ai chatgpt-web shortcuts install`", "shortcuts-off")
             if mode == "tools":
                 self.require_tools_ready(self.load_state())
-            if not (self.launcher_active() and self.runner.port_in_use(DEFAULT_PORT)):
+            if not (self.launcher_active() and self.runner.port_in_use(self.paths.port)):
                 self.setup(login_wait=0)
             if mode == "web" and (self.upstream_config() or {}).get("mode") == "full":
                 mode = "tools"  # the main shortcut follows the launcher's current mode
@@ -2681,18 +2750,18 @@ class Bridge:
             self.restart_launcher()
             self._wait(self.descriptor_ready, DESCRIPTOR_WAIT_SECONDS,
                        "launcher não ficou pronto a tempo", "launcher-timeout")
-            self._wait(lambda: not self.runner.port_in_use(DEFAULT_PORT), DAEMON_WAIT_SECONDS,
-                       f"porta {DEFAULT_PORT} continua ocupada", "port-busy")
+            self._wait(lambda: not self.runner.port_in_use(self.paths.port), DAEMON_WAIT_SECONDS,
+                       f"porta {self.paths.port} continua ocupada", "port-busy")
         finally:
             os.replace(aside, config)
         result = self.upstream_cli(["setup", *args, "--browser-host-descriptor",
                                     str(self.paths.descriptor), "--acknowledge-unofficial",
-                                    "--port", str(DEFAULT_PORT)], timeout=600)
+                                    "--port", str(self.paths.port)], timeout=600)
         self.restart_launcher()
         self._wait(self.descriptor_ready, DESCRIPTOR_WAIT_SECONDS,
                    "launcher não ficou pronto a tempo", "launcher-timeout")
-        self._wait(lambda: self.runner.port_in_use(DEFAULT_PORT), DAEMON_WAIT_SECONDS,
-                   f"bridge não abriu 127.0.0.1:{DEFAULT_PORT}", "daemon-timeout")
+        self._wait(lambda: self.runner.port_in_use(self.paths.port), DAEMON_WAIT_SECONDS,
+                   f"bridge não abriu 127.0.0.1:{self.paths.port}", "daemon-timeout")
         return result
 
     def _snapshot_configs(self, label: str) -> Path:
@@ -3001,9 +3070,31 @@ class Bridge:
         env = dict(self.env)
         env["CODEX_HOME"] = str(self.paths.codex_home)
         env["CODEX_MULTI_LAUNCH"] = "1"
-        pid = self.runner.spawn([launcher, "--new-instance"], env)
+        if self.paths.instance:
+            if len(os.fsencode(self.paths.codex_home / "ipc/ipc.sock")) > 107:
+                raise BridgeError("Caminho do perfil excede limite de socket Linux; use raiz de dados mais curta.", "desktop-path")
+            if not desktop_profiles_supported():
+                raise BridgeError("Launcher Desktop sem isolamento de múltiplas contas comprovado.", "desktop-isolation")
+            slot = int(self.env["PZ_CHATGPT_WEB_SLOT"])
+            base = self.paths.root.parent / "desktop" / "web"
+            for key, folder in (("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "state"),
+                                ("XDG_CACHE_HOME", "cache")):
+                env[key] = str(base / folder)
+            port = 22101 + slot * 4
+            env["CODEX_WEBVIEW_PORT"] = str(port)
+            env["CODEX_MULTI_LAUNCH_PORT_RANGE"] = f"{port}-{port}"
+            env["CODEX_ELECTRON_USER_DATA_DIR"] = str(base / "electron")
+            if self.runner.port_in_use(port):
+                raise BridgeError("Janela Web deste perfil já aberta ou porta ocupada; selecione sua janela.", "desktop-open")
+        command = [launcher, "--new-instance"]
+        if self.paths.instance:
+            command.append(f"--class=phasezero-codex-{self.paths.instance}-web")
+        pid = self.runner.spawn(command, env)
         signed_in = self.codex_signed_in()
         labels = self.visible_web_models()
+        effective_config = tomllib.loads(self._config_text())
+        effective_sandbox = effective_config.get("sandbox_mode", "unknown")
+        effective_approval = effective_config.get("approval_policy", "unknown")
         pick = ("No seletor de modelo, escolha um que termine em \"(Web)\""
                 + (": " + ", ".join(labels[:4]) + "." if labels else
                    ", por exemplo \"GPT-6 Sol (Web)\"."))
@@ -3013,15 +3104,15 @@ class Bridge:
             + [f"{'1' if signed_in else '2'}. {pick}",
                "Os modelos Web usam sua conta ChatGPT, não a cota do Codex."]
             + (["Com ferramentas: cada ação local pede sua aprovação. Nunca escolha aprovar "
-                "tudo nem acesso total no seletor de permissões.",
-                "Sandbox somente leitura; escrita local segue bloqueada."] if tools else
-               ["Somente leitura: conversa e análise, sem editar arquivos."])
+                "tudo nem acesso total no seletor de permissões."] if tools else [])
+            + [f"Sandbox deste perfil: {effective_sandbox}; aprovação: {effective_approval}."]
             + ["A outra janela do Codex continua no perfil normal."])
         notified = self.runner.notify(
             NOTIFY_TITLE + (" — login necessário" if not signed_in else " — janela aberta"),
             "\n".join(guidance), critical=not signed_in)
         return {"desktop": "started", "mode": mode, "pid": pid,
-                "codexHome": str(self.paths.codex_home), "sandbox": "read-only",
+                "codexHome": str(self.paths.codex_home), "sandbox": effective_sandbox,
+                "approval": effective_approval,
                 "codexSignedIn": signed_in, "model": self.default_model(),
                 "visibleModels": labels, "guidance": guidance,
                 "notified": notified, "liveCodexRouteTouched": self.live_route_touched()}
@@ -3242,7 +3333,7 @@ def render(command: str, result: dict[str, Any]) -> str:
             f"  {mark(isolation['ok'])} isolamento (sem launcher solto, sem autostart upstream)",
             f"  {mark(result['signedIn'])} sessão ChatGPT no perfil do launcher",
             f"  {mark(bool(result['route'].get('active')))} rota no perfil dedicado",
-            f"  {mark(result['daemonListening'])} bridge em 127.0.0.1:{DEFAULT_PORT}",
+            f"  {mark(result['daemonListening'])} bridge em 127.0.0.1:{result['launcher'].get('port', DEFAULT_PORT)}",
             f"  {mark(result['liveCodexRouteTouched'] is False)} ~/.codex do usuário intocado",
         ]
         smoke = result.get("lastSmoke")
@@ -3347,9 +3438,9 @@ def offer_autostart(bridge: Bridge) -> None:
         print("✓ início no login ligado (desligue com `pz ai chatgpt-web autostart disable`)")
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, env: dict[str, str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    bridge = Bridge()
+    bridge = Bridge(env=env)
     friendly = args.command in FRIENDLY_COMMANDS and not args.json
     try:
         if args.command == "codex":

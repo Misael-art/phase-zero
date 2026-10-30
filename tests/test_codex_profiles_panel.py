@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+import json
+from PySide6.QtCore import QObject, Signal, QEvent
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QDialog
+
+from linux.ai.codex_profiles import CodexProfiles
+from linux.ui_native.codex_profiles_panel import CodexProfilesPanel, CodexProfileDialog
+
+
+class Runner(QObject):
+    completed = Signal(object)
+
+
+@pytest.fixture
+def panel(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    for key, folder in (("HOME", "home"), ("XDG_DATA_HOME", "data"),
+                        ("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "state")):
+        monkeypatch.setenv(key, str(tmp_path / folder))
+    manager = CodexProfiles()
+    a = manager.add("Conta pessoal A", "verde")
+    b = manager.add("Conta trabalho B", "roxo")
+    runner = Runner()
+    panel = CodexProfilesPanel(runner, hidden=False)
+    yield panel, manager, a, b, app
+    panel.close()
+    panel.deleteLater()
+    app.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_each_button_dispatches_its_own_profile_without_switching_accounts(panel):
+    widget, _manager, a, b, _app = panel
+    actions = []
+    widget.action_requested.connect(actions.append)
+    for row in (a, b):
+        button = next(button for button in widget.findChildren(QPushButton, "codexProfileDesktop")
+                      if button.property("profileId") == row["id"])
+        button.click()
+    assert actions[0].args == ("ai", "codex-profiles", "--redacted", "open", a["id"], "--surface", "desktop")
+    assert actions[1].args == ("ai", "codex-profiles", "--redacted", "open", b["id"], "--surface", "desktop")
+    assert all(not action.elevated for action in actions)
+
+
+def test_privacy_hides_labels_and_ids_and_archived_profile_only_offers_restore(panel):
+    widget, manager, a, b, app = panel
+    manager.archive(a["id"])
+    widget.set_hidden(True)
+    app.sendPostedEvents(None, QEvent.DeferredDelete)
+    labels = " ".join(label.text() for label in widget.findChildren(QLabel))
+    assert a["label"] not in labels and b["label"] not in labels
+    assert a["id"] not in labels and b["id"] not in labels
+    assert widget.findChild(QPushButton, "restoreCodexProfile") is not None
+    assert not any(button.property("profileId") == a["id"]
+                   for button in widget.findChildren(QPushButton, "codexProfileDesktop"))
+    assert all(not button.isEnabled() for button in widget.findChildren(QPushButton, "codexProfileWeb"))
+
+
+def test_add_profile_collects_only_visual_metadata(panel):
+    widget, _manager, _a, _b, _app = panel
+    actions = []
+    widget.action_requested.connect(actions.append)
+    def accept(dialog):
+        dialog.label.setText("Conta C")
+        dialog.color.setCurrentIndex(dialog.color.findData("laranja"))
+        return QDialog.Accepted
+    with patch.object(CodexProfileDialog, "exec", accept):
+        widget.findChild(QPushButton, "addCodexProfile").click()
+    assert actions[0].args == ("ai", "codex-profiles", "--redacted", "add", "--metadata-stdin")
+    assert "Conta C" not in " ".join(actions[0].args)
+    values = widget.consume_action_values(actions[0])
+    assert json.loads(values["codex_metadata"]) == {"label": "Conta C", "color": "laranja"}
+    assert actions[0].mutable and not actions[0].elevated
+
+
+def test_panel_fits_steamdeck_width_without_hidden_controls(panel):
+    widget, _manager, _a, _b, app = panel
+    widget.resize(560, 1000)
+    widget.show()
+    app.processEvents()
+    assert widget.minimumSizeHint().width() <= 560
+    for button in widget.findChildren(QPushButton):
+        assert button.geometry().width() > 0
