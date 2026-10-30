@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import sys
 import json
+import re
+from xml.etree import ElementTree
 
 from PySide6.QtCore import Signal, Qt, QTimer
-from PySide6.QtGui import QPixmap, QPainter, QColor, QIcon
-from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtGui import QPixmap, QPainter, QColor, QIcon, QPainterPath, QLinearGradient
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget, QScrollArea,
@@ -14,6 +15,39 @@ from PySide6.QtWidgets import (
 
 from linux.ai.codex_profiles import COLORS, CodexProfiles, ProfileError
 from .models import ActionSpec
+
+
+def _icon_pixmap(svg: str, size: int = 44) -> QPixmap:
+    """Render our polygon/gradient asset with QtGui, also on minimal Arch.
+
+    QtSvg is optional in distro PySide6 packages. This deliberately supports
+    the fixed account asset's M/Z contours, not arbitrary downloaded SVG.
+    """
+    document = ElementTree.fromstring(svg)
+    namespace = '{http://www.w3.org/2000/svg}'
+    shape = document.find(namespace + 'path')
+    path = QPainterPath()
+    path.setFillRule(Qt.OddEvenFill)
+    for contour in re.findall(r'M([^Z]+)Z', shape.attrib['d']):
+        points = [tuple(float(value) for value in point.split(',')) for point in contour.split()]
+        path.moveTo(*points[0])
+        for point in points[1:]:
+            path.lineTo(*point)
+        path.closeSubpath()
+    bounds = path.boundingRect()
+    gradient = QLinearGradient(bounds.topLeft(), bounds.bottomLeft())
+    stops = document.findall('.//' + namespace + 'stop')
+    gradient.setColorAt(0, QColor(stops[0].attrib['stop-color']))
+    gradient.setColorAt(1, QColor(stops[-1].attrib['stop-color']))
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    _, _, width, height = (float(value) for value in document.attrib['viewBox'].split())
+    painter.scale(size / width, size / height)
+    painter.fillPath(path, gradient)
+    painter.end()
+    return pixmap
 
 
 class CodexProfileDialog(QDialog):
@@ -230,13 +264,7 @@ class CodexProfilesPanel(QWidget):
             badge = QLabel()
             badge.setObjectName("codexProfileBadge")
             badge.setProperty('profileId', row['id'])
-            renderer = QSvgRenderer(self.manager.icon_svg(row).encode())
-            pixmap = QPixmap(44, 44)
-            pixmap.fill(Qt.transparent)
-            painter = QPainter(pixmap)
-            renderer.render(painter)
-            painter.end()
-            badge.setPixmap(pixmap)
+            badge.setPixmap(_icon_pixmap(self.manager.icon_svg(row)))
             identity.addWidget(badge)
             name = QLabel(f"Conta Codex {index + 1}" if self.hidden else row["label"])
             name.setObjectName("codexProfileName")

@@ -3309,8 +3309,10 @@ quadriculado incorporado ao raster. Extração: cromaticidade RGB max−min >35,
 contornos CCOMP, aproximação de 0,55 px no original 768×768; três contornos com
 fill-rule evenodd. Gradiente original reservado ao padrão; renderer troca
 somente gradiente para contas adicionais. Runtime não exige download nem
-biblioteca de imagens; Qt renderiza SVG no painel e KDE lê o mesmo SVG nos
-atalhos. Fonte indicada pelo usuário; não inferir endosso oficial da origem.
+biblioteca de imagens; QtGui renderiza os contornos/gradiente do SVG no painel
+e KDE lê o mesmo SVG nos atalhos. PySide6 mínimo do Arch não garante
+libQt6Svg.so.6; import direto de QtSvg foi removido após reproduzir falha no
+job CI 124208244093. Regressão bloqueia módulo QtSvg e confere pixels/alpha. Fonte indicada pelo usuário; não inferir endosso oficial da origem.
 
 Paleta fixa de 65 cores (padrão +64 perfis). Alocação sob lock escolhe cor livre;
 escolhas explícitas reservadas/repetidas são recusadas, inclusive quando usadas
@@ -3346,6 +3348,6 @@ entradas Codex visíveis e três duplicações antigas ocultadas/removidas do
 desktop. Sete caminhos de autenticação/configuração comparados por
 existência/inode/SHA-256 ficaram idênticos; estado do bridge só recebeu owner
 visual. Defaults dos protocolos Codex já apontavam a codex-desktop.desktop.
-Cache KDE/MIME atualizado; nenhum app encerrado. 202 testes focados passaram,
+Cache KDE/MIME atualizado; nenhum app encerrado. 204 testes focados passaram,
 com GUI real e desktop-file-validate. Evidência privada:
 `~/.cache/phasezero-dev/evidence/codex-icons-20261030/`.

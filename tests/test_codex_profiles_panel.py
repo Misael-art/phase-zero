@@ -126,3 +126,24 @@ def test_primary_icon_first_and_picker_excludes_used_colors(panel):
     assert primary.color.count() == 1 and not primary.color.isEnabled()
     primary.close()
     dialog.close()
+
+
+
+def test_panel_and_logo_work_when_optional_qtsvg_module_is_unavailable(panel):
+    import subprocess
+    import sys
+    code = """
+import sys
+sys.modules['PySide6.QtSvg'] = None
+from PySide6.QtWidgets import QApplication
+from linux.ui_native.codex_profiles_panel import _icon_pixmap
+from linux.ai.codex_profiles import CodexProfiles
+app = QApplication([])
+m = CodexProfiles()
+image = _icon_pixmap(m.icon_svg(m.get('current')), 128).toImage()
+assert image.pixelColor(64, 30).alpha() > 0
+assert image.pixelColor(0, 0).alpha() == 0
+assert image.pixelColor(52, 64).alpha() == 0
+"""
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr

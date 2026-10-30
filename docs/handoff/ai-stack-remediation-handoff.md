@@ -418,10 +418,14 @@ credenciais/configs idênticos; estado do bridge preservado exceto owner.
 Protocolo codex/codex-browser-sidebar já apontava ao ID primário, sem mudança.
 Cache KDE/MIME refeito, sem root, término de apps ou reinício de sessão.
 
-202 testes focados passaram (perfis/painel/bridge/Accounts, ledger/help,
+204 testes focados passaram (perfis/painel/bridge/Accounts, ledger/help,
 contratos de contas e inventário), incluindo limite de 64 cores adicionais,
 recusa de colisões/cores reservadas, migração legada, protocolo preservado,
-owner do guardião e opt-out Web sem afetar nativo. AST/diff também passaram.
+owner do guardião e opt-out Web sem afetar nativo. Gate de cancelamento de
+desenvolvimento e renderização sem QtSvg também passaram. AST/diff passaram.
+CI Arch do primeiro SHA revelou libQt6Svg.so.6 ausente em PySide6 mínimo;
+import direto foi removido. QtGui renderiza os mesmos contornos/gradiente sem
+dependência adicional. Log do job 124208244093 preservado na evidência local.
 
 GUI PySide6 real, em HOME/XDG próprios, executou criação e organização com
 prévia/CommandRunner/QProcess; três contas mostraram ícones coloridos, padrão
