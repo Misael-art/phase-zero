@@ -112,6 +112,10 @@ seus tokens. Seus registros contêm apenas identificação local. Arquivar faz
 backup dos atalhos antes de remover; não apaga sessões nem para aplicativos.
 Atalho `PhaseZero — Contas Codex` aponta ao launcher da raiz canônica; pacote
 instalado do Control Center e suas entradas originais não são substituídos.
+Configurações Electron isoladas recebem `user-dirs.dirs` gerenciado contendo
+somente caminhos dos oito diretórios padrão. Atualizações usam backup central
+no manager de contas, ou journal próprio no bridge standalone; configuração
+global e mapas personalizados são preservados. Não amplia direitos do sandbox.
 
 ### `boot`
 

@@ -280,6 +280,25 @@ class CodexProfiles:
                    'sandbox_mode = "workspace-write"\napproval_policy = "on-request"\n')
             ledger_record(module="ai-codex-profiles", action="prepare", created=[str(target)],
                           reversible=True)
+        self.prepare_desktop_dirs(row)
+
+    def prepare_desktop_dirs(self, row: dict) -> int:
+        """Repair folder discovery for existing/new native and Web desktops."""
+        if row["id"] == "current":
+            return 0
+        from linux.ai.chatgpt_web_bridge import sync_desktop_user_dirs
+        self._check_paths(row)
+        changed = 0
+        for mode in ("native", "web"):
+            target = self.profile_base(row) / "desktop" / mode / "config"
+            existed = (target / "user-dirs.dirs").exists()
+            if sync_desktop_user_dirs(self.home, self.config, target,
+                                      lambda path: backup_file(path, module="ai-codex-profiles")):
+                changed += 1
+                ledger_record(module="ai-codex-profiles", action="desktop-directories",
+                              created=[] if existed else [str(target / "user-dirs.dirs")],
+                              modified=[str(target / "user-dirs.dirs")] if existed else [], reversible=True)
+        return changed
 
     def bridge(self, row: dict):
         from linux.ai.chatgpt_web_bridge import Bridge

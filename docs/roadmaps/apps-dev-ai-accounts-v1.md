@@ -3211,3 +3211,25 @@ e nos atalhos; launcher instalado mantém sua própria classe/título de janela.
 Windows, login real em duas
 contas, igualdade de identidade entre superfícies, cotas e sessões depois de
 reboot não estão homologados por fixtures ou Xvfb.
+
+### Correção de acesso à Área de Trabalho — 2026-10-30
+
+Primeiro uso do perfil falhava em “Permitir acesso” à Área de Trabalho.
+Isolar `XDG_CONFIG_HOME` também isolou `user-dirs.dirs`: Electron passou a
+procurar `~/Desktop`, inexistente no host cujo diretório real é `~/Área de
+trabalho`. O handler instalado `requestDesktopRoot()` usa
+`app.getPath("desktop")` e `opendir()`, falhando antes da concessão de acesso.
+
+Preparação nativa e abertura Web agora compartilham somente o mapa dos oito
+diretórios XDG padrão com cada configuração Electron isolada. Valores são
+convertidos em caminhos literais sem executar shell. Preferências, sessões,
+cookies e credenciais continuam separados; mapas próprios do usuário são
+preservados, e mapas gerenciados têm backup antes de atualizar. Não houve
+ampliação de sandbox ou mudança de permissão Unix para corrigir essa falha.
+
+Perfis existentes são reparados no próximo preparo/lançamento. Uma janela já
+aberta precisa ser fechada e reaberta para descartar cache de caminhos do
+Electron/GLib; depois repetir **Permitir acesso**. No host, os mapas nativo e
+Web foram reparados e passaram criação/leitura/remoção de arquivo de prova na
+pasta correta. Sandbox real do Codex negou escrita sem concessão e aceitou
+escrita somente na pasta temporária explicitamente autorizada no teste.

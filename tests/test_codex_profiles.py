@@ -207,8 +207,10 @@ def test_native_and_browser_launches_target_only_selected_account(manager):
     with patch("shutil.which", side_effect=lambda name, **kw: "/bin/" + name), \
          patch.object(manager, "desktop_profiles_supported", return_value=True), \
          patch.object(manager, "check_desktop_socket_path"), \
+         patch("socket.socket") as sockets, \
          patch("subprocess.Popen", side_effect=lambda command, **kw:
                spawned.append((command, kw["env"])) or type("Child", (), {"pid": 321})()):
+        sockets.return_value.__enter__.return_value.connect_ex.return_value = 1
         manager.launch(a["id"], "desktop")
         manager.launch(b["id"], "desktop")
         manager.launch(a["id"], "browser")
@@ -313,3 +315,55 @@ def test_panel_metadata_uses_stdin_and_redacted_output(manager):
     assert nickname not in " ".join(command) + result.stdout + result.stderr
     assert json.loads(result.stdout)["identityRedacted"] is True
     assert manager.rows()[0]["label"] == nickname
+
+
+def test_isolated_desktop_retains_localized_user_directories_without_sharing_settings(manager):
+    from linux.ai.chatgpt_web_bridge import DESKTOP_DIR_MAP_HEADER
+    from linux.lib.pz_hostbackup import latest_backup
+    manager.config.mkdir(parents=True)
+    source = manager.config / "user-dirs.dirs"
+    source.write_text('XDG_DESKTOP_DIR="$HOME/Área de trabalho"\n'
+                      'XDG_DOCUMENTS_DIR="$HOME/Documentos"\n'
+                      'XDG_DOWNLOAD_DIR="$HOME/Downloads"\n')
+    settings = manager.config / "codex-desktop" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text('{"privateSettings":"sentinel-do-not-copy"}')
+    row = manager.add("A")
+    manager.prepare_native(row)
+    targets = []
+    for mode in ("native", "web"):
+        env = manager.profile_env(row, mode)
+        config = Path(env["XDG_CONFIG_HOME"])
+        target = config / "user-dirs.dirs"
+        targets.append(target)
+        assert target.read_text().startswith(DESKTOP_DIR_MAP_HEADER)
+        assert f'XDG_DESKTOP_DIR="{manager.home}/Área de trabalho"' in target.read_text()
+        assert f'XDG_DOCUMENTS_DIR="{manager.home}/Documentos"' in target.read_text()
+        assert not (config / "codex-desktop/settings.json").exists()
+        assert target.stat().st_mode & 0o777 == 0o600
+    mtimes = [target.stat().st_mtime_ns for target in targets]
+    assert manager.prepare_desktop_dirs(row) == 0
+    assert mtimes == [target.stat().st_mtime_ns for target in targets]
+    previous = targets[0].read_bytes()
+    source.write_text('XDG_DESKTOP_DIR="$HOME/Outra pasta"\n')
+    assert manager.prepare_desktop_dirs(row) == 2
+    assert latest_backup(targets[0]).read_bytes() == previous
+    assert source.read_text() == 'XDG_DESKTOP_DIR="$HOME/Outra pasta"\n'
+
+
+def test_user_directory_map_never_evaluates_shell_and_preserves_manual_maps(manager):
+    from linux.ai.chatgpt_web_bridge import sync_desktop_user_dirs
+    manager.config.mkdir(parents=True)
+    source = manager.config / "user-dirs.dirs"
+    source.write_text('XDG_DESKTOP_DIR="$HOME/Área $(touch SHOULD_NOT_EXIST) `echo bad`"\n'
+                      'UNRELATED_SETTING="secret-do-not-copy"\n')
+    target = manager.home / "isolated-config"
+    assert sync_desktop_user_dirs(manager.home, manager.config, target)
+    generated = (target / "user-dirs.dirs").read_text()
+    assert r'\$(touch SHOULD_NOT_EXIST)' in generated and r'\`echo bad\`' in generated
+    assert "secret-do-not-copy" not in generated
+    assert not (manager.home / "SHOULD_NOT_EXIST").exists()
+    custom = 'XDG_DESKTOP_DIR="/custom-user-choice"\n'
+    (target / "user-dirs.dirs").write_text(custom)
+    assert not sync_desktop_user_dirs(manager.home, manager.config, target)
+    assert (target / "user-dirs.dirs").read_text() == custom

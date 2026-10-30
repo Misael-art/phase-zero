@@ -292,3 +292,44 @@ conferir identidade no ChatGPT. Provar uso simultâneo e reabertura após logout
 da sessão/reboot sem mistura de conta. Esse passo exige ação de autenticação
 do operador. Para comandos deste checkout, usar `linux/pz ai codex-profiles`;
 `pz` do pacote antigo pode não conhecer a nova família.
+
+## 6. Escrita/consentimento Desktop do perfil — 2026-10-30
+
+Relato: onboarding não conseguia conceder acesso à Área de Trabalho.
+Base `e3aa4592`, mesma raiz/branch e PR #129. Causa reproduzida: ambiente
+isolado sem `user-dirs.dirs`; GLib e `xdg-user-dir DESKTOP` retornavam
+`/home/misael/Desktop` inexistente, embora a pasta real fosse
+`/home/misael/Área de trabalho`. Handler `requestDesktopRoot()` no bundle
+instalado chama `app.getPath("desktop")` e abre o diretório com `opendir()`.
+Falha ocorria na validação da pasta, antes de concluir a concessão de acesso.
+
+Correção em `sync_desktop_user_dirs()` no bridge, reutilizada por
+`CodexProfiles.prepare_desktop_dirs()`: espelha somente oito caminhos XDG
+padrão em native/web, com strings literais, idempotência, backup e preservação
+de mapas próprios. Preparo de perfil e abertura Web standalone convergem para
+o mesmo helper. Credenciais, preferências gerais, sandbox e permissões Unix não
+são copiados/ampliados.
+
+Host: dois mapas criados no perfil existente. GLib/xdg passaram a resolver a
+pasta localizada. Dois processos com os ambientes nativo/Web criaram, leram e
+apagaram arquivo de prova nessa pasta; diretórios temporários próprios foram
+removidos. Codex sandbox real negou escrita fora do workspace sem concessão
+(exit 1) e aceitou a pasta de prova explicitamente autorizada (exit 0), sem
+prompt de inferência. CLI 0.166 usa `codex sandbox -P NOME ...`; não utiliza
+mais o subcomando `linux` nesse comando. Probes usaram configuração temporária,
+sem alterar a política dos perfis do operador.
+
+103 testes focados passaram (perfis, painel, bridge e Accounts), incluindo
+regressão de diretórios localizados, atualização com backup, ausência de
+importação de configurações e tratamento literal de caracteres de shell.
+Teste de lançamento passou a simular também porta livre, pois o perfil real
+aberto ocupava a porta de teste; fixture não consulta o socket do operador.
+Compilação Python e `git diff --check` passaram. Evidência local:
+`~/.cache/phasezero-dev/evidence/codex-desktop-write-20261030/{before,after,sandbox-write}.json`.
+
+Janela autenticada do operador foi preservada. **Próximo passo:** fechar apenas
+a janela do perfil afetado, abrir novamente pelo painel e repetir **Permitir
+acesso**. Cache de caminhos do processo anterior exige reabertura. Repetição do
+onboarding autenticado não foi automatizada; teste de filesystem/sandbox não
+equivale a essa jornada GUI. Login e dados existentes permanecem nos mesmos
+stores. Não houve reboot, chmod amplo ou desativação de sandbox.

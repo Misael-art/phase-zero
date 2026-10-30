@@ -295,6 +295,63 @@ def desktop_profiles_supported() -> bool:
         "CODEX_MULTI_LAUNCH_PORT_RANGE", "CODEX_ELECTRON_USER_DATA_DIR", "--new-instance"))
 
 
+DESKTOP_DIR_MAP_HEADER = "# PhaseZero desktop directory map (managed; paths only).\n"
+DESKTOP_DIR_KEYS = frozenset({"DESKTOP", "DOWNLOAD", "TEMPLATES", "PUBLICSHARE",
+                              "DOCUMENTS", "MUSIC", "PICTURES", "VIDEOS"})
+
+
+def sync_desktop_user_dirs(home: Path, source_config: Path, target_config: Path,
+                           before_write: Callable[[Path], None] | None = None) -> bool:
+    """Share directory locations with isolated Electron, without sharing settings/auth.
+
+    XDG_CONFIG_HOME also controls Electron/GLib special-folder discovery. Missing
+    user-dirs.dirs makes a localized desktop fall back to ~/Desktop. Parse data
+    without evaluating shell expressions; generated assignments contain literals.
+    """
+    source = source_config / "user-dirs.dirs"
+    target = target_config / "user-dirs.dirs"
+    if source.resolve() == target.resolve():
+        return False
+    try:
+        lines = source.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return False
+    mappings: dict[str, str] = {}
+    for line in lines:
+        key = line.strip().split("=", 1)[0]
+        if key not in {f"XDG_{name}_DIR" for name in DESKTOP_DIR_KEYS}:
+            continue
+        try:
+            words = shlex.split(line, comments=True)
+        except ValueError:
+            raise BridgeError("Mapa de diretórios do desktop inválido; arquivo preservado.", "desktop-dirs") from None
+        if len(words) != 1 or "=" not in words[0]:
+            raise BridgeError("Mapa de diretórios do desktop inválido.", "desktop-dirs")
+        _key, value = words[0].split("=", 1)
+        if value == "$HOME" or value.startswith("$HOME/"):
+            value = str(home) + value[len("$HOME"):]
+        if not Path(value).is_absolute() or any(ord(c) < 32 for c in value):
+            raise BridgeError("Diretório XDG deve ser um caminho absoluto ou $HOME.", "desktop-dirs")
+        literal = value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+        mappings[key] = f'{key}="{literal}"\n'
+    if not mappings:
+        return False
+    text = DESKTOP_DIR_MAP_HEADER + "".join(mappings[key] for key in sorted(mappings))
+    if target.is_symlink():
+        raise BridgeError("Mapa de diretórios do perfil é um symlink; preservado.", "desktop-dirs")
+    try:
+        previous = target.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        previous = None
+    if previous == text or (previous is not None and not previous.startswith(DESKTOP_DIR_MAP_HEADER)):
+        return False  # Preserve an explicit user-owned map.
+    if previous is not None and before_write is not None:
+        before_write(target)
+    private_dir(target_config)
+    atomic_write(target, text.encode())
+    return True
+
+
 def now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
@@ -3077,6 +3134,12 @@ class Bridge:
                 raise BridgeError("Launcher Desktop sem isolamento de múltiplas contas comprovado.", "desktop-isolation")
             slot = int(self.env["PZ_CHATGPT_WEB_SLOT"])
             base = self.paths.root.parent / "desktop" / "web"
+            source_config = Path(self.env.get("PZ_CODEX_ACCOUNTS_XDG_CONFIG_HOME")
+                                 or self.paths.autostart_dir.parent)
+            def backup_map(path: Path) -> None:
+                private_dir(self.paths.journal)
+                atomic_write(self.paths.journal / f"user-dirs-{sha256_file(path)}.dirs", path.read_bytes())
+            sync_desktop_user_dirs(self.paths.home, source_config, base / "config", backup_map)
             for key, folder in (("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "state"),
                                 ("XDG_CACHE_HOME", "cache")):
                 env[key] = str(base / folder)
