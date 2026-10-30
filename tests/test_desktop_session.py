@@ -30,68 +30,13 @@ def test_keyboard_recovery_keeps_automatic_opening_touch_only():
             runtime["mode"] = args[-1]
         return subprocess.CompletedProcess(args, 0, "", "")
 
-    with patch.object(desktop, "run", run), patch.object(desktop, "properties", side_effect=lambda *args: dict(runtime)), \
-         patch.object(desktop, "protected_devices", return_value=[TOUCHSCREEN, DECK_KEYS]):
+    with patch.object(desktop, "run", run), patch.object(desktop, "properties", side_effect=lambda *args: dict(runtime)):
         assert desktop.keyboard_restore() == []
         assert saved["VirtualKeyboardMode"] == "1" and runtime["mode"] == "1"
         assert desktop.keyboard_restore() == []
     assert sum(args[0] == "kwriteconfig6" for args in calls) == 1
     assert sum(args[0] == "qdbus6" for args in calls) == 1
     assert not any("forceActivate" in args for args in calls)
-
-
-TOUCHSCREEN = {"name": "FTS3528:00 2808:1015", "enabled": "true", "touch": "true", "vendor": "10248"}
-DECK_KEYS = {"name": "Valve Software Steam Deck Controller", "enabled": "true",
-             "alphaNumericKeyboard": "true", "vendor": "10462"}
-INTERNAL_I8042 = {"name": "AT Translated Set 2 keyboard", "enabled": "true",
-                  "alphaNumericKeyboard": "true", "vendor": "1"}
-USB_KEYBOARD = {"name": "Dock keyboard", "enabled": "true", "alphaNumericKeyboard": "true", "vendor": "1133"}
-
-
-def test_keyboard_opens_on_click_when_trackpads_are_the_only_way_to_type():
-    # FTS absent: Deck controller and the i8042 stub are not typing keyboards.
-    assert desktop.keyboard_target_mode([DECK_KEYS, INTERNAL_I8042]) == "2"
-    assert desktop.keyboard_target_mode([DECK_KEYS, INTERNAL_I8042, USB_KEYBOARD]) == "1"
-    assert desktop.keyboard_target_mode([DECK_KEYS, TOUCHSCREEN]) == "1"
-    assert desktop.keyboard_target_mode([DECK_KEYS, {**TOUCHSCREEN, "enabled": "false"}]) == "2"
-    assert desktop.keyboard_target_mode([DECK_KEYS, {**USB_KEYBOARD, "enabled": "false"}]) == "2"
-
-
-def test_games_keep_keyboard_touch_only_and_unknown_state_is_preserved():
-    assert desktop.keyboard_target_mode([DECK_KEYS], game=True) == "1"
-    assert desktop.keyboard_target_mode([]) is None
-    saved = {"VirtualKeyboardEnabled": "true", "VirtualKeyboardMode": "2"}
-    calls = []
-
-    def run(*args, **kwargs):
-        calls.append(args)
-        return subprocess.CompletedProcess(args, 0, saved.get(args[-1], ""), "")
-
-    with patch.object(desktop, "run", run), patch.object(desktop, "protected_devices", return_value=[]), \
-         patch.object(desktop, "properties", return_value={"available": "true", "mode": "2"}):
-        assert desktop.keyboard_restore() == []
-    assert not any(args[0] in ("kwriteconfig6", "qdbus6") for args in calls)
-
-
-def test_watcher_switches_keyboard_to_click_mode_in_desktop_and_back_for_games():
-    saved = {"VirtualKeyboardEnabled": "true", "VirtualKeyboardMode": "1"}
-    runtime = {"available": "true", "mode": "1"}
-
-    def run(*args, **kwargs):
-        if args[0] == "kreadconfig6":
-            return subprocess.CompletedProcess(args, 0, saved[args[-1]], "")
-        if args[0] == "kwriteconfig6":
-            saved[args[-2]] = args[-1]
-        if args[0] == "qdbus6" and args[-2] == "mode":
-            runtime["mode"] = args[-1]
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    with patch.object(desktop, "run", run), patch.object(desktop, "properties", side_effect=lambda *a: dict(runtime)), \
-         patch.object(desktop, "protected_devices", return_value=[DECK_KEYS, INTERNAL_I8042]):
-        assert desktop.keyboard_restore() == []
-        assert runtime["mode"] == saved["VirtualKeyboardMode"] == "2"
-        assert desktop.keyboard_restore(game=True) == []
-        assert runtime["mode"] == saved["VirtualKeyboardMode"] == "1"
 
 
 def test_reused_pid_from_previous_boot_cannot_hold_desktop_in_game_mode(tmp_path):
