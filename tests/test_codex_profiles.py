@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import socket
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
@@ -367,3 +369,100 @@ def test_user_directory_map_never_evaluates_shell_and_preserves_manual_maps(mana
     (target / "user-dirs.dirs").write_text(custom)
     assert not sync_desktop_user_dirs(manager.home, manager.config, target)
     assert (target / "user-dirs.dirs").read_text() == custom
+
+
+def test_open_busy_profile_focuses_existing_owner_without_spawning_or_using_another_account(manager):
+    a, b = manager.add("A"), manager.add("B")
+    with patch("shutil.which", return_value="/bin/codex-desktop"), \
+         patch.object(manager, "desktop_profiles_supported", return_value=True), \
+         patch.object(manager, "check_desktop_socket_path"), \
+         patch("socket.socket") as sockets, \
+         patch("linux.ai.chatgpt_web_bridge.focus_desktop_instance", return_value=123) as focus, \
+         patch("subprocess.Popen", side_effect=AssertionError("must not spawn duplicate")):
+        sockets.return_value.__enter__.return_value.connect_ex.return_value = 0
+        result = manager.launch(a["id"], "desktop")
+    assert result["focused"] is True and result["started"] is False
+    env = focus.call_args.args[0]
+    assert env["CODEX_HOME"] == str(manager.native_home(a))
+    assert b["id"] not in env["CODEX_ELECTRON_USER_DATA_DIR"]
+
+
+def test_unowned_busy_port_remains_an_error_and_is_never_stopped(manager):
+    row = manager.add("A")
+    with patch("shutil.which", return_value="/bin/codex-desktop"), \
+         patch.object(manager, "desktop_profiles_supported", return_value=True), \
+         patch.object(manager, "check_desktop_socket_path"), \
+         patch("socket.socket") as sockets, \
+         patch("linux.ai.chatgpt_web_bridge.focus_desktop_instance", return_value=None), \
+         patch("subprocess.Popen", side_effect=AssertionError("must not spawn")), \
+         patch("os.kill", side_effect=AssertionError("must not stop another process")):
+        sockets.return_value.__enter__.return_value.connect_ex.return_value = 0
+        with pytest.raises(ProfileError, match="porta ocupada"):
+            manager.launch(row["id"], "desktop")
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux desktop namespace")
+def test_desktop_owner_requires_process_identity_and_matching_electron_home(manager):
+    from linux.ai import chatgpt_web_bridge as module
+    a, b = manager.add("A"), manager.add("B")
+    env = manager.profile_env(a)
+    port = env["CODEX_WEBVIEW_PORT"]
+    state = Path(env["XDG_STATE_HOME"]) / "codex-desktop/instances" / f"port-{port}"
+    state.mkdir(parents=True)
+    (state / "app.pid").write_text(str(os.getpid()))
+    exe = Path(f"/proc/{os.getpid()}/exe")
+    cmdline = Path(f"/proc/{os.getpid()}/cmdline")
+    original_readlink, original_read_bytes = os.readlink, Path.read_bytes
+    own = os.fsencode(env["CODEX_ELECTRON_USER_DATA_DIR"] + f"/instances/port-{port}")
+    other = os.fsencode(manager.profile_env(b)["CODEX_ELECTRON_USER_DATA_DIR"])
+    def link(path, *args, **kwargs):
+        return "/opt/codex-desktop/electron" if Path(path) == exe else original_readlink(path, *args, **kwargs)
+    for target, expected, collapsed in ((own, True, False), (other, False, False),
+                                        (own, True, True), (other, False, True),
+                                        (own + b"-other", False, True)):
+        def read(path):
+            if path != cmdline:
+                return original_read_bytes(path)
+            return (b"/opt/codex-desktop/electron --no-sandbox --user-data-dir=" + target + b" --class=codex-desktop\0"
+                    if collapsed else b"electron\0--user-data-dir=" + target + b"\0")
+        with patch("os.readlink", side_effect=link), patch.object(Path, "read_bytes", read):
+            assert (module.desktop_instance(env) is not None) is expected
+    (state / "app.pid").write_text("2147483647")
+    assert module.desktop_instance(env) is None
+
+
+@pytest.mark.skipif(not hasattr(socket, "SO_PEERCRED"), reason="Linux peer credentials")
+@pytest.mark.parametrize("failure", ["", "peer-pid", "start-ticks"])
+def test_focus_handoff_uses_real_unix_peer_and_refuses_wrong_owner(failure):
+    from linux.ai import chatgpt_web_bridge as module
+    # TMPDIR is the short persistent per-user test root, not the long pytest
+    # fixture path, which can exceed AF_UNIX's pathname limit.
+    with tempfile.TemporaryDirectory(prefix="focus-") as directory:
+        endpoint = Path(directory) / "action.sock"
+        code = (
+            "import socket,sys,json\n"
+            "s=socket.socket(socket.AF_UNIX);s.bind(sys.argv[1]);s.listen(1)\n"
+            "print('ready',flush=True)\n"
+            "c,_=s.accept();data=c.recv(1024)\n"
+            "if data:c.sendall(b'ok\\n')\n"
+            "print(json.dumps({'received':data.decode()}),flush=True)\n"
+        )
+        process = subprocess.Popen([sys.executable, "-c", code, str(endpoint)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            assert process.stdout.readline().strip() == "ready"
+            pid = process.pid if failure != "peer-pid" else process.pid + 1000000
+            owner = {"pid": pid, "startTicks": "123", "socket": endpoint}
+            current = {**owner, "startTicks": "456"} if failure == "start-ticks" else owner
+            with patch.object(module, "desktop_instance", side_effect=[owner, current]):
+                result = module.focus_desktop_instance({})
+            output, errors = process.communicate(timeout=5)
+            assert process.returncode == 0, errors
+            received = json.loads(output)["received"]
+            if not failure:
+                assert result == process.pid and json.loads(received) == {"argv": []}
+            else:
+                assert result is None and received == ""
+        finally:
+            if process.poll() is None:
+                process.terminate(); process.wait(timeout=5)

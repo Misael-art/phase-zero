@@ -63,6 +63,7 @@ import shutil
 import shlex
 import signal
 import socket
+import stat
 import sqlite3
 import struct
 import subprocess
@@ -293,6 +294,76 @@ def desktop_profiles_supported() -> bool:
         return False
     return all(marker in text for marker in (
         "CODEX_MULTI_LAUNCH_PORT_RANGE", "CODEX_ELECTRON_USER_DATA_DIR", "--new-instance"))
+
+
+def desktop_instance(env: dict[str, str]) -> dict[str, Any] | None:
+    """Verify a live profile owner; neither a busy TCP port nor a PID file suffices."""
+    try:
+        port = str(int(env["CODEX_WEBVIEW_PORT"]))
+        state = Path(env["XDG_STATE_HOME"]) / "codex-desktop/instances" / f"port-{port}"
+        marker = state / "app.pid"
+        info = marker.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_size > 32:
+            return None
+        pid = int(marker.read_text(encoding="utf-8").strip())
+        if pid <= 1:
+            return None
+        proc = Path("/proc") / str(pid)
+        if proc.stat().st_uid != os.getuid():
+            return None
+        executable = os.readlink(proc / "exe").removesuffix(" (deleted)")
+        if Path(executable) != Path("/opt/codex-desktop/electron").resolve():
+            return None
+        expected = Path(env["CODEX_ELECTRON_USER_DATA_DIR"]) / "instances" / f"port-{port}"
+        argv = (proc / "cmdline").read_bytes().split(b"\0")
+        argument = "--user-data-dir=" + str(expected)
+        if os.fsencode(argument) not in argv:
+            # Linux package rewrites process.title, collapsing argv into one
+            # string (and sometimes erasing environ). Keep exact path/token
+            # boundaries; never accept a profile-path prefix or parse a shell.
+            parts = [os.fsdecode(part) for part in argv if part]
+            if (len(parts) != 1 or not parts[0].startswith(executable + " ")
+                    or not re.search(r"(?:^|\s)" + re.escape(argument) + r"(?=\s|$)", parts[0])):
+                return None
+        ticks = (proc / "stat").read_text().rsplit(")", 1)[1].split()[19]
+        runtime = (Path(env["XDG_RUNTIME_DIR"]) / "codex-desktop/instances" / f"port-{port}"
+                   if env.get("XDG_RUNTIME_DIR") else state)
+        return {"pid": pid, "startTicks": ticks, "socket": runtime / "launch-action.sock"}
+    except (OSError, ValueError, KeyError, IndexError):
+        return None
+
+
+def focus_desktop_instance(env: dict[str, str]) -> int | None:
+    """Use the packaged launcher's warm-start protocol for exactly this account.
+
+    Native launch-action listener accepts {argv: []} and replies ok/newline.
+    Verify socket ownership and Linux peer PID before sending any action.
+    """
+    instance = desktop_instance(env)
+    if instance is None:
+        return None
+    endpoint = instance["socket"]
+    try:
+        info = endpoint.lstat()
+        if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid():
+            return None
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(1.0)
+            client.connect(str(endpoint))
+            peer_pid, peer_uid, _ = struct.unpack("3i", client.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+            if peer_pid != instance["pid"] or peer_uid != os.getuid():
+                return None
+            current = desktop_instance(env)
+            if current is None or current["pid"] != instance["pid"] or current["startTicks"] != instance["startTicks"]:
+                return None
+            client.sendall(b'{"argv":[]}\n')
+            client.shutdown(socket.SHUT_WR)
+            if client.recv(32).startswith(b"ok\n"):
+                return instance["pid"]
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
 
 
 DESKTOP_DIR_MAP_HEADER = "# PhaseZero desktop directory map (managed; paths only).\n"
@@ -3148,6 +3219,11 @@ class Bridge:
             env["CODEX_MULTI_LAUNCH_PORT_RANGE"] = f"{port}-{port}"
             env["CODEX_ELECTRON_USER_DATA_DIR"] = str(base / "electron")
             if self.runner.port_in_use(port):
+                pid = focus_desktop_instance(env)
+                if pid is not None:
+                    return {"desktop": "focused", "mode": mode, "pid": pid,
+                            "codexHome": str(self.paths.codex_home),
+                            "guidance": ["Janela existente deste perfil trazida para frente."]}
                 raise BridgeError("Janela Web deste perfil já aberta ou porta ocupada; selecione sua janela.", "desktop-open")
         command = [launcher, "--new-instance"]
         if self.paths.instance:

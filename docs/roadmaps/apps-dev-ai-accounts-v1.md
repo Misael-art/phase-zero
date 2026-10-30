@@ -3233,3 +3233,22 @@ Electron/GLib; depois repetir **Permitir acesso**. No host, os mapas nativo e
 Web foram reparados e passaram criação/leitura/remoção de arquivo de prova na
 pasta correta. Sandbox real do Codex negou escrita sem concessão e aceitou
 escrita somente na pasta temporária explicitamente autorizada no teste.
+
+### Reabrir perfil já ativo — 2026-10-30
+
+Botão Abrir tratava porta ocupada como falha mesmo quando o perfil já estava
+em execução em segundo plano. Nativo e Web agora usam o protocolo de warm-start
+do launcher instalado (`launch-action.sock`, `argv: []`) para recuperar a
+janela existente. Não iniciam processo duplicado nem encerram outro perfil.
+
+Ownership exige PID vivo do usuário, executável Electron esperado, diretório
+Electron exato daquele perfil e start ticks estáveis. Socket precisa pertencer
+ao mesmo usuário; `SO_PEERCRED` confirma PID/UID do processo antes de enviar a
+ação. A identificação aceita tanto argv normal quanto o process.title agregado
+usado pelo pacote Linux, preservando limites exatos do caminho. Arquivo PID
+sozinho ou porta ocupada não autorizam a recuperação. Se owner não puder ser
+confirmado, abertura continua recusada, preservando processos desconhecidos.
+
+Warm-start traz a janela para frente; não reinicia o processo. Para carregar
+alterações que dependam de reinício, como cache antigo dos diretórios XDG, usar
+**Sair** na instância correspondente antes de abrir novamente.

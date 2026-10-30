@@ -333,3 +333,29 @@ acesso**. Cache de caminhos do processo anterior exige reabertura. Repetição d
 onboarding autenticado não foi automatizada; teste de filesystem/sandbox não
 equivale a essa jornada GUI. Login e dados existentes permanecem nos mesmos
 stores. Não houve reboot, chmod amplo ou desativação de sandbox.
+
+## 7. Abrir perfil ativo retornava falha — 2026-10-30
+
+PXA-006/010, base `af0a5669`, mesma branch/PR. Ledger do painel registrou erro
+“Janela deste perfil já aberta ou porta ocupada”. Perfil continuava ativo com
+Electron e webview; o guard de porta impedia o operador de recuperar sua janela.
+
+`desktop_instance()` e `focus_desktop_instance()` no bridge validam namespace
+de dados, PID/UID/executável/start ticks e socket/peer Linux. `CodexProfiles.launch`
+e `Bridge.desktop` reaproveitam o warm-start do pacote para foco da instância
+correta. Comando `argv: []`, confirmação `ok\n`; nenhuma chamada de inferência,
+novo processo ou sinal de encerramento é necessário. Processo Linux reescreve
+argv como uma única string; validação reconhece essa representação com caminho
+completo e limites de argumento, sem execução de shell ou match por prefixo.
+
+109 testes focados passaram (perfis, bridge, painel e Accounts), incluindo IPC
+Unix real, peer errado sem envio de payload, mudança de start ticks, diretório
+de outro perfil, argv agregado, PID stale e porta estrangeira sem spawn/kill.
+Host: `launch(ID, "desktop")` respondeu `focused=true`, `started=false`; PID e
+start ticks permaneceram iguais. Evidência:
+`~/.cache/phasezero-dev/evidence/codex-profile-reopen-20261030/live-handoff.json`.
+
+Janela autenticada recuperada sem encerrar trabalho em execução. Warm-start
+preserva cache do processo: para reaplicar o mapa de pastas da seção anterior,
+operador deve usar **Sair** somente naquela instância e depois abrir de novo.
+Não houve reinício forçado, parada de outro Codex ou mudança de credenciais.

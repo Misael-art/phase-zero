@@ -364,6 +364,11 @@ class CodexProfiles:
                 with socket.socket() as probe:
                     probe.settimeout(0.2)
                     if probe.connect_ex(("127.0.0.1", int(env["CODEX_WEBVIEW_PORT"]))) == 0:
+                        from linux.ai.chatgpt_web_bridge import focus_desktop_instance
+                        pid = focus_desktop_instance(env)
+                        if pid is not None:
+                            return {"started": False, "focused": True, "profileId": profile_id,
+                                    "surface": surface, "pid": pid}
                         raise ProfileError("Janela deste perfil já aberta ou porta ocupada. Selecione a janela pelo ícone da conta.")
             command = [executable]
             if profile_id != "current":
