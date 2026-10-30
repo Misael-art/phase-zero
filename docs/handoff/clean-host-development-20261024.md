@@ -1,5 +1,26 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Integração manual de entrada — 30/10/2026
+
+Base `bdbfed30bf5bef0a523d8246ff5057e2b24829be`, mesma branch/PR #129.
+O incidente do Fôlego exigiu separar solicitação manual de entrada da
+reconciliação geral: `desktop_session.py reconcile-input` executa somente
+`protect_input`, retorna schema 1/escopo `input` e erros explícitos. Não chama
+restauração/captura de áudio, modo do teclado ou Steam. Watcher inalterado.
+Fôlego verifica lease/jogo/pendências, identidade e hash antes da chamada e
+confere o resultado no compositor. API não concede exclusividade global.
+
+Validação local: `tests/test_desktop_session.py`, **19 passed em 7,11 s**,
+incluindo dois casos de separação de escopo/erro. Python 3.14.7 + pytest
+emprestados do ambiente gerenciado já existente do Fôlego, HOME/XDG/TMPDIR
+privados em disco; nenhum efeito no host como fixture. O `doctor --profile core`
+do wrapper PhaseZero recusou o venv core ausente/incompleto; não houve instalação
+global nem promoção desse teste focal a gate completo do PhaseZero. Evidência
+privada no lote `run-accessibility-incident-20261030/phasezero-qa` do Fôlego.
+CI da base já apresentava falha `shell-lint (0.9.0)` e Pester em andamento;
+essa falha não foi contornada por alteração de regras. Login físico, teclado,
+toque e áudio continuam exigindo aceite próprio; sem merge/release.
+
 ## Ponto de partida e limite da prova
 
 `main` auditada em `ddadd6de4fc5a0b8933c2d312e2f8a6dd7f1aff3`; release beta `v1.22.11` aponta ao mesmo SHA. [Auditoria versionada](../audits/status-20261024/README.md) contém evidências, capturas, lacunas e critérios de aceite. Clone de `main` basta para começar desenvolvimento da base publicada. Para continuar WIP sem acesso ao cartão, usar o resgate privado verificado abaixo. GitHub **não contém** contas, tokens, VM guest, dados de Homelab nem configuração do host.

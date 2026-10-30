@@ -94,6 +94,21 @@ def test_disabled_usb_keyboard_is_enabled_without_remapping():
     assert calls[0][-2:] == ("enabled", "true")
 
 
+def test_manual_input_request_does_not_restore_audio_or_change_keyboard_mode():
+    with patch.object(desktop, "protect_input", return_value=[]) as protect, \
+         patch.object(desktop, "restore_audio", side_effect=AssertionError("audio is outside this request")), \
+         patch.object(desktop, "audio_snapshot", side_effect=AssertionError("no audio capture")), \
+         patch.object(desktop, "keyboard_restore", side_effect=AssertionError("keyboard mode is outside input enabling")):
+        assert desktop.reconcile_input() == {"schema_version":1,"ok":True,"scope":"input","errors":[]}
+    protect.assert_called_once()
+
+
+def test_manual_input_failure_is_reported_without_broad_recovery():
+    with patch.object(desktop, "protect_input", return_value=["device unavailable"]):
+        result = desktop.reconcile_input()
+    assert result["ok"] is False and result["errors"] == ["device unavailable"]
+
+
 def test_audio_profile_and_preferences_restored_by_stable_names_not_numeric_ids():
     calls = []
     card = {"name": "alsa_card.deck", "active_profile": "off", "profiles": {"HiFi": {"available": True}}}

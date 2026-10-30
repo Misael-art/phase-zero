@@ -242,6 +242,17 @@ def reconcile():
     return {"ok": not errors, "mode": "desktop", "errors": errors}
 
 
+def reconcile_input():
+    """Explicit additive input request; never restore audio or change Steam.
+
+    Desktop clients can ask their registered owner to enable inputs without
+    running the broader desktop-preference recovery. Existing watcher policy
+    and temporary Steam/profile ownership remain unchanged.
+    """
+    errors = protect_input()
+    return {"schema_version": 1, "ok": not errors, "scope": "input", "errors": errors}
+
+
 def health():
     keyboard = properties("/VirtualKeyboard", "org.kde.kwin.VirtualKeyboard")
     devices = protected_devices()
@@ -349,13 +360,14 @@ def watch():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("lease", "health", "reconcile", "install", "watch", "capture"))
+    parser.add_argument("action", choices=("lease", "health", "reconcile", "reconcile-input", "install", "watch", "capture"))
     action = parser.parse_args().action
     try:
         if action == "watch":
             watch()
             return 0
-        actions = {"lease": lambda: {**lease_status(), "externalGameActive": other_game_active()}, "health": health, "install": install,
+        actions = {"lease": lambda: {**lease_status(), "externalGameActive": other_game_active()}, "health": health,
+                   "reconcile-input": reconcile_input, "install": install,
                    "reconcile": reconcile, "capture": capture_preferences}
         value = actions[action]()
         print(json.dumps(value, ensure_ascii=False))
