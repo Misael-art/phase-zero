@@ -72,6 +72,12 @@ class CodexProfilesPanel(QWidget):
         actions.addWidget(refresh)
         actions.addStretch()
         self._layout.addLayout(actions)
+        cleanup = QPushButton("Limpar instalações personalizadas")
+        cleanup.setObjectName("clearCustomCodexProfiles")
+        cleanup.setToolTip("Exclui todos os perfis personalizados. Codex padrão e seu Web são preservados.")
+        cleanup.clicked.connect(lambda: self.remove_profiles())
+        self._layout.addWidget(cleanup)
+        self.cleanup = cleanup
         self.status = QLabel("")
         self.status.setWordWrap(True)
         self.status.setObjectName("codexProfilesStatus")
@@ -86,18 +92,37 @@ class CodexProfilesPanel(QWidget):
         self.hidden = hidden
         self.refresh()
 
-    def _request(self, title: str, args: tuple[str, ...], *, mutable=False, metadata=None):
+    def _request(self, title: str, args: tuple[str, ...], *, mutable=False, metadata=None, impact=None):
         if metadata is not None:
             self._pending_metadata = {"codex_metadata": json.dumps(metadata)}
         action = ActionSpec(
             id=f"ai.codex-profiles.{args[0]}", category="Contas e conexões", title=title,
-            description="Opera somente no ID de perfil selecionado; credenciais permanecem no Codex.",
+            description=("Limpa instalações personalizadas; instalação padrão e seu Web são protegidos."
+                         if args[0] == "remove" else
+                         "Opera somente no ID de perfil selecionado; credenciais permanecem no Codex."),
             args=("ai", "codex-profiles", "--redacted", *args), icon="system-users", mutable=mutable,
-            preview_args=("ai", "codex-profiles", "--redacted", "list") if mutable else None,
+            preview_args=(("ai", "codex-profiles", "--redacted", *args, "--dry-run")
+                          if args[0] == "remove" else
+                          ("ai", "codex-profiles", "--redacted", "list")) if mutable else None,
             stdin_parameter="codex_metadata" if metadata is not None else "",
-            impact="Cria ou atualiza perfil local. Não copia sessões nem autentica outra conta.",
+            impact=impact or "Cria ou atualiza perfil local. Não copia sessões nem autentica outra conta.",
         )
         self.action_requested.emit(action)
+
+    def remove_profiles(self, row=None):
+        args = ("remove", "--id", row["id"]) if row else ("remove", "--all-custom")
+        self._request("Excluir perfil Codex" if row else "Limpar instalações personalizadas",
+                      args, mutable=True,
+                      impact="Remove perfis personalizados, login local, atalhos e início automático do ambiente ativo. "
+                             "Codex padrão e seu Web são protegidos. Feche aplicativos dos perfis antes de limpar. "
+                             "Dados permanecem em recuperação privada; conectores/túneis remotos não são revogados.")
+
+    def _delete_button(self, row):
+        button = QPushButton("Excluir perfil")
+        button.setObjectName("deleteCodexProfile")
+        button.setProperty("profileId", row["id"])
+        button.clicked.connect(lambda _checked=False, row=row: self.remove_profiles(row))
+        return button
 
     def consume_action_values(self, action):
         if action.stdin_parameter != "codex_metadata":
@@ -179,6 +204,7 @@ class CodexProfilesPanel(QWidget):
         else:
             install.deleteLater()
         self.status.setText("Status local: sessão e cota ainda não verificadas. “Conta atual” preserva sua instalação existente.")
+        self.cleanup.setEnabled(any(row["id"] != "current" for row in snapshot["profiles"]))
         for index, row in enumerate(snapshot["profiles"]):
             card = QFrame()
             card.setObjectName("codexProfileCard")
@@ -205,6 +231,7 @@ class CodexProfilesPanel(QWidget):
                 restore.clicked.connect(lambda _checked=False, row=row:
                                         self._request("Restaurar perfil Codex", ("restore", row["id"]), mutable=True))
                 layout.addWidget(restore)
+                layout.addWidget(self._delete_button(row))
                 self.cards.addWidget(card)
                 continue
             state = QLabel("Login salvo localmente; validade não verificada." if row["nativeCredential"] == "present"
@@ -212,7 +239,8 @@ class CodexProfilesPanel(QWidget):
             state.setWordWrap(True)
             layout.addWidget(state)
             if row["id"] == "current":
-                legacy = QLabel("Nativo e Web existentes foram preservados. Confirme a conta em cada janela; vínculo entre elas não verificado.")
+                legacy = QLabel("Instalação padrão protegida contra exclusão, incluindo seu Web. "
+                                "Confirme a conta em cada janela; vínculo entre elas não verificado.")
                 legacy.setWordWrap(True)
                 layout.addWidget(legacy)
             line = QHBoxLayout()
@@ -265,4 +293,6 @@ class CodexProfilesPanel(QWidget):
                 manage_line.addWidget(archive)
             manage_line.addStretch()
             layout.addLayout(manage_line)
+            if row["id"] != "current":
+                layout.addWidget(self._delete_button(row))
             self.cards.addWidget(card)

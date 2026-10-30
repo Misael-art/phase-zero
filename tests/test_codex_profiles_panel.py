@@ -85,3 +85,29 @@ def test_panel_fits_steamdeck_width_without_hidden_controls(panel):
     assert widget.minimumSizeHint().width() <= 560
     for button in widget.findChildren(QPushButton):
         assert button.geometry().width() > 0
+
+
+
+def test_cleanup_buttons_exclude_primary_and_dispatch_real_dry_run(panel):
+    widget, manager, a, b, app = panel
+    manager.archive(a["id"])
+    widget.refresh()
+    app.sendPostedEvents(None, QEvent.DeferredDelete)
+    actions = []
+    widget.action_requested.connect(actions.append)
+    buttons = widget.findChildren(QPushButton, "deleteCodexProfile")
+    assert {button.property("profileId") for button in buttons} == {a["id"], b["id"]}
+    buttons[0].click()
+    action = actions[-1]
+    assert action.args[-3:-1] == ("remove", "--id")
+    assert action.preview_args == (*action.args, "--dry-run")
+    assert action.mutable and not action.elevated
+    widget.findChild(QPushButton, "clearCustomCodexProfiles").click()
+    assert actions[-1].args[-2:] == ("remove", "--all-custom")
+    assert actions[-1].preview_args == (*actions[-1].args, "--dry-run")
+    with patch.object(manager, "_removal_plan", side_effect=lambda row: {"row": row, "paths": []}):
+        manager.remove(all_custom=True)
+    widget.refresh()
+    app.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert not widget.findChildren(QPushButton, "deleteCodexProfile")
+    assert not widget.findChild(QPushButton, "clearCustomCodexProfiles").isEnabled()

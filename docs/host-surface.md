@@ -104,7 +104,7 @@ Legenda: **✅ coberto** = toda mutação passa por um chokepoint · **⚠️ pa
 | segredos rotacionados | `rotate-secrets.sh` | ✅ `pz_backup_file` + `pz_rollback_register` |
 | admin bridge (`phasezero-admin`, `bigsudo`) | `setup-admin-bridge.sh` | ✅ `pz_write_managed_file` |
 | AppImages/ícones de desktop apps | `desktop-apps.sh` | ⚠️ ver dívida |
-| metadados de contas Codex, configuração inicial por perfil, ícones/wrappers/atalhos e reutilização do arquivo público Web | `ai/codex_profiles.py` | ✅ `pz_hostbackup.backup_file` / `ledger_record`, domínio `ai-codex-profiles`; metadados em `$XDG_DATA_HOME/phasezero/ai-accounts/codex-profiles`, execução em `$XDG_DATA_HOME/phasezero/codex/<id>` |
+| metadados de contas Codex, configuração inicial por perfil, ícones/wrappers/atalhos, exclusão de perfis personalizados e reutilização do arquivo público Web | `ai/codex_profiles.py` | ✅ `pz_hostbackup.backup_file` / `ledger_record`, domínio `ai-codex-profiles`; metadados em `$XDG_DATA_HOME/phasezero/ai-accounts/codex-profiles`, execução em `$XDG_DATA_HOME/phasezero/codex/<id>`; exclusão move dados/atalhos para recuperação privada em `codex-profiles/removed/<operação>/manifest.json`, remove runtime inativo e protege instalação padrão/Web padrão |
 
 Login e atualização de credenciais/sessões continuam pertencendo ao Codex,
 Chromium e ao manager Web existente. O gerenciador de perfis não lê nem copia

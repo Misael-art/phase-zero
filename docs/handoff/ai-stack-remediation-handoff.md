@@ -359,3 +359,37 @@ Janela autenticada recuperada sem encerrar trabalho em execução. Warm-start
 preserva cache do processo: para reaplicar o mapa de pastas da seção anterior,
 operador deve usar **Sair** somente naquela instância e depois abrir de novo.
 Não houve reinício forçado, parada de outro Codex ou mudança de credenciais.
+
+
+## 8. Limpeza de perfis personalizados — 2026-10-30
+
+Pedido autoriza implementar e executar exclusão individual/em lote, preservando
+Codex padrão e Web padrão. Base `550d8540`, mesma raiz/branch/PR #129. Novo
+`remove --id ID` / `remove --all-custom`, ambos com `--dry-run`, integrado ao
+runner e painel. Proteção de `current` obrigatória no backend; arquivados entram
+no lote. Apps ativos bloqueiam a limpeza; sem kill, reset ou elevação.
+
+Operação retira dados/atalhos do ambiente ativo para recuperação privada com
+manifesto e rollback de falha do registro; runtime/socket inativo removido
+separadamente. Não apaga pacote compartilhado, sessão primária nem Web padrão;
+não revoga recursos remotos. Detalhes e recuperação no roadmap Apps/IA/contas.
+
+193 testes focados passaram (perfis/painel/bridge/Accounts, ledger/help,
+contratos de contas e inventário).
+GUI real com PySide6 do host executou exclusão individual e geral, com prévia e
+QProcess/CommandRunner oficiais, em HOME/XDG próprios; capturas antes/depois e
+receipt preservados. Teste com processo vivo comprova bloqueio sem sinais;
+socket Unix stale real comprova limpeza sem cópia entre filesystems.
+
+Host real: comando fonte `linux/pz ai codex-profiles remove --all-custom`
+removeu 1 perfil autorizado; registro agora contém somente instalação padrão,
+raiz runtime personalizada vazia, sem atalhos personalizados ou processos
+residuais. Sete caminhos do padrão permaneceram idênticos por existência,
+inode e SHA-256. Backup privado identificado em `host-after.json`; não publicar
+conteúdo. Evidência local: `~/.cache/phasezero-dev/evidence/codex-profile-cleanup-20261030/`.
+
+Próximo passo: abrir **PhaseZero — Contas Codex** novamente para carregar os
+botões. Operador pode repetir criação, autenticação A/B e testes GUI de escrita.
+Esses aceites de login/identidade/cota continuam pendentes; limpeza não certifica
+túnel ou onboarding autenticado. CI anterior: shell-lint 0.9.0 falhou; 0.11.0 e
+lint/gitleaks passaram. Não houve merge/release nem alteração do pacote 1.22.11.

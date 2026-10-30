@@ -466,3 +466,174 @@ def test_focus_handoff_uses_real_unix_peer_and_refuses_wrong_owner(failure):
         finally:
             if process.poll() is None:
                 process.terminate(); process.wait(timeout=5)
+
+
+@pytest.fixture
+def cleanup_manager(manager):
+    with patch("linux.ai.chatgpt_web_bridge.Bridge.launcher_active", return_value=False), \
+         patch("linux.ai.chatgpt_web_bridge.Runner.port_in_use", return_value=False):
+        yield manager
+
+
+def test_delete_one_preserves_primary_other_account_and_private_recovery(cleanup_manager):
+    m = cleanup_manager
+    a, b = m.add("A"), m.add("B")
+    for row in (a, b):
+        m.prepare_native(row)
+        (m.native_home(row) / "auth.json").write_text("private-token-fixture")
+        m.shortcuts(row["id"])
+    primary = m.native_home(m.get("current"))
+    primary.mkdir()
+    (primary / "auth.json").write_text("primary-sentinel")
+    web = m.bridge(m.get("current")).paths.root
+    web.mkdir(parents=True)
+    (web / "state.json").write_text("primary-web-sentinel")
+    preview = m.remove(a["id"], dry_run=True)
+    assert preview["selected"] == 1 and preview["removed"] == 0
+    assert m.profile_base(a).is_dir() and len(m.rows()) == 2
+    assert not (m.root / "removed").exists()
+    result = m.remove(a["id"])
+    assert result["removed"] == 1 and result["primaryWebPreserved"]
+    assert [r["id"] for r in m.rows()] == [b["id"]]
+    assert not m.profile_base(a).exists() and m.profile_base(b).is_dir()
+    assert not list((m.data / "applications").glob(f"*{a['id']}*"))
+    assert (primary / "auth.json").read_text() == "primary-sentinel"
+    assert (web / "state.json").read_text() == "primary-web-sentinel"
+    recovery = Path(result["recovery"])
+    assert recovery.stat().st_mode & 0o777 == 0o700
+    assert next(recovery.rglob("auth.json")).read_text() == "private-token-fixture"
+    assert "private-token-fixture" not in json.dumps(result)
+    with pytest.raises(ProfileError, match="protegidos"):
+        m.remove("current")
+
+
+def test_clear_all_includes_archived_and_cleans_autostart_and_runtime(cleanup_manager):
+    m = cleanup_manager
+    a, b = m.add("A"), m.add("B")
+    m.prepare_native(a)
+    m.archive(b["id"])
+    bridge = m.bridge(a)
+    bridge.paths.managed_autostart.parent.mkdir(parents=True)
+    bridge.paths.managed_autostart.write_text(bridge.autostart_entry_text())
+    bridge.paths.runtime.mkdir(parents=True)
+    (bridge.paths.runtime / "lock").write_text("stale")
+    desktop_runtime = Path(m.env["XDG_RUNTIME_DIR"]) / "codex-desktop/instances/port-22104"
+    desktop_runtime.mkdir(parents=True)
+    stale_socket = socket.socket(socket.AF_UNIX)
+    # A real stale socket must be unlinked, never copied into persistent backup.
+    with tempfile.TemporaryDirectory(prefix="delete-sock-") as directory:
+        endpoint = Path(directory) / "stale.sock"
+        stale_socket.bind(str(endpoint))
+        stale_socket.close()
+        endpoint.rename(desktop_runtime / "launch-action.sock")
+    result = m.remove(all_custom=True)
+    assert result["removed"] == 2 and m.rows() == []
+    assert not bridge.paths.managed_autostart.exists()
+    assert not bridge.paths.runtime.exists() and not desktop_runtime.exists()
+    assert m.remove(all_custom=True)["removed"] == 0
+    assert m.add("Fresh")["id"] not in {a["id"], b["id"]}
+
+
+def test_clear_all_preflights_every_profile_before_any_mutation(cleanup_manager):
+    m = cleanup_manager
+    a, b = m.add("A"), m.add("B")
+    m.prepare_native(a)
+    original = m.registry.read_bytes()
+    with patch.object(m, "_profile_processes", side_effect=[[], [123]]):
+        with pytest.raises(ProfileError, match="em uso"):
+            m.remove(all_custom=True)
+    assert m.registry.read_bytes() == original and m.profile_base(a).is_dir()
+    assert not (m.root / "removed").exists()
+
+
+def test_delete_rejects_redirects_and_foreign_shortcuts(cleanup_manager):
+    m = cleanup_manager
+    row = m.add("A")
+    m.prepare_native(row)
+    foreign = m.data / "applications" / f"phasezero-codex-{row['id']}-desktop.desktop"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("user-owned file")
+    with pytest.raises(ProfileError, match="terceiros"):
+        m.remove(row["id"])
+    assert foreign.read_text() == "user-owned file"
+    foreign.unlink()
+    foreign.symlink_to(m.registry)
+    with pytest.raises(ProfileError, match="simbólico"):
+        m.remove(row["id"])
+    assert len(m.rows()) == 1
+
+
+def test_delete_rolls_back_moved_files_if_registry_save_fails(cleanup_manager):
+    m = cleanup_manager
+    row = m.add("A")
+    m.prepare_native(row)
+    original = m.registry.read_bytes()
+    with patch.object(m, "_save", side_effect=OSError("write failed")):
+        with pytest.raises(OSError, match="write failed"):
+            m.remove(row["id"])
+    assert m.registry.read_bytes() == original
+    assert m.native_home(row).is_dir()
+
+
+def test_real_live_profile_process_blocks_delete_without_sending_signals(cleanup_manager):
+    m = cleanup_manager
+    row, other = m.add("A"), m.add("B")
+    m.prepare_native(row)
+    child = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)"], env=m.profile_env(row))
+    try:
+        assert child.pid in m._profile_processes(row)
+        assert child.pid not in m._profile_processes(other)
+        with patch("os.kill", side_effect=AssertionError("must not kill")):
+            with pytest.raises(ProfileError, match="em uso"):
+                m.remove(row["id"])
+        assert child.poll() is None and len(m.rows()) == 2
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
+
+
+
+def test_hidden_environment_does_not_hide_profile_argv(cleanup_manager):
+    m = cleanup_manager
+    row = m.add("A")
+    child = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)",
+                              f"--user-data-dir={m.profile_base(row)}/browser"])
+    read_bytes = Path.read_bytes
+    def restricted(path):
+        if str(path) == f"/proc/{child.pid}/environ":
+            raise PermissionError("non-dumpable environment")
+        return read_bytes(path)
+    try:
+        with patch.object(Path, "read_bytes", restricted):
+            assert child.pid in m._profile_processes(row)
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
+
+
+def test_cli_remove_redacted_preview_and_execution_use_same_selection(cleanup_manager):
+    m = cleanup_manager
+    row = m.add("Private nickname")
+    script = Path(__file__).resolve().parents[1] / "linux/ai/codex_profiles.py"
+    command = [sys.executable, str(script), "--redacted", "remove", "--id", row["id"]]
+    preview = subprocess.run([*command, "--dry-run"], env=m.env, text=True, capture_output=True, timeout=15)
+    assert preview.returncode == 0, preview.stdout + preview.stderr
+    result = json.loads(preview.stdout)
+    assert result["selected"] == 1 and result["removed"] == 0 and result["dryRun"]
+    assert len(m.rows()) == 1
+    run = subprocess.run(command, env=m.env, text=True, capture_output=True, timeout=15)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert json.loads(run.stdout)["removed"] == 1 and m.rows() == []
+    assert "Private nickname" not in preview.stdout + run.stdout
+
+
+
+def test_runtime_cleanup_failure_is_reported_without_false_success(cleanup_manager):
+    m = cleanup_manager
+    row = m.add("A")
+    runtime = m.bridge(row).paths.runtime
+    runtime.mkdir(parents=True)
+    with patch("shutil.rmtree", side_effect=OSError("busy runtime")):
+        result = m.remove(row["id"])
+    assert result["removed"] == 1 and m.rows() == []
+    assert result["ok"] is False and result["runtimeRemaining"] == [str(runtime)]

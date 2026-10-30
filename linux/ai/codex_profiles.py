@@ -15,6 +15,7 @@ import re
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -212,6 +213,169 @@ class CodexProfiles:
             raise ProfileError("Perfil arquivado. Restaure este ID antes de abrir ou criar atalhos.")
         return row
 
+    def _profile_processes(self, row: dict) -> list[int]:
+        """Read-only ownership probe; never stop apps or match profile nicknames."""
+        base = str(self.profile_base(row))
+        found = []
+        for entry in Path('/proc').iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                if entry.stat().st_uid != os.getuid():
+                    continue
+                # Zombies have no live handles and must not block recovery.
+                if (entry / 'stat').read_text().rsplit(')', 1)[1].split()[0] == 'Z':
+                    continue
+                # Desktop daemons such as kwin/sd-pam are non-dumpable even
+                # for their user. Their private environment is not needed;
+                # keep checking public argv and executable independently.
+                try:
+                    values = (entry / 'environ').read_bytes().split(b'\0')
+                except PermissionError:
+                    values = []
+                owned = any(
+                    key in {b'CODEX_HOME', b'XDG_CONFIG_HOME', b'XDG_STATE_HOME',
+                            b'XDG_CACHE_HOME', b'CODEX_ELECTRON_USER_DATA_DIR',
+                            b'CODEX_WEB_GPT_LAUNCHER_DATA_DIR', b'PZ_CHATGPT_WEB_ROOT'}
+                    and os.fsdecode(value).startswith(base + '/')
+                    for item in values if b'=' in item
+                    for key, value in [item.split(b'=', 1)]
+                )
+                # Electron/Chromium may clear their environment and collapse argv.
+                command = os.fsdecode((entry / 'cmdline').read_bytes())
+                owned |= bool(re.search(r'(?:^|[\s\x00=])' + re.escape(base) + r'/', command))
+                try:
+                    owned |= os.readlink(entry / 'exe').startswith(base + '/')
+                except PermissionError:
+                    pass
+                if owned:
+                    found.append(int(entry.name))
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            except PermissionError:
+                raise ProfileError('Não foi possível verificar processos do usuário; limpeza bloqueada.') from None
+        return sorted(found)
+
+    def _removal_plan(self, row: dict) -> dict:
+        if row['id'] == 'current':
+            raise ProfileError('Codex padrão e seu Codex Web são protegidos contra exclusão.')
+        self._check_paths(row)
+        if self._profile_processes(row):
+            raise ProfileError('Perfil ainda em uso. Use Sair no Desktop e feche CLI/navegador deste perfil antes de excluir.')
+        bridge = self.bridge(row)
+        if bridge.launcher_active():
+            raise ProfileError('Codex Web deste perfil está ativo. Encerre seu launcher antes de excluir.')
+        targets = [self.profile_base(row)]
+        for folder in (self.data / 'applications', self.desktop_dir()):
+            targets.extend(folder / f"phasezero-codex-{row['id']}-{surface}.desktop"
+                           for surface in ('desktop', 'cli', 'web', 'browser'))
+            targets.extend(folder / name for name in bridge.paths.shortcut_entries.values())
+        targets.append(bridge.paths.managed_autostart)
+        if bridge.paths.runtime:
+            targets.append(bridge.paths.runtime)
+        runtime = self.env.get('XDG_RUNTIME_DIR')
+        desktop_runtime = set()
+        if runtime:
+            for mode in ('native', 'web'):
+                port = self.profile_env(row, mode)['CODEX_WEBVIEW_PORT']
+                directory = Path(runtime) / 'codex-desktop/instances' / f'port-{port}'
+                if directory.exists():
+                    if bridge.runner.port_in_use(int(port)):
+                        raise ProfileError('Porta Desktop ainda em uso; limpeza bloqueada para preservar a instância.')
+                    desktop_runtime.add(directory)
+                    targets.append(directory)
+        existing = []
+        for target in dict.fromkeys(targets):
+            if any(parent.is_symlink() for parent in (target, *target.parents)):
+                raise ProfileError('Caminho de limpeza redirecionado por link simbólico; nada removido.')
+            if not target.exists():
+                continue
+            if target == self.profile_base(row) or target == bridge.paths.runtime or target in desktop_runtime:
+                if not target.is_dir() or target.stat().st_uid != os.getuid():
+                    raise ProfileError('Diretório do perfil com proprietário/tipo inesperado; preservado.')
+            else:
+                mode = target.stat()
+                if not stat.S_ISREG(mode.st_mode) or mode.st_uid != os.getuid() or mode.st_size > 65536:
+                    raise ProfileError('Atalho de perfil alterado por terceiros; preservado.')
+                text = target.read_text(encoding='utf-8')
+                if target == bridge.paths.managed_autostart:
+                    managed = text == bridge.autostart_entry_text()
+                elif target.name in bridge.paths.shortcut_entries.values():
+                    managed = str(bridge.paths.root) in text
+                else:
+                    managed = 'X-PhaseZero-Managed=codex-profiles' in text
+                if not managed:
+                    raise ProfileError('Atalho de perfil alterado por terceiros; preservado.')
+            existing.append(target)
+        ephemeral = {bridge.paths.runtime, *desktop_runtime}
+        return {'row': row, 'paths': [p for p in existing if p not in ephemeral],
+                'runtime': [p for p in existing if p in ephemeral]}
+
+    def remove(self, profile_id: str | None = None, *, all_custom: bool = False,
+               dry_run: bool = False) -> dict:
+        """Detach custom installations; retain private, inactive recovery data.
+
+        Preflight every account before touching any. Unknown/live ownership blocks
+        cleanup instead of killing a primary app or losing an in-flight write.
+        """
+        if all_custom == (profile_id is not None):
+            raise ProfileError('Selecione um perfil ou todas as instalações personalizadas.')
+        with self.locked():
+            rows = self.rows()
+            selected = rows if all_custom else [self.get(profile_id)]
+            plans = [self._removal_plan(row) for row in selected]
+            result = {'removed': 0, 'selected': len(plans), 'primaryPreserved': True,
+                      'primaryWebPreserved': True, 'dryRun': dry_run,
+                      'remoteRevocation': False}
+            if dry_run or not plans:
+                return result
+            recovery_root = self.root / 'removed'
+            _private(recovery_root)
+            recovery = recovery_root / uuid.uuid4().hex
+            _private(recovery)
+            # Same-filesystem rename keeps credentials out of logs and avoids
+            # duplicating package/session data. Runtime sockets are disposable,
+            # not copied across filesystems (copytree cannot copy Unix sockets).
+            previous = self.registry.read_text() if self.registry.exists() else None
+            moves = []
+            try:
+                manifest = {'schemaVersion': 1, 'profiles': selected, 'moves': []}
+                for plan in plans:
+                    for source in plan['paths']:
+                        destination = recovery / str(len(manifest['moves']))
+                        manifest['moves'].append({'source': str(source), 'backup': str(destination)})
+                _write(recovery / 'manifest.json', json.dumps(manifest, indent=2) + '\n')
+                for item in manifest['moves']:
+                    source, destination = Path(item['source']), Path(item['backup'])
+                    shutil.move(str(source), str(destination))
+                    moves.append((source, destination))
+                removed = {row['id'] for row in selected}
+                self._save([row for row in rows if row['id'] not in removed])
+                ledger_record(module='ai-codex-profiles', action='remove',
+                              modified=[str(self.registry), *(str(source) for source, _ in moves)],
+                              backups=[str(recovery / 'manifest.json')],
+                              reversible=True)
+            except Exception:
+                for source, destination in reversed(moves):
+                    shutil.move(str(destination), str(source))
+                if previous is not None:
+                    _write(self.registry, previous)
+                raise
+            runtime_remaining = []
+            for plan in plans:
+                for directory in plan.get('runtime', []):
+                    try:
+                        shutil.rmtree(directory)
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        runtime_remaining.append(str(directory))
+            return {**result, 'removed': len(plans), 'recovery': str(recovery),
+                    'ok': not runtime_remaining,
+                    'runtimeRemaining': runtime_remaining,
+                    'guidance': 'Dados fora do ambiente ativo, em recuperação privada. '
+                                'Conectores e túneis remotos não são revogados pela limpeza local.'}
+
     def profile_base(self, row: dict) -> Path:
         # Linux AF_UNIX paths are limited to 107 bytes. Keep runtime homes
         # shorter than the account metadata domain; never symlink credentials.
@@ -327,6 +491,10 @@ class CodexProfiles:
             "desktopInstalled": bool(shutil.which("codex-desktop", path=self.env.get("PATH")))}
 
     def launch(self, profile_id: str, surface: str) -> dict:
+        with self.locked():
+            return self._launch(profile_id, surface)
+
+    def _launch(self, profile_id: str, surface: str) -> dict:
         row = self.require_active(profile_id)
         self.prepare_native(row)
         if surface == "web":
@@ -389,6 +557,10 @@ class CodexProfiles:
         return [executable, *(["login"] if login else args)], self.profile_env(row)
 
     def terminal(self, profile_id: str, task: str) -> dict:
+        with self.locked():
+            return self._terminal(profile_id, task)
+
+    def _terminal(self, profile_id: str, task: str) -> dict:
         self.require_active(profile_id)
         pz = Path(__file__).resolve().parents[1] / "pz"
         command = [str(pz), "ai", "codex-profiles"]
@@ -553,6 +725,11 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     sub.add_parser("install-panel-shortcut")
+    remove = sub.add_parser('remove')
+    selection = remove.add_mutually_exclusive_group(required=True)
+    selection.add_argument('--id')
+    selection.add_argument('--all-custom', action='store_true')
+    remove.add_argument('--dry-run', action='store_true')
     add = sub.add_parser("add")
     add.add_argument("--label")
     add.add_argument("--metadata-stdin", action="store_true")
@@ -596,6 +773,8 @@ def main(argv: list[str] | None = None) -> int:
             result = manager.status()
         elif args.command == "install-panel-shortcut":
             result = manager.install_panel_shortcut()
+        elif args.command == 'remove':
+            result = manager.remove(args.id, all_custom=args.all_custom, dry_run=args.dry_run)
         elif args.command == "add":
             result = manager.add(args.label, args.color)
         elif args.command == "rename":
@@ -620,9 +799,13 @@ def main(argv: list[str] | None = None) -> int:
                 manager.shortcuts(args.id)
             return exit_code
         else:
-            command, env = manager.cli_command(args.id, args.args if args.command == "cli" else [],
-                                                login=args.command == "login")
-            os.execvpe(command[0], command, env)
+            # Keep creation/exec atomic relative to remove. registry.lock is
+            # CLOEXEC: the new CLI's scoped environment becomes visible in
+            # /proc before another cleaner can acquire this lock.
+            with manager.locked():
+                command, env = manager.cli_command(args.id, args.args if args.command == "cli" else [],
+                                                    login=args.command == "login")
+                os.execvpe(command[0], command, env)
             return 0
     except (ProfileError, OSError) as error:
         print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
@@ -635,9 +818,14 @@ def main(argv: list[str] | None = None) -> int:
             result = {"schemaVersion": 1, "total": len(result["profiles"]),
                       "secretsRedacted": True, "identityRedacted": True}
         else:
-            result = {"ok": True, "operation": args.command, "identityRedacted": True}
+            summary = {key: result[key] for key in ('removed', 'selected', 'dryRun',
+                       'primaryPreserved', 'primaryWebPreserved', 'remoteRevocation') if key in result}
+            if 'runtimeRemaining' in result:
+                summary['runtimeRemainingCount'] = len(result['runtimeRemaining'])
+            result = {"ok": result.get('ok', True), "operation": args.command,
+                      "identityRedacted": True, **summary}
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return 1 if result.get('ok') is False else 0
 
 
 if __name__ == "__main__":

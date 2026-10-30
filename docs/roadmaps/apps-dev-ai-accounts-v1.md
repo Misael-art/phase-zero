@@ -3252,3 +3252,44 @@ confirmado, abertura continua recusada, preservando processos desconhecidos.
 Warm-start traz a janela para frente; não reinicia o processo. Para carregar
 alterações que dependam de reinício, como cache antigo dos diretórios XDG, usar
 **Sair** na instância correspondente antes de abrir novamente.
+
+
+### Limpeza de instalações personalizadas — 2026-10-30
+
+Painel Contas Codex oferece **Excluir perfil** em cada perfil personalizado,
+inclusive arquivados, e **Limpar instalações personalizadas**. Instalação
+`current` e seu Codex Web são protegidos no backend; botão global desabilita
+quando só resta a instalação padrão. Ações passam pelo runner existente com
+prévia `remove --dry-run`, sem administrador.
+
+Backend `codex_profiles.remove`: preflight de todo lote sob lock do registro,
+verificação de processos por diretórios/env/argv/executável e launcher Web,
+validação de propriedade/tipo e recusa de caminhos redirecionados/atalhos
+estrangeiros. Perfil em uso exige Sair/fechar seu app antes de excluir; não
+mata processos nem encerra outras contas. Abertura Desktop/terminal compartilha
+lock com limpeza. Daemons não dumpáveis do desktop não exigem leitura de seu
+ambiente privado; argv/executável são consultados independentemente.
+
+Dados, autenticação local e atalhos saem do ambiente ativo por movimento para
+`$XDG_DATA_HOME/phasezero/ai-accounts/codex-profiles/removed/<operação>/`,
+com diretório 0700 e manifesto 0600. Falha ao salvar registro devolve arquivos
+aos caminhos originais. Não há cópia de tokens para outra conta. Sockets e
+runtime inativos são descartáveis e removidos separadamente, sem tentar copiá-los
+entre filesystems; falhas residuais aparecem no resultado. Registro mantém
+somente perfis restantes. Nova criação recebe novo ID; slots liberados podem
+ser usados novamente após encerramento e remoção do namespace antigo.
+
+Recuperação manual: com apps fechados, consultar `manifest.json` privado,
+repor cada par `backup` → `source` sem sobrescrever arquivos novos e restaurar
+metadados dos perfis registrados no manifesto sob lock. Backups do registro
+continuam no mecanismo central. Recuperação contém sessões privadas e não deve
+ser publicada ou reutilizada como login de outro ID.
+
+Limpeza é local: não revoga conectores ChatGPT nem túneis remotos. Aplicativo
+compartilhado/CLI, configuração e sessões do padrão ficam nos lugares originais.
+No host autorizado, único perfil personalizado foi removido; nenhum perfil,
+atalho ou processo personalizado permaneceu. Sete caminhos relevantes do padrão
+foram comparados antes/depois por existência, inode e SHA-256, sem alteração.
+193 testes focados passaram; GUI do host executou ações com prévia via runner
+QProcess em ambiente isolado. Evidência:
+`~/.cache/phasezero-dev/evidence/codex-profile-cleanup-20261030/`.
