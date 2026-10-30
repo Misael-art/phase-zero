@@ -14,6 +14,9 @@ para abertura automática por mouse/trackpad. Timeout continua incerto.
 isolado, incluindo ausência de teclado sem root, troca de foco, cancelamento e
 timeout com restauração. Não certifica digitação na autenticação física sem dock.
 O serviço residente precisa carregar essa revisão para respeitar a trava.
+Espera de até um segundo pelo painel evita confundir ativação assíncrona com
+ausência; repetição final do mesmo foco: **22 passed em 6,37 s**. Serviço próprio
+recarregado para a coordenação; autenticação física sem dock segue pendente.
 
 Base `bdbfed30bf5bef0a523d8246ff5057e2b24829be`, mesma branch/PR #129.
 O incidente do Fôlego exigiu separar solicitação manual de entrada da

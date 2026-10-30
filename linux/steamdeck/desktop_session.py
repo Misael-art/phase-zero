@@ -319,7 +319,13 @@ def recover_touch(*, persist=False):
         try:
             if not set_mode("2") or not activate():
                 return result(False, "Não foi possível abrir teclado; autenticação não solicitada")
-            if properties("/VirtualKeyboard", "org.kde.kwin.VirtualKeyboard").get("visible") != "true":
+            visible = False
+            for _ in range(10):
+                if properties("/VirtualKeyboard", "org.kde.kwin.VirtualKeyboard").get("visible") == "true":
+                    visible = True
+                    break
+                time.sleep(.1)
+            if not visible:
                 return result(False, "Teclado não ficou visível; autenticação não solicitada. Abra um campo de texto")
             watcher = threading.Thread(target=keep_visible, daemon=True)
             watcher.start()
