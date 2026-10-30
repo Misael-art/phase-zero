@@ -191,7 +191,9 @@ def protected_devices():
         props = properties(path, "org.kde.KWin.InputDevice")
         if any(props.get(key) == "true" for key in ("keyboard", "pointer", "touch", "touchpad")):
             devices.append({"path": path, "name": props.get("name", event), "enabled": props.get("enabled"),
-                            "touchpad": props.get("touchpad"),
+                            "touchpad": props.get("touchpad"), "touch": props.get("touch"),
+                            "alphaNumericKeyboard": props.get("alphaNumericKeyboard"),
+                            "vendor": props.get("vendor"), "product": props.get("product"),
                             "disableEventsOnExternalMouse": props.get("disableEventsOnExternalMouse")})
     return devices
 
@@ -232,26 +234,49 @@ def keyboard_mode_lock(*, wait=False):
         os.close(fd)
 
 
-def keyboard_restore():
+VALVE_VENDOR = "10462"  # 0x28de: Deck controller/lizard keyboard, never a typing keyboard.
+
+
+def keyboard_target_mode(devices, game=False):
+    """KWin mode for the virtual keyboard, or None when the evidence is missing.
+
+    1 opens automatically only after touchscreen input; 2 opens on any focus
+    in a text field. Without an enabled touchscreen and without a physical
+    keyboard, the Deck trackpads are the only way to reach a field, so desktop
+    uses 2. A dock keyboard or a working touchscreen keeps 1. Games/emulators
+    keep 1 so the panel never covers them; Steam owns the controller.
+    """
+    if game:
+        return "1"
+    if not devices:
+        return None  # Unreadable compositor state never changes the mode.
+    enabled = [d for d in devices if d.get("enabled") == "true"]
+    touch = any(d.get("touch") == "true" for d in enabled)
+    physical = any(d.get("alphaNumericKeyboard") == "true" and d.get("vendor") != VALVE_VENDOR
+                   and not str(d.get("name", "")).startswith("AT Translated Set 2") for d in enabled)
+    return "1" if touch or physical else "2"
+
+
+def keyboard_restore(game=False):
     with keyboard_mode_lock() as acquired:
         if not acquired:
             return []  # Explicit user authentication owns the temporary mode.
-        return _keyboard_restore()
+        return _keyboard_restore(game)
 
 
-def _keyboard_restore():
+def _keyboard_restore(game=False):
     errors = []
-    # NonMouseInput: automatic opening follows touchscreen input, never a
-    # physical mouse/trackpad. Explicit keyboard shortcuts remain available.
-    for key, value in (("VirtualKeyboardEnabled", "true"), ("VirtualKeyboardMode", "1")):
+    mode = keyboard_target_mode(protected_devices(), game)
+    wanted = [("VirtualKeyboardEnabled", "true")] + ([("VirtualKeyboardMode", mode)] if mode else [])
+    for key, value in wanted:
         current = run("kreadconfig6", "--file", "kwinrc", "--group", "Wayland", "--key", key).stdout.strip()
         if current != value and run("kwriteconfig6", "--notify", "--file", "kwinrc", "--group", "Wayland",
                                     "--key", key, value).returncode:
             errors.append(key)
     props = properties("/VirtualKeyboard", "org.kde.kwin.VirtualKeyboard")
-    if props.get("mode") != "1":
+    if mode and props.get("mode") != mode:
         if run("qdbus6", "org.kde.KWin", "/VirtualKeyboard", "org.freedesktop.DBus.Properties.Set",
-               "org.kde.kwin.VirtualKeyboard", "mode", "1").returncode:
+               "org.kde.kwin.VirtualKeyboard", "mode", mode).returncode:
             errors.append("keyboard-mode")
     if props.get("available") != "true":
         result = run("bash", str(HERE / "input-actions.sh"), "configure", timeout=20)
@@ -262,9 +287,9 @@ def _keyboard_restore():
 
 def reconcile():
     errors = protect_input()
-    errors.extend(keyboard_restore())
-    lease = lease_status()
-    if lease["active"] or other_game_active():
+    game = lease_status()["active"] or other_game_active()
+    errors.extend(keyboard_restore(game))
+    if game:
         return {"ok": not errors, "mode": "game", "errors": errors}
     saved = read(state_dir() / "preferences.json")
     if saved:
@@ -422,10 +447,10 @@ def watch():
         restoring, previous_game, last_error = True, False, None
         while True:
             try:
-                errors = protect_input() + keyboard_restore()
+                active = lease_status()["active"] or other_game_active()
+                errors = protect_input() + keyboard_restore(active)
                 if errors:
                     raise RuntimeError(", ".join(errors))
-                active = lease_status()["active"] or other_game_active()
                 if previous_game and not active:
                     restoring = True
                 if not active:
