@@ -42,7 +42,7 @@ def test_status_is_read_only_and_preserves_existing_accounts(manager):
     assert result["profiles"][0]["session"] == "unverified"
     assert "sentinel" not in json.dumps(result)
     assert (native / "auth.json").read_text() == '{"token":"private-native-sentinel"}'
-    manager.rename("current", "Conta principal", "verde")
+    manager.rename("current", "Conta principal", "azul")
     assert manager.get("current")["label"] == "Conta principal"
     assert manager.native_home(manager.get("current")) == native
     assert (native / "auth.json").read_text() == '{"token":"private-native-sentinel"}'
@@ -165,12 +165,12 @@ def test_shortcuts_quote_paths_and_preserve_identity_through_archive_restore(man
     (manager.config / "user-dirs.dirs").write_text('XDG_DESKTOP_DIR="$HOME/Área de Trabalho"\n')
     row = manager.add("Conta A % com espaços", "verde")
     result = manager.shortcuts(row["id"])
-    assert result["count"] == 8
+    assert result["count"] == 6
     native = manager.native_home(row)
     manager.prepare_native(row)
     (native / "auth.json").write_text("private-A")
     entries = list(desktop.glob("*.desktop"))
-    assert len(entries) == 4
+    assert len(entries) == 2
     for entry in entries:
         text = entry.read_text()
         assert row["label"] in text and "private-A" not in text
@@ -637,3 +637,145 @@ def test_runtime_cleanup_failure_is_reported_without_false_success(cleanup_manag
         result = m.remove(row["id"])
     assert result["removed"] == 1 and m.rows() == []
     assert result["ok"] is False and result["runtimeRemaining"] == [str(runtime)]
+
+
+
+def test_primary_is_first_and_all_64_custom_colors_are_unique(manager):
+    rows = [manager.add(f"Account {i}") for i in range(64)]
+    colors = [r["color"] for r in manager.status()["profiles"]]
+    from linux.ai.codex_profiles import COLORS
+    assert manager.status()["profiles"][0]["id"] == "current"
+    assert len(colors) == len(set(colors)) == 65
+    assert len({COLORS[key] for key in colors}) == 65
+    with pytest.raises(ProfileError, match="Limite"):
+        manager.add("Too many")
+
+
+def test_colors_cannot_be_reused_or_reserved_even_for_archived_profiles(manager):
+    a, b = manager.add("A", "verde"), manager.add("B", "roxo")
+    manager.archive(a["id"])
+    for operation in [lambda: manager.add("C", "verde"),
+                      lambda: manager.add("C", "azul"),
+                      lambda: manager.rename(b["id"], "B", "verde"),
+                      lambda: manager.rename("current", "Principal", "laranja")]:
+        with pytest.raises(ProfileError, match="[Cc]or"):
+            operation()
+    assert manager.get(a["id"])["color"] == "verde"
+
+
+def test_shortcut_names_icons_and_hidden_auxiliary_entries(manager):
+    from xml.etree import ElementTree as ET
+    row = manager.add("Pessoal", "verde")
+    manager.shortcuts(row["id"])
+    menu = manager.data / "applications"
+    desktop = menu / manager.entry_name(row, "desktop")
+    web = menu / manager.entry_name(row, "web")
+    assert "Name=Codex Pessoal\n" in desktop.read_text()
+    assert "Name=Codex Web Pessoal\n" in web.read_text()
+    assert "NoDisplay=true" not in web.read_text() + desktop.read_text()
+    for surface in ("cli", "browser"):
+        assert "NoDisplay=true" in (menu / manager.entry_name(row, surface)).read_text()
+    svg = (manager.profile_base(row) / "account.svg").read_text()
+    assert ET.fromstring(svg).find("{http://www.w3.org/2000/svg}path") is not None
+    assert "<text" not in svg and "<rect" not in svg
+    assert svg != manager.icon_svg(manager.get("current"))
+
+
+def test_organize_preserves_primary_exec_hides_only_known_codex_duplicates(manager):
+    menu = manager.data / "applications"
+    menu.mkdir(parents=True)
+    primary = menu / "codex-desktop.desktop"
+    original = ('[Desktop Entry]\nName=ChatGPT\nName[pt]=Antigo\n'
+                'Exec=/usr/bin/codex-desktop %u\nIcon=old\n'
+                'MimeType=x-scheme-handler/codex;\nActions=new-window;\n'
+                '\n[Desktop Action new-window]\nName=New Window\nExec=/usr/bin/codex-desktop --new-instance\n')
+    primary.write_text(original)
+    old = menu / "appimagekit_123-Codex.desktop"
+    old.write_text('[Desktop Entry]\nName=Codex Desktop old\nX-AppImage-Old-Name=Codex Desktop\n'
+                   'Exec=/home/user/codex-desktop-old.AppImage %u\n')
+    other = menu / "other.desktop"
+    other.write_text('[Desktop Entry]\nName=Other\nExec=other\n')
+    bridge = manager.bridge(manager.get("current"))
+    bridge.paths.root.mkdir(parents=True)
+    bridge.save_state({"optIn": {"fixture": True}})
+    tools = menu / "phasezero-chatgpt-web-tools.desktop"
+    tools.write_text('[Desktop Entry]\nName=ChatGPT Web tools\nExec=old-tools\n'
+                     'X-PhaseZero-Managed=chatgpt-web\n')
+    result = manager.organize()
+    assert result["organized"] and result["hiddenDuplicates"] == 2
+    text = primary.read_text()
+    assert "Name=Codex Principal\n" in text and "Name[pt]" not in text
+    assert "Exec=/usr/bin/codex-desktop %u\n" in text
+    assert "Exec=/usr/bin/codex-desktop --new-instance\n" in text
+    assert "MimeType=x-scheme-handler/codex;" in text
+    assert "NoDisplay=true" in old.read_text() and "NoDisplay=true" in tools.read_text()
+    assert "NoDisplay" not in other.read_text()
+    assert bridge.load_state()["accountShortcuts"] == "codex-profiles"
+    assert bridge.shortcuts_status()["owner"] == "codex-profiles"
+    assert bridge.shortcuts_status()["state"] == "installed"
+    before = {p.name: p.read_bytes() for p in menu.glob("*.desktop")}
+    assert bridge.restore_shortcuts() is False
+    assert bridge.shortcuts_install()["state"] == "installed"
+    manager.organize()
+    assert before == {p.name: p.read_bytes() for p in menu.glob("*.desktop")}
+
+
+def test_organize_migrates_old_color_collisions_without_changing_profile_ids(manager):
+    a, b = manager.add("A", "verde"), manager.add("B", "roxo")
+    document = json.loads(manager.registry.read_text())
+    for row in document["profiles"]:
+        row["color"] = "azul"
+    document["current"]["label"] = "Conta atual"
+    manager.registry.write_text(json.dumps(document))
+    manager.organize()
+    rows = manager.status()["profiles"]
+    assert rows[0]["label"] == "Principal"
+    assert {r["id"] for r in rows} == {"current", a["id"], b["id"]}
+    assert len({r["color"] for r in rows}) == 3
+
+
+
+def test_organize_preview_never_creates_state_or_shortcuts(manager):
+    result = manager.organize(dry_run=True)
+    assert result["dryRun"] and result["primaryFirst"]
+    assert result["visibleLaunchersPerActiveAccount"] == 2
+    assert not manager.root.exists() and not (manager.data / "applications").exists()
+
+
+
+def test_account_shortcut_ownership_does_not_block_web_opt_out(manager):
+    bridge = manager.bridge(manager.get("current"))
+    bridge.paths.root.mkdir(parents=True)
+    bridge.save_state({"optIn": {"fixture": True}})
+    manager.shortcuts("current")
+    native = manager.data / "applications/codex-desktop.desktop"
+    original_native = native.read_bytes()
+    web = manager.data / "applications/phasezero-chatgpt-web.desktop"
+    assert web.exists()
+    with patch.object(bridge, "launcher_active", return_value=False), \
+         patch.object(bridge, "route_status", return_value={"active": False}):
+        assert bridge.opt_out() == {"optIn": False}
+    assert not web.exists() and native.read_bytes() == original_native
+    assert bridge.shortcuts_status()["state"] == "off"
+    assert bridge.restore_shortcuts() is False
+    with pytest.raises(BridgeError, match="painel"):
+        bridge.shortcuts_install()
+    manager.shortcuts("current")
+    assert web.exists() and bridge.shortcuts_status()["state"] == "installed"
+    assert not bridge.load_state().get("optIn")
+
+
+
+def test_primary_legacy_aliases_retire_but_browser_login_stays_in_place(manager):
+    menu = manager.data / "applications"
+    menu.mkdir(parents=True)
+    alias = menu / "phasezero-codex-current-desktop.desktop"
+    alias.write_text('[Desktop Entry]\nName=Old account\nX-PhaseZero-Managed=codex-profiles\n')
+    browser = manager.runtime_root / "current/browser"
+    browser.mkdir(parents=True)
+    (browser / "Cookies").write_text("private-browser-sentinel")
+    manager.shortcuts("current")
+    assert not alias.exists()
+    assert (menu / "codex-desktop.desktop").exists()
+    assert manager.browser_home(manager.get("current")) == browser
+    assert (browser / "Cookies").read_text() == "private-browser-sentinel"

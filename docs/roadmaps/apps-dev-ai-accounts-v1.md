@@ -3293,3 +3293,59 @@ foram comparados antes/depois por existência, inode e SHA-256, sem alteração.
 193 testes focados passaram; GUI do host executou ações com prévia via runner
 QProcess em ambiente isolado. Evidência:
 `~/.cache/phasezero-dev/evidence/codex-profile-cleanup-20261030/`.
+
+
+### Identidade visual e organização do menu Codex — 2026-10-30
+
+Instalação padrão é sempre primeira no painel; apelido inicial passa a
+**Principal**. Apelidos personalizados existentes são preservados, salvo rótulo
+legado exato “Conta atual”, migrado para Principal por `organize`.
+
+Ícone usa forma da imagem indicada pelo operador:
+https://zonalogo.com/assets/codex-logo.webp, SHA-256
+`9ef453daf2261ce3207f6c0f19bb01d9b244005aa0cb6a8f50a696ac24c4b346` (25794 bytes).
+`linux/ai/assets/codex-account.svg` contém contorno vetorizado, sem o fundo
+quadriculado incorporado ao raster. Extração: cromaticidade RGB max−min >35,
+contornos CCOMP, aproximação de 0,55 px no original 768×768; três contornos com
+fill-rule evenodd. Gradiente original reservado ao padrão; renderer troca
+somente gradiente para contas adicionais. Runtime não exige download nem
+biblioteca de imagens; Qt renderiza SVG no painel e KDE lê o mesmo SVG nos
+atalhos. Fonte indicada pelo usuário; não inferir endosso oficial da origem.
+
+Paleta fixa de 65 cores (padrão +64 perfis). Alocação sob lock escolhe cor livre;
+escolhas explícitas reservadas/repetidas são recusadas, inclusive quando usadas
+por arquivados. Seletor mostra amostras e oferece somente cores disponíveis;
+cor do padrão é fixa. Migração corrige colisões antigas sem mudar ID ou login.
+Cores RGB distintas não prometem distinção perceptiva para toda deficiência
+visual; apelidos continuam necessários.
+
+Menu/desktop oferecem **Codex [apelido]** e **Codex Web [apelido]**, com mesma
+cor para as duas superfícies da conta. Aliases primários antigos pertencentes ao painel são retirados com backup;
+login de navegador preexistente mantém seu diretório original.
+CLI/navegador ficam acessíveis no painel;
+seus arquivos de menu usam NoDisplay=true e não recebem cópia no desktop.
+Perfis personalizados oferecem ações CLI/navegador no menu de contexto nativo.
+Criação pelo CLI/painel já produz atalhos; renomear atualiza existentes.
+
+`pz ai codex-profiles organize [--dry-run]` e botão **Organizar ícones e menu
+Codex** reconciliam apresentação. Override de usuário `codex-desktop.desktop`
+conserva ID, Exec, protocolos e ações do pacote instalado; modifica nome/ícone
+sem editar pacote nem reiniciar app. Web padrão conserva ID
+`phasezero-chatgpt-web.desktop`. Entrada antiga Tools fica oculta no menu e sua
+cópia do desktop sai com backup; AppImages extras só são ocultados quando
+marcadores/Exec identificam explicitamente Codex Desktop. Demais apps intactos.
+
+Bridge recebe owner `accountShortcuts=codex-profiles` e não recria atalhos
+legados em setup/repair/reentrada. Snapshot estável de seu gerenciador é
+atualizado com backup quando já existe. Status mantém contrato installed/off;
+opt-out continua possível, removendo apenas atalho Web, sem tocar nativo ou
+revogar sessão. Recriação explícita pelo painel mantém gates de opt-in/tools.
+
+Host: duas contas existentes preservadas, colisão azul legada migrada, quatro
+entradas Codex visíveis e três duplicações antigas ocultadas/removidas do
+desktop. Sete caminhos de autenticação/configuração comparados por
+existência/inode/SHA-256 ficaram idênticos; estado do bridge só recebeu owner
+visual. Defaults dos protocolos Codex já apontavam a codex-desktop.desktop.
+Cache KDE/MIME atualizado; nenhum app encerrado. 202 testes focados passaram,
+com GUI real e desktop-file-validate. Evidência privada:
+`~/.cache/phasezero-dev/evidence/codex-icons-20261030/`.

@@ -5,6 +5,8 @@ import sys
 import json
 
 from PySide6.QtCore import Signal, Qt, QTimer
+from PySide6.QtGui import QPixmap, QPainter, QColor, QIcon
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget, QScrollArea,
@@ -15,7 +17,7 @@ from .models import ActionSpec
 
 
 class CodexProfileDialog(QDialog):
-    def __init__(self, parent=None, row: dict | None = None):
+    def __init__(self, parent=None, row: dict | None = None, *, unavailable=()):
         super().__init__(parent)
         self.setObjectName("codexProfileDialog")
         self.setWindowTitle("Identificar conta Codex" if row else "Adicionar conta Codex")
@@ -31,8 +33,16 @@ class CodexProfileDialog(QDialog):
         self.color = QComboBox()
         self.color.setObjectName("codexProfileColor")
         for color in COLORS:
-            self.color.addItem(color.title(), color)
-        self.color.setCurrentIndex(max(0, self.color.findData((row or {}).get("color", "azul"))))
+            if row and row['id'] == 'current' and color != 'azul':
+                continue
+            if color in unavailable and color != (row or {}).get('color'):
+                continue
+            swatch = QPixmap(20, 20)
+            swatch.fill(QColor(COLORS[color]))
+            self.color.addItem(QIcon(swatch), color.title(), color)
+        self.color.setCurrentIndex(max(0, self.color.findData((row or {}).get("color"))))
+        if row and row['id'] == 'current':
+            self.color.setEnabled(False)
         form.addRow("Apelido da conta", self.label)
         form.addRow("Cor", self.color)
         layout.addLayout(form)
@@ -72,6 +82,11 @@ class CodexProfilesPanel(QWidget):
         actions.addWidget(refresh)
         actions.addStretch()
         self._layout.addLayout(actions)
+        organize = QPushButton('Organizar ícones e menu Codex')
+        organize.setObjectName('organizeCodexMenu')
+        organize.clicked.connect(lambda: self._request('Organizar menu Codex', ('organize',), mutable=True,
+                                  impact='Padroniza nomes/ícones e oculta entradas Codex antigas; preserva aplicativos e sessões.'))
+        self._layout.addWidget(organize)
         cleanup = QPushButton("Limpar instalações personalizadas")
         cleanup.setObjectName("clearCustomCodexProfiles")
         cleanup.setToolTip("Exclui todos os perfis personalizados. Codex padrão e seu Web são preservados.")
@@ -102,7 +117,7 @@ class CodexProfilesPanel(QWidget):
                          "Opera somente no ID de perfil selecionado; credenciais permanecem no Codex."),
             args=("ai", "codex-profiles", "--redacted", *args), icon="system-users", mutable=mutable,
             preview_args=(("ai", "codex-profiles", "--redacted", *args, "--dry-run")
-                          if args[0] == "remove" else
+                          if args[0] in {"remove", "organize"} else
                           ("ai", "codex-profiles", "--redacted", "list")) if mutable else None,
             stdin_parameter="codex_metadata" if metadata is not None else "",
             impact=impact or "Cria ou atualiza perfil local. Não copia sessões nem autentica outra conta.",
@@ -131,14 +146,15 @@ class CodexProfilesPanel(QWidget):
         return values
 
     def add_profile(self):
-        dialog = CodexProfileDialog(self)
+        dialog = CodexProfileDialog(self, unavailable={'azul', *(r['color'] for r in self.manager.rows())})
         if dialog.exec() != QDialog.Accepted or not dialog.label.text().strip():
             return
         self._request("Adicionar perfil Codex", ("add", "--metadata-stdin"), mutable=True,
                       metadata={"label": dialog.label.text(), "color": dialog.color.currentData()})
 
     def edit_profile(self, row):
-        dialog = CodexProfileDialog(self, row)
+        dialog = CodexProfileDialog(self, row, unavailable={'azul', *(r['color'] for r in self.manager.rows()
+                                                                if r['id'] != row['id'])})
         if dialog.exec() == QDialog.Accepted and dialog.label.text().strip():
             self._request("Identificar perfil Codex", ("rename", row["id"], "--metadata-stdin"), mutable=True,
                           metadata={"label": dialog.label.text(), "color": dialog.color.currentData()})
@@ -150,7 +166,8 @@ class CodexProfilesPanel(QWidget):
                 QTimer.singleShot(0, self._focus_first_profile)
 
     def _focus_first_profile(self):
-        button = self.findChild(QPushButton, "codexProfileDesktop")
+        button = next((b for b in self.findChildren(QPushButton, 'codexProfileDesktop')
+                       if b.property('profileId') != 'current'), None)
         if button is None:
             return
         button.setFocus(Qt.TabFocusReason)
@@ -203,16 +220,23 @@ class CodexProfilesPanel(QWidget):
             self.cards.addWidget(install)
         else:
             install.deleteLater()
-        self.status.setText("Status local: sessão e cota ainda não verificadas. “Conta atual” preserva sua instalação existente.")
+        self.status.setText("Status local: sessão e cota ainda não verificadas. Instalação padrão permanece primeira e protegida.")
         self.cleanup.setEnabled(any(row["id"] != "current" for row in snapshot["profiles"]))
         for index, row in enumerate(snapshot["profiles"]):
             card = QFrame()
             card.setObjectName("codexProfileCard")
             layout = QVBoxLayout(card)
             identity = QHBoxLayout()
-            badge = QLabel(f"C{row['slot']}")
+            badge = QLabel()
             badge.setObjectName("codexProfileBadge")
-            badge.setStyleSheet(f"background: {COLORS[row['color']]}; color: white; padding: 6px; border-radius: 6px;")
+            badge.setProperty('profileId', row['id'])
+            renderer = QSvgRenderer(self.manager.icon_svg(row).encode())
+            pixmap = QPixmap(44, 44)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            badge.setPixmap(pixmap)
             identity.addWidget(badge)
             name = QLabel(f"Conta Codex {index + 1}" if self.hidden else row["label"])
             name.setObjectName("codexProfileName")

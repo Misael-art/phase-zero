@@ -393,3 +393,43 @@ botões. Operador pode repetir criação, autenticação A/B e testes GUI de esc
 Esses aceites de login/identidade/cota continuam pendentes; limpeza não certifica
 túnel ou onboarding autenticado. CI anterior: shell-lint 0.9.0 falhou; 0.11.0 e
 lint/gitleaks passaram. Não houve merge/release nem alteração do pacote 1.22.11.
+
+
+## 9. Ícones, principal primeiro e menu Codex — 2026-10-30
+
+Base `bdbfed30`, mesma raiz/branch/PR #129. Pedido autoriza implementar e aplicar
+no host ícone indicado, variações por cor exclusiva e nomes Codex [nome] /
+Codex Web [nome]. Padrão agora primeiro; paleta suporta 64 adicionais sem RGB
+repetido, inclusive arquivados. SVG compartilhado preserva forma indicada e
+remove fundo quadriculado do raster. Sem download/runtime gráfico extra.
+
+Menu passa a duas entradas visíveis por conta; CLI/site ocultos do menu e
+acessíveis no painel/contexto. Override nativo preserva Exec/protocolos/ações
+da instalação padrão. `organize --dry-run` e botão organizador convergem para
+mesmo backend, migram cores legadas e ocultam somente AppImage Codex conhecido
+e entrada Web Tools extra. Bridge reconhece ownership do painel e snapshot
+estável atualizado evita recriar entradas antigas. Opt-out Web segue coberto,
+sem apagar atalho nativo ou contornar gates de tools/opt-in.
+
+Host tinha duas contas no momento da aplicação: novo perfil surgiu após limpeza
+da seção 8 e foi preservado. Colisão azul corrigida; quatro entradas visíveis,
+três duplicações antigas ocultadas/removidas do desktop. Sete caminhos de
+credenciais/configs idênticos; estado do bridge preservado exceto owner.
+Protocolo codex/codex-browser-sidebar já apontava ao ID primário, sem mudança.
+Cache KDE/MIME refeito, sem root, término de apps ou reinício de sessão.
+
+202 testes focados passaram (perfis/painel/bridge/Accounts, ledger/help,
+contratos de contas e inventário), incluindo limite de 64 cores adicionais,
+recusa de colisões/cores reservadas, migração legada, protocolo preservado,
+owner do guardião e opt-out Web sem afetar nativo. AST/diff também passaram.
+
+GUI PySide6 real, em HOME/XDG próprios, executou criação e organização com
+prévia/CommandRunner/QProcess; três contas mostraram ícones coloridos, padrão
+primeiro e seis entradas visíveis. Desktop files validados. Evidência privada:
+`~/.cache/phasezero-dev/evidence/codex-icons-20261030/` (receipts, capturas e
+imagem original; não publicar estado privado).
+
+Próximo passo: reabrir **PhaseZero — Contas Codex** para recarregar classe Qt
+atualizada; menu do host já foi corrigido. Homologação de login A/B/Web,
+identidade real, cotas e onboarding permanece do operador. Não houve instalação
+ou atualização do pacote de produto 1.22.11, merge ou release.

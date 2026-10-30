@@ -111,3 +111,18 @@ def test_cleanup_buttons_exclude_primary_and_dispatch_real_dry_run(panel):
     app.sendPostedEvents(None, QEvent.DeferredDelete)
     assert not widget.findChildren(QPushButton, "deleteCodexProfile")
     assert not widget.findChild(QPushButton, "clearCustomCodexProfiles").isEnabled()
+
+
+
+def test_primary_icon_first_and_picker_excludes_used_colors(panel):
+    widget, manager, a, b, app = panel
+    badges = widget.findChildren(QLabel, "codexProfileBadge")
+    assert badges[0].property("profileId") == "current"
+    assert all(not badge.pixmap().isNull() for badge in badges)
+    dialog = CodexProfileDialog(widget, unavailable={"azul", a["color"], b["color"]})
+    available = {dialog.color.itemData(i) for i in range(dialog.color.count())}
+    assert not available & {"azul", a["color"], b["color"]}
+    primary = CodexProfileDialog(widget, manager.get("current"))
+    assert primary.color.count() == 1 and not primary.color.isEnabled()
+    primary.close()
+    dialog.close()

@@ -7,6 +7,7 @@ stores. The current installation is referenced in place, never imported/copied.
 from __future__ import annotations
 
 import argparse
+import colorsys
 from contextlib import contextmanager
 import json
 import os
@@ -32,8 +33,12 @@ if __package__ in {None, ""}:
 from linux.lib.pz_hostbackup import backup_file, ledger_record
 
 COLORS = {"azul": "#2563eb", "verde": "#15803d", "roxo": "#7e22ce", "laranja": "#c2410c"}
+for _index in range(61):
+    # Fixed palette: 64 custom colours plus the reserved primary blue.
+    _rgb = colorsys.hsv_to_rgb((_index * 0.61803398875 + 0.02) % 1, 0.72, 0.78)
+    COLORS[f"cor-{_index + 5:02d}"] = '#' + ''.join(f'{round(c * 255):02x}' for c in _rgb)
 PROFILE_ID = re.compile(r"pz-[0-9a-f]{12}\Z")
-CURRENT = {"id": "current", "label": "Conta atual", "color": "azul", "slot": 0}
+CURRENT = {"id": "current", "label": "Principal", "color": "azul", "slot": 0}
 MAX_PROFILES = 64
 
 
@@ -109,7 +114,7 @@ class CodexProfiles:
         if (not isinstance(current, dict) or not isinstance(current.get("label"), str)
                 or current.get("color") not in COLORS):
             raise ProfileError("Identificação da conta atual inválida.")
-        self._current = {**CURRENT, "label": _text(current["label"]), "color": current["color"]}
+        self._current = {**CURRENT, "label": _text(current["label"])}
         rows = document.get("profiles")
         if not isinstance(rows, list) or len(rows) > MAX_PROFILES:
             raise ProfileError("Registro de perfis inválido.")
@@ -154,12 +159,17 @@ class CodexProfiles:
                 return row
         raise ProfileError("Perfil não encontrado. Atualize a lista de contas.")
 
-    def add(self, label: str, color: str = "azul") -> dict:
+    def add(self, label: str, color: str | None = None) -> dict:
         label = _text(label)
-        if color not in COLORS:
-            raise ProfileError("Cor desconhecida.")
         with self.locked():
             rows = self.rows()
+            if len(rows) >= MAX_PROFILES:
+                raise ProfileError('Limite local de 64 perfis atingido.')
+            used_colors = {'azul', *(row['color'] for row in rows)}
+            if color is None:
+                color = next((key for key in COLORS if key not in used_colors), None)
+            if color not in COLORS or color in used_colors:
+                raise ProfileError('Cor indisponível ou já usada por outro perfil. Escolha outra cor.')
             used = {row["slot"] for row in rows}
             available = sorted(set(range(1, MAX_PROFILES + 1)) - used)
             if not available:
@@ -179,6 +189,10 @@ class CodexProfiles:
             row = self._current if profile_id == "current" else next((r for r in rows if r["id"] == profile_id), None)
             if row is None:
                 raise ProfileError("Perfil não encontrado.")
+            if ((profile_id == 'current' and color != 'azul')
+                    or (profile_id != 'current' and (color == 'azul' or any(
+                        r['id'] != profile_id and r['color'] == color for r in rows)))):
+                raise ProfileError('Cor reservada ou já usada por outro perfil. Escolha outra cor.')
             row.update(label=label, color=color)
             self._save(rows)
         if not row.get("archived"):
@@ -379,7 +393,15 @@ class CodexProfiles:
     def profile_base(self, row: dict) -> Path:
         # Linux AF_UNIX paths are limited to 107 bytes. Keep runtime homes
         # shorter than the account metadata domain; never symlink credentials.
-        return self.runtime_root / row["id"]
+        return self.root / 'primary' if row['id'] == 'current' else self.runtime_root / row["id"]
+
+    def browser_home(self, row: dict) -> Path:
+        legacy = self.runtime_root / 'current/browser'
+        if row['id'] == 'current' and legacy.exists():
+            if any(p.is_symlink() for p in (legacy, *legacy.parents)):
+                raise ProfileError('Perfil de navegador redirecionado; sessão preservada.')
+            return legacy
+        return self.profile_base(row) / 'browser'
 
     @staticmethod
     def check_desktop_socket_path(codex_home: Path) -> None:
@@ -480,7 +502,7 @@ class CodexProfiles:
 
     def status(self) -> dict:
         profiles = self.rows()
-        rows = [*(row for row in reversed(profiles) if not row.get("archived")), dict(self._current),
+        rows = [dict(self._current), *(row for row in reversed(profiles) if not row.get("archived")),
                 *(row for row in reversed(profiles) if row.get("archived"))]
         # Local evidence only. Presence must never be called authenticated.
         return {"schemaVersion": 1, "profiles": [
@@ -489,6 +511,16 @@ class CodexProfiles:
              "webConfigured": self.bridge(row).paths.state.is_file()}
             for row in rows], "cliInstalled": bool(shutil.which("codex", path=self.env.get("PATH"))),
             "desktopInstalled": bool(shutil.which("codex-desktop", path=self.env.get("PATH")))}
+
+    @staticmethod
+    def icon_svg(row: dict) -> str:
+        template = (Path(__file__).with_name('assets') / 'codex-account.svg').read_text()
+        if row['id'] == 'current':
+            return template
+        rgb = tuple(int(COLORS[row['color']][i:i + 2], 16) for i in (1, 3, 5))
+        top = '#' + ''.join(f'{round(c + (255-c)*0.38):02x}' for c in rgb)
+        bottom = '#' + ''.join(f'{round(c*0.90):02x}' for c in rgb)
+        return template.replace('#aaa0ff', top).replace('#433bff', bottom)
 
     def launch(self, profile_id: str, surface: str) -> dict:
         with self.locked():
@@ -515,7 +547,7 @@ class CodexProfiles:
                             if shutil.which(name, path=self.env.get("PATH"))), None)
             if not browser:
                 raise ProfileError("Chromium/Chrome não encontrado; instale pelo painel Aplicativos.")
-            profile = self.profile_base(row) / "browser"
+            profile = self.browser_home(row)
             _private(self.runtime_root)
             _private(profile.parent)
             _private(profile)
@@ -628,7 +660,7 @@ class CodexProfiles:
         if self.desktop_dir().is_dir():
             folders.append(self.desktop_dir())
         if existing_only and not any(
-                (folder / f"phasezero-codex-{profile_id}-{surface}.desktop").is_file()
+                (folder / self.entry_name(row, surface)).is_file()
                 for folder in folders for surface in ("desktop", "cli", "web", "browser")):
             return {"installed": False, "profileId": profile_id, "count": 0}
         base = self.profile_base(row)
@@ -638,10 +670,7 @@ class CodexProfiles:
         # checkout fails visibly, never selects a different account.
         pz = Path(__file__).resolve().parents[1] / "pz"
         icon = base / "account.svg"
-        _write(icon, '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128">'
-               f'<rect width="128" height="128" rx="24" fill="{COLORS[row["color"]]}"/>'
-               f'<text x="64" y="80" text-anchor="middle" font-family="sans-serif" '
-               f'font-size="48" fill="white">C{row["slot"]}</text></svg>\n')
+        _write(icon, self.icon_svg(row))
         paths = []
         wrappers = []
         for surface, label, terminal in (("desktop", "Desktop", False), ("cli", "CLI", True),
@@ -663,27 +692,152 @@ class CodexProfiles:
             _write(wrapper, script, 0o700)
             wrappers.append(str(wrapper))
             for folder in folders:
-                target = folder / f"phasezero-codex-{profile_id}-{surface}.desktop"
+                target = folder / self.entry_name(row, surface)
+                if folder == self.desktop_dir() and surface in {'cli', 'browser'}:
+                    if target.is_file() and 'X-PhaseZero-Managed=codex-profiles' in target.read_text():
+                        backup_file(target, module='ai-codex-profiles')
+                        target.unlink()
+                    continue
                 if existing_only and (not target.is_file() or
-                        "X-PhaseZero-Managed=codex-profiles" not in target.read_text(encoding="utf-8")):
+                        not any(marker in target.read_text(encoding="utf-8") for marker in
+                                ('X-PhaseZero-Managed=codex-profiles', 'X-PhaseZero-Managed=chatgpt-web'))):
                     continue
                 label_text = row["label"].replace("\\", "\\\\")
                 content = ("[Desktop Entry]\nType=Application\n"
-                           f"Name=Codex {label} — {label_text} · C{row['slot']}\n"
+                           f"Name=Codex{' Web' if surface == 'web' else ''} {label_text}"
+                           + (f' — {label}' if surface in {'cli', 'browser'} else '') + '\n'
                            f'Exec="{_desktop_exec_path(wrapper)}"\nIcon={icon}\n'
                            f"Terminal={str(terminal).lower()}\nCategories=Development;\n"
                            + (f"StartupWMClass=phasezero-codex-{profile_id}-browser\n" if surface == "browser"
                               else "StartupWMClass=codex-desktop\n" if surface in {"desktop", "web"} else "") +
                            "X-PhaseZero-Managed=codex-profiles\n")
+                if surface in {'cli', 'browser'}:
+                    content += 'NoDisplay=true\n'
+                if surface == 'desktop':
+                    if profile_id == 'current':
+                        # Preserve packaged protocol handling, flags and actions.
+                        system = self.primary_desktop_entry()
+                        if system:
+                            content = self.patch_desktop_entry(system.read_text(), {
+                                'Name': f'Codex {label_text}', 'Icon': str(icon),
+                                'NoDisplay': 'false', 'Hidden': 'false',
+                                'X-PhaseZero-Managed': 'codex-profiles'})
+                    else:
+                        content += ('Actions=CLI;Browser;\n\n[Desktop Action CLI]\nName=Abrir CLI\n'
+                                    f'Exec="{_desktop_exec_path(base / "open-cli.sh")}"\n'
+                                    '\n[Desktop Action Browser]\nName=Abrir no navegador\n'
+                                    f'Exec="{_desktop_exec_path(base / "open-browser.sh")}"\n')
                 if target.exists():
-                    if "X-PhaseZero-Managed=codex-profiles" not in target.read_text(encoding="utf-8"):
+                    if ("X-PhaseZero-Managed=codex-profiles" not in target.read_text(encoding="utf-8")
+                            and not (profile_id == 'current' and (surface == 'desktop' or
+                                'X-PhaseZero-Managed=chatgpt-web' in target.read_text()))):
                         raise ProfileError("Atalho alterado por terceiros; arquivo preservado.")
                     backup_file(target, module="ai-codex-profiles")
                 _write(target, content, 0o755)
                 paths.append(str(target))
+        bridge = self.bridge(row)
+        if bridge.paths.state.is_file():
+            state = bridge.load_state()
+            if state.get('accountShortcuts') != 'codex-profiles' or state.get('accountShortcutsRemoved'):
+                backup_file(bridge.paths.state, module='ai-codex-profiles')
+                state['accountShortcuts'] = 'codex-profiles'
+                state.pop('accountShortcutsRemoved', None)
+                bridge.save_state(state)
+        if profile_id == 'current':
+            # Earlier account shortcuts used different IDs from the native
+            # package/bridge. Retire only those explicitly owned aliases.
+            for folder in folders:
+                for surface in ('desktop', 'web'):
+                    old = folder / f'phasezero-codex-current-{surface}.desktop'
+                    if (old.is_file() and not old.is_symlink()
+                            and 'X-PhaseZero-Managed=codex-profiles' in old.read_text()):
+                        backup_file(old, module='ai-codex-profiles')
+                        old.unlink()
         ledger_record(module="ai-codex-profiles", action="shortcuts", created=paths + wrappers + [str(icon)],
                       reversible=True)
         return {"installed": True, "profileId": profile_id, "count": len(paths)}
+
+    @staticmethod
+    def entry_name(row: dict, surface: str) -> str:
+        if row['id'] == 'current' and surface in {'desktop', 'web'}:
+            return 'codex-desktop.desktop' if surface == 'desktop' else 'phasezero-chatgpt-web.desktop'
+        return f"phasezero-codex-{row['id']}-{surface}.desktop"
+
+    def primary_desktop_entry(self) -> Path | None:
+        # XDG override keeps the existing desktop ID and taskbar/protocol links.
+        for folder in (self.data / 'applications', Path('/usr/local/share/applications'),
+                       Path('/usr/share/applications')):
+            candidate = folder / 'codex-desktop.desktop'
+            if candidate.is_file() and not candidate.is_symlink():
+                return candidate
+        return None
+
+    @staticmethod
+    def patch_desktop_entry(text: str, fields: dict[str, str]) -> str:
+        main, separator, actions = text.partition('\n[Desktop Action')
+        lines = main.splitlines()
+        for key, value in fields.items():
+            lines = [line for line in lines if not line.startswith(key + '=')
+                     and not line.startswith(key + '[')]
+            lines.append(f'{key}={value}')
+        return '\n'.join(lines) + '\n' + (separator.lstrip('\n') + actions if separator else '')
+
+    def organize(self, *, dry_run: bool = False) -> dict:
+        """Reconcile presentation through the accounts owner; never uninstall apps."""
+        if dry_run:
+            rows = self.rows()
+            return {'organized': False, 'dryRun': True, 'accounts': len(rows) + 1,
+                    'visibleLaunchersPerActiveAccount': 2, 'primaryFirst': True,
+                    'preservesApplicationsAndSessions': True}
+        with self.locked():
+            rows = self.rows()
+            used = {'azul'}
+            unavailable = {'azul', *(row['color'] for row in rows)}
+            for row in rows:
+                if row['color'] in used:
+                    row['color'] = next(key for key in COLORS if key not in unavailable)
+                    unavailable.add(row['color'])
+                used.add(row['color'])
+            if self._current['label'] == 'Conta atual':
+                self._current['label'] = 'Principal'
+            self._save(rows)
+        for row in [self.get('current'), *rows]:
+            if not row.get('archived'):
+                self.shortcuts(row['id'])
+        hidden = []
+        # Old bridge's extra Tools entry remains invocable, but not a duplicate
+        # menu item. Its desktop copy is backed up and removed.
+        for folder in (self.data / 'applications', self.desktop_dir()):
+            candidate = folder / 'phasezero-chatgpt-web-tools.desktop'
+            if candidate.is_file() and not candidate.is_symlink():
+                text = candidate.read_text()
+                if 'X-PhaseZero-Managed=chatgpt-web' in text:
+                    backup_file(candidate, module='ai-codex-profiles')
+                    if folder == self.desktop_dir():
+                        candidate.unlink()
+                    else:
+                        _write(candidate, self.patch_desktop_entry(text, {'NoDisplay': 'true'}), 0o755)
+                    hidden.append(str(candidate))
+        for candidate in (self.data / 'applications').glob('appimagekit_*.desktop'):
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            text = candidate.read_text()
+            if ('X-AppImage-Old-Name=Codex Desktop' in text
+                    and re.search(r'(?m)^Exec=[^\n]*codex-desktop[^\n]*\.AppImage(?: |$)', text)):
+                backup_file(candidate, module='ai-codex-profiles')
+                _write(candidate, self.patch_desktop_entry(text, {
+                    'NoDisplay': 'true', 'X-PhaseZero-HiddenBy': 'codex-profiles'}), 0o755)
+                hidden.append(str(candidate))
+        # Existing bridge wrappers run their stable snapshot after reboot.
+        primary_bridge = self.bridge(self.get('current'))
+        if primary_bridge.paths.manager_script.is_file():
+            for path in (primary_bridge.paths.manager_script, primary_bridge.paths.manager_secret_store,
+                         primary_bridge.paths.manager_windows_secret_store):
+                backup_file(path, module='ai-codex-profiles')
+            primary_bridge.install_managed_entrypoint()
+        ledger_record(module='ai-codex-profiles', action='organize-menu',
+                      modified=hidden, reversible=True)
+        return {'organized': True, 'accounts': len(rows) + 1, 'hiddenDuplicates': len(hidden)}
 
     def install_panel_shortcut(self) -> dict:
         """Expose this checkout's account panel without replacing the installed app."""
@@ -725,6 +879,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     sub.add_parser("install-panel-shortcut")
+    organize = sub.add_parser('organize')
+    organize.add_argument('--dry-run', action='store_true')
     remove = sub.add_parser('remove')
     selection = remove.add_mutually_exclusive_group(required=True)
     selection.add_argument('--id')
@@ -733,7 +889,7 @@ def main(argv: list[str] | None = None) -> int:
     add = sub.add_parser("add")
     add.add_argument("--label")
     add.add_argument("--metadata-stdin", action="store_true")
-    add.add_argument("--color", choices=COLORS, default="azul")
+    add.add_argument("--color", choices=COLORS)
     rename = sub.add_parser("rename")
     rename.add_argument("id")
     rename.add_argument("--label")
@@ -773,10 +929,13 @@ def main(argv: list[str] | None = None) -> int:
             result = manager.status()
         elif args.command == "install-panel-shortcut":
             result = manager.install_panel_shortcut()
+        elif args.command == 'organize':
+            result = manager.organize(dry_run=args.dry_run)
         elif args.command == 'remove':
             result = manager.remove(args.id, all_custom=args.all_custom, dry_run=args.dry_run)
         elif args.command == "add":
             result = manager.add(args.label, args.color)
+            manager.shortcuts(result['id'])
         elif args.command == "rename":
             result = manager.rename(args.id, args.label, args.color)
         elif args.command == "shortcuts":
@@ -819,7 +978,9 @@ def main(argv: list[str] | None = None) -> int:
                       "secretsRedacted": True, "identityRedacted": True}
         else:
             summary = {key: result[key] for key in ('removed', 'selected', 'dryRun',
-                       'primaryPreserved', 'primaryWebPreserved', 'remoteRevocation') if key in result}
+                       'primaryPreserved', 'primaryWebPreserved', 'remoteRevocation',
+                       'accounts', 'organized', 'hiddenDuplicates', 'visibleLaunchersPerActiveAccount',
+                       'primaryFirst', 'preservesApplicationsAndSessions') if key in result}
             if 'runtimeRemaining' in result:
                 summary['runtimeRemainingCount'] = len(result['runtimeRemaining'])
             result = {"ok": result.get('ok', True), "operation": args.command,

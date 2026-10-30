@@ -2312,6 +2312,19 @@ class Bridge:
                 for mode, name in self.paths.shortcut_entries.items()]
 
     def shortcuts_status(self) -> dict[str, Any]:
+        owner_state = self.load_state()
+        if owner_state.get('accountShortcuts') == 'codex-profiles':
+            name = (f'phasezero-codex-{self.paths.instance}-web.desktop' if self.paths.instance
+                    else 'phasezero-chatgpt-web.desktop')
+            entry = self.paths.applications / name
+            try:
+                intact = not entry.is_symlink() and 'X-PhaseZero-Managed=codex-profiles' in entry.read_text()
+            except OSError:
+                intact = False
+            return {'state': ('off' if owner_state.get('accountShortcutsRemoved') else
+                              'installed' if intact else 'inconsistent'), 'owner': 'codex-profiles',
+                    'entries': [str(entry)] if intact else [],
+                    'guidance': 'Atalhos de conta gerenciados pelo painel Contas Codex.'}
         record = self.load_state().get("shortcuts")
         desktop_copy = bool((record or {}).get("desktopCopy", True))
         expected = self.shortcut_files(desktop_copy)
@@ -2335,6 +2348,11 @@ class Bridge:
 
     def shortcuts_install(self, desktop_copy: bool = True) -> dict[str, Any]:
         state = self.load_state()
+        if state.get('accountShortcuts') == 'codex-profiles':
+            status = self.shortcuts_status()
+            if status['state'] != 'installed':
+                raise BridgeError('Recrie atalhos pelo painel Contas Codex.', 'account-shortcut-owner')
+            return status
         self.require_opt_in(state)
         if self.package_state().get("unpacked") != "verified":
             raise BridgeError("conclua `setup` antes de criar os atalhos", "install-unverified")
@@ -2366,7 +2384,7 @@ class Bridge:
         Never overwrites an entry someone else changed, and never comes back
         after `shortcuts remove` (recorded as `shortcutsRemoved`).
         """
-        if self.paths.instance:
+        if self.paths.instance or self.load_state().get('accountShortcuts') == 'codex-profiles':
             # The account panel owns named/coloured shortcuts for managed profiles.
             return False
         state = self.load_state()
@@ -2389,6 +2407,17 @@ class Bridge:
 
     def shortcuts_remove(self) -> dict[str, Any]:
         state = self.load_state()
+        if state.get('accountShortcuts') == 'codex-profiles':
+            name = (f'phasezero-codex-{self.paths.instance}-web.desktop' if self.paths.instance
+                    else 'phasezero-chatgpt-web.desktop')
+            for folder in (self.paths.applications, self.user_desktop_dir()):
+                entry = folder / name
+                if (entry.is_file() and not entry.is_symlink()
+                        and 'X-PhaseZero-Managed=codex-profiles' in entry.read_text()):
+                    entry.unlink()
+            state['accountShortcutsRemoved'] = True
+            self.save_state(state)
+            return self.shortcuts_status()
         for path, mode in self.shortcut_files(True):
             try:
                 ours = "X-PhaseZero-Managed=chatgpt-web" in path.read_text(encoding="utf-8")
