@@ -109,6 +109,52 @@ def test_manual_input_failure_is_reported_without_broad_recovery():
     assert result["ok"] is False and result["errors"] == ["device unavailable"]
 
 
+def test_touch_auth_requires_visible_keyboard_before_root_and_restores_mode(tmp_path):
+    runtime={"available":"true","mode":"1","visible":"false","activeClientSupportsTextInput":"true"}
+    calls=[]
+    def run(*args, **kwargs):
+        calls.append(args)
+        if args[-2:]==("mode","2"): runtime["mode"]="2"
+        if args[-2:]==("mode","1"): runtime["mode"]="1"
+        if args[-1].endswith("forceActivate"): runtime["visible"]="true"
+        return subprocess.CompletedProcess(args,0,"","")
+    def privileged(args, **kwargs):
+        assert runtime["mode"]=="2" and runtime["visible"]=="true"
+        assert desktop.keyboard_restore()==[], "Watcher must yield instead of hiding the auth keyboard"
+        runtime["visible"]="false"  # Authentication dialog takes focus.
+        end=time.monotonic()+2
+        while runtime["visible"]!="true" and time.monotonic()<end: time.sleep(.02)
+        assert runtime["visible"]=="true"
+        return subprocess.CompletedProcess(args,126,"","Autenticação cancelada")
+    with patch.object(desktop,"state_dir",return_value=tmp_path), patch.object(desktop,"run",run), \
+         patch.object(desktop,"properties",side_effect=lambda *args:dict(runtime)), \
+         patch.object(desktop.subprocess,"run",privileged):
+        result=desktop.recover_touch()
+    assert not result["ok"] and "cancelada" in result["errors"][0]
+    assert runtime["mode"]=="1"
+    assert sum(call[-1].endswith("forceActivate") for call in calls)>=2
+
+
+def test_unusable_virtual_keyboard_never_requests_authentication(tmp_path):
+    with patch.object(desktop,"state_dir",return_value=tmp_path), \
+         patch.object(desktop,"properties",return_value={"available":"false","mode":"1"}), \
+         patch.object(desktop.subprocess,"run",side_effect=AssertionError("must not request root")):
+        result=desktop.recover_touch()
+    assert not result["ok"] and "autenticação não solicitada" in result["errors"][0]
+
+
+def test_touch_timeout_keeps_uncertainty_and_restores_temporary_keyboard(tmp_path):
+    runtime={"available":"true","mode":"1","visible":"true"}
+    def run(*args, **kwargs):
+        if args[-2]=="mode": runtime["mode"]=args[-1]
+        return subprocess.CompletedProcess(args,0,"","")
+    with patch.object(desktop,"state_dir",return_value=tmp_path), patch.object(desktop,"run",run), \
+         patch.object(desktop,"properties",side_effect=lambda *args:dict(runtime)), \
+         patch.object(desktop.subprocess,"run",side_effect=subprocess.TimeoutExpired("helper",110)):
+        with pytest.raises(subprocess.TimeoutExpired): desktop.recover_touch()
+    assert runtime["mode"]=="1"
+
+
 def test_audio_profile_and_preferences_restored_by_stable_names_not_numeric_ids():
     calls = []
     card = {"name": "alsa_card.deck", "active_profile": "off", "profiles": {"HiFi": {"available": True}}}

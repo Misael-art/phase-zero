@@ -7,6 +7,7 @@ frontend's existing lease is the authority for temporary controller ownership.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import fcntl
 import json
 import os
@@ -15,6 +16,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 UNIT = "phasezero-input-restore.service"
@@ -209,7 +211,35 @@ def protect_input():
     return errors
 
 
+@contextmanager
+def keyboard_mode_lock(*, wait=False):
+    """One writer for normal policy and explicit authentication windows."""
+    directory = state_dir()
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = directory / "keyboard-mode.lock"
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(fd)
+        if info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise RuntimeError("Trava do teclado sem propriedade privada")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+        except BlockingIOError:
+            yield False
+        else:
+            yield True
+    finally:
+        os.close(fd)
+
+
 def keyboard_restore():
+    with keyboard_mode_lock() as acquired:
+        if not acquired:
+            return []  # Explicit user authentication owns the temporary mode.
+        return _keyboard_restore()
+
+
+def _keyboard_restore():
     errors = []
     # NonMouseInput: automatic opening follows touchscreen input, never a
     # physical mouse/trackpad. Explicit keyboard shortcuts remain available.
@@ -251,6 +281,61 @@ def reconcile_input():
     """
     errors = protect_input()
     return {"schema_version": 1, "ok": not errors, "scope": "input", "errors": errors}
+
+
+def recover_touch(*, persist=False):
+    """Keep a verified native keyboard available across the polkit focus change.
+
+    No password enters this process. KWin's input method owns text delivery.
+    Root is requested only after the input panel is confirmed visible.
+    """
+    def result(ok, *errors):
+        return {"schema_version": 1, "scope": "touch", "ok": ok, "errors": list(errors)}
+    with keyboard_mode_lock() as acquired:
+        if not acquired:
+            return result(False, "Outra abertura de teclado está em andamento; autenticação não solicitada")
+        props = properties("/VirtualKeyboard", "org.kde.kwin.VirtualKeyboard")
+        mode = props.get("mode")
+        if props.get("available") != "true" or mode not in ("0", "1", "2"):
+            return result(False, "Teclado virtual indisponível; autenticação não solicitada. Conecte uma entrada utilizável")
+        restore = "1" if mode == "0" else mode
+        stopped = threading.Event()
+        failures = []
+        def set_mode(value):
+            return run("qdbus6", "org.kde.KWin", "/VirtualKeyboard", "org.freedesktop.DBus.Properties.Set",
+                       "org.kde.kwin.VirtualKeyboard", "mode", value).returncode == 0
+        def activate():
+            return run("qdbus6", "org.kde.KWin", "/VirtualKeyboard",
+                       "org.kde.kwin.VirtualKeyboard.forceActivate").returncode == 0
+        def keep_visible():
+            while not stopped.wait(.5):
+                current = properties("/VirtualKeyboard", "org.kde.kwin.VirtualKeyboard")
+                if current.get("mode") != "2":
+                    failures.append("Outro responsável alterou o modo do teclado durante a autenticação")
+                    return  # Do not fight an unknown writer.
+                if current.get("activeClientSupportsTextInput") == "true" and current.get("visible") == "false":
+                    activate()
+        watcher = None
+        try:
+            if not set_mode("2") or not activate():
+                return result(False, "Não foi possível abrir teclado; autenticação não solicitada")
+            if properties("/VirtualKeyboard", "org.kde.kwin.VirtualKeyboard").get("visible") != "true":
+                return result(False, "Teclado não ficou visível; autenticação não solicitada. Abra um campo de texto")
+            watcher = threading.Thread(target=keep_visible, daemon=True)
+            watcher.start()
+            answer = subprocess.run(["bash", str(HERE.parent / "repairs/reparo-entrada.sh"),
+                                     "--persist" if persist else "--reset-touch-bus"],
+                                    capture_output=True, text=True, timeout=110,
+                                    stdin=subprocess.DEVNULL, env={**os.environ, "LC_ALL": "C"})
+            if answer.returncode:
+                return result(False, (answer.stderr.strip() or answer.stdout.strip() or "Reparo não concluído")[-500:])
+            return result(not failures, *failures)
+        finally:
+            stopped.set()
+            if watcher:
+                watcher.join(timeout=10)
+            if not set_mode(restore):
+                raise RuntimeError("Modo do teclado não restaurado; verificar antes de repetir")
 
 
 def health():
@@ -360,7 +445,7 @@ def watch():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("lease", "health", "reconcile", "reconcile-input", "install", "watch", "capture"))
+    parser.add_argument("action", choices=("lease", "health", "reconcile", "reconcile-input", "recover-touch", "persist-touch", "install", "watch", "capture"))
     action = parser.parse_args().action
     try:
         if action == "watch":
@@ -368,6 +453,7 @@ def main():
             return 0
         actions = {"lease": lambda: {**lease_status(), "externalGameActive": other_game_active()}, "health": health,
                    "reconcile-input": reconcile_input, "install": install,
+                   "recover-touch": recover_touch, "persist-touch": lambda: recover_touch(persist=True),
                    "reconcile": reconcile, "capture": capture_preferences}
         value = actions[action]()
         print(json.dumps(value, ensure_ascii=False))

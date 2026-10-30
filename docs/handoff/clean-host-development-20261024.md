@@ -2,6 +2,19 @@
 
 ## Integração manual de entrada — 30/10/2026
 
+Correção posterior após teste do operador sem dock: pedir senha sem teclado
+utilizável bloqueava o reparo. `recover-touch`/`persist-touch` agora só pedem
+privilégio após confirmar o painel nativo visível. Mantêm modo 2 temporário
+durante a autenticação, reabrem o painel ao mudar o foco para outro cliente de
+texto e restauram o modo anterior (0 retorna a 1). Não recebem nem registram
+senha. `keyboard-mode.lock` serializa essa janela explícita com a política
+normal; o watcher cede enquanto a trava está ocupada. Não há mudança permanente
+para abertura automática por mouse/trackpad. Timeout continua incerto.
+`tests/test_desktop_session.py`: **22 passed em 7,57 s**, ambiente compatível
+isolado, incluindo ausência de teclado sem root, troca de foco, cancelamento e
+timeout com restauração. Não certifica digitação na autenticação física sem dock.
+O serviço residente precisa carregar essa revisão para respeitar a trava.
+
 Base `bdbfed30bf5bef0a523d8246ff5057e2b24829be`, mesma branch/PR #129.
 O incidente do Fôlego exigiu separar solicitação manual de entrada da
 reconciliação geral: `desktop_session.py reconcile-input` executa somente
