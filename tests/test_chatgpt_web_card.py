@@ -79,6 +79,7 @@ def test_bridge_card_offers_the_everyday_commands_once_opted_in(qapp, monkeypatc
         "chatgptWebToolsOn": ("ai", "chatgpt-web", "tools", "enable"),
         "chatgptWebToolsOff": ("ai", "chatgpt-web", "tools", "disable"),
         "chatgptWebSmoke": ("ai", "chatgpt-web", "smoke"),
+        "chatgptWebUpdate": ("ai", "chatgpt-web", "update"),
         "chatgptWebDisable": ("ai", "chatgpt-web", "disable"),
     }
     assert set(buttons) == set(expected)
@@ -89,7 +90,7 @@ def test_bridge_card_offers_the_everyday_commands_once_opted_in(qapp, monkeypatc
     by_name = {name: requested[index] for index, name in enumerate(expected)}
     assert by_name["chatgptWebOpen"].mutable is False
     assert by_name["chatgptWebTools"].mutable is False
-    for name in ("chatgptWebSetup", "chatgptWebSmoke", "chatgptWebDisable",
+    for name in ("chatgptWebSetup", "chatgptWebSmoke", "chatgptWebDisable", "chatgptWebUpdate",
                  "chatgptWebToolsOn", "chatgptWebToolsOff"):
         action = by_name[name]
         assert action.mutable is True and action.impact

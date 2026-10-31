@@ -141,6 +141,11 @@ FULL_RUNTIME_ACTION = (
     "Mantenha browser-only. Atualize o pin para um runtime 6.1.10 ou mais novo; prove "
     "leitura, recusa de escrita e rollback reais."
 )
+# Snapshot of the audited pin. A user-requested `update` records a newer
+# release in pin.json; every Paths() starts from this snapshot and overlays it.
+AUDITED_PIN: dict[str, Any] = json.loads(json.dumps(PIN))
+PIN_OVERRIDE_FILE = "pin.json"
+RELEASE_VERSION = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
 TUNNEL_READY_WAIT_SECONDS = 120
 CONNECTOR_CHECK_TIMEOUT = 30
 
@@ -421,6 +426,30 @@ def sync_desktop_user_dirs(home: Path, source_config: Path, target_config: Path,
     private_dir(target_config)
     atomic_write(target, text.encode())
     return True
+
+
+def load_pin(shared_root: Path) -> None:
+    """Reset PIN to the audited pin, then apply a user-approved update if recorded."""
+    PIN.clear()
+    PIN.update(json.loads(json.dumps(AUDITED_PIN)))
+    try:
+        override = json.loads((shared_root / PIN_OVERRIDE_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(override, dict):
+        return
+    version = str(override.get("version", ""))
+    asset = (override.get("assets") or {}).get("linux-x86_64")
+    if (not RELEASE_VERSION.fullmatch(version) or not isinstance(asset, dict)
+            or version_tuple(version) <= version_tuple(AUDITED_PIN["version"])
+            or not re.fullmatch(r"[0-9a-f]{64}", str(asset.get("sha256", "")))
+            or not isinstance(asset.get("size"), int)
+            or not re.fullmatch(r"codex-web-gpt-[0-9.]+-linux-x64\.AppImage", str(asset.get("name", "")))):
+        return
+    PIN.update({"version": version, "tag": f"v{version}", "tagObject": None,
+                "commit": override.get("commit"), "auditedAt": None,
+                "userApprovedAt": override.get("userApprovedAt"),
+                "assets": {"linux-x86_64": {k: asset[k] for k in ("name", "size", "sha256")}}})
 
 
 def now() -> dt.datetime:
@@ -734,6 +763,15 @@ class Runner:
             out.flush()
             os.fsync(out.fileno())
 
+    def fetch_text(self, url: str, limit: int = 2 * 1024 * 1024) -> str:
+        request = urllib.request.Request(url, headers={"User-Agent": "PhaseZero",
+                                                       "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = response.read(limit + 1)
+        if len(data) > limit:
+            raise BridgeError("resposta grande demais", "update-check-failed")
+        return data.decode("utf-8")
+
     def spawn(self, args: list[str], env: dict[str, str]) -> int:
         """Start a detached GUI process; returns its PID."""
         process = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
@@ -1004,6 +1042,10 @@ class Paths:
         if instance and self.root.resolve() != expected_root.resolve():
             raise BridgeError("Raiz Web não corresponde ao ID da conta", "instance-root")
         self.state = self.root / "state.json"
+        # One pin per account domain: dedicated accounts reuse the main package.
+        self.pin_root = data / "phasezero/chatgpt-web" if instance else self.root
+        self.pin_file = self.pin_root / PIN_OVERRIDE_FILE
+        load_pin(self.pin_root)
         self.packages = self.root / "packages" / PIN["version"]
         self.core_home = self.root / "core-home"
         self.launcher_data = self.root / "launcher-data"
@@ -1625,6 +1667,103 @@ class Bridge:
         self.save_state(state)
         return {"install": "unpacked", "tree": state["unpacked"]["tree"], "desktopEntry": False,
                 "autostart": False, "routeChanged": False}
+
+    # ---- update ----------------------------------------------------------
+
+    def latest_release(self) -> dict[str, Any]:
+        """Read the newest upstream release; only runs when the user asks to update."""
+        base = f"https://api.github.com/repos/{AUDITED_PIN['repository']}/releases/latest"
+        try:
+            release = json.loads(self.runner.fetch_text(base))
+        except (OSError, ValueError, urllib.error.URLError) as error:
+            raise BridgeError(f"não foi possível consultar a versão nova: {error}",
+                              "update-check-failed") from None
+        tag = str(release.get("tag_name", "")) if isinstance(release, dict) else ""
+        if not RELEASE_VERSION.fullmatch(tag) or release.get("draft") or release.get("prerelease"):
+            raise BridgeError(f"release mais recente inválida: {tag or '?'}", "update-check-failed")
+        version = tag.lstrip("v")
+        name = f"codex-web-gpt-{version}-linux-x64.AppImage"
+        assets = {item.get("name"): item for item in release.get("assets") or []
+                  if isinstance(item, dict)}
+        asset = assets.get(name)
+        checksums = assets.get("checksums.txt")
+        digest = str((asset or {}).get("digest") or "")
+        if not asset or not digest.startswith("sha256:") or not checksums:
+            raise BridgeError(f"release {tag} sem AppImage Linux com SHA-256 publicado",
+                              "update-unverifiable")
+        sha = digest.split(":", 1)[1].lower()
+        try:
+            listed = self.runner.fetch_text(str(checksums["browser_download_url"]), 64 * 1024)
+        except (OSError, ValueError, KeyError, urllib.error.URLError) as error:
+            raise BridgeError(f"checksums.txt indisponível: {error}", "update-unverifiable") from None
+        if not any(len(line.split()) >= 2 and line.split()[0].lower() == sha
+                   and line.split()[1].lstrip("*") == name for line in listed.splitlines()):
+            raise BridgeError("SHA-256 da API difere do checksums.txt; atualização recusada",
+                              "update-unverifiable")
+        return {"version": version, "commit": release.get("target_commitish"),
+                "assets": {"linux-x86_64": {"name": name, "size": int(asset["size"]),
+                                            "sha256": sha}}}
+
+    def update_check(self) -> dict[str, Any]:
+        self.require_opt_in(self.load_state())
+        latest = self.latest_release()
+        current = PIN["version"]
+        return {"current": current, "latest": latest["version"],
+                "available": version_tuple(latest["version"]) > version_tuple(current)}
+
+    def _switch_pin(self, data: bytes | None) -> None:
+        if data is None:
+            self.paths.pin_file.unlink(missing_ok=True)
+        else:
+            private_dir(self.paths.pin_root)
+            atomic_write(self.paths.pin_file, data)
+        self.paths = Paths(self.env)
+
+    def update(self, report: Callable[[str, str], None] = lambda *_: None) -> dict[str, Any]:
+        """Move to the newest upstream release, verified by hash; rolls back on failure."""
+        if self.paths.instance:
+            raise BridgeError("atualize pela conta principal; as contas dedicadas reutilizam o pacote",
+                              "update-instance")
+        self.require_opt_in(self.load_state())
+        previous_version = PIN["version"]
+        latest = self.latest_release()
+        if version_tuple(latest["version"]) <= version_tuple(previous_version):
+            return {"update": "current", "version": previous_version}
+        report("versão", f"{previous_version} → {latest['version']}")
+        try:
+            previous = self.paths.pin_file.read_bytes()
+        except FileNotFoundError:
+            previous = None
+        latest["userApprovedAt"] = iso(self.clock())
+        self._switch_pin((json.dumps(latest, indent=2, sort_keys=True) + "\n").encode())
+        try:
+            fetched = self.fetch()
+        except BridgeError:
+            self._switch_pin(previous)
+            raise
+        report("pacote", "baixado e conferido (SHA-256 da release)")
+        was_active = self.launcher_active()
+        if was_active:
+            try:
+                self.disable()
+            except BridgeError:
+                self._switch_pin(previous)
+                raise
+            report("launcher", "versão anterior encerrada")
+        try:
+            self.install()
+        except BridgeError:
+            self._switch_pin(previous)
+            if was_active:
+                self.setup(login_wait=0)
+            raise
+        report("instalação", f"{latest['version']} desempacotada")
+        result: dict[str, Any] = {"update": "applied", "from": previous_version,
+                                  "to": latest["version"], "downloaded": fetched["downloaded"],
+                                  "note": "hash confere com a release; não comprova identidade do publicador"}
+        if was_active:
+            result["setup"] = self.setup(report, login_wait=0)
+        return result
 
     # ---- launcher --------------------------------------------------------
 
@@ -3438,6 +3577,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("plan", "status", "fetch", "install", "launch", "stop", "disable", "opt-out",
                  "repair", "adopt-session", "smoke"):
         sub.add_parser(name)
+    update = sub.add_parser("update", help="atualiza o app para a release mais nova (hash conferido)")
+    update.add_argument("--check", action="store_true", help="só consulta, não altera nada")
     desktop = sub.add_parser("desktop", help="Codex Desktop no perfil dedicado")
     desktop.add_argument("--mode", choices=("auto", "web", "tools"), default="auto",
                          help="auto segue o modo do launcher (Web ou com ferramentas)")
@@ -3507,6 +3648,12 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
         return bridge.fetch()
     if command == "install":
         return bridge.install()
+    if command == "update":
+        if args.check:
+            return bridge.update_check()
+        if args.json:
+            return bridge.update()
+        return bridge.update(lambda step, detail: print(f"• {step}: {detail}", flush=True))
     if command == "launch":
         return bridge.launch()
     if command == "smoke":

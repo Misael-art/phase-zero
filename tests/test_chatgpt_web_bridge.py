@@ -1656,3 +1656,77 @@ def test_shortcuts_come_back_unless_the_user_removed_them(host, monkeypatch):
     assert bridge.restore_shortcuts() is False
     assert bridge.shortcuts_install(desktop_copy=False)["state"] == "installed"
     assert "shortcutsRemoved" not in bridge.load_state()
+
+
+def elf_payload() -> bytes:
+    header = bytearray(64)
+    header[:4] = b"\x7fELF"
+    header[4], header[5] = 2, 1
+    struct.pack_into("<Q", header, 0x28, 1024)
+    struct.pack_into("<HH", header, 0x3A, 64, 10)
+    return bytes(header)
+
+
+def serve_release(runner: FakeRunner, version: str, payload: bytes,
+                  checksum: str | None = None) -> str:
+    name = f"codex-web-gpt-{version}-linux-x64.AppImage"
+    sha = bridge_module.sha256_bytes(payload)
+    release = {"tag_name": f"v{version}", "target_commitish": "main", "assets": [
+        {"name": name, "size": len(payload), "digest": f"sha256:{sha}"},
+        {"name": "checksums.txt", "browser_download_url": "https://example.invalid/sums"}]}
+    pages = {"releases/latest": json.dumps(release),
+             "sums": f"{checksum or sha}  {name}\n"}
+    runner.fetch_text = lambda url, limit=0: next(v for k, v in pages.items() if url.endswith(k))
+    return name
+
+
+def test_update_reports_current_when_pin_is_newest(host):
+    bridge, runner, _ = host
+    serve_release(runner, PINNED, elf_payload())
+    assert bridge.update_check()["available"] is False
+    assert bridge.update() == {"update": "current", "version": PINNED}
+    assert not bridge.paths.pin_file.exists()
+
+
+def test_update_downloads_verifies_and_switches_pin(host, monkeypatch):
+    bridge, runner, _ = host
+    clean_preflight(monkeypatch, bridge)
+    payload = elf_payload()
+    name = serve_release(runner, "9.0.0", payload)
+    runner.download_bytes = payload
+    try:
+        assert bridge.update_check() == {"current": PINNED, "latest": "9.0.0", "available": True}
+        result = bridge.update()
+        assert result["update"] == "applied" and result["to"] == "9.0.0"
+        assert runner.downloads[-1].endswith(f"/v9.0.0/{name}")
+        assert bridge.paths.packages.name == "9.0.0"
+        assert (bridge.paths.app / bridge_module.LAUNCHER_BINARY).is_file()
+        # A fresh process keeps the approved version.
+        again = Bridge(env=bridge.env, runner=runner)
+        assert bridge_module.PIN["version"] == "9.0.0"
+        assert again.package_state()["state"] == "verified"
+    finally:
+        bridge.paths.pin_file.unlink(missing_ok=True)
+        bridge_module.load_pin(bridge.paths.pin_root)
+    assert bridge_module.PIN == bridge_module.AUDITED_PIN
+
+
+def test_update_refuses_checksum_mismatch_and_keeps_old_pin(host, monkeypatch):
+    bridge, runner, _ = host
+    clean_preflight(monkeypatch, bridge)
+    serve_release(runner, "9.0.0", elf_payload(), checksum="0" * 64)
+    with pytest.raises(BridgeError) as error:
+        bridge.update()
+    assert error.value.code == "update-unverifiable"
+    assert not bridge.paths.pin_file.exists() and bridge_module.PIN["version"] == PINNED
+
+
+def test_update_rolls_back_pin_when_download_fails(host, monkeypatch):
+    bridge, runner, _ = host
+    clean_preflight(monkeypatch, bridge)
+    serve_release(runner, "9.0.0", elf_payload())
+    runner.download_bytes = b"tampered"
+    with pytest.raises(BridgeError):
+        bridge.update()
+    assert not bridge.paths.pin_file.exists() and bridge_module.PIN["version"] == PINNED
+    assert bridge.paths.packages.name == PINNED
