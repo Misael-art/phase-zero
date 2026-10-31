@@ -444,18 +444,25 @@ def account_appearance_text(text: str, accent: str) -> str:
     if not isinstance(desktop, dict):
         raise BridgeError('Tabela desktop inválida; configuração preservada.', 'appearance-config')
     desktop = dict(desktop)
-    for variant, contrast, ink, surface, added, removed, skill in (
-        ('Light', 45, '#1a1c1f', '#ffffff', '#00a240', '#ba2623', '#924ff7'),
-        ('Dark', 60, '#ffffff', '#181818', '#40c977', '#fa423e', '#ad7bf9'),
+    rgb = tuple(int(accent[index:index + 2], 16) for index in (1, 3, 5))
+    for variant, contrast, ink, added, removed, skill in (
+        ('Light', 45, '#1a1c1f', '#00a240', '#ba2623', '#924ff7'),
+        ('Dark', 60, '#ffffff', '#40c977', '#fa423e', '#ad7bf9'),
     ):
         key = f'appearance{variant}ChromeTheme'
         existing = desktop.get(key, {})
         if not isinstance(existing, dict):
             raise BridgeError('Tema de Aparência inválido; configuração preservada.', 'appearance-config')
-        desktop[key] = {'contrast': contrast, 'fonts': {}, 'ink': ink, 'surface': surface,
+        # Accent alone leaves most of the window neutral. Tint the surface too,
+        # keeping the native light/dark mode and readable default text colours.
+        base = 255 if variant == 'Light' else 24
+        weight = 0.15 if variant == 'Light' else 0.40
+        tinted_surface = '#' + ''.join(f'{round(base * (1 - weight) + value * weight):02x}'
+                                       for value in rgb)
+        desktop[key] = {'contrast': contrast, 'fonts': {}, 'ink': ink,
                         'opaqueWindows': False,
                         'semanticColors': {'diffAdded': added, 'diffRemoved': removed, 'skill': skill},
-                        **existing, 'accent': accent}
+                        **existing, 'accent': accent, 'surface': tinted_surface}
     expected = {**before, 'desktop': desktop}
     if before == expected:
         return text

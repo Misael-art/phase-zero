@@ -3355,25 +3355,26 @@ com GUI real e desktop-file-validate. Evidência privada:
 
 ### Aparência pela cor da conta — 2026-10-31
 
-Cor do perfil agora também alimenta **Aparência → destaque** nos temas claro e
+Cor do perfil alimenta **Aparência → destaque e fundo** nos temas claro e
 escuro do Codex Desktop nativo/Web. Instalação `current` e seu Web padrão não
 são escritos, incluindo preferências já existentes. Fontes, modo light/dark/
-system, fundo, contraste, cores semânticas e configurações fora de Aparência
-são preservados. Temas ainda inexistentes partem dos defaults do pacote local;
-só o destaque recebe a cor reservada à conta.
+system, contraste, cores semânticas e configurações fora de Aparência são
+preservados. Temas ainda inexistentes partem dos defaults do pacote local.
+Destaque recebe cor reservada à conta; fundo recebe mistura dessa cor com
+base clara/escura, preservando contraste do texto padrão.
 
 Contrato confirmado na documentação oficial de Aparência
 (https://learn.chatgpt.com/docs/reference/settings#appearance) e no bundle do
 pacote instalado: chaves `desktop.appearanceLightChromeTheme` e
-`desktop.appearanceDarkChromeTheme`, campo `accent`. Schema TOML usa objetos
+`desktop.appearanceDarkChromeTheme`, campos `accent` e `surface`. Schema TOML usa objetos
 inline/nested e omite fontes nullable ausentes. Nenhuma preferência é obtida
 por cópia da instalação padrão.
 
 Helper único `account_appearance_text` / `sync_account_appearance` no bridge,
 reutilizado por `CodexProfiles.sync_appearance`. Editor reescreve somente tabelas
 `desktop`, valida TOML antes/depois e exige igualdade semântica de tudo fora dos
-dois temas. Preserva valores existentes de cada tema, alterando apenas accent;
-preenche defaults faltantes. Backup antes de gravar, idempotência e comparação
+dois temas. Preserva valores existentes de cada tema, alterando accent e
+surface; preenche defaults faltantes. Backup antes de gravar, idempotência e comparação
 do conteúdo detectam edições concorrentes. TOML inválido, tipo inesperado ou
 sintaxe ambígua que não passe a validação são recusados sem sobrescrever.
 
@@ -3392,3 +3393,28 @@ Web das contas adicionais ainda não preparado. Hashes dos arquivos primários,
 auth e semântica fora de Aparência permaneceram iguais. Nenhum app reiniciado;
 janelas já abertas podem precisar ser reabertas para reler preferências.
 Evidência privada: `~/.cache/phasezero-dev/evidence/codex-appearance-20261031/`.
+
+
+### Correção do fundo neutro — 2026-10-31
+
+Relato HMAIL expôs aceite visual incompleto: destaque verde em config/read não
+comprovava janela verde. Política anterior mantinha `surface` cinza/branco.
+Helper compartilhado agora tinge fundo: 40% da cor sobre `#181818` no escuro e
+15% sobre branco no claro. Verde produz `#174227` / `#dcece2`. Mistura clara
+inicial de 12% colidia em dois pares da paleta; regressão corrigida para 15%.
+Teste cobre 65 fundos distintos em cada modo e contraste padrão ≥ 4,5:1.
+Fontes e cores de texto personalizadas permanecem escolhas do usuário; teste
+de contraste cobre defaults, não certifica overrides arbitrários.
+
+Validação desta correção: 45 testes de perfis + 93 de bridge/UI passaram.
+Aplicativo instalado executado em HOME/XDG anônimos e Xvfb próprios: captura
+nativa mostrou tela de login com fundo verde, amostras RGB `#174227`. CDP
+expôs apenas páginas auxiliares, portanto screenshot do display próprio foi
+usado como prova visual; não houve login nem inferência. Fixture encerrada.
+
+Host: configurações de ambas as contas adicionais e snapshots existentes do
+bridge atualizados com backup. Configuração principal e credenciais comparadas
+por hash, iguais. Janela HMAIL estava executando outra tarefa: não foi encerrada;
+recarga visual dessa janela permanece pendente até reabertura após a tarefa.
+Prova anônima não homologa sessão autenticada ou recarga ao vivo.
+Evidência privada: `~/.cache/phasezero-dev/evidence/codex-green-window-20261031/`.

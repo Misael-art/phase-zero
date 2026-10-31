@@ -797,6 +797,8 @@ def test_native_and_web_appearance_follow_color_preserving_primary_and_other_pre
         config = tomllib.loads(path.read_text())
         assert config["desktop"]["appearanceLightChromeTheme"]["accent"] == "#15803d"
         assert config["desktop"]["appearanceDarkChromeTheme"]["accent"] == "#15803d"
+        assert config["desktop"]["appearanceDarkChromeTheme"]["surface"] == "#174227"
+        assert config["desktop"]["appearanceLightChromeTheme"]["surface"] == "#dcece2"
     # The helper also accepts the nested-table format produced by the app.
     from linux.ai.chatgpt_web_bridge import sync_account_appearance
     custom = '[desktop]\nappearanceTheme="light"\nsansFontSize=19\n[desktop.appearanceDarkChromeTheme]\nsurface="#202428"\n'
@@ -804,7 +806,7 @@ def test_native_and_web_appearance_follow_color_preserving_primary_and_other_pre
     manager.rename(row["id"], "A", "laranja")
     after = tomllib.loads(native.read_text())["desktop"]
     assert after["appearanceTheme"] == "light" and after["sansFontSize"] == 19
-    assert after["appearanceDarkChromeTheme"]["surface"] == "#202428"
+    assert after["appearanceDarkChromeTheme"]["surface"] == "#5c2813"
     assert after["appearanceDarkChromeTheme"]["accent"] == "#c2410c"
     assert tomllib.loads(bridge.paths.codex_config.read_text())["desktop"]["appearanceLightChromeTheme"]["accent"] == "#c2410c"
     assert primary.read_bytes() == primary_before
@@ -829,6 +831,28 @@ def test_appearance_preserves_unrelated_toml_semantics_and_is_idempotent():
     assert "# retain this comment" in result
     assert after["desktop"]["appearanceLightChromeTheme"]["fonts"]["ui"] == "Inter"
     assert account_appearance_text(result, "#15803d") == result
+
+
+def test_account_surfaces_remain_distinct_and_default_text_readable():
+    import tomllib
+    from linux.ai.chatgpt_web_bridge import account_appearance_text
+    from linux.ai.codex_profiles import COLORS
+
+    def luminance(colour):
+        channels = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+                  for c in channels]
+        return sum(c * weight for c, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+    surfaces = {"Light": set(), "Dark": set()}
+    for colour in COLORS.values():
+        desktop = tomllib.loads(account_appearance_text("", colour))["desktop"]
+        for variant in surfaces:
+            theme = desktop[f"appearance{variant}ChromeTheme"]
+            surface, ink = luminance(theme["surface"]), luminance(theme["ink"])
+            assert (max(surface, ink) + 0.05) / (min(surface, ink) + 0.05) >= 4.5
+            surfaces[variant].add(theme["surface"])
+    assert all(len(values) == len(COLORS) for values in surfaces.values())
 
 
 def test_appearance_rejects_corruption_and_ambiguous_syntax_without_writes(manager):

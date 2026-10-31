@@ -496,3 +496,25 @@ demais checks ainda executavam durante a coleta. Este complemento só registra
 execução real e não muda código. Árvore de código permaneceu limpa antes da
 edição documental. Próximo passo: autenticar a conta sem login pelo fluxo do
 aplicativo; PR #129 continua draft, sem merge/release.
+
+
+### Fundo da conta verde — correção após relato do operador
+
+Base `236e389e`, mesma branch/PR #129. Ajuste anterior só mudava destaque e
+não cumpria identificação visual da janela. Helper de Aparência agora altera
+`accent` e `surface`, mantendo demais preferências e instalação principal.
+Fundos são distintos em 65 cores; contraste do texto default ≥ 4,5:1 nos dois
+modos. Verde escuro `#174227`, claro `#dcece2`.
+
+45 testes de perfis e 93 de bridge/UI passaram. Screenshot real do aplicativo
+instalado, em HOME/XDG anônimos e Xvfb próprios, confirmou tela de login verde.
+Sonda CDP não enumerou página principal; captura nativa do display foi usada,
+sem fingir sucesso de automação CDP. Evidência privada no lote
+`codex-green-window-20261031`, incluindo visual-proof e host-theme-proof JSON.
+
+Host recebeu dois configs customizados atualizados e snapshots do bridge.
+Principal/config e todos os auth.json presentes ficaram byte a byte iguais.
+HMAIL executava outra tarefa: processo preservado; janela aberta continua
+pendente de recarga após tarefa terminar. Próximo passo: reabrir somente essa
+conta e conferir tema autenticado. Não certificar recarga ao vivo, login/cota
+ou Web autenticado por essa prova anônima. Sem merge/release.
