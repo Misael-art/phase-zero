@@ -15,6 +15,7 @@ Commands: status [--json] | tray | install | remove | set-renewal <provider> --d
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import json
 import os
@@ -30,6 +31,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+CLAUDE_PROFILE_URL = "https://api.anthropic.com/api/oauth/profile"
+CLAUDE_PROFILE_CACHE_SECONDS = 6 * 3600
+WEB_COUNT_HOURS = (3, 24)
+# Remaining-quota colour bands: >60 green, 21-60 yellow, <=20 red (0 included).
+LEVEL_COLORS = {"green": "#16a34a", "yellow": "#eab308", "red": "#dc2626"}
+LEVEL_MARKS = {"green": "🟢", "yellow": "🟡", "red": "🔴", None: "⚪"}
+PLAN_NAMES = {"free": "Free", "plus": "Plus", "pro": "Pro", "prolite": "Pro Lite",
+              "team": "Team", "business": "Business", "enterprise": "Enterprise", "edu": "Edu",
+              "claude_pro": "Pro", "claude_max": "Max", "max": "Max", "claude_team": "Team",
+              "claude_enterprise": "Enterprise"}
 CLAUDE_COLOR = "#d97757"
 GROK_COLOR = "#9ca3af"
 CLAUDE_CACHE_SECONDS = 300
@@ -78,6 +89,37 @@ def parse_time(value: Any) -> dt.datetime | None:
     return None
 
 
+def level(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return "green" if value > 60 else "yellow" if value > 20 else "red"
+
+
+def plan_name(value: Any) -> str | None:
+    if not value:
+        return None
+    return PLAN_NAMES.get(str(value).lower(), str(value).replace("_", " ").title())
+
+
+def subscription_claims(auth_file: Path) -> dict[str, Any]:
+    """Plan and paid-until dates from the ChatGPT id_token claims; the token itself is dropped."""
+    data = load_json(auth_file)
+    token = ((data or {}).get("tokens") or {}).get("id_token") if isinstance(data, dict) else None
+    if not isinstance(token, str) or token.count(".") != 2:
+        return {}
+    try:
+        part = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+    except (ValueError, TypeError):
+        return {}
+    auth = claims.get("https://api.openai.com/auth") if isinstance(claims, dict) else None
+    if not isinstance(auth, dict):
+        return {}
+    return {"plan": plan_name(auth.get("chatgpt_plan_type")),
+            "subscriptionUntil": auth.get("chatgpt_subscription_active_until"),
+            "subscriptionCheckedAt": auth.get("chatgpt_subscription_last_checked")}
+
+
 def remaining(used: Any) -> int | None:
     if not isinstance(used, (int, float)):
         return None
@@ -100,8 +142,11 @@ def meter(meter_id: str, label: str, provider: str, color: str, windows: list[di
     windows = [item for item in windows if item]
     # The tightest window is the one that blocks the next request.
     tight = min(windows, key=lambda item: item["remaining"]) if windows else None
+    value = tight["remaining"] if tight else None
+    for item in windows:
+        item["level"] = level(item["remaining"])
     return {"id": meter_id, "label": label, "provider": provider, "color": color,
-            "remaining": tight["remaining"] if tight else None,
+            "remaining": value, "level": level(value),
             "resetsAt": tight["resetsAt"] if tight else extra.pop("resetsAt", None),
             "windows": windows, **extra}
 
@@ -164,16 +209,110 @@ def codex_meters(env: dict[str, str], now: dt.datetime) -> list[dict[str, Any]]:
                     minutes = item.get("window_minutes")
                     label = {300: "5 horas", 10080: "semanal"}.get(minutes, name)
                     windows.append(window(label, item.get("used_percent"), item.get("resets_at"), now))
+        claims = subscription_claims(Path(home) / "auth.json")
         result.append(meter(
             f"codex:{row['id']}", f"Codex · {row.get('label') or row['id']}", "codex",
             COLORS.get(row.get("color"), "#2563eb"), windows,
-            plan=(limits or {}).get("plan_type"),
+            plan=claims.get("plan") or plan_name((limits or {}).get("plan_type")),
+            subscriptionUntil=claims.get("subscriptionUntil"),
+            subscriptionCheckedAt=claims.get("subscriptionCheckedAt"),
             seenAt=dt.datetime.fromtimestamp(seen, dt.timezone.utc).isoformat() if seen else None,
             error=None if limits else "sem registro de limite; use esta conta uma vez"))
     return result
 
 
+# ---- Codex Web (ChatGPT Web route) -------------------------------------------
+
+def web_turns(codex_home: Path, now: dt.datetime) -> dict[int, int]:
+    """Count turns sent through the chatgpt-web model; ChatGPT Web exposes no limit."""
+    counts = {hours: 0 for hours in WEB_COUNT_HOURS}
+    horizon = now - dt.timedelta(hours=max(WEB_COUNT_HOURS))
+    for path in (codex_home / "sessions").glob("*/*/*/rollout-*.jsonl"):
+        try:
+            if dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc) < horizon:
+                continue
+            with path.open(encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if '"turn_context"' not in line or "chatgpt-web/" not in line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not str((record.get("payload") or {}).get("model", "")).startswith("chatgpt-web/"):
+                        continue
+                    stamp = parse_time(record.get("timestamp"))
+                    for hours in WEB_COUNT_HOURS:
+                        if stamp and now - stamp <= dt.timedelta(hours=hours):
+                            counts[hours] += 1
+        except OSError:
+            continue
+    return counts
+
+
+def web_meters(env: dict[str, str], now: dt.datetime) -> list[dict[str, Any]]:
+    data = env_path(env, "XDG_DATA_HOME", ".local/share")
+    try:
+        from linux.ai.codex_profiles import COLORS, CodexProfiles
+        profiles = CodexProfiles(env=env)
+        rows = [dict(profiles._current), *(row for row in profiles.rows() if not row.get("archived"))]
+    except Exception:
+        rows, profiles, COLORS = [dict(id="current", label="Principal", color="azul")], None, {}
+    result = []
+    for row in rows:
+        root = (data / "phasezero/chatgpt-web" if row["id"] == "current"
+                else data / "phasezero/codex" / row["id"] / "web")
+        state = load_json(root / "state.json")
+        home = root / "codex-home"
+        if not isinstance(state, dict) or not state.get("optIn") or not (home / "config.toml").is_file():
+            continue
+        counts = web_turns(home, now)
+        claims = subscription_claims(home / "auth.json")
+        result.append(meter(
+            f"codex-web:{row['id']}", f"Codex Web · {row.get('label') or row['id']}", "codex-web",
+            COLORS.get(row.get("color"), "#2563eb"), [],
+            plan=claims.get("plan"), subscriptionUntil=claims.get("subscriptionUntil"),
+            subscriptionCheckedAt=claims.get("subscriptionCheckedAt"),
+            webTurns={f"{hours}h": count for hours, count in counts.items()},
+            error="o ChatGPT Web não informa o limite restante; contagem de mensagens Web enviadas: "
+                  + ", ".join(f"{count} nas últimas {hours}h" for hours, count in counts.items())))
+    return result
+
+
 # ---- Claude ----------------------------------------------------------------
+
+def next_anniversary(start: dt.datetime, now: dt.datetime) -> dt.datetime:
+    year, month = now.year, now.month
+    for _ in range(3):
+        last = (dt.date(year + month // 12, month % 12 + 1, 1) - dt.timedelta(days=1)).day
+        candidate = start.replace(year=year, month=month, day=min(start.day, last))
+        if candidate > now:
+            return candidate
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return candidate
+
+
+def claude_profile(env: dict[str, str], token: str, now: dt.datetime,
+                   fetch: Callable[[str, dict[str, str]], Any] | None,
+                   use_cache: bool) -> dict[str, Any]:
+    path = cache_file(env).with_name("quota-meter-claude-profile.json")
+    cached = load_json(path) if use_cache else None
+    if isinstance(cached, dict) and time.time() - cached.get("at", 0) < CLAUDE_PROFILE_CACHE_SECONDS:
+        return cached.get("profile") or {}
+    headers = {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20",
+               "User-Agent": "PhaseZero-quota-meter"}
+    try:
+        payload = (fetch or http_json)(CLAUDE_PROFILE_URL, headers)
+    except (OSError, ValueError):
+        return (cached or {}).get("profile") or {} if isinstance(cached, dict) else {}
+    org = (payload or {}).get("organization") if isinstance(payload, dict) else None
+    org = org if isinstance(org, dict) else {}
+    profile = {"plan": plan_name(org.get("organization_type")),
+               "status": org.get("subscription_status"),
+               "createdAt": org.get("subscription_created_at")}
+    write_private(path, {"at": time.time(), "profile": profile})
+    return profile
+
 
 def claude_meter(env: dict[str, str], now: dt.datetime,
                  fetch: Callable[[str, dict[str, str]], Any] | None = None,
@@ -212,8 +351,15 @@ def claude_meter(env: dict[str, str], now: dt.datetime,
             item = payload.get(key)
             if isinstance(item, dict):
                 windows.append(window(label, item.get("utilization"), item.get("resets_at"), now))
+    profile = claude_profile(env, oauth["accessToken"], now, fetch, use_cache)
+    created = parse_time(profile.get("createdAt"))
+    # Anthropic exposes no paid-until date; monthly billing renews on the signup day.
+    renewal = next_anniversary(created, now).isoformat() if created and profile.get(
+        "status") in (None, "active") else None
     return meter("claude:default", "Claude (Code + Desktop)", "claude", CLAUDE_COLOR, windows,
-                 plan=plan, error=error)
+                 plan=profile.get("plan") or plan_name(plan), subscriptionUntil=renewal,
+                 subscriptionEstimated=bool(renewal), subscriptionStatus=profile.get("status"),
+                 error=error)
 
 
 def http_json(url: str, headers: dict[str, str]) -> Any:
@@ -253,7 +399,7 @@ def collect(env: dict[str, str] | None = None, now: dt.datetime | None = None,
             fetch: Callable[[str, dict[str, str]], Any] | None = None) -> list[dict[str, Any]]:
     env = dict(os.environ if env is None else env)
     now = now or dt.datetime.now(dt.timezone.utc)
-    meters = codex_meters(env, now)
+    meters = codex_meters(env, now) + web_meters(env, now)
     for item in (claude_meter(env, now, fetch), grok_meter(env, now)):
         if item:
             meters.append(item)
@@ -276,11 +422,32 @@ def countdown(target: str | None, now: dt.datetime) -> str:
     return f"renova {moment.astimezone():%d/%m %H:%M} (em {span})"
 
 
+def subscription_text(item: dict[str, Any]) -> str | None:
+    parts = []
+    if item.get("plan"):
+        parts.append(f"plano {item['plan']}")
+    until = parse_time(item.get("subscriptionUntil"))
+    if until:
+        word = "renova (estimado)" if item.get("subscriptionEstimated") else "assinatura paga até"
+        text = f"{word} {until.astimezone():%d/%m/%Y %H:%M}"
+        checked = parse_time(item.get("subscriptionCheckedAt"))
+        if until < dt.datetime.now(dt.timezone.utc):
+            text += (f" (dado de {checked.astimezone():%d/%m}; " if checked else " (dado antigo; ") \
+                + "abra esta conta para atualizar)"
+        parts.append(text)
+    return " · ".join(parts) or None
+
+
 def describe(item: dict[str, Any], now: dt.datetime) -> str:
     head = f"{item['remaining']}% restante" if item.get("remaining") is not None else "limite n/d"
-    lines = [f"{item['label']}: {head} · {countdown(item.get('resetsAt'), now)}"]
+    mark = LEVEL_MARKS[item.get("level")]
+    lines = [f"{mark} {item['label']}: {head} · {countdown(item.get('resetsAt'), now)}"]
+    sub = subscription_text(item)
+    if sub:
+        lines.append(f"  {sub}")
     for win in item.get("windows", []):
-        lines.append(f"  {win['name']}: {win['remaining']}% · {countdown(win.get('resetsAt'), now)}")
+        lines.append(f"  {LEVEL_MARKS[win.get('level')]} {win['name']}: {win['remaining']}% · "
+                     f"{countdown(win.get('resetsAt'), now)}")
     if item.get("error"):
         lines.append(f"  ⚠ {item['error']}")
     return "\n".join(lines)
@@ -302,10 +469,10 @@ def render_icon(item: dict[str, Any]):  # pragma: no cover - exercised through t
     ring = QRectF(5, 5, size - 10, size - 10)
     painter.drawEllipse(ring)
     if value is not None:
-        level = QColor("#dc2626") if value <= 10 else color
-        painter.setPen(QPen(level, 7, Qt.SolidLine, Qt.RoundCap))
+        band = QColor(LEVEL_COLORS[level(value)])
+        painter.setPen(QPen(band, 7, Qt.SolidLine, Qt.RoundCap))
         painter.drawArc(ring, 90 * 16, int(-360 * 16 * value / 100))
-    painter.setPen(QColor("#ffffff") if value is None or value > 10 else QColor("#fecaca"))
+    painter.setPen(Qt.NoPen)
     painter.setBrush(color)
     painter.drawEllipse(QRectF(14, 14, size - 28, size - 28))
     font = QFont()

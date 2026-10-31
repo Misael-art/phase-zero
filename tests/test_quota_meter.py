@@ -45,7 +45,7 @@ def test_codex_meter_is_regressive_and_uses_the_tightest_window(env):
     meters = qm.codex_meters(env, NOW)
 
     main = next(item for item in meters if item["id"] == "codex:current")
-    assert main["remaining"] == 25 and main["color"] == "#2563eb" and main["plan"] == "plus"
+    assert main["remaining"] == 25 and main["color"] == "#2563eb" and main["plan"] == "Plus"
     assert {w["name"]: w["remaining"] for w in main["windows"]} == {"5 horas": 70, "semanal": 25}
     assert main["resetsAt"].startswith("2026-11-03")
 
@@ -66,6 +66,8 @@ def test_claude_meter_reads_usage_without_leaking_the_token(env):
     seen = {}
 
     def fetch(url, headers):
+        if url == qm.CLAUDE_PROFILE_URL:
+            return {"organization": {"organization_type": "claude_pro"}}
         seen.update(url=url, auth=headers["Authorization"])
         return {"five_hour": {"utilization": 40.0, "resets_at": "2026-10-31T15:00:00+00:00"},
                 "seven_day": {"utilization": 90.0, "resets_at": "2026-11-02T03:00:00+00:00"}}
@@ -73,7 +75,7 @@ def test_claude_meter_reads_usage_without_leaking_the_token(env):
     item = qm.claude_meter(env, NOW, fetch, use_cache=False)
 
     assert seen["url"] == qm.CLAUDE_USAGE_URL and seen["auth"] == "Bearer secret-token"
-    assert item["remaining"] == 10 and item["plan"] == "pro" and item["error"] is None
+    assert item["remaining"] == 10 and item["plan"] == "Pro" and item["error"] is None
     assert "secret-token" not in json.dumps(item)
     assert "secret-token" not in qm.cache_file(env).read_text()
     assert qm.cache_file(env).stat().st_mode & 0o777 == 0o600
@@ -134,3 +136,68 @@ def test_tray_icon_renders(env):
     for value in (100, 42, 5, None):
         icon = qm.render_icon({"color": "#15803d", "remaining": value})
         assert not icon.isNull()
+
+
+def fake_id_token(auth: dict) -> str:
+    import base64
+    body = base64.urlsafe_b64encode(json.dumps({"https://api.openai.com/auth": auth}).encode())
+    return "e30." + body.decode().rstrip("=") + ".sig"
+
+
+def test_level_bands_follow_the_requested_colours():
+    assert [qm.level(v) for v in (100, 61, 60, 21, 20, 1, 0, None)] == [
+        "green", "green", "yellow", "yellow", "red", "red", "red", None]
+
+
+def test_codex_meter_reports_plan_and_paid_until(env):
+    home = Path(env["HOME"]) / ".codex"
+    rollout(home, codex_limits({"used_percent": 50.0, "window_minutes": 300,
+                                "resets_at": int((NOW + dt.timedelta(hours=1)).timestamp())}))
+    (home / "auth.json").write_text(json.dumps({"tokens": {"id_token": fake_id_token({
+        "chatgpt_plan_type": "pro", "chatgpt_subscription_active_until": "2026-11-16T16:38:59+00:00"})}}))
+    item = next(m for m in qm.codex_meters(env, NOW) if m["id"] == "codex:current")
+    assert item["plan"] == "Pro" and item["level"] == "yellow"
+    assert item["subscriptionUntil"] == "2026-11-16T16:38:59+00:00"
+    text = qm.describe(item, NOW)
+    assert "plano Pro" in text and "assinatura paga até 16/11/2026" in text and "🟡" in text
+    assert "id_token" not in json.dumps(item) and "e30." not in json.dumps(item)
+
+
+def test_codex_web_meter_counts_web_turns_and_never_invents_a_limit(env):
+    root = Path(env["XDG_DATA_HOME"]) / "phasezero/chatgpt-web"
+    home = root / "codex-home"
+    folder = home / "sessions/2026/10/31"
+    folder.mkdir(parents=True)
+    (home / "config.toml").write_text("")
+    (root / "state.json").write_text(json.dumps({"schemaVersion": 1, "optIn": {"at": "x"}}))
+    turns = [("2026-10-31T11:00:00Z", "chatgpt-web/gpt-6-sol"),
+             ("2026-10-31T01:00:00Z", "chatgpt-web/gpt-6-sol"),
+             ("2026-10-31T11:30:00Z", "gpt-6.1-sol")]
+    (folder / "rollout-w.jsonl").write_text("".join(
+        json.dumps({"timestamp": t, "type": "turn_context", "payload": {"model": m}}) + "\n"
+        for t, m in turns))
+    meters = qm.web_meters(env, NOW)
+    assert len(meters) == 1
+    item = meters[0]
+    assert item["remaining"] is None and item["webTurns"] == {"3h": 1, "24h": 2}
+    assert "não informa" in item["error"]
+
+
+def test_claude_plan_and_estimated_renewal(env):
+    config = Path(env["HOME"]) / ".claude"
+    config.mkdir()
+    (config / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {
+        "accessToken": "t", "expiresAt": 9_999_999_999_000, "subscriptionType": "pro"}}))
+
+    def fetch(url, headers):
+        if url == qm.CLAUDE_PROFILE_URL:
+            return {"organization": {"organization_type": "claude_max",
+                                     "subscription_status": "active",
+                                     "subscription_created_at": "2026-03-29T14:47:50Z"}}
+        return {"seven_day": {"utilization": 10.0, "resets_at": "2026-11-02T03:00:00+00:00"}}
+
+    item = qm.claude_meter(env, NOW, fetch, use_cache=False)
+    assert item["plan"] == "Max" and item["level"] == "green"
+    assert item["subscriptionEstimated"] is True
+    assert item["subscriptionUntil"].startswith("2026-11-29")
+    assert "renova (estimado) 29/11/2026" in qm.describe(item, NOW)
