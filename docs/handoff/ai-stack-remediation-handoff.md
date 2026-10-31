@@ -200,3 +200,321 @@ Ordem sugerida por impacto. Para cada item: teste primeiro (deve falhar), depois
   shellcheck -S warning linux/pz linux/ai/*.sh linux/server/ai-policy-broker.sh   # base: 15 avisos
   python linux/ui/generate_actions.py /tmp/a.json && diff -q /tmp/a.json linux/ui/actions.json
   ```
+
+## 5. Contas Codex por perfil — 2026-10-29
+
+**Objetivo/IDs:** PXA-006/010, gestão no painel de múltiplos perfis Codex
+Desktop/CLI e suas sessões ChatGPT Web, sem substituir contas existentes.
+Owner: `linux/ai/codex_profiles.py`, no domínio de Contas e conexões; bridge
+existente continua proprietário do setup/rota/túnel Web.
+
+**Continuidade:** raiz única `/home/misael/Projects/PhaseZero`, branch
+`codex/clean-host-dev-bootstrap`, PR draft
+[#129](https://github.com/Misael-art/phase-zero/pull/129). HEAD inicial
+`83c50a60b8c0a7ab7c95941b1b06be482d4b8d0d`; implementação `47e4012`
+(`feat(ai): add isolated Codex account profiles to accounts panel`). Commit
+deste handoff segue a implementação. Sem merge/release.
+
+**Arquivos:** backend `linux/ai/codex_profiles.py`; roteador `linux/pz`;
+instanciação/ownership em `linux/ai/chatgpt_web_bridge.py`;
+`linux/ui_native/codex_profiles_panel.py` integrado a `pages/accounts.py`;
+testes `test_codex_profiles`, `test_codex_profiles_panel` e ajuste do fake do
+bridge. Jornada, contrato e limites detalhados no
+[roadmap](../roadmaps/apps-dev-ai-accounts-v1.md#contas-codex-no-painel--incremento-de-2026-10-29)
+e superfície de escrita em `docs/host-surface.md`.
+
+**Resultado:** nome/cor/ID persistentes, Desktop/CLI por conta, Web e navegador
+com armazenamento próprio, atalhos por modo, arquivar/restaurar sem apagar
+sessões, e recuperação do daemon Web ao abrir novamente. Cadastro envia
+metadados por stdin e retorna resumo redigido ao runner. Não há troca
+automática por cota. IDs locais não certificam identidade no provedor.
+
+Dois defeitos estruturais tratados: parada Web antes percorria todos os
+`app-codex-web-gpt-launcher-*.scope`; agora filtra somente owners do perfil.
+Caminhos muito longos causavam `listen EINVAL` no socket `ipc/ipc.sock`, com
+Desktop preso no carregamento. Execução passa a usar raiz curta
+`$XDG_DATA_HOME/phasezero/codex/<id>`; metadados continuam em
+`phasezero/ai-accounts/codex-profiles`. Abertura recusa socket acima de 107
+bytes. Nenhum symlink de credenciais é necessário.
+
+**Testes:**
+
+- Fixture: 139 testes focados passaram em `test_codex_profiles.py`,
+  `test_codex_profiles_panel.py`, `test_chatgpt_web_bridge.py`,
+  `test_accounts_page.py`, `test_account_contract.py` e
+  `test_product_inventory.py`. Incluem processos CLI simultâneos, persistência,
+  ambiente/rotas limpos, isolamento de scopes/unidades, perfil desconhecido,
+  metadados inválidos, redirecionamento por symlink, socket UTF-8, ausência de
+  download automático e privacidade. Após ajuste final de foco/refresh,
+  22 testes das páginas de contas/perfis passaram novamente.
+- Host de desenvolvimento: `tools/dev-bootstrap.sh doctor --profile ui`
+  pronto; Bash syntax, ShellCheck de `linux/pz` com exclusões oficiais do CI,
+  compilação Python e `git diff --check` passaram. Hooks de stage/commit
+  aprovaram arquivos explícitos. Gitleaks local indisponível; varredura do CI
+  ainda necessária.
+- Aplicativo real: launcher `linux/ui/native.sh --smoke-test --category
+  'Contas e conexões'` abriu com Python/PySide do sistema e produziu captura,
+  sem erro. Quatro atalhos de perfil em fixture e atalho real do painel
+  passaram `desktop-file-validate`.
+- Codex Desktop instalado, CLI 0.166.0: duas instâncias em Xvfb atingiram
+  **Entrar no ChatGPT**, com portas 22104/22108 e diretórios Electron próprios.
+  Capturas individuais revisadas. Primeiro ensaio com `--disable-gpu` falhou;
+  ensaio seguinte revelou limite IPC. Verificação final usou raiz curta e
+  ANGLE/SwiftShader, sem mudar flags da instalação do operador. Receber HTML
+  no servidor local não foi tratado como prova de tela pronta.
+
+**Estado do host:** BigLinux/Manjaro, `misael-jupiter`. Atalho **PhaseZero —
+Contas Codex** criado no menu e na área de trabalho do usuário, apontando ao
+launcher da raiz canônica. Pacote instalado continua 1.22.11; o novo painel é
+acessível por esse atalho de desenvolvimento. Instalações nativa e Web
+anteriores foram referenciadas, sem leitura/cópia dos tokens, logout ou mudança
+de rota. Nenhuma nova conta real cadastrada automaticamente, daemon de produto
+instalado, reinício de sessão ou operação de boot executados.
+
+Evidência local regenerável:
+`~/.cache/phasezero-dev/evidence/codex-profiles-20261029/` (capturas, script e
+receipt). Fixtures do Codex não receberam autenticação real. Processos de
+teste encerrados; ausência de `auth.json` e de processos usando as duas raízes
+anônimas foi conferida antes de removê-las. Logs/receipts/capturas preservados. Diretórios pytest compartilhados não foram varridos.
+
+**CI/limites:** SHA anterior tinha `shell-lint` falho no PR; checks do novo SHA
+devem ser consultados após push. Fixture/Xvfb não homologam login A/B, identidade
+igual entre Desktop e Web, cota, túnel por conta, retenção de sessão após reboot,
+integração com IDE ou Windows. Apelido/cor identificam painel e atalhos; classe
+e título das janelas continuam pertencendo ao launcher instalado. Registros
+agregados de Contas permanecem redigidos; CLI administrativa privada não deve
+ser publicada com identificação local.
+
+**Próximo passo exato:** abrir **PhaseZero — Contas Codex**, identificar conta
+existente e adicionar outra. Entrar pelo Desktop em cada conta; conferir
+identidade exibida pelo Codex; preparar/login Web do ID correspondente e
+conferir identidade no ChatGPT. Provar uso simultâneo e reabertura após logout
+da sessão/reboot sem mistura de conta. Esse passo exige ação de autenticação
+do operador. Para comandos deste checkout, usar `linux/pz ai codex-profiles`;
+`pz` do pacote antigo pode não conhecer a nova família.
+
+## 6. Escrita/consentimento Desktop do perfil — 2026-10-30
+
+Relato: onboarding não conseguia conceder acesso à Área de Trabalho.
+Base `e3aa4592`, mesma raiz/branch e PR #129. Causa reproduzida: ambiente
+isolado sem `user-dirs.dirs`; GLib e `xdg-user-dir DESKTOP` retornavam
+`/home/misael/Desktop` inexistente, embora a pasta real fosse
+`/home/misael/Área de trabalho`. Handler `requestDesktopRoot()` no bundle
+instalado chama `app.getPath("desktop")` e abre o diretório com `opendir()`.
+Falha ocorria na validação da pasta, antes de concluir a concessão de acesso.
+
+Correção em `sync_desktop_user_dirs()` no bridge, reutilizada por
+`CodexProfiles.prepare_desktop_dirs()`: espelha somente oito caminhos XDG
+padrão em native/web, com strings literais, idempotência, backup e preservação
+de mapas próprios. Preparo de perfil e abertura Web standalone convergem para
+o mesmo helper. Credenciais, preferências gerais, sandbox e permissões Unix não
+são copiados/ampliados.
+
+Host: dois mapas criados no perfil existente. GLib/xdg passaram a resolver a
+pasta localizada. Dois processos com os ambientes nativo/Web criaram, leram e
+apagaram arquivo de prova nessa pasta; diretórios temporários próprios foram
+removidos. Codex sandbox real negou escrita fora do workspace sem concessão
+(exit 1) e aceitou a pasta de prova explicitamente autorizada (exit 0), sem
+prompt de inferência. CLI 0.166 usa `codex sandbox -P NOME ...`; não utiliza
+mais o subcomando `linux` nesse comando. Probes usaram configuração temporária,
+sem alterar a política dos perfis do operador.
+
+103 testes focados passaram (perfis, painel, bridge e Accounts), incluindo
+regressão de diretórios localizados, atualização com backup, ausência de
+importação de configurações e tratamento literal de caracteres de shell.
+Teste de lançamento passou a simular também porta livre, pois o perfil real
+aberto ocupava a porta de teste; fixture não consulta o socket do operador.
+Compilação Python e `git diff --check` passaram. Evidência local:
+`~/.cache/phasezero-dev/evidence/codex-desktop-write-20261030/{before,after,sandbox-write}.json`.
+
+Janela autenticada do operador foi preservada. **Próximo passo:** fechar apenas
+a janela do perfil afetado, abrir novamente pelo painel e repetir **Permitir
+acesso**. Cache de caminhos do processo anterior exige reabertura. Repetição do
+onboarding autenticado não foi automatizada; teste de filesystem/sandbox não
+equivale a essa jornada GUI. Login e dados existentes permanecem nos mesmos
+stores. Não houve reboot, chmod amplo ou desativação de sandbox.
+
+## 7. Abrir perfil ativo retornava falha — 2026-10-30
+
+PXA-006/010, base `af0a5669`, mesma branch/PR. Ledger do painel registrou erro
+“Janela deste perfil já aberta ou porta ocupada”. Perfil continuava ativo com
+Electron e webview; o guard de porta impedia o operador de recuperar sua janela.
+
+`desktop_instance()` e `focus_desktop_instance()` no bridge validam namespace
+de dados, PID/UID/executável/start ticks e socket/peer Linux. `CodexProfiles.launch`
+e `Bridge.desktop` reaproveitam o warm-start do pacote para foco da instância
+correta. Comando `argv: []`, confirmação `ok\n`; nenhuma chamada de inferência,
+novo processo ou sinal de encerramento é necessário. Processo Linux reescreve
+argv como uma única string; validação reconhece essa representação com caminho
+completo e limites de argumento, sem execução de shell ou match por prefixo.
+
+109 testes focados passaram (perfis, bridge, painel e Accounts), incluindo IPC
+Unix real, peer errado sem envio de payload, mudança de start ticks, diretório
+de outro perfil, argv agregado, PID stale e porta estrangeira sem spawn/kill.
+Host: `launch(ID, "desktop")` respondeu `focused=true`, `started=false`; PID e
+start ticks permaneceram iguais. Evidência:
+`~/.cache/phasezero-dev/evidence/codex-profile-reopen-20261030/live-handoff.json`.
+
+Janela autenticada recuperada sem encerrar trabalho em execução. Warm-start
+preserva cache do processo: para reaplicar o mapa de pastas da seção anterior,
+operador deve usar **Sair** somente naquela instância e depois abrir de novo.
+Não houve reinício forçado, parada de outro Codex ou mudança de credenciais.
+
+
+## 8. Limpeza de perfis personalizados — 2026-10-30
+
+Pedido autoriza implementar e executar exclusão individual/em lote, preservando
+Codex padrão e Web padrão. Base `550d8540`, mesma raiz/branch/PR #129. Novo
+`remove --id ID` / `remove --all-custom`, ambos com `--dry-run`, integrado ao
+runner e painel. Proteção de `current` obrigatória no backend; arquivados entram
+no lote. Apps ativos bloqueiam a limpeza; sem kill, reset ou elevação.
+
+Operação retira dados/atalhos do ambiente ativo para recuperação privada com
+manifesto e rollback de falha do registro; runtime/socket inativo removido
+separadamente. Não apaga pacote compartilhado, sessão primária nem Web padrão;
+não revoga recursos remotos. Detalhes e recuperação no roadmap Apps/IA/contas.
+
+193 testes focados passaram (perfis/painel/bridge/Accounts, ledger/help,
+contratos de contas e inventário).
+GUI real com PySide6 do host executou exclusão individual e geral, com prévia e
+QProcess/CommandRunner oficiais, em HOME/XDG próprios; capturas antes/depois e
+receipt preservados. Teste com processo vivo comprova bloqueio sem sinais;
+socket Unix stale real comprova limpeza sem cópia entre filesystems.
+
+Host real: comando fonte `linux/pz ai codex-profiles remove --all-custom`
+removeu 1 perfil autorizado; registro agora contém somente instalação padrão,
+raiz runtime personalizada vazia, sem atalhos personalizados ou processos
+residuais. Sete caminhos do padrão permaneceram idênticos por existência,
+inode e SHA-256. Backup privado identificado em `host-after.json`; não publicar
+conteúdo. Evidência local: `~/.cache/phasezero-dev/evidence/codex-profile-cleanup-20261030/`.
+
+Próximo passo: abrir **PhaseZero — Contas Codex** novamente para carregar os
+botões. Operador pode repetir criação, autenticação A/B e testes GUI de escrita.
+Esses aceites de login/identidade/cota continuam pendentes; limpeza não certifica
+túnel ou onboarding autenticado. CI anterior: shell-lint 0.9.0 falhou; 0.11.0 e
+lint/gitleaks passaram. Não houve merge/release nem alteração do pacote 1.22.11.
+
+
+## 9. Ícones, principal primeiro e menu Codex — 2026-10-30
+
+Base `bdbfed30`, mesma raiz/branch/PR #129. Pedido autoriza implementar e aplicar
+no host ícone indicado, variações por cor exclusiva e nomes Codex [nome] /
+Codex Web [nome]. Padrão agora primeiro; paleta suporta 64 adicionais sem RGB
+repetido, inclusive arquivados. SVG compartilhado preserva forma indicada e
+remove fundo quadriculado do raster. Sem download/runtime gráfico extra.
+
+Menu passa a duas entradas visíveis por conta; CLI/site ocultos do menu e
+acessíveis no painel/contexto. Override nativo preserva Exec/protocolos/ações
+da instalação padrão. `organize --dry-run` e botão organizador convergem para
+mesmo backend, migram cores legadas e ocultam somente AppImage Codex conhecido
+e entrada Web Tools extra. Bridge reconhece ownership do painel e snapshot
+estável atualizado evita recriar entradas antigas. Opt-out Web segue coberto,
+sem apagar atalho nativo ou contornar gates de tools/opt-in.
+
+Host tinha duas contas no momento da aplicação: novo perfil surgiu após limpeza
+da seção 8 e foi preservado. Colisão azul corrigida; quatro entradas visíveis,
+três duplicações antigas ocultadas/removidas do desktop. Sete caminhos de
+credenciais/configs idênticos; estado do bridge preservado exceto owner.
+Protocolo codex/codex-browser-sidebar já apontava ao ID primário, sem mudança.
+Cache KDE/MIME refeito, sem root, término de apps ou reinício de sessão.
+
+204 testes focados passaram (perfis/painel/bridge/Accounts, ledger/help,
+contratos de contas e inventário), incluindo limite de 64 cores adicionais,
+recusa de colisões/cores reservadas, migração legada, protocolo preservado,
+owner do guardião e opt-out Web sem afetar nativo. Gate de cancelamento de
+desenvolvimento e renderização sem QtSvg também passaram. AST/diff passaram.
+CI Arch do primeiro SHA revelou libQt6Svg.so.6 ausente em PySide6 mínimo;
+import direto foi removido. QtGui renderiza os mesmos contornos/gradiente sem
+dependência adicional. Log do job 124208244093 preservado na evidência local.
+
+GUI PySide6 real, em HOME/XDG próprios, executou criação e organização com
+prévia/CommandRunner/QProcess; três contas mostraram ícones coloridos, padrão
+primeiro e seis entradas visíveis. Desktop files validados. Evidência privada:
+`~/.cache/phasezero-dev/evidence/codex-icons-20261030/` (receipts, capturas e
+imagem original; não publicar estado privado).
+
+Próximo passo: reabrir **PhaseZero — Contas Codex** para recarregar classe Qt
+atualizada; menu do host já foi corrigido. Homologação de login A/B/Web,
+identidade real, cotas e onboarding permanece do operador. Não houve instalação
+ou atualização do pacote de produto 1.22.11, merge ou release.
+
+
+## 10. Aparência acompanha a cor da conta — 2026-10-31
+
+Base lógica `eaca07b5`; raiz/branch/PR #129 preservados, incluindo commits
+concorrentes de entrada Steam Deck. User autorizou tema de Aparência pela cor
+do perfil e confirmou prosseguimento. `current` e Web padrão ficam intocados.
+
+Configurações nativas `desktop.appearanceLightChromeTheme.accent` e
+`desktop.appearanceDarkChromeTheme.accent` passam a acompanhar cor registrada,
+nos perfis nativo/Web. Helper único no bridge faz patch TOML validado, backup,
+idempotência e preservação semântica; atualizações de cor/atalhos/preparo e
+organizador integram política. Metadata de cor do Web sustenta reentrada;
+snapshots existentes são atualizados com backup. Detalhes/limites no roadmap.
+
+208 testes focados passaram, cobrindo tema nativo/Web, principal intocado,
+fontes/fundo/mode preservados, formato nested/inline emitido pelo app, TOML
+inválido/ambíguo recusado, idempotência e cor persistida de Web sem env herdado.
+Probe real app-server/config/read confirmou duas chaves com destaque verde em
+HOME anônimo; nenhum login, prompt de modelo ou inferência foi realizado.
+
+Host: duas contas adicionais existentes receberam dois config.toml nativos;
+seus Webs ainda não preparados receberão tema no seed. Configs do padrão/auth
+permaneceram byte a byte iguais e demais configurações equivalentes por hash
+semântico. Sem encerrar app, mudar sandbox/rota ou reiniciar sessão. Evidência
+privada: `~/.cache/phasezero-dev/evidence/codex-appearance-20261031/`.
+
+Próximo passo: reabrir janelas dos perfis personalizados para reler Aparência.
+Padrão mantém cores/preferências atuais. Login real, cota e Web autenticado
+continuam gates distintos; alteração de tema não os homologa.
+
+
+### Aplicação e execução no host — 2026-10-31
+
+Pedido posterior exige host já operante, commit e PR. Código de Aparência já
+publicado em `4924380e`, PR #129. Estado inicial desta verificação: cores
+persistidas, duas instâncias adicionais fechadas e painel Qt fechado. Chamadas
+`CodexProfiles.launch(ID, "desktop")` abriram ambas em namespaces separados;
+atalho canônico **PhaseZero — Contas Codex** abriu o painel atualizado.
+
+Host Wayland/KDE: PID/executável/home de cada Electron validados, dois webviews
+HTTP responderam com título Codex. Consulta temporária, somente leitura, ao
+KWin confirmou ambas as janelas mapeadas, não minimizadas, com dimensão não
+nula, além do painel PhaseZero. Instâncias primária/Web anteriores permaneceram
+abertas. Nenhum app foi encerrado nem preferência de cor do padrão alterada.
+Sondas KWin próprias descarregadas; aplicações solicitadas continuam abertas.
+
+Uma conta adicional possui credencial local; outra não tem login salvo e sua
+janela está aberta para autenticação oficial do operador. Presença local não
+valida sessão/cota. Não houve inferência nem preenchimento de credenciais.
+Cores claro/escuro dos dois arquivos nativos correspondem ao registro. Webs
+adicionais continuam não preparados. Evidência privada:
+`~/.cache/phasezero-dev/evidence/codex-appearance-20261031/{host-running,host-windows,host-deployment}.json`.
+
+CI Arch limpo passou em `4924380e` (dois jobs), assim como scans de segredo;
+demais checks ainda executavam durante a coleta. Este complemento só registra
+execução real e não muda código. Árvore de código permaneceu limpa antes da
+edição documental. Próximo passo: autenticar a conta sem login pelo fluxo do
+aplicativo; PR #129 continua draft, sem merge/release.
+
+
+### Fundo da conta verde — correção após relato do operador
+
+Base `236e389e`, mesma branch/PR #129. Ajuste anterior só mudava destaque e
+não cumpria identificação visual da janela. Helper de Aparência agora altera
+`accent` e `surface`, mantendo demais preferências e instalação principal.
+Fundos são distintos em 65 cores; contraste do texto default ≥ 4,5:1 nos dois
+modos. Verde escuro `#174227`, claro `#dcece2`.
+
+45 testes de perfis e 93 de bridge/UI passaram. Screenshot real do aplicativo
+instalado, em HOME/XDG anônimos e Xvfb próprios, confirmou tela de login verde.
+Sonda CDP não enumerou página principal; captura nativa do display foi usada,
+sem fingir sucesso de automação CDP. Evidência privada no lote
+`codex-green-window-20261031`, incluindo visual-proof e host-theme-proof JSON.
+
+Host recebeu dois configs customizados atualizados e snapshots do bridge.
+Principal/config e todos os auth.json presentes ficaram byte a byte iguais.
+HMAIL executava outra tarefa: processo preservado; janela aberta continua
+pendente de recarga após tarefa terminar. Próximo passo: reabrir somente essa
+conta e conferir tema autenticado. Não certificar recarga ao vivo, login/cota
+ou Web autenticado por essa prova anônima. Sem merge/release.

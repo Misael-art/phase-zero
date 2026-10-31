@@ -2514,7 +2514,7 @@
     },
     {
       "name": "ai.opencode-status",
-      "label": "OpenCode + 9Router",
+      "label": "OpenCode",
       "command": "linux/pz ai opencode status",
       "mutable": false,
       "require_plan": false,
@@ -2524,8 +2524,20 @@
       "input_label": ""
     },
     {
+      "name": "ai.opencode-heal",
+      "label": "Reparar configuração do OpenCode",
+      "command": "linux/pz ai opencode heal",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai opencode heal --dry-run"
+    },
+    {
       "name": "ai.opencode-install",
-      "label": "Configurar OpenCode + 9Router",
+      "label": "Ligar provider opcional 9Router no OpenCode",
       "command": "linux/pz ai opencode install --yes",
       "mutable": true,
       "require_plan": true,
@@ -2537,7 +2549,7 @@
     },
     {
       "name": "ai.opencode-verify",
-      "label": "Verificar OpenCode + 9Router",
+      "label": "Verificar provider opcional 9Router",
       "command": "linux/pz ai opencode verify",
       "mutable": false,
       "require_plan": false,

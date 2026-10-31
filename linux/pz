@@ -179,7 +179,8 @@ Usage:
   pz ai ollama [--pull <m>]    Ollama install/config; model pulls broker-gated
   pz ai omo <action>           oh-my-openagent OpenCode plugin (setup|doctor|status|enable|disable|uninstall)
   pz ai opencode status        Audit CLI/Desktop, canonical config and 9Router route
-  pz ai opencode install       Blocked until 9Router can enforce account-bound grants
+  pz ai opencode heal          Drop providers that keep OpenCode from starting (backup kept)
+  pz ai opencode install       Optional 9Router provider; blocked until account-bound grants
   pz ai opencode verify        Read-only config check; live inference blocked without grant binding
   pz ai opencode run --route=9router -- <args>  Blocked until account-bound grants are enforceable
   pz ai opencode rollback <manifest> Restore an OpenCode route transaction
@@ -241,6 +242,7 @@ Usage:
   pz ai workspaces doctor      Unified Hermes/Odysseus/9Router readiness audit
   pz ai workspaces plan        Safe read-only deployment plan and blockers
   pz ai auth status            Redacted registry for AI accounts and sessions
+  pz ai codex-profiles list     Codex accounts: isolated Desktop, CLI and Web profiles
   pz ai operations status      Persistent Control Center operation summary
   pz ai operations resume-info Safe retry metadata for interrupted operations
   pz doctor                    Run full system diagnostics
@@ -281,6 +283,9 @@ Usage:
   pz host backups migrate      Move legacy .bak files into the central store
   pz host backups list         List centralized backups
   pz host prune [--keep N]     Prune old backups and rotated logs
+  pz host duplicates scan      Find apps installed more than once (conflict by default)
+  pz host duplicates resolve <app> [--keep PATH]  Quarantine extra copies (reversible)
+  pz host duplicates allow <app> --reason TEXT    Accept a duplicate consciously
   pz host wipe                 Preview the ledger-driven host wipe
   pz host wipe --apply --confirm PHASEZERO-WIPE   Remove the recorded footprint
   pz ui                        Open native Linux control center
@@ -353,7 +358,7 @@ cmd_flatpak() {
 
 cmd_steamdeck() {
     local action="${1:-}" target="${2:-}"
-    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|terminal-keyboard|panel|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
+    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|terminal-keyboard|input|panel|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
     source "$PZ_ROOT/linux/steamdeck/common.sh"
     source "$PZ_ROOT/linux/steamdeck/input-actions.sh"
     case "$action" in
@@ -373,6 +378,9 @@ cmd_steamdeck() {
             ;;
         cursor|pointer)
             bash "$PZ_ROOT/linux/steamdeck/cursor-diagnose.sh" "${target:-snapshot}" "${3:-}"
+            ;;
+        input|controls|controles)
+            bash "$PZ_ROOT/linux/steamdeck/input-restore.sh" "${target:-status}" "${@:3}"
             ;;
         terminal-keyboard)
             bash "$PZ_ROOT/linux/steamdeck/terminal-keyboard.sh" "${target:-watch}"
@@ -603,7 +611,7 @@ cmd_ai() {
             case "${1:-status}" in
                 sync|align) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" sync ;;
                 version-status|version) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" version-status ;;
-                status|install|configure|repair|verify|run|rollback)
+                status|heal|install|configure|repair|verify|run|rollback)
                     python3 "$PZ_ROOT/linux/ai/opencode_9router_manager.py" "$@"
                     ;;
                 local-model|ollama) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" local-model ;;
@@ -611,7 +619,7 @@ cmd_ai() {
                 install-hook) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" install-hook ;;
                 remove-hook) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" remove-hook ;;
                 setup) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" setup ;;
-                *) pz_error "usage: pz ai opencode (status|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup)"; return 1 ;;
+                *) pz_error "usage: pz ai opencode (status|heal|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup)"; return 1 ;;
             esac
             ;;
         doctor)
@@ -669,6 +677,10 @@ cmd_ai() {
         routing|ai-router|task-router)
             shift
             python3 "$PZ_ROOT/linux/ai/routing_manager.py" "$@"
+            ;;
+        codex-profiles)
+            shift
+            python3 "$PZ_ROOT/linux/ai/codex_profiles.py" "${@:-list}"
             ;;
         chatgpt-web)
             # Experimental and opt-in (PXA-010): kept out of help and catalog on purpose.

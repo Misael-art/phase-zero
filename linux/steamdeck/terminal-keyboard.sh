@@ -149,11 +149,13 @@ terminal_keyboard_unit() {
 Description=PhaseZero touch keyboard for terminals
 After=graphical-session.target
 PartOf=graphical-session.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 ExecStart=/bin/bash $DIR/terminal-keyboard.sh watch
-Restart=on-failure
+# Missing touchscreen at login and normal EOF after hotplug must retry too.
+Restart=always
 RestartSec=2
 
 [Install]
@@ -262,7 +264,19 @@ case "$cmd" in
     pick-device)
         terminal_keyboard_pick_device
         ;;
-    drain|watch)
+    watch)
+        # Hotplug and a late I2C probe are normal, not a permanent failure.
+        # Re-enumerate after EOF because event numbers may change.
+        while true; do
+            device="${2:-${PZ_TOUCH_DEVICE:-}}"
+            [ -n "$device" ] || device="$(terminal_keyboard_pick_device || true)"
+            if [ -n "$device" ]; then
+                terminal_keyboard_loop "$device" || true
+            fi
+            sleep 2
+        done
+        ;;
+    drain)
         device="${2:-${PZ_TOUCH_DEVICE:-}}"
         if [ -z "$device" ]; then
             device="$(terminal_keyboard_pick_device)" || {

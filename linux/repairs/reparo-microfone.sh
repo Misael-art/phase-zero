@@ -27,7 +27,10 @@ for card in cards:
     if not available:
         continue
     active=card.get("active_profile", "")
-    available.sort(key=lambda pair: (pair[0]!=active, -pair[1].get("priority", 0)))
+    # Pro Audio exposes a PCM without running UCM Int Mic / DMIC enable
+    # sequences. Prefer the available internal microphone UCM profile.
+    available.sort(key=lambda pair: (pair[0] == "pro-audio",
+                                    "Mic" not in pair[0], -pair[1].get("priority", 0), pair[0]!=active))
     print(card["name"]); print(active); print(available[0][0]); break
 ') || { notify --error "Não foi possível observar os perfis de áudio."; exit 1; }
 [ -n "$CARD_SELECTION" ] || { notify --error "Nenhum perfil de captura disponível. Verifique hardware e conexão."; exit 69; }
@@ -60,6 +63,16 @@ if ! wait_source; then
   fi
 fi
 say "Microfone físico presente."
+
+# UCM may be unavailable during early boot. Pro Audio alone does not enable
+# the Deck internal microphone. Only touch controls actually exposed by ALSA.
+if [[ "$MIC_CARD" == *acp5x* ]] && [ "$PROFILE" = pro-audio ]; then
+  for control in 'Int Mic' 'DMIC Enable'; do
+    if amixer -c acp5x sget "$control" >/dev/null 2>&1; then
+      amixer -c acp5x sset "$control" on >/dev/null || exit 1
+    fi
+  done
+fi
 
 # 3) Reconectar filtro padrão ao mic e validar sinal
 MAXVOL=""

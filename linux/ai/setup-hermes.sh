@@ -285,6 +285,10 @@ EOF
     fi
 }
 
+router_opted_in() {
+    [ "${PZ_HERMES_9ROUTER:-0}" = 1 ]
+}
+
 configure_router_model() {
     router_credentials_ready || {
         pz_error "9Router client credential unavailable; Hermes cannot be integrated"
@@ -476,7 +480,12 @@ configure_hermes() {
     write_env_template
     mkdir -p "$HERMES_HOME"
     if [ -x "$HERMES_VENV_PY" ]; then
-        configure_router_model
+        # 9Router is an optional provider: wire it only on explicit opt-in.
+        if router_opted_in; then
+            configure_router_model
+        else
+            pz_info "9Router opcional: Hermes configurado sem ele (opt-in: PZ_HERMES_9ROUTER=1 ou 'pz ai setup hermes gateway')"
+        fi
         ensure_playwright_sdk
     fi
     bash "$PZ_ROOT/linux/ai/mcp-manager.sh" sync hermes >/dev/null || pz_warn "Hermes MCP sync failed"
@@ -673,8 +682,7 @@ doctor_json() {
               if ($status.envExists and $status.envMode != "600") then {severity:"error",component:"hermes",code:"hermes-env-permissions-unsafe"} else empty end,
               if ($status.mcp.ready|not) then {severity:"warning",component:"hermes",code:"hermes-mcp-not-ready"} else empty end,
               if ($status.installed and ($status.browser.pythonSdk|not)) then {severity:"warning",component:"hermes",code:"hermes-browser-sdk-missing"} else empty end,
-              if ($status.installed and ($status.gateway.active|not)) then {severity:"warning",component:"hermes",code:"hermes-gateway-inactive"} else empty end,
-              if ($status.installed and ($status.gateway.enabled|not)) then {severity:"warning",component:"hermes",code:"hermes-gateway-disabled"} else empty end,
+              if ($status.installed and $status.gateway.enabled and ($status.gateway.active|not)) then {severity:"warning",component:"hermes",code:"hermes-gateway-inactive"} else empty end,
               if $status.usageBlocked then {severity:"warning",component:"hermes",code:"connection-grant-not-enforceable"} else empty end,
               if ($status.configPathSafe|not) then {severity:"error",component:"hermes",code:"hermes-config-path-unsafe"} else empty end,
               if ($tailscaleAuthenticated|not) then {severity:"warning",component:"tailscale",code:"tailscale-unavailable"} else empty end
@@ -715,7 +723,7 @@ case "${1:-setup}" in
         require_workload_release_gate
         install_hermes
         configure_hermes
-        install_gateway_service
+        if router_opted_in; then install_gateway_service; fi
         status_json
         ;;
     install) require_connection_grant; require_workload_release_gate; install_hermes ;;
@@ -731,6 +739,6 @@ case "${1:-setup}" in
         [ -n "$cmd" ] || { pz_error "Hermes not installed"; exit 1; }
         "$cmd" setup --portal
         ;;
-    gateway) require_connection_grant; require_workload_release_gate; install_gateway_service ;;
+    gateway) require_connection_grant; require_workload_release_gate; PZ_HERMES_9ROUTER=1 configure_router_model; install_gateway_service ;;
     *) echo "usage: setup-hermes.sh (setup|install|configure|mcp|gateway|status|doctor|dry-run|portal)"; exit 1 ;;
 esac

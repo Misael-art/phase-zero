@@ -604,7 +604,7 @@ steamdeck_kwinrc_ensure_loaded() {
     pz_info "notified KWin to load input method $path"
 }
 
-steamdeck_configure_virtual_keyboard() {
+steamdeck_configure_virtual_keyboard_im() {
     local origin key path action enabled file backup previous_plain
     steamdeck_read_record origin key path action < <(steamdeck_vkbd_resolve)
     enabled="$(steamdeck_vkbd_enabled_state)"
@@ -654,9 +654,74 @@ steamdeck_configure_virtual_keyboard() {
     pz_info "KDE virtual keyboard configured: action=$action enabled=$(steamdeck_vkbd_enabled_state) inputMethod=$path"
 }
 
+# A second input method (fcitx5/ibus) autostarted beside the KWin keyboard
+# fights it for focus: the panel opens for one app and text lands in another,
+# and X11 apps such as Steam talk to fcitx5 instead. Keep one input method
+# unless the user asked for the other (CJK input): PZ_KEEP_INPUT_METHOD=1.
+VKBD_COMPETING_IMS="org.fcitx.Fcitx5.desktop fcitx5.desktop ibus-daemon.desktop org.freedesktop.IBus.Panel.desktop"
+VKBD_IM_MARKER="X-PhaseZero-Managed=competing-input-method"
+
+steamdeck_vkbd_autostart_dir() { printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/autostart"; }
+
+steamdeck_vkbd_competing_ims() {
+    local entry dir user
+    user="$(steamdeck_vkbd_autostart_dir)"
+    for entry in $VKBD_COMPETING_IMS; do
+        # The user override shadows the system entry: hidden by us means gone.
+        if [ -f "$user/$entry" ]; then
+            grep -q "^$VKBD_IM_MARKER" "$user/$entry" 2>/dev/null || printf '%s\n' "$entry"
+            continue
+        fi
+        for dir in ${PZ_XDG_AUTOSTART_DIRS:-/etc/xdg/autostart}; do
+            [ -f "$dir/$entry" ] && { printf '%s\n' "$entry"; break; }
+        done
+    done
+    return 0
+}
+
+steamdeck_disable_competing_ims() {
+    [ "${PZ_KEEP_INPUT_METHOD:-0}" = 1 ] && { pz_info "PZ_KEEP_INPUT_METHOD=1: fcitx5/ibus preserved"; return 0; }
+    local entry dir override
+    dir="$(steamdeck_vkbd_autostart_dir)"
+    while read -r entry; do
+        [ -n "$entry" ] || continue
+        override="$dir/$entry"
+        if [ -f "$override" ] && ! grep -q "^$VKBD_IM_MARKER" "$override"; then
+            # A personal copy of the entry: back it up before overriding.
+            [ "${PZ_DRY_RUN:-0}" = 1 ] || pz_backup_file "$override" user >/dev/null || true
+        fi
+        if [ "${PZ_DRY_RUN:-0}" = 1 ]; then
+            pz_info "dry-run: would hide autostart $entry (competing input method)"
+            continue
+        fi
+        mkdir -p "$dir"
+        printf '[Desktop Entry]\nType=Application\nName=%s (desativado pelo PhaseZero)\nHidden=true\n%s\n' \
+            "${entry%.desktop}" "$VKBD_IM_MARKER" > "$override"
+        pz_info "autostart $entry hidden: one input method (KWin virtual keyboard)"
+    done < <(steamdeck_vkbd_competing_ims)
+    if [ "${PZ_DRY_RUN:-0}" != 1 ]; then
+        pkill -x fcitx5 2>/dev/null && pz_info "fcitx5 stopped for this session" || true
+        pkill -x ibus-daemon 2>/dev/null || true
+    fi
+}
+
+steamdeck_restore_competing_ims() {
+    local file
+    for file in "$(steamdeck_vkbd_autostart_dir)"/*.desktop; do
+        [ -f "$file" ] && grep -q "^$VKBD_IM_MARKER" "$file" && rm -f "$file" && pz_info "autostart restored: $(basename "$file")"
+    done
+    return 0
+}
+
+steamdeck_configure_virtual_keyboard() {
+    steamdeck_configure_virtual_keyboard_im || return $?
+    steamdeck_disable_competing_ims
+}
+
 # Restores the whole kwinrc captured before the last migration. A first
 # select against a missing file has no backup and cannot be reverted.
 steamdeck_revert_virtual_keyboard() {
+    steamdeck_restore_competing_ims
     local state backup file
     state="$(steamdeck_vkbd_state_file)"
     file="$(steamdeck_kwinrc_path)"
@@ -1026,8 +1091,10 @@ steamdeck_virtual_keyboard_status() {
         --argjson recordedAction "$recorded_action" \
         --argjson recordedBackup "$recorded_backup" \
         --argjson maliit "$maliit" \
+        --argjson competing "$(steamdeck_vkbd_competing_ims | jq -R . | jq -s . 2>/dev/null || echo '[]')" \
         '{
             provider: $provider,
+            competingInputMethods: $competing,
             configured: {
                 enabled: $cfgEnabled,
                 inputMethod: $path,

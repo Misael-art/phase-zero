@@ -2855,3 +2855,566 @@ real ("Pronto — modelo Web ativo…; inicia com o login", ferramentas bloquead
 pelo plano Plus) e o botão Com ferramentas… rodou pelo `CommandRunner` real
 (`/tmp/pz-evidence/pxa010/ui-page.png`). Não provado: clique real na janela
 do Control Center e a aparência do diálogo de resultado para saída em texto.
+
+## PXA-010 validação do hook e estado do modo ferramentas — 2026-10-16
+
+No host, `setup --login-wait 0` falhou com `config-drift` apesar da rota ativa.
+`route verify` apontou exclusivamente o hook de interrupção instalado pelo
+upstream 6.1.8: o validador aceitava `bin/codex-chatgpt-web`, mas o perfil real
+usa `runtime/bun app/cli.js` da mesma versão pinada. O validador agora aceita
+apenas essas duas formas exatas dentro do runtime gerenciado e continua a
+recusar executáveis, versões e comandos diferentes. Com a correção na árvore
+isolada, `route verify` retornou `ok:true` e `setup` concluiu; `smoke` real
+registrou `ok:true` para `chatgpt-web/light` em `state.json`. O pacote instalado
+continua 1.22.5-1, sem esta correção; não substituir enquanto a frente WinVM
+homologa outro pacote no mesmo host.
+
+O upstream preservou `autoApproveToolCalls:true` mesmo em `browser-only`, onde
+`doctor` reporta que não há broker nem túnel. O modo Web agora aceita esse estado
+legado somente enquanto `turn-broker.sock` não existir; `full` continua a
+recusar aprovação automática. A UI deixou de anunciar ferramentas como ligadas
+apenas porque o arquivo upstream diz `mode:full`: mostra bloqueios de elegibilidade
+ou indica que falta uma chamada MCP real. Testes focados: 97 passaram, incluindo
+hook atual e alterações hostis, ausência de broker e estados da UI.
+
+Conta Pro foi informada pelo operador e registrada como **atestado, não prova**;
+Developer Mode e confiança do host continuam não confirmados. A OpenAI Platform
+pede login no navegador integrado. Nenhuma chave, túnel ou plugin foi criado,
+e nenhum segredo foi lido. A assinatura ChatGPT não implica faturamento da API
+nem permissões Tunnels Read/Manage/Use; no Pro, o modo MCP do ChatGPT oferece
+leitura/fetch, não ferramentas locais de escrita. Próximo gate: autenticação
+do operador na Platform; conferir e reutilizar recursos existentes antes de
+criar outros; testar leitura MCP real no ChatGPT. Até lá, apenas Web-only está
+validado no host.
+
+### PXA-010: prova de conta/túnel e bloqueio real do Full — 2026-10-16
+
+Após autenticação/MFA do operador, a conta pessoal ChatGPT Pro e a organização
+Platform permitiram criar um túnel dedicado, uma chave de runtime restrita a
+Tunnels Read + Use com expiração em 30 dias e o
+conector pessoal `Codex Native2`. A chave foi guardada no SecretService; não
+entrou no repositório. O conector mostrou “conectado” no ChatGPT, com política
+de ações de baixo risco; `Allow all actions` e aprovação automática do launcher
+permaneceram desligados. Isto prova provisionamento, **não** uma chamada MCP
+funcional. O modo Full chegou a túnel/daemon saudáveis e `doctor.ok:true`, mas
+a verificação de turno do launcher expirou e o `smoke` real falhou com
+`ChatGPT web turn is missing network access in trusted Codex environment context`.
+
+Causa no runtime pinado 6.1.8: o resolver Full exige `statesNetworkAccess` no
+contexto do turno Codex. O perfil dedicado PhaseZero usa `sandbox_mode =
+"read-only"`, sem esse estado. Dar `danger-full-access` ou aprovação geral
+quebraria o contrato de isolamento; não foi feito. A configuração foi
+restaurada para `browser-only`, launcher reiniciado apenas em seu scope de
+usuário, sem KDE logout/reboot. `smoke` voltou a `PONG` por
+`chatgpt-web/light`, com `sandbox:read-only` e rota do Codex normal intocada.
+Túnel, chave e conector continuam cadastrados, mas o túnel fica offline em
+browser-only. Revogação externa segue disponível ao operador.
+
+Correção na ponte: `tools status`, `tools check`, janela com ferramentas e
+cartão da UI falham fechados com `full-runtime` e motivo específico. `doctor`
+saudável sozinho não sinaliza pronto. O próximo trabalho é adaptar o
+transporte Full ao sandbox restrito, provar chamada MCP real com autorização
+por tarefa no plano Pro (leitura/fetch), testar desconexão/revogação e rollback,
+e só então remover o bloqueio. O gate Windows descartável e usabilidade G4
+continuam pendentes. A frente Windows VM não foi alterada nesta rodada.
+
+Alternativa executável para o plano Pro: manter inferência Codex em
+`browser-only` e criar **outro** servidor MCP local, read/fetch, ligado ao
+mesmo Secure MCP Tunnel por `tunnel-client` supervisionado pelo PhaseZero.
+O servidor deve publicar somente operações de leitura com entradas e saídas
+tipadas: estado sanitizado do host/PhaseZero e consultas a diretórios
+explicitamente escolhidos pelo usuário. Recusar comandos arbitrários, leitura
+fora dos diretórios, arquivos secretos, caminhos simbólicos que escapem da
+raiz, saída excessiva e chamadas sem escopo. Tool annotations são dicas ao
+cliente, não mecanismo de enforcement; impor escopo no servidor. Guardar a
+chave no cofre, materializar no máximo em tmpfs 0600 durante execução, manter
+o cliente sem porta pública e com saúde/rollback visíveis na UI. Opt-in e
+desligar/revogar devem ser operações separadas. Prova de aceite: `tools/list`
+e `tools/call` em fixture; túnel `readyz`; descoberta do conector no ChatGPT;
+chamada real read/fetch que retorne um marcador seguro do host; recusa de
+path traversal e ações de escrita; desconexão e revogação sem afetar o
+`browser-only`. Esta alternativa não libera `Full` upstream nem escrita no
+plano Pro. Fontes: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+e [permissões de apps MCP](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt).
+
+Rechecagem no host em 2026-10-16: `loginctl` mostrou só a conta `misael`
+(sessões `manager` e KDE da mesma UID). O gerenciador estável do atalho marcou
+`single-user: ok` e `full-runtime: bloqueado`; `launcher-mode: browser-only`
+é consequência deliberada desse bloqueio. O `pz` do pacote 1.22.5-1 ainda
+mostra o checklist anterior sem `full-runtime`, portanto não é fonte de
+verdade até atualizar o pacote. O checklist da árvore atual explicita o gate
+de conta atendido e deixa de sugerir mudar o launcher antes de uma chamada
+MCP real com sandbox restrito. Cópia estável dos atalhos atualizada; launcher
+e sessão KDE não foram reiniciados.
+
+### PXA-010: contraprova de acesso completo e UX do bloqueio — 2026-10-16
+
+`loginctl list-users` no host mostrou somente UID 1000, mas a consulta D-Bus
+falhava ocasionalmente dentro do turno Codex. O gerenciador agora compara UIDs
+numéricas e, quando a consulta falha, lê os registros de sessão do próprio
+logind em `/run/systemd/sessions`. Só declara usuário único quando encontra a
+UID atual e consegue interpretar todos os registros; ausência, erro ou registro
+malformado continuam como `unknown`. Teste simulou a falha D-Bus e presença de
+outra UID; no host real, a mesma fallback encontrou apenas a UID atual.
+
+O limite do plano é independente do estado do launcher. A documentação OpenAI
+de [Developer Mode e apps MCP](https://help.openai.com/pt-br/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
+reserva ações MCP de gravação/modificação aos planos Business, Enterprise e Edu
+(beta); a conta Pro aceita somente leitura/fetch. O checklist agora expõe
+`plan-full` e a UI mostra permissão da conta, próxima ação e Web funcional sem
+confundir túnel conectado com acesso completo. O botão de requisitos descreve
+seu efeito real; a página foi conferida no tema dark em 800 px, sem corte de
+botões. O plano Pro **não** autoriza ampliar permissões via chave de API ou
+túnel.
+
+Contraprovas físicas, sem tocar a sessão KDE: um turno real
+`chatgpt-web/light` com `codex --sandbox workspace-write` respondeu que as
+ferramentas locais estavam indisponíveis; nenhum arquivo pedido apareceu no
+diretório descartável. `setup --full` no perfil principal recusou porta 17841
+ocupada e preservou os hashes de configuração/estado. Em perfil isolado e
+porta 17842, `setup --full` saiu 0, mas `doctor` apontou supervisor ausente e
+túnel parado; o subcomando upstream `tunnel start` recusou instalar serviço
+gerenciado no Linux. O perfil isolado foi removido e o serviço de prova
+parado. O launcher principal, a rota Web e o Codex normal ficaram inalterados.
+Esses resultados **não provam** chamada MCP funcional no modo Full.
+
+Gate remanescente: testar modo Full e política de aprovação em conta e ambiente
+compatíveis; até lá, `full-runtime` e `launcher-mode` permanecem bloqueados.
+No plano Pro, a alternativa separada de MCP local estritamente read/fetch,
+descrita acima, requer implementação e prova real antes de ser anunciada como
+disponível. A UI nova está na árvore/PR; o pacote 1.22.5-1 do host ainda não
+contém essa revisão. Homologação em host limpo, Windows descartável e teste de
+usabilidade seguem abertos.
+
+### PXA-010: atalho e autostart sobrevivem à remoção do worktree — 2026-10-16
+
+Incidente físico: clicar no menu mostrou “O gerenciador em
+`/mnt/sdcard/Projects/pz-product-apps-impl/linux/ai/chatgpt_web_bridge.py`
+não existe mais”. O `open.target` e o `autostart.target` apontavam para o
+worktree removido, mas `shortcuts status` ainda dizia `installed` porque só
+verificava se os arquivos de atalho e target existiam. O pacote instalado
+1.22.5-1 não era fallback funcional: seu `route verify` rejeitava o hook
+atual do upstream 6.1.8.
+
+Correção: `shortcuts install` e `autostart enable` instalam cópia privada do
+gerenciador e dos adapters do cofre em `~/.local/share/phasezero/chatgpt-web/manager`
+(diretório 0700, arquivos 0600). Targets apontam para essa localização
+persistente, não para um checkout. Status agora exige target exato, intérprete
+e scripts presentes; no Arch, o intérprete é `/usr/bin/python3`, não um venv
+descartável. Worktree ausente vira `inconsistent`. Testes de regressão
+simulam target apagado e re-instalação. No host, ambos foram reparados sem
+reboot/logout: menu `installed`, autostart `enabled`, `route verify ok:true`.
+Invocar o **mesmo wrapper do atalho** abriu o Codex Desktop no perfil dedicado
+(`--new-instance`, rc 0, processo ativo). Pacote do sistema e VM intactos.
+Após publicar pacote com esta correção, reinstalar os atalhos/autostart pelo
+gerenciador atualizado para renovar o snapshot privado. O modo Full segue
+bloqueado independentemente deste conserto.
+
+### PXA-010: corrigir diagnóstico de plano Pro — 2026-10-18
+
+A afirmação acima de que Pro permite **somente** `read/fetch` veio do fluxo
+anterior de Developer Mode. Ela não pode servir como proibição universal:
+a [documentação atual de plugins MCP personalizados](https://developers.openai.com/api/docs/guides/custom-mcp-server)
+diz que o ChatGPT aceita ferramentas de leitura **e escrita**, sujeitas às
+permissões e confirmações da conta/workspace. A [documentação do túnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+descreve o vínculo do mesmo plugin a um Secure MCP Tunnel. Essas fontes não
+atestam que a conta Pro deste host recebeu a permissão. O código deixa de
+mostrar “faça upgrade para Business” como fato e marca Pro como
+`write-unverified`; `plan-full` deixa de ser o primeiro bloqueio. Teste de
+chamada real de escrita reversível continua obrigatório antes de liberar
+ferramentas.
+
+O host ainda falha em `full-runtime`: o launcher 6.1.8 não completou turno
+com MCP sob o sandbox read-only do perfil isolado. `launcher-mode` permanece
+browser-only. O presente ajuste corrige diagnóstico e copy, não declara
+Full funcional. Chrome da conta não estava exposto ao controle desta sessão;
+permissão real de plugin não foi observada. Reavaliar o plano de MCP local
+read/fetch após essa prova: a restrição por plano que o motivou foi
+superada pela documentação atual, embora o escopo restrito continue opção.
+
+Prova hermética: `tests/test_chatgpt_web_bridge.py` e
+`tests/test_chatgpt_web_card.py`: 62 passaram; caso Pro confirma próximo gate
+`full-runtime` depois da chave e nunca retorna `ready:true` sem turno real.
+No host `misael-jupiter`, `shortcuts install` renovou apenas a cópia estável
+do gerenciador/atalhos; hash do gerenciador instalado igual ao da árvore.
+`shortcuts status: installed`, `autostart status: enabled` e o próprio
+gerenciador instalado apontam `full-runtime` como primeiro gate. Backup do
+manager anterior em
+`~/.local/share/phasezero/chatgpt-web/manager/chatgpt_web_bridge.py.pre-20261018`.
+Pacote instalado 1.22.8-1 não contém a
+copy nova da UI; publicar pacote depois da revisão. Sem reiniciar ou mudar
+launcher, túnel, credenciais, VM, KDE ou boot.
+
+### PXA-010: reprova do Full com Codex 0.164 — 2026-10-27
+
+Teste controlado autorizado pelo operador, em repositório descartável fora do
+PhaseZero. Backup em `journal/full-probe-20261027T…`. Launcher reconfigurado
+para `--full` (túnel existente, chave do cofre materializada em tmpfs e apagada
+em seguida, aprovação automática desligada); `doctor.ok:true`, túnel pronto.
+Turno real com Codex 0.164.0, `workspace-write` e `network_access=true` falhou
+igual ao 0.163: `ChatGPT web turn is missing network access in trusted Codex
+environment context`.
+
+Causa exata, por captura do request com provider local falso (sem gastar
+mensagem): o resolver Full do runtime 6.1.8 procura `<network_access>` (ou
+“network access is enabled”) no `<environment_context>` confiável. Codex
+0.163+ descreve permissões em `<permission_profile>` e declara rede apenas na
+mensagem developer. Não é questão de configuração; depende de runtime upstream
+compatível ou de Codex anterior ao novo formato. Rollback para `browser-only`
+feito; `smoke` voltou a `PONG`, `~/.codex` intocado. Bloqueio mantido com o
+motivo atualizado.
+
+### PXA-010: ferramentas liberadas com runtime 6.1.14 — 2026-10-27
+
+Pin atualizado para `miuuyy/codex-chatgpt-web` v6.1.14 (commit `cfeaf04`,
+tag leve). O hash do AppImage confere com `checksums.txt` e com o digest do
+release no GitHub. O pacote continua sem assinatura de plataforma. Desde a
+6.1.10, o runtime lê as permissões nativas no registro (rollout) do Codex, o que
+elimina o `missing network access` do Codex 0.163/0.164.
+
+Prova real no host, com Codex 0.164.0 e conector `Codex Native2` (túnel
+`tunnel_6ad2…`), em repositório descartável:
+
+- leitura por `codex_exec` no sandbox somente leitura do perfil dedicado: ok;
+- escrita no workspace com sandbox somente leitura: recusada (`Read-only file
+  system`);
+- com `workspace-write`, só para teste: escrita no workspace ok e escrita fora
+  das raízes recusada (exit 1);
+- `tools disable` encerra o túnel; `tools enable` religa e confere tudo.
+
+Automação nova: `tools enable [--tunnel-id]` e `tools disable`. A troca usa
+backup em `journal/`; a chave só fica em tmpfs durante o setup do upstream. Em
+qualquer falha, a configuração volta sozinha ao modo Web. A saúde do túnel é
+lida no `/readyz` do tunnel-client, porque o `doctor` do upstream marca como
+parado um túnel do launcher. O conector na conta é conferido de forma somente
+leitura pela sessão do próprio launcher (DevTools em loopback), sem exportar
+tokens.
+
+Achados corrigidos:
+
+1. A 6.1.14 zera o próprio `environ` e reescreve o `argv` dos filhos. O
+   isolamento passa a ser lido pela árvore de processos, pelo MainPID do unit e
+   pelo mount somente leitura.
+2. O `tunnel-client` sobrevivia ao reinício do launcher no `app-*.scope`
+   antigo, mantendo o túnel e um `codex app-server` online mesmo no modo Web.
+   Agora ele é tratado como violação de isolamento, os escopos são parados com o
+   unit e o `repair` encerra órfãos.
+3. O `codex app-server` do próprio túnel bloqueava o reinício como se fosse um
+   Codex do usuário.
+4. A entrada de início no login, quando apagada, agora é recriada pelo
+   `repair`/`setup` se o opt-in já estiver registrado.
+
+Escrita local continua bloqueada: o perfil dedicado usa sandbox somente leitura.
+A permissão do conector na conta está como "Permitir tudo"; o limite efetivo é
+o sandbox do Codex, não o cartão de aprovação do ChatGPT.
+
+### PXA-010: atalhos e sandbox herdado — 2026-10-27
+
+- Atalhos de menu e área de trabalho tinham sumido do host (arquivos apagados
+  por fora, registro intacto). O `setup` agora instala por padrão e o `repair`
+  recria os que faltam. Não sobrescreve arquivo alterado por terceiros e
+  respeita `shortcuts remove`. O atalho principal segue o modo do launcher
+  (Web ou com ferramentas).
+- Sandbox do perfil dedicado: `pz ai chatgpt-web sandbox inherit|isolated`.
+  O padrão `inherit` copia `sandbox_mode`, `approval_policy` e
+  `[sandbox_workspace_write]` do `~/.codex/config.toml`, que só é lido. O
+  opt-in `isolated` fixa o modo somente leitura. O `CODEX_HOME` continua
+  separado: compartilhá-lo faria o Codex normal passar pelo bridge. `smoke` e
+  `ask` rodam sempre somente leitura.
+- Prova real no host: com `inherit`, o sandbox herdado foi
+  `danger-full-access` e a escrita no workspace funcionou. Com `isolated`, o
+  sandbox ficou `read-only` e a escrita foi recusada. Ao final, o host voltou
+  ao padrão `inherit`.
+
+### Contas Codex no painel — incremento de 2026-10-29
+
+PXA-006/010: implementação Linux de perfis de conta em **Contas e conexões →
+Contas Codex**. Backend `linux/ai/codex_profiles.py`, acionado por
+`pz ai codex-profiles`, usa o domínio de contas existente. Não substitui o
+cofre de chaves nem introduz um login universal. Registro v1 contém apenas ID
+opaco, apelido, cor, slot persistente e estado de arquivamento.
+
+Jornada:
+
+1. Identificar a **Conta atual** com nome/cor. Ela referencia a instalação
+   nativa e o bridge existentes, sem mover ou copiar suas sessões.
+2. **Adicionar conta Codex**, escolher apelido/cor e **Abrir Desktop**. Fazer
+   login na conta desejada na janela do Codex. Desktop e CLI desse perfil
+   usam o mesmo `CODEX_HOME`; contas diferentes conservam diretórios próprios.
+3. **Preparar / login Web** abre terminal e o fluxo do bridge existente.
+   Aceite experimental e login ChatGPT são próprios daquele perfil. A janela
+   Web Desktop também pode pedir seu primeiro login Codex. Entrar na mesma
+   conta pretendida; o cadastro local não prova identidade de provedor.
+4. **Navegador** abre Codex no site usando perfil Chromium/Chrome exclusivo,
+   com autenticação independente. Não importa cookies do navegador pessoal.
+5. **Criar atalhos** disponibiliza Desktop, CLI, Web Desktop e Navegador no
+   menu e na área de trabalho existente, identificados por apelido, cor e
+   `C<slot>`. Nome/cor atualizam atalhos gerenciados já existentes.
+6. **Arquivar** remove os atalhos gerenciados e bloqueia novas aberturas desse
+   ID. Preserva credenciais, dados e aplicativos abertos. **Restaurar** mantém
+   ID/slot. Arquivamento não equivale a logout ou revogação no provedor.
+
+| Estado | Local/contrato |
+|---|---|
+| Metadados | `$XDG_DATA_HOME/phasezero/ai-accounts/codex-profiles/profiles.json`, 0600; lock entre processos, backup central antes de alterar |
+| Dados de perfil | `$XDG_DATA_HOME/phasezero/codex/<id>/`, 0700; raiz curta para sockets Unix |
+| Desktop/CLI nativos | `<id>/native/`; login ChatGPT gerido pelo Codex, arquivo próprio de credenciais; configuração inicial workspace-write/on-request |
+| Bridge Web | `<id>/web/{codex-home,core-home,launcher-data}`; autenticações, baseline, journal, chave e runtime próprios |
+| Electron | `<id>/desktop/{native,web}/`; configuração/cache/estado separados e porta fixa para não trocar armazenamento após reinício |
+| Navegador | `<id>/browser/`; perfil persistente dedicado |
+| Instância Web | `pz-chatgpt-web-<id>.service`; porta `24000 + 4 × slot`; runtime e autostart identificados por ID |
+| Desktop local | Nativo `22100 + 4 × slot`, Web `22101 + 4 × slot`; porta ocupada não provoca seleção de outra conta |
+
+ID aleatório permanece estável mesmo com apelidos iguais, alteração de cor ou
+arquivamento. Slot não é reutilizado. Até 64 perfis adicionais; não há rotação
+automática de contas, inferência de cota ou promessa de sessão permanente.
+Expiração/revogação continua exigindo novo login pelo fluxo do provedor.
+
+Variáveis de rota/chave OpenAI, `CODEX_HOME` e instância Electron herdadas são
+removidas antes de selecionar o perfil. Âncoras de XDG preservam o registro
+canônico quando um comando parte de outra janela isolada. Raiz Web e perfil
+nativo devem corresponder ao mesmo ID; redirecionamentos por symlink são
+recusados. Encerramento/reinício do bridge filtra somente os scopes dos seus
+processos, inclusive no perfil legado. Abrir Web após encerramento do daemon
+reaplica o setup existente com sessão salva e `login_wait=0`, sem novo opt-in
+automático e sem tocar outro perfil.
+
+Instalação reutiliza `setup-codex.sh`, o pacote Desktop local preparado e o
+manager Web fixado em 6.1.14. Arquivo Web público já presente é copiado somente
+após conferir tamanho/SHA-256; sessão nunca acompanha essa cópia. Downloads
+acima de 70 MB continuam manuais, com URL/hash/destino informados. Abertura de
+perfil Desktop exige launcher Linux com suporte a múltiplas instâncias e
+armazenamento Electron separado. Caminhos IPC acima de 107 bytes são recusados
+antes da abertura, evitando spinner causado por socket Unix inválido.
+
+Comandos de suporte:
+
+```bash
+pz ai codex-profiles list
+pz ai codex-profiles add --label "Conta B" --color roxo
+pz ai codex-profiles open ID --surface desktop
+pz ai codex-profiles terminal ID --task login
+pz ai codex-profiles cli ID
+pz ai codex-profiles web ID status
+pz ai codex-profiles shortcuts ID
+pz ai codex-profiles install-panel-shortcut
+```
+
+`ID` é o valor retornado pelo cadastro; `current` seleciona a instalação
+existente. Para logout nativo explícito: `pz ai codex-profiles cli ID logout`.
+Web e navegador conservam seus fluxos próprios de saída. A CLI de perfis e
+sua lista são superfícies locais privadas; não publicar a saída com apelidos.
+Painel envia apelido/cor por stdin, sem incluí-los no comando ou no histórico
+do runner, e usa `--redacted` nas prévias/resultados administrativos. Exportação
+agregada de Contas continua redigida. Identificação visual local fica no painel
+e nos atalhos; launcher instalado mantém sua própria classe/título de janela.
+Windows, login real em duas
+contas, igualdade de identidade entre superfícies, cotas e sessões depois de
+reboot não estão homologados por fixtures ou Xvfb.
+
+### Correção de acesso à Área de Trabalho — 2026-10-30
+
+Primeiro uso do perfil falhava em “Permitir acesso” à Área de Trabalho.
+Isolar `XDG_CONFIG_HOME` também isolou `user-dirs.dirs`: Electron passou a
+procurar `~/Desktop`, inexistente no host cujo diretório real é `~/Área de
+trabalho`. O handler instalado `requestDesktopRoot()` usa
+`app.getPath("desktop")` e `opendir()`, falhando antes da concessão de acesso.
+
+Preparação nativa e abertura Web agora compartilham somente o mapa dos oito
+diretórios XDG padrão com cada configuração Electron isolada. Valores são
+convertidos em caminhos literais sem executar shell. Preferências, sessões,
+cookies e credenciais continuam separados; mapas próprios do usuário são
+preservados, e mapas gerenciados têm backup antes de atualizar. Não houve
+ampliação de sandbox ou mudança de permissão Unix para corrigir essa falha.
+
+Perfis existentes são reparados no próximo preparo/lançamento. Uma janela já
+aberta precisa ser fechada e reaberta para descartar cache de caminhos do
+Electron/GLib; depois repetir **Permitir acesso**. No host, os mapas nativo e
+Web foram reparados e passaram criação/leitura/remoção de arquivo de prova na
+pasta correta. Sandbox real do Codex negou escrita sem concessão e aceitou
+escrita somente na pasta temporária explicitamente autorizada no teste.
+
+### Reabrir perfil já ativo — 2026-10-30
+
+Botão Abrir tratava porta ocupada como falha mesmo quando o perfil já estava
+em execução em segundo plano. Nativo e Web agora usam o protocolo de warm-start
+do launcher instalado (`launch-action.sock`, `argv: []`) para recuperar a
+janela existente. Não iniciam processo duplicado nem encerram outro perfil.
+
+Ownership exige PID vivo do usuário, executável Electron esperado, diretório
+Electron exato daquele perfil e start ticks estáveis. Socket precisa pertencer
+ao mesmo usuário; `SO_PEERCRED` confirma PID/UID do processo antes de enviar a
+ação. A identificação aceita tanto argv normal quanto o process.title agregado
+usado pelo pacote Linux, preservando limites exatos do caminho. Arquivo PID
+sozinho ou porta ocupada não autorizam a recuperação. Se owner não puder ser
+confirmado, abertura continua recusada, preservando processos desconhecidos.
+
+Warm-start traz a janela para frente; não reinicia o processo. Para carregar
+alterações que dependam de reinício, como cache antigo dos diretórios XDG, usar
+**Sair** na instância correspondente antes de abrir novamente.
+
+
+### Limpeza de instalações personalizadas — 2026-10-30
+
+Painel Contas Codex oferece **Excluir perfil** em cada perfil personalizado,
+inclusive arquivados, e **Limpar instalações personalizadas**. Instalação
+`current` e seu Codex Web são protegidos no backend; botão global desabilita
+quando só resta a instalação padrão. Ações passam pelo runner existente com
+prévia `remove --dry-run`, sem administrador.
+
+Backend `codex_profiles.remove`: preflight de todo lote sob lock do registro,
+verificação de processos por diretórios/env/argv/executável e launcher Web,
+validação de propriedade/tipo e recusa de caminhos redirecionados/atalhos
+estrangeiros. Perfil em uso exige Sair/fechar seu app antes de excluir; não
+mata processos nem encerra outras contas. Abertura Desktop/terminal compartilha
+lock com limpeza. Daemons não dumpáveis do desktop não exigem leitura de seu
+ambiente privado; argv/executável são consultados independentemente.
+
+Dados, autenticação local e atalhos saem do ambiente ativo por movimento para
+`$XDG_DATA_HOME/phasezero/ai-accounts/codex-profiles/removed/<operação>/`,
+com diretório 0700 e manifesto 0600. Falha ao salvar registro devolve arquivos
+aos caminhos originais. Não há cópia de tokens para outra conta. Sockets e
+runtime inativos são descartáveis e removidos separadamente, sem tentar copiá-los
+entre filesystems; falhas residuais aparecem no resultado. Registro mantém
+somente perfis restantes. Nova criação recebe novo ID; slots liberados podem
+ser usados novamente após encerramento e remoção do namespace antigo.
+
+Recuperação manual: com apps fechados, consultar `manifest.json` privado,
+repor cada par `backup` → `source` sem sobrescrever arquivos novos e restaurar
+metadados dos perfis registrados no manifesto sob lock. Backups do registro
+continuam no mecanismo central. Recuperação contém sessões privadas e não deve
+ser publicada ou reutilizada como login de outro ID.
+
+Limpeza é local: não revoga conectores ChatGPT nem túneis remotos. Aplicativo
+compartilhado/CLI, configuração e sessões do padrão ficam nos lugares originais.
+No host autorizado, único perfil personalizado foi removido; nenhum perfil,
+atalho ou processo personalizado permaneceu. Sete caminhos relevantes do padrão
+foram comparados antes/depois por existência, inode e SHA-256, sem alteração.
+193 testes focados passaram; GUI do host executou ações com prévia via runner
+QProcess em ambiente isolado. Evidência:
+`~/.cache/phasezero-dev/evidence/codex-profile-cleanup-20261030/`.
+
+
+### Identidade visual e organização do menu Codex — 2026-10-30
+
+Instalação padrão é sempre primeira no painel; apelido inicial passa a
+**Principal**. Apelidos personalizados existentes são preservados, salvo rótulo
+legado exato “Conta atual”, migrado para Principal por `organize`.
+
+Ícone usa forma da imagem indicada pelo operador:
+https://zonalogo.com/assets/codex-logo.webp, SHA-256
+`9ef453daf2261ce3207f6c0f19bb01d9b244005aa0cb6a8f50a696ac24c4b346` (25794 bytes).
+`linux/ai/assets/codex-account.svg` contém contorno vetorizado, sem o fundo
+quadriculado incorporado ao raster. Extração: cromaticidade RGB max−min >35,
+contornos CCOMP, aproximação de 0,55 px no original 768×768; três contornos com
+fill-rule evenodd. Gradiente original reservado ao padrão; renderer troca
+somente gradiente para contas adicionais. Runtime não exige download nem
+biblioteca de imagens; QtGui renderiza os contornos/gradiente do SVG no painel
+e KDE lê o mesmo SVG nos atalhos. PySide6 mínimo do Arch não garante
+libQt6Svg.so.6; import direto de QtSvg foi removido após reproduzir falha no
+job CI 124208244093. Regressão bloqueia módulo QtSvg e confere pixels/alpha. Fonte indicada pelo usuário; não inferir endosso oficial da origem.
+
+Paleta fixa de 65 cores (padrão +64 perfis). Alocação sob lock escolhe cor livre;
+escolhas explícitas reservadas/repetidas são recusadas, inclusive quando usadas
+por arquivados. Seletor mostra amostras e oferece somente cores disponíveis;
+cor do padrão é fixa. Migração corrige colisões antigas sem mudar ID ou login.
+Cores RGB distintas não prometem distinção perceptiva para toda deficiência
+visual; apelidos continuam necessários.
+
+Menu/desktop oferecem **Codex [apelido]** e **Codex Web [apelido]**, com mesma
+cor para as duas superfícies da conta. Aliases primários antigos pertencentes ao painel são retirados com backup;
+login de navegador preexistente mantém seu diretório original.
+CLI/navegador ficam acessíveis no painel;
+seus arquivos de menu usam NoDisplay=true e não recebem cópia no desktop.
+Perfis personalizados oferecem ações CLI/navegador no menu de contexto nativo.
+Criação pelo CLI/painel já produz atalhos; renomear atualiza existentes.
+
+`pz ai codex-profiles organize [--dry-run]` e botão **Organizar ícones e menu
+Codex** reconciliam apresentação. Override de usuário `codex-desktop.desktop`
+conserva ID, Exec, protocolos e ações do pacote instalado; modifica nome/ícone
+sem editar pacote nem reiniciar app. Web padrão conserva ID
+`phasezero-chatgpt-web.desktop`. Entrada antiga Tools fica oculta no menu e sua
+cópia do desktop sai com backup; AppImages extras só são ocultados quando
+marcadores/Exec identificam explicitamente Codex Desktop. Demais apps intactos.
+
+Bridge recebe owner `accountShortcuts=codex-profiles` e não recria atalhos
+legados em setup/repair/reentrada. Snapshot estável de seu gerenciador é
+atualizado com backup quando já existe. Status mantém contrato installed/off;
+opt-out continua possível, removendo apenas atalho Web, sem tocar nativo ou
+revogar sessão. Recriação explícita pelo painel mantém gates de opt-in/tools.
+
+Host: duas contas existentes preservadas, colisão azul legada migrada, quatro
+entradas Codex visíveis e três duplicações antigas ocultadas/removidas do
+desktop. Sete caminhos de autenticação/configuração comparados por
+existência/inode/SHA-256 ficaram idênticos; estado do bridge só recebeu owner
+visual. Defaults dos protocolos Codex já apontavam a codex-desktop.desktop.
+Cache KDE/MIME atualizado; nenhum app encerrado. 204 testes focados passaram,
+com GUI real e desktop-file-validate. Evidência privada:
+`~/.cache/phasezero-dev/evidence/codex-icons-20261030/`.
+
+
+### Aparência pela cor da conta — 2026-10-31
+
+Cor do perfil alimenta **Aparência → destaque e fundo** nos temas claro e
+escuro do Codex Desktop nativo/Web. Instalação `current` e seu Web padrão não
+são escritos, incluindo preferências já existentes. Fontes, modo light/dark/
+system, contraste, cores semânticas e configurações fora de Aparência são
+preservados. Temas ainda inexistentes partem dos defaults do pacote local.
+Destaque recebe cor reservada à conta; fundo recebe mistura dessa cor com
+base clara/escura, preservando contraste do texto padrão.
+
+Contrato confirmado na documentação oficial de Aparência
+(https://learn.chatgpt.com/docs/reference/settings#appearance) e no bundle do
+pacote instalado: chaves `desktop.appearanceLightChromeTheme` e
+`desktop.appearanceDarkChromeTheme`, campos `accent` e `surface`. Schema TOML usa objetos
+inline/nested e omite fontes nullable ausentes. Nenhuma preferência é obtida
+por cópia da instalação padrão.
+
+Helper único `account_appearance_text` / `sync_account_appearance` no bridge,
+reutilizado por `CodexProfiles.sync_appearance`. Editor reescreve somente tabelas
+`desktop`, valida TOML antes/depois e exige igualdade semântica de tudo fora dos
+dois temas. Preserva valores existentes de cada tema, alterando accent e
+surface; preenche defaults faltantes. Backup antes de gravar, idempotência e comparação
+do conteúdo detectam edições concorrentes. TOML inválido, tipo inesperado ou
+sintaxe ambígua que não passe a validação são recusados sem sobrescrever.
+
+Preparo nativo, criação/atualização de atalhos, Nome/cor e Organizar reaplicam
+preferência. Web recebe `PZ_CHATGPT_WEB_ACCOUNT_COLOR` no processo selecionado e
+`accountAppearanceAccent` no estado quando já configurado; seed/Desktop e
+snapshot standalone usam mesmo helper após reboot. Organizador atualiza
+snapshots existentes tanto do padrão quanto dos perfis, com backup do código;
+nenhuma cor é aplicada ao padrão. Web ainda não preparado recebe tema no seed,
+sem criar antecipadamente uma instalação/estado de login.
+
+208 testes focados passaram. Servidor real `codex app-server --stdio` em HOME
+anônimo respondeu `config/read` com ambos os destaques corretos, sem login ou
+chamada de inferência. Host: duas configurações nativas existentes atualizadas;
+Web das contas adicionais ainda não preparado. Hashes dos arquivos primários,
+auth e semântica fora de Aparência permaneceram iguais. Nenhum app reiniciado;
+janelas já abertas podem precisar ser reabertas para reler preferências.
+Evidência privada: `~/.cache/phasezero-dev/evidence/codex-appearance-20261031/`.
+
+
+### Correção do fundo neutro — 2026-10-31
+
+Relato HMAIL expôs aceite visual incompleto: destaque verde em config/read não
+comprovava janela verde. Política anterior mantinha `surface` cinza/branco.
+Helper compartilhado agora tinge fundo: 40% da cor sobre `#181818` no escuro e
+15% sobre branco no claro. Verde produz `#174227` / `#dcece2`. Mistura clara
+inicial de 12% colidia em dois pares da paleta; regressão corrigida para 15%.
+Teste cobre 65 fundos distintos em cada modo e contraste padrão ≥ 4,5:1.
+Fontes e cores de texto personalizadas permanecem escolhas do usuário; teste
+de contraste cobre defaults, não certifica overrides arbitrários.
+
+Validação desta correção: 45 testes de perfis + 93 de bridge/UI passaram.
+Aplicativo instalado executado em HOME/XDG anônimos e Xvfb próprios: captura
+nativa mostrou tela de login com fundo verde, amostras RGB `#174227`. CDP
+expôs apenas páginas auxiliares, portanto screenshot do display próprio foi
+usado como prova visual; não houve login nem inferência. Fixture encerrada.
+
+Host: configurações de ambas as contas adicionais e snapshots existentes do
+bridge atualizados com backup. Configuração principal e credenciais comparadas
+por hash, iguais. Janela HMAIL estava executando outra tarefa: não foi encerrada;
+recarga visual dessa janela permanece pendente até reabertura após a tarefa.
+Prova anônima não homologa sessão autenticada ou recarga ao vivo.
+Evidência privada: `~/.cache/phasezero-dev/evidence/codex-green-window-20261031/`.

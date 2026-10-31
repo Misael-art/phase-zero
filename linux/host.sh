@@ -292,6 +292,9 @@ main() {
                 *) pz_error "pz host backups: ação desconhecida: $sub"; usage; return 2 ;;
             esac
             ;;
+        duplicates|duplicidades|dup)
+            exec python3 "$PZ_ROOT/linux/audit/duplicates.py" "$@"
+            ;;
         help|--help|-h) usage ;;
         *) pz_error "pz host: ação desconhecida: $action"; usage; return 2 ;;
     esac
