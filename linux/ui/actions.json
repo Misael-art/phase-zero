@@ -4487,6 +4487,64 @@
       "plan_command": "linux/pz ai desktop status"
     },
     {
+      "name": "ai.desktop.claude.update",
+      "label": "Atualizar Claude Desktop",
+      "command": "linux/pz ai desktop update-claude",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai desktop check-claude"
+    },
+    {
+      "name": "ai.desktop.claude.check",
+      "label": "Verificar atualização Claude Desktop",
+      "command": "linux/pz ai desktop check-claude",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.quota.status",
+      "label": "Franquia restante (Codex/Claude/Grok)",
+      "command": "linux/pz ai quota status --json",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.quota.install",
+      "label": "Medidores de franquia na bandeja",
+      "command": "linux/pz ai quota install",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai quota status --json"
+    },
+    {
+      "name": "ai.quota.remove",
+      "label": "Desligar medidores de franquia",
+      "command": "linux/pz ai quota remove",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai quota status --json"
+    },
+    {
       "name": "ai.desktop.qwen",
       "label": "Instalar Qwen Code Desktop",
       "command": "linux/pz ai desktop install-qwen",

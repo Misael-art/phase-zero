@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""quota_meter.py - remaining plan quota (100% -> 0%) and renewal time per AI account.
+
+Sources, all local or first-party:
+- Codex (every PhaseZero profile): the newest `rate_limits` record Codex itself
+  writes into its rollout sessions. Nothing is requested from the network.
+- Claude (Code CLI and Desktop share the claude.ai account): the OAuth usage
+  endpoint Claude Code uses for `/usage`. The token is read, never refreshed,
+  logged or written anywhere.
+- Grok: the CLI does not expose plan limits, so only the renewal date the user
+  configured is shown; the meter is reported as unavailable, never guessed.
+
+Commands: status [--json] | tray | install | remove | set-renewal <provider> --day N
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, Callable
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+CLAUDE_COLOR = "#d97757"
+GROK_COLOR = "#9ca3af"
+CLAUDE_CACHE_SECONDS = 300
+REFRESH_SECONDS = 60
+ROLLOUT_SCAN_LIMIT = 40
+AUTOSTART_NAME = "phasezero-quota-meter.desktop"
+
+
+def env_path(env: dict[str, str], name: str, fallback: str) -> Path:
+    home = Path(env.get("HOME") or Path.home())
+    return Path(env.get(name) or home / fallback)
+
+
+def config_file(env: dict[str, str]) -> Path:
+    return env_path(env, "XDG_CONFIG_HOME", ".config") / "phasezero/quota-meter.json"
+
+
+def cache_file(env: dict[str, str]) -> Path:
+    return env_path(env, "XDG_CACHE_HOME", ".cache") / "phasezero/quota-meter-claude.json"
+
+
+def load_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def write_private(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def parse_time(value: Any) -> dt.datetime | None:
+    if isinstance(value, (int, float)) and value > 0:
+        return dt.datetime.fromtimestamp(value, dt.timezone.utc)
+    if isinstance(value, str) and value:
+        try:
+            parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
+    return None
+
+
+def remaining(used: Any) -> int | None:
+    if not isinstance(used, (int, float)):
+        return None
+    return max(0, min(100, round(100 - float(used))))
+
+
+def window(name: str, used: Any, resets: Any, now: dt.datetime) -> dict[str, Any] | None:
+    left = remaining(used)
+    reset_at = parse_time(resets)
+    if left is None:
+        return None
+    renewed = bool(reset_at and reset_at <= now)
+    return {"name": name, "remaining": 100 if renewed else left,
+            "resetsAt": reset_at.isoformat() if reset_at else None,
+            "renewedSinceSeen": renewed}
+
+
+def meter(meter_id: str, label: str, provider: str, color: str, windows: list[dict[str, Any]],
+          **extra: Any) -> dict[str, Any]:
+    windows = [item for item in windows if item]
+    # The tightest window is the one that blocks the next request.
+    tight = min(windows, key=lambda item: item["remaining"]) if windows else None
+    return {"id": meter_id, "label": label, "provider": provider, "color": color,
+            "remaining": tight["remaining"] if tight else None,
+            "resetsAt": tight["resetsAt"] if tight else extra.pop("resetsAt", None),
+            "windows": windows, **extra}
+
+
+# ---- Codex -----------------------------------------------------------------
+
+def last_rate_limits(codex_home: Path) -> tuple[dict[str, Any] | None, float | None]:
+    sessions = codex_home / "sessions"
+    try:
+        files = sorted(sessions.glob("*/*/*/rollout-*.jsonl"), key=lambda p: p.stat().st_mtime,
+                       reverse=True)[:ROLLOUT_SCAN_LIMIT]
+    except OSError:
+        return None, None
+    for path in files:
+        found = None
+        try:
+            with path.open(encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if '"rate_limits"' not in line or '"codex"' not in line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    limits = (record.get("payload") or {}).get("rate_limits")
+                    if isinstance(limits, dict) and limits.get("limit_id") == "codex" and (
+                            limits.get("primary") or limits.get("secondary")):
+                        found = (limits, parse_time(record.get("timestamp")))
+        except OSError:
+            continue
+        if found:
+            seen = found[1].timestamp() if found[1] else path.stat().st_mtime
+            return found[0], seen
+    return None, None
+
+
+def codex_meters(env: dict[str, str], now: dt.datetime) -> list[dict[str, Any]]:
+    try:
+        from linux.ai.codex_profiles import COLORS, CodexProfiles
+        profiles = CodexProfiles(env=env)
+        rows = [dict(profiles._current), *(row for row in profiles.rows() if not row.get("archived"))]
+    except Exception as error:  # profiles unavailable: fall back to the native home only
+        rows, profiles, COLORS = [], None, {}
+        home = env_path(env, "CODEX_HOME", ".codex")
+        if home.is_dir():
+            rows = [{"id": "current", "label": "Principal", "color": "azul", "_home": home}]
+        if not rows:
+            return [meter("codex:error", "Codex", "codex", "#2563eb", [], error=str(error))]
+    result = []
+    for row in rows:
+        home = row.get("_home") or (profiles.native_home(row) if profiles else None)
+        if not home or not Path(home).is_dir():
+            continue
+        limits, seen = last_rate_limits(Path(home))
+        windows = []
+        if limits:
+            for key, name in (("primary", "principal"), ("secondary", "secundária")):
+                item = limits.get(key)
+                if isinstance(item, dict):
+                    minutes = item.get("window_minutes")
+                    label = {300: "5 horas", 10080: "semanal"}.get(minutes, name)
+                    windows.append(window(label, item.get("used_percent"), item.get("resets_at"), now))
+        result.append(meter(
+            f"codex:{row['id']}", f"Codex · {row.get('label') or row['id']}", "codex",
+            COLORS.get(row.get("color"), "#2563eb"), windows,
+            plan=(limits or {}).get("plan_type"),
+            seenAt=dt.datetime.fromtimestamp(seen, dt.timezone.utc).isoformat() if seen else None,
+            error=None if limits else "sem registro de limite; use esta conta uma vez"))
+    return result
+
+
+# ---- Claude ----------------------------------------------------------------
+
+def claude_meter(env: dict[str, str], now: dt.datetime,
+                 fetch: Callable[[str, dict[str, str]], Any] | None = None,
+                 use_cache: bool = True) -> dict[str, Any] | None:
+    config_dir = Path(env.get("CLAUDE_CONFIG_DIR") or Path(env.get("HOME") or Path.home()) / ".claude")
+    credentials = load_json(config_dir / ".credentials.json")
+    oauth = (credentials or {}).get("claudeAiOauth") if isinstance(credentials, dict) else None
+    if not isinstance(oauth, dict) or not oauth.get("accessToken"):
+        return None
+    plan = oauth.get("subscriptionType")
+    cached = load_json(cache_file(env)) if use_cache else None
+    payload = None
+    if isinstance(cached, dict) and time.time() - cached.get("at", 0) < CLAUDE_CACHE_SECONDS:
+        payload = cached.get("usage")
+    error = None
+    if payload is None:
+        expires = oauth.get("expiresAt")
+        if isinstance(expires, (int, float)) and expires / 1000 < time.time():
+            error = "login do Claude expirado; abra o Claude Code para renovar"
+        else:
+            headers = {"Authorization": f"Bearer {oauth['accessToken']}",
+                       "anthropic-beta": "oauth-2025-04-20", "User-Agent": "PhaseZero-quota-meter"}
+            try:
+                payload = (fetch or http_json)(CLAUDE_USAGE_URL, headers)
+                write_private(cache_file(env), {"at": time.time(), "usage": payload})
+            except urllib.error.HTTPError as failure:
+                error = f"Anthropic respondeu HTTP {failure.code}"
+            except (OSError, ValueError) as failure:
+                error = f"uso indisponível: {failure.__class__.__name__}"
+            if error and isinstance(cached, dict):
+                payload = cached.get("usage")
+    windows = []
+    if isinstance(payload, dict):
+        for key, label in (("five_hour", "5 horas"), ("seven_day", "semanal"),
+                           ("seven_day_opus", "semanal Opus"), ("seven_day_sonnet", "semanal Sonnet")):
+            item = payload.get(key)
+            if isinstance(item, dict):
+                windows.append(window(label, item.get("utilization"), item.get("resets_at"), now))
+    return meter("claude:default", "Claude (Code + Desktop)", "claude", CLAUDE_COLOR, windows,
+                 plan=plan, error=error)
+
+
+def http_json(url: str, headers: dict[str, str]) -> Any:
+    request = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.loads(response.read(1024 * 1024))
+
+
+# ---- Grok ------------------------------------------------------------------
+
+def next_monthly(day: int, now: dt.datetime) -> dt.datetime:
+    local = now.astimezone()
+    year, month = local.year, local.month
+    for _ in range(2):
+        last = (dt.date(year + month // 12, month % 12 + 1, 1) - dt.timedelta(days=1)).day
+        candidate = local.replace(year=year, month=month, day=min(day, last), hour=0, minute=0,
+                                  second=0, microsecond=0)
+        if candidate > local:
+            return candidate
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return candidate
+
+
+def grok_meter(env: dict[str, str], now: dt.datetime) -> dict[str, Any] | None:
+    home = Path(env.get("HOME") or Path.home())
+    if not (home / ".grok/auth.json").is_file():
+        return None
+    settings = (load_json(config_file(env)) or {}).get("grok") or {}
+    day = settings.get("renewalDay")
+    resets = next_monthly(day, now).isoformat() if isinstance(day, int) and 1 <= day <= 31 else None
+    return meter("grok:default", "Grok", "grok", GROK_COLOR, [], resetsAt=resets,
+                 error="o Grok não expõe o limite do plano; só a renovação configurada"
+                       + ("" if resets else " (defina com `pz ai quota set-renewal grok --day N`)"))
+
+
+def collect(env: dict[str, str] | None = None, now: dt.datetime | None = None,
+            fetch: Callable[[str, dict[str, str]], Any] | None = None) -> list[dict[str, Any]]:
+    env = dict(os.environ if env is None else env)
+    now = now or dt.datetime.now(dt.timezone.utc)
+    meters = codex_meters(env, now)
+    for item in (claude_meter(env, now, fetch), grok_meter(env, now)):
+        if item:
+            meters.append(item)
+    return meters
+
+
+# ---- text ------------------------------------------------------------------
+
+def countdown(target: str | None, now: dt.datetime) -> str:
+    moment = parse_time(target)
+    if not moment:
+        return "renovação desconhecida"
+    seconds = int((moment - now).total_seconds())
+    if seconds <= 0:
+        return "renovado"
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes = rest // 60
+    span = f"{days}d {hours}h" if days else (f"{hours}h {minutes:02d}min" if hours else f"{minutes}min")
+    return f"renova {moment.astimezone():%d/%m %H:%M} (em {span})"
+
+
+def describe(item: dict[str, Any], now: dt.datetime) -> str:
+    head = f"{item['remaining']}% restante" if item.get("remaining") is not None else "limite n/d"
+    lines = [f"{item['label']}: {head} · {countdown(item.get('resetsAt'), now)}"]
+    for win in item.get("windows", []):
+        lines.append(f"  {win['name']}: {win['remaining']}% · {countdown(win.get('resetsAt'), now)}")
+    if item.get("error"):
+        lines.append(f"  ⚠ {item['error']}")
+    return "\n".join(lines)
+
+
+# ---- tray ------------------------------------------------------------------
+
+def render_icon(item: dict[str, Any]):  # pragma: no cover - exercised through the tray test
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
+    size = 64
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    color = QColor(item["color"])
+    value = item.get("remaining")
+    painter.setPen(QPen(QColor(128, 128, 128, 110), 7))
+    ring = QRectF(5, 5, size - 10, size - 10)
+    painter.drawEllipse(ring)
+    if value is not None:
+        level = QColor("#dc2626") if value <= 10 else color
+        painter.setPen(QPen(level, 7, Qt.SolidLine, Qt.RoundCap))
+        painter.drawArc(ring, 90 * 16, int(-360 * 16 * value / 100))
+    painter.setPen(QColor("#ffffff") if value is None or value > 10 else QColor("#fecaca"))
+    painter.setBrush(color)
+    painter.drawEllipse(QRectF(14, 14, size - 28, size - 28))
+    font = QFont()
+    font.setBold(True)
+    font.setPixelSize(19 if value is not None and value >= 100 else 22)
+    painter.setFont(font)
+    painter.setPen(QColor("#ffffff"))
+    painter.drawText(pixmap.rect(), Qt.AlignCenter, "?" if value is None else str(value))
+    painter.end()
+    return QIcon(pixmap)
+
+
+def run_tray(env: dict[str, str]) -> int:  # pragma: no cover - needs a desktop session
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+    app = QApplication.instance() or QApplication(sys.argv[:1])
+    app.setApplicationName("PhaseZero Quota")
+    app.setQuitOnLastWindowClosed(False)
+    if not QSystemTrayIcon.isSystemTrayAvailable():
+        print("bandeja do sistema indisponível", file=sys.stderr)
+        return 1
+    icons: dict[str, QSystemTrayIcon] = {}
+
+    def refresh() -> None:
+        now = dt.datetime.now(dt.timezone.utc)
+        items = collect(env, now)
+        seen = set()
+        for item in items:
+            seen.add(item["id"])
+            tray = icons.get(item["id"])
+            if tray is None:
+                tray = QSystemTrayIcon()
+                menu = QMenu()
+                menu.addAction("Atualizar agora", refresh)
+                menu.addSeparator()
+                menu.addAction("Fechar medidores", app.quit)
+                tray.setContextMenu(menu)
+                tray._menu = menu  # keep a reference
+                tray.activated.connect(lambda _reason, t=tray: t.showMessage(
+                    "PhaseZero", t.toolTip(), QSystemTrayIcon.Information, 8000))
+                icons[item["id"]] = tray
+            tray.setIcon(render_icon(item))
+            tray.setToolTip(describe(item, now))
+            tray.show()
+        for key in [key for key in icons if key not in seen]:
+            icons.pop(key).hide()
+
+    refresh()
+    timer = QTimer()
+    timer.timeout.connect(refresh)
+    timer.start(REFRESH_SECONDS * 1000)
+    return app.exec()
+
+
+# ---- install ---------------------------------------------------------------
+
+def autostart_path(env: dict[str, str]) -> Path:
+    return env_path(env, "XDG_CONFIG_HOME", ".config") / "autostart" / AUTOSTART_NAME
+
+
+def install(env: dict[str, str]) -> dict[str, Any]:
+    target = autostart_path(env)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "[Desktop Entry]\nType=Application\nName=PhaseZero medidor de franquia\n"
+        "Comment=Franquia restante e renovação de Codex, Claude e Grok na bandeja\n"
+        f"Exec=/usr/bin/env python3 {Path(__file__).resolve()} tray\n"
+        "Icon=utilities-system-monitor\nX-GNOME-Autostart-enabled=true\n"
+        "X-PhaseZero-Managed=quota-meter\n", encoding="utf-8")
+    return {"autostart": str(target), "installed": True}
+
+
+def remove(env: dict[str, str]) -> dict[str, Any]:
+    target = autostart_path(env)
+    managed = target.is_file() and "X-PhaseZero-Managed=quota-meter" in target.read_text()
+    if managed:
+        target.unlink()
+    return {"autostart": str(target), "removed": managed}
+
+
+def set_renewal(env: dict[str, str], provider: str, day: int) -> dict[str, Any]:
+    if not 1 <= day <= 31:
+        raise ValueError("dia deve estar entre 1 e 31")
+    path = config_file(env)
+    data = load_json(path) if path.exists() else {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} ilegível; nada alterado")
+    data.setdefault(provider, {})["renewalDay"] = day
+    write_private(path, data)
+    return {"provider": provider, "renewalDay": day,
+            "next": next_monthly(day, dt.datetime.now(dt.timezone.utc)).isoformat()}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="pz ai quota", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command")
+    status = sub.add_parser("status")
+    status.add_argument("--json", action="store_true")
+    sub.add_parser("tray")
+    sub.add_parser("install")
+    sub.add_parser("remove")
+    renewal = sub.add_parser("set-renewal")
+    renewal.add_argument("provider", choices=("grok",))
+    renewal.add_argument("--day", type=int, required=True)
+    args = parser.parse_args(argv)
+    env = dict(os.environ)
+    command = args.command or "status"
+    try:
+        if command == "tray":
+            return run_tray(env)
+        if command == "install":
+            result: Any = install(env)
+        elif command == "remove":
+            result = remove(env)
+        elif command == "set-renewal":
+            result = set_renewal(env, args.provider, args.day)
+        else:
+            now = dt.datetime.now(dt.timezone.utc)
+            items = collect(env, now)
+            if not getattr(args, "json", False):
+                print("\n".join(describe(item, now) for item in items))
+                return 0
+            result = {"schemaVersion": 1, "checkedAt": now.isoformat(), "meters": items}
+    except ValueError as error:
+        print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
