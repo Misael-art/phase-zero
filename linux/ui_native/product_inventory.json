@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "source": "linux.ui_native.catalog.build_catalog",
   "platform": "linux",
-  "actionCount": 608,
+  "actionCount": 610,
   "dynamicActionPatterns": [
     "hub.capabilities.status",
     "hub.capability.install.<capabilityId>",
@@ -614,6 +614,8 @@
     {"actionId":"ai.quota.status","targetId":"journey.ai.quota.status","targetKind":"journey","destination":"Inteligência artificial","role":"legacy","context":"IA & Dev","instanceScope":"local","installationAuthorityId":null},
     {"actionId":"ai.quota.install","targetId":"journey.ai.quota.install","targetKind":"journey","destination":"Inteligência artificial","role":"legacy","context":"IA & Dev","instanceScope":"local","installationAuthorityId":null},
     {"actionId":"ai.quota.remove","targetId":"journey.ai.quota.remove","targetKind":"journey","destination":"Inteligência artificial","role":"legacy","context":"IA & Dev","instanceScope":"local","installationAuthorityId":null},
+    {"actionId":"ai.desktop.updates.on","targetId":"journey.ai.desktop.updates.on","targetKind":"journey","destination":"Inteligência artificial","role":"legacy","context":"IA & Dev","instanceScope":"local","installationAuthorityId":null},
+    {"actionId":"ai.desktop.updates.off","targetId":"journey.ai.desktop.updates.off","targetKind":"journey","destination":"Inteligência artificial","role":"legacy","context":"IA & Dev","instanceScope":"local","installationAuthorityId":null},
     {"actionId":"ai.desktop.qwen","targetId":"app.qwen-code-desktop","targetKind":"app","destination":"Inteligência artificial","role":"shortcut","context":"IA & Dev","instanceScope":"local","installationAuthorityId":null},
     {"actionId":"ai.desktop.codex","targetId":"app.codex-desktop","targetKind":"app","destination":"Inteligência artificial","role":"shortcut","context":"IA & Dev","instanceScope":"local","installationAuthorityId":null},
     {"actionId":"ai.token-economy","targetId":"journey.ai.token-economy","targetKind":"journey","destination":"Inteligência artificial","role":"legacy","context":"IA & Dev","instanceScope":"local","installationAuthorityId":null},

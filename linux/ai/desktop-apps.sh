@@ -53,6 +53,7 @@ Actions:
   check-codex            Run guarded Codex update check
   install-services       Enable Codex guard and periodic desktop updates
   update                 Update Claude and check Codex
+  disable-updates        Stop the periodic desktop app update timer
   repair                 Repair desktop apps and services
 EOF
 }
@@ -907,6 +908,9 @@ main() {
         install-codex-ready) install_codex_ready ;;
         check-codex) check_codex ;;
         install-services) install_services ;;
+        disable-updates)
+            systemctl --user disable --now phasezero-ai-desktop-update.timer >/dev/null 2>&1 || true
+            pz_info "AI desktop automatic updates disabled (run install-services to enable)" ;;
         update) update_all ;;
         repair) repair_all ;;
         help|-h|--help) usage ;;

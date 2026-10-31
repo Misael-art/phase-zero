@@ -29,6 +29,15 @@ _PRIMARY_IDS = {
     "ai.claude-verify",
     "ai.claude-bonsai-login",
     "ai.bonsai-diagnose",
+    "ai.quota.status",
+    "ai.quota.install",
+    "ai.quota.remove",
+    "ai.desktop.status",
+    "ai.desktop.claude",
+    "ai.desktop.claude.check",
+    "ai.desktop.claude.update",
+    "ai.desktop.updates.on",
+    "ai.desktop.updates.off",
     "ai.mcp-sync",
     "ai.compat",
     "ai.memory",
@@ -73,6 +82,10 @@ _REPRESENTED_ELSEWHERE = {
 # The ChatGPT Web bridge stays out of the public catalog while its gates are
 # pending. This card is private to hosts that already opted in through the
 # manager: its actions are built here and never registered in the catalog.
+_QUOTA_STATUS_ID = "ai.quota.status"
+_DESKTOP_STATUS_ID = "ai.desktop.status"
+_CLAUDE_CHECK_ID = "ai.desktop.claude.check"
+_LEVEL_STATES = {"green": "success", "yellow": "warning", "red": "error"}
 _BRIDGE_STATUS_ID = "private.chatgpt-web.status"
 _BRIDGE_ARGS = ("ai", "chatgpt-web")
 _BRIDGE_STAGES = {
@@ -134,6 +147,9 @@ class AiDevPage(BasePage):
         self._technical_widgets: list[QWidget] = []
         self._bridge_buttons: dict[str, QPushButton] = {}
         self._bridge_ready = False
+        self._quota_toggle_id = "ai.quota.install"
+        self._updates_on: bool | None = None
+        self._quota_rows: list[QWidget] = []
 
     def build(self) -> None:
         for action_id in _PRIMARY_IDS | _REPRESENTED_ELSEWHERE:
@@ -191,6 +207,8 @@ class AiDevPage(BasePage):
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
         layout.addLayout(cards)
+        layout.addWidget(self._build_quota_card())
+        layout.addWidget(self._build_desktop_apps_card())
         layout.addWidget(self._build_bonsai_card())
         layout.addWidget(self._build_bridge_card())
         layout.addWidget(self._build_advanced_connections())
@@ -200,6 +218,226 @@ class AiDevPage(BasePage):
         self._layout.addWidget(scroll, 1)
         self.status_loader.status_ready.connect(self._on_status_ready)
         self.status_loader.status_failed.connect(self._on_status_failed)
+
+    # ---- quotas and subscriptions -----------------------------------------
+
+    def _build_quota_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        card.setProperty("cardRole", "quota")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        layout.addWidget(SectionHeader(
+            "Franquias e assinaturas",
+            "Restante de cada conta (100% → 0%), renovação, plano e vencimento",
+        ))
+        self.quota_state = QLabel("● Verificando…")
+        self.quota_state.setObjectName("chatgptWebState")
+        self.quota_state.setAccessibleName("Estado dos medidores de franquia")
+        self.quota_state.setWordWrap(True)
+        layout.addWidget(self.quota_state)
+        self.quota_grid = QGridLayout()
+        self.quota_grid.setHorizontalSpacing(10)
+        self.quota_grid.setVerticalSpacing(6)
+        self.quota_grid.setColumnStretch(3, 1)
+        layout.addLayout(self.quota_grid)
+        legend = QLabel("Cores: verde acima de 60% · amarelo de 21% a 60% · vermelho 20% ou menos")
+        legend.setObjectName("sectionCaption")
+        legend.setWordWrap(True)
+        layout.addWidget(legend)
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self.quota_toggle = QPushButton("Ligar medidores na bandeja")
+        self.quota_toggle.setObjectName("primaryButton")
+        self.quota_toggle.setProperty("quotaRole", "toggle")
+        self.quota_toggle.clicked.connect(self._toggle_quota_tray)
+        row.addWidget(self.quota_toggle)
+        refresh = QPushButton("Atualizar")
+        refresh.setObjectName("secondaryButton")
+        refresh.setProperty("quotaRole", "refresh")
+        refresh.setToolTip("Lê de novo uso, renovação e assinatura de cada conta.")
+        refresh.clicked.connect(self._fetch_quota)
+        self.quota_refresh = refresh
+        row.addWidget(refresh)
+        row.addStretch()
+        layout.addLayout(row)
+        self.quota_card = card
+        return card
+
+    def _fetch_quota(self) -> None:
+        if not self.status_loader.running(_QUOTA_STATUS_ID):
+            self.status_loader.fetch(_QUOTA_STATUS_ID, ["ai", "quota", "status", "--json"])
+
+    def _toggle_quota_tray(self) -> None:
+        action = self.by_id.get(self._quota_toggle_id)
+        if action is not None:
+            self.action_requested.emit(action)
+
+    def _on_quota_status(self, payload: dict) -> None:
+        from linux.ai.quota_meter import countdown, subscription_text, parse_time
+        import datetime as dt
+        now = dt.datetime.now(dt.timezone.utc)
+        tray = payload.get("tray") if isinstance(payload.get("tray"), dict) else {}
+        on = bool(tray.get("autostart"))
+        running = bool(tray.get("running"))
+        if on and running:
+            self._set_label_state(self.quota_state, "● Medidores ligados na bandeja · iniciam com o login", "success")
+        elif on:
+            self._set_label_state(self.quota_state, "● Ligados no login, mas fora da bandeja agora", "warning")
+        else:
+            self._set_label_state(self.quota_state, "● Medidores desligados · os dados abaixo continuam disponíveis aqui", "info")
+        # Enabled and visible -> offer off; enabled but closed -> reopen; off -> on.
+        self._quota_toggle_id = "ai.quota.remove" if on and running else "ai.quota.install"
+        self.quota_toggle.setText("Desligar medidores na bandeja" if on and running
+                                  else "Abrir medidores na bandeja" if on else "Ligar medidores na bandeja")
+        self.quota_toggle.setObjectName("secondaryButton" if on and running else "primaryButton")
+        self.quota_toggle.style().unpolish(self.quota_toggle)
+        self.quota_toggle.style().polish(self.quota_toggle)
+        action = self.by_id.get(self._quota_toggle_id)
+        self.quota_toggle.setToolTip(action.description if action else "")
+        for widget in self._quota_rows:
+            self.quota_grid.removeWidget(widget)
+            widget.deleteLater()
+        self._quota_rows = []
+        meters = [item for item in payload.get("meters") or [] if isinstance(item, dict)]
+        for index, item in enumerate(meters):
+            dot = QLabel("●")
+            dot.setStyleSheet(f"color: {item.get('color') or '#888'}; font-size: 16px;")
+            dot.setAccessibleName(f"Cor da conta {item.get('label', '')}")
+            name = QLabel(str(item.get("label", "")))
+            name.setObjectName("settingValue")
+            value = item.get("remaining")
+            badge = QLabel(f"{value}%" if value is not None else "n/d")
+            badge.setObjectName("badge")
+            badge.setAlignment(Qt.AlignCenter)
+            badge.setMinimumWidth(52)
+            badge.setProperty("state", _LEVEL_STATES.get(item.get("level"), "info"))
+            badge.setProperty("quotaLevel", item.get("level") or "")
+            parts = [countdown(item.get("resetsAt"), now)]
+            sub = subscription_text(item)
+            if sub:
+                parts.append(sub)
+            detail = QLabel(" · ".join(parts))
+            detail.setWordWrap(True)
+            tips = [f"{w['name']}: {w['remaining']}% · {countdown(w.get('resetsAt'), now)}"
+                    for w in item.get("windows") or []]
+            if item.get("error"):
+                tips.append(str(item["error"]))
+            for widget in (name, badge, detail):
+                widget.setToolTip("\n".join(tips))
+            for column, widget in enumerate((dot, name, badge, detail)):
+                self.quota_grid.addWidget(widget, index, column)
+                self._quota_rows.append(widget)
+        if not meters:
+            empty = QLabel("Nenhuma conta Codex, Claude ou Grok encontrada neste host.")
+            self.quota_grid.addWidget(empty, 0, 0, 1, 4)
+            self._quota_rows.append(empty)
+        self.quota_toggle.setEnabled(True)
+        self.quota_refresh.setEnabled(True)
+
+    # ---- desktop apps -------------------------------------------------------
+
+    def _build_desktop_apps_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        card.setProperty("cardRole", "desktopApps")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        layout.addWidget(SectionHeader(
+            "Apps desktop de IA",
+            "Claude Desktop oficial · repositório assinado da Anthropic",
+        ))
+        self.desktop_state = QLabel("● Verificando…")
+        self.desktop_state.setObjectName("chatgptWebState")
+        self.desktop_state.setAccessibleName("Estado do Claude Desktop")
+        self.desktop_state.setWordWrap(True)
+        layout.addWidget(self.desktop_state)
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self.desktop_install = self._action_button(
+            "ai.desktop.claude", "Instalar Claude Desktop", primary=True, direct=True)
+        self.desktop_update = self._action_button(
+            "ai.desktop.claude.update", "Atualizar Claude Desktop", primary=True, direct=True)
+        self.desktop_check = QPushButton("Verificar atualização")
+        self.desktop_check.setObjectName("secondaryButton")
+        self.desktop_check.setToolTip("Compara a versão instalada com o repositório assinado; não altera nada.")
+        self.desktop_check.clicked.connect(self._check_claude_desktop)
+        self.mark_represented(self.by_id[_CLAUDE_CHECK_ID]) if _CLAUDE_CHECK_ID in self.by_id else None
+        self.desktop_auto = QPushButton("Ligar atualização automática")
+        self.desktop_auto.setObjectName("secondaryButton")
+        self.desktop_auto.setProperty("desktopRole", "autoUpdate")
+        self.desktop_auto.clicked.connect(self._toggle_desktop_updates)
+        for button in (self.desktop_install, self.desktop_update, self.desktop_check, self.desktop_auto):
+            if button is not None:
+                row.addWidget(button)
+        row.addStretch()
+        layout.addLayout(row)
+        self._claude_installed: bool | None = None
+        self._apply_desktop_buttons()
+        return card
+
+    def _toggle_desktop_updates(self) -> None:
+        action = self.by_id.get("ai.desktop.updates.off" if self._updates_on else "ai.desktop.updates.on")
+        if action is not None:
+            self.action_requested.emit(action)
+
+    def _check_claude_desktop(self) -> None:
+        if not self.status_loader.running(_CLAUDE_CHECK_ID):
+            self.desktop_check.setEnabled(False)
+            self.desktop_state.setText("● Consultando repositório assinado…")
+            self.status_loader.fetch(_CLAUDE_CHECK_ID, ["ai", "desktop", "check-claude"])
+
+    def _apply_desktop_buttons(self, running: bool = False) -> None:
+        installed = self._claude_installed
+        if self.desktop_install is not None:
+            self.desktop_install.setVisible(installed is False)
+            self.desktop_install.setEnabled(not running)
+        if self.desktop_update is not None:
+            self.desktop_update.setVisible(installed is not False)
+            self.desktop_update.setEnabled(not running and installed is True)
+        self.desktop_check.setEnabled(not running and installed is True)
+        self.desktop_auto.setEnabled(not running and installed is True)
+        self.desktop_auto.setText("Desligar atualização automática" if self._updates_on
+                                  else "Ligar atualização automática")
+        action = self.by_id.get("ai.desktop.updates.off" if self._updates_on else "ai.desktop.updates.on")
+        self.desktop_auto.setToolTip(action.description if action else "")
+
+    def _on_desktop_status(self, payload: dict) -> None:
+        claude = payload.get("claudeDesktop") if isinstance(payload.get("claudeDesktop"), dict) else {}
+        installed = bool(claude.get("installed"))
+        self._claude_installed = installed
+        self._updates_on = bool((payload.get("updater") or {}).get("timerEnabled"))
+        if not installed:
+            self._set_label_state(self.desktop_state, "● Claude Desktop não instalado", "info")
+        elif claude.get("launcherManaged") is False:
+            self._set_label_state(self.desktop_state,
+                                  f"● Claude Desktop {claude.get('version')} · atalho de outro instalador; use Atualizar para reparar",
+                                  "warning")
+        else:
+            self._set_label_state(self.desktop_state,
+                                  f"● Claude Desktop {claude.get('version')} instalado · atualização automática "
+                                  + ("ligada" if (payload.get("updater") or {}).get("timerEnabled") else "desligada"),
+                                  "success")
+        self._apply_desktop_buttons()
+
+    def _on_claude_check(self, payload: dict) -> None:
+        latest, installed = payload.get("latest"), payload.get("installed")
+        if payload.get("available"):
+            text = f"● Nova versão {latest} disponível (instalada: {installed or 'nenhuma'})"
+            if payload.get("running"):
+                text += " · o app aberto segue na versão atual até reabrir"
+            self._set_label_state(self.desktop_state, text, "warning")
+        else:
+            self._set_label_state(self.desktop_state, f"● Claude Desktop {installed} é a versão mais nova", "success")
+        self._apply_desktop_buttons()
+
+    def _set_label_state(self, label: QLabel, text: str, state: str) -> None:
+        label.setText(text)
+        label.setProperty("state", state)
+        label.style().unpolish(label)
+        label.style().polish(label)
 
     def _build_bonsai_card(self) -> QFrame:
         card = QFrame()
@@ -546,6 +784,9 @@ class AiDevPage(BasePage):
         self._set_state("info")
         self.status_loader.fetch_action(action)
         self.status_loader.fetch("private.bonsai.status", ["ai", "claude", "bonsai-status"])
+        self._fetch_quota()
+        if not self.status_loader.running(_DESKTOP_STATUS_ID):
+            self.status_loader.fetch(_DESKTOP_STATUS_ID, ["ai", "desktop", "status"])
         self.bridge_card.setVisible(_bridge_opted_in())
         if not self.bridge_card.isHidden() and not self.status_loader.running(_BRIDGE_STATUS_ID):
             self.status_loader.fetch(_BRIDGE_STATUS_ID, [*_BRIDGE_ARGS, "--json", "status"])
@@ -556,6 +797,15 @@ class AiDevPage(BasePage):
         self.state_label.style().polish(self.state_label)
 
     def _on_status_ready(self, action_id: str, _stdout: str, parsed: object) -> None:
+        if action_id == _QUOTA_STATUS_ID and isinstance(parsed, dict):
+            self._on_quota_status(parsed)
+            return
+        if action_id == _DESKTOP_STATUS_ID and isinstance(parsed, dict):
+            self._on_desktop_status(parsed)
+            return
+        if action_id == _CLAUDE_CHECK_ID and isinstance(parsed, dict):
+            self._on_claude_check(parsed)
+            return
         if action_id == "private.bonsai.status" and isinstance(parsed, dict):
             provider = parsed.get("authProvider")
             if not isinstance(provider, dict):
@@ -681,6 +931,14 @@ class AiDevPage(BasePage):
             self._set_state("info")
 
     def _on_status_failed(self, action_id: str, message: str) -> None:
+        if action_id == _QUOTA_STATUS_ID:
+            self._set_label_state(self.quota_state, "● Não foi possível ler as franquias. Use Atualizar.", "warning")
+            self.quota_refresh.setEnabled(True)
+            return
+        if action_id in (_DESKTOP_STATUS_ID, _CLAUDE_CHECK_ID):
+            self._set_label_state(self.desktop_state, "● Não foi possível consultar o Claude Desktop. Tente de novo.", "warning")
+            self._apply_desktop_buttons()
+            return
         if action_id == "private.bonsai.status":
             self.bonsai_state.setText("Estado Bonsai indisponível")
             self.bonsai_next.setText(
@@ -718,5 +976,8 @@ class AiDevPage(BasePage):
         self.refresh_button.setEnabled(not running)
         self.repair_button.setEnabled(not running)
         self._apply_bridge_buttons(running)
+        self.quota_toggle.setEnabled(not running)
+        self.quota_refresh.setEnabled(not running)
+        self._apply_desktop_buttons(running)
         if not running and self.isVisible():
             self.reload()

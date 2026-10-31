@@ -494,6 +494,17 @@ def run_tray(env: dict[str, str]) -> int:  # pragma: no cover - needs a desktop 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         print("bandeja do sistema indisponível", file=sys.stderr)
         return 1
+    if tray_pid(env) not in (None, os.getpid()):
+        print("medidores já estão na bandeja", file=sys.stderr)
+        return 0
+    pid_file(env).parent.mkdir(parents=True, exist_ok=True)
+    pid_file(env).write_text(str(os.getpid()))
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: app.quit())
+    # Let Python handle SIGTERM while the Qt loop runs.
+    heartbeat = QTimer()
+    heartbeat.timeout.connect(lambda: None)
+    heartbeat.start(500)
     icons: dict[str, QSystemTrayIcon] = {}
 
     def refresh() -> None:
@@ -524,10 +535,60 @@ def run_tray(env: dict[str, str]) -> int:  # pragma: no cover - needs a desktop 
     timer = QTimer()
     timer.timeout.connect(refresh)
     timer.start(REFRESH_SECONDS * 1000)
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        if tray_pid(env) == os.getpid():
+            pid_file(env).unlink(missing_ok=True)
 
 
 # ---- install ---------------------------------------------------------------
+
+def pid_file(env: dict[str, str]) -> Path:
+    runtime = env.get("XDG_RUNTIME_DIR")
+    base = Path(runtime) if runtime else env_path(env, "XDG_CACHE_HOME", ".cache") / "phasezero"
+    return base / "phasezero-quota-meter.pid"
+
+
+def tray_pid(env: dict[str, str]) -> int | None:
+    """PID of the running tray, only when /proc confirms it is this script."""
+    try:
+        pid = int(pid_file(env).read_text().strip())
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    except (OSError, ValueError):
+        return None
+    return pid if b"tray" in cmdline and any(part.endswith(b"quota_meter.py") for part in cmdline) else None
+
+
+def tray_state(env: dict[str, str]) -> dict[str, Any]:
+    target = autostart_path(env)
+    managed = target.is_file() and "X-PhaseZero-Managed=quota-meter" in target.read_text()
+    return {"autostart": managed, "running": tray_pid(env) is not None}
+
+
+def start_tray(env: dict[str, str]) -> bool:
+    if tray_pid(env) is not None or not (env.get("WAYLAND_DISPLAY") or env.get("DISPLAY")):
+        return False
+    import subprocess
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "tray"], env=env,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    return True
+
+
+def stop_tray(env: dict[str, str]) -> bool:
+    import signal
+    pid = tray_pid(env)
+    if pid is None:
+        return False
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(30):
+        if tray_pid(env) is None:
+            break
+        time.sleep(0.1)
+    pid_file(env).unlink(missing_ok=True)
+    return True
+
 
 def autostart_path(env: dict[str, str]) -> Path:
     return env_path(env, "XDG_CONFIG_HOME", ".config") / "autostart" / AUTOSTART_NAME
@@ -542,7 +603,8 @@ def install(env: dict[str, str]) -> dict[str, Any]:
         f"Exec=/usr/bin/env python3 {Path(__file__).resolve()} tray\n"
         "Icon=utilities-system-monitor\nX-GNOME-Autostart-enabled=true\n"
         "X-PhaseZero-Managed=quota-meter\n", encoding="utf-8")
-    return {"autostart": str(target), "installed": True}
+    started = start_tray(env)
+    return {"autostart": str(target), "installed": True, "started": started, "tray": tray_state(env)}
 
 
 def remove(env: dict[str, str]) -> dict[str, Any]:
@@ -550,7 +612,8 @@ def remove(env: dict[str, str]) -> dict[str, Any]:
     managed = target.is_file() and "X-PhaseZero-Managed=quota-meter" in target.read_text()
     if managed:
         target.unlink()
-    return {"autostart": str(target), "removed": managed}
+    stopped = stop_tray(env)
+    return {"autostart": str(target), "removed": managed, "stopped": stopped, "tray": tray_state(env)}
 
 
 def set_renewal(env: dict[str, str], provider: str, day: int) -> dict[str, Any]:
@@ -595,7 +658,8 @@ def main(argv: list[str] | None = None) -> int:
             if not getattr(args, "json", False):
                 print("\n".join(describe(item, now) for item in items))
                 return 0
-            result = {"schemaVersion": 1, "checkedAt": now.isoformat(), "meters": items}
+            result = {"schemaVersion": 1, "checkedAt": now.isoformat(), "meters": items,
+                      "tray": tray_state(env)}
     except ValueError as error:
         print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
         return 1

@@ -196,6 +196,7 @@ QScrollArea, QScrollArea > QWidget > QWidget {
 #chatgptWebState[state="success"] { color: {{success}}; }
 #chatgptWebState[state="warning"] { color: {{warning}}; }
 #chatgptWebState[state="error"] { color: {{error}}; }
+#chatgptWebState[state="info"] { color: {{info}}; }
 #settingsCard, #chatgptWebCard, #healthGroup, #healthMetric {
     background: {{surface}};
     border: 1px solid {{border_subtle}};

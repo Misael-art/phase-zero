@@ -4545,6 +4545,30 @@
       "plan_command": "linux/pz ai quota status --json"
     },
     {
+      "name": "ai.desktop.updates.on",
+      "label": "Ligar atualização automática dos apps IA",
+      "command": "linux/pz ai desktop install-services",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai desktop status"
+    },
+    {
+      "name": "ai.desktop.updates.off",
+      "label": "Desligar atualização automática dos apps IA",
+      "command": "linux/pz ai desktop disable-updates",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai desktop status"
+    },
+    {
       "name": "ai.desktop.qwen",
       "label": "Instalar Qwen Code Desktop",
       "command": "linux/pz ai desktop install-qwen",
