@@ -467,3 +467,32 @@ privada: `~/.cache/phasezero-dev/evidence/codex-appearance-20261031/`.
 Próximo passo: reabrir janelas dos perfis personalizados para reler Aparência.
 Padrão mantém cores/preferências atuais. Login real, cota e Web autenticado
 continuam gates distintos; alteração de tema não os homologa.
+
+
+### Aplicação e execução no host — 2026-10-31
+
+Pedido posterior exige host já operante, commit e PR. Código de Aparência já
+publicado em `4924380e`, PR #129. Estado inicial desta verificação: cores
+persistidas, duas instâncias adicionais fechadas e painel Qt fechado. Chamadas
+`CodexProfiles.launch(ID, "desktop")` abriram ambas em namespaces separados;
+atalho canônico **PhaseZero — Contas Codex** abriu o painel atualizado.
+
+Host Wayland/KDE: PID/executável/home de cada Electron validados, dois webviews
+HTTP responderam com título Codex. Consulta temporária, somente leitura, ao
+KWin confirmou ambas as janelas mapeadas, não minimizadas, com dimensão não
+nula, além do painel PhaseZero. Instâncias primária/Web anteriores permaneceram
+abertas. Nenhum app foi encerrado nem preferência de cor do padrão alterada.
+Sondas KWin próprias descarregadas; aplicações solicitadas continuam abertas.
+
+Uma conta adicional possui credencial local; outra não tem login salvo e sua
+janela está aberta para autenticação oficial do operador. Presença local não
+valida sessão/cota. Não houve inferência nem preenchimento de credenciais.
+Cores claro/escuro dos dois arquivos nativos correspondem ao registro. Webs
+adicionais continuam não preparados. Evidência privada:
+`~/.cache/phasezero-dev/evidence/codex-appearance-20261031/{host-running,host-windows,host-deployment}.json`.
+
+CI Arch limpo passou em `4924380e` (dois jobs), assim como scans de segredo;
+demais checks ainda executavam durante a coleta. Este complemento só registra
+execução real e não muda código. Árvore de código permaneceu limpa antes da
+edição documental. Próximo passo: autenticar a conta sem login pelo fluxo do
+aplicativo; PR #129 continua draft, sem merge/release.
