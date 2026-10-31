@@ -427,6 +427,92 @@ def now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
+def account_appearance_text(text: str, accent: str) -> str:
+    """Change only native Appearance themes; verify TOML semantics before writing.
+
+    Desktop settings are JSON-compatible TOML. Re-render only desktop tables,
+    retaining all other source text. Unusual syntax fails closed if the parsed
+    result differs anywhere outside the intended themes.
+    """
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', accent):
+        raise BridgeError('Cor de Aparência inválida.', 'appearance-color')
+    try:
+        before = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        raise BridgeError('Configuração TOML inválida; Aparência preservada.', 'appearance-config') from None
+    desktop = before.get('desktop', {})
+    if not isinstance(desktop, dict):
+        raise BridgeError('Tabela desktop inválida; configuração preservada.', 'appearance-config')
+    desktop = dict(desktop)
+    for variant, contrast, ink, surface, added, removed, skill in (
+        ('Light', 45, '#1a1c1f', '#ffffff', '#00a240', '#ba2623', '#924ff7'),
+        ('Dark', 60, '#ffffff', '#181818', '#40c977', '#fa423e', '#ad7bf9'),
+    ):
+        key = f'appearance{variant}ChromeTheme'
+        existing = desktop.get(key, {})
+        if not isinstance(existing, dict):
+            raise BridgeError('Tema de Aparência inválido; configuração preservada.', 'appearance-config')
+        desktop[key] = {'contrast': contrast, 'fonts': {}, 'ink': ink, 'surface': surface,
+                        'opaqueWindows': False,
+                        'semanticColors': {'diffAdded': added, 'diffRemoved': removed, 'skill': skill},
+                        **existing, 'accent': accent}
+    expected = {**before, 'desktop': desktop}
+    if before == expected:
+        return text
+
+    def literal(value: Any) -> str:
+        if isinstance(value, str):
+            return json.dumps(value, ensure_ascii=False)
+        if isinstance(value, bool):
+            return 'true' if value else 'false'
+        if isinstance(value, (int, float)):
+            return repr(value)
+        if isinstance(value, list):
+            return '[' + ', '.join(literal(item) for item in value) + ']'
+        if isinstance(value, dict):
+            return '{ ' + ', '.join(f'{json.dumps(key)} = {literal(item)}'
+                                    for key, item in value.items()) + ' }'
+        raise BridgeError('Valor desktop não suportado; configuração preservada.', 'appearance-config')
+
+    kept = []
+    in_desktop = False
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith('['):
+            try:
+                header = tomllib.loads(line)
+            except tomllib.TOMLDecodeError:
+                header = None
+            if header is not None:
+                in_desktop = set(header) == {'desktop'}
+        if not in_desktop:
+            kept.append(line)
+    result = ''.join(kept).rstrip() + '\n\n[desktop]\n'
+    result += ''.join(f'{json.dumps(key)} = {literal(value)}\n' for key, value in desktop.items())
+    try:
+        valid = tomllib.loads(result) == expected
+    except tomllib.TOMLDecodeError:
+        valid = False
+    if not valid:
+        raise BridgeError('Formato TOML não suportado; configuração preservada.', 'appearance-config')
+    return result
+
+
+def sync_account_appearance(path: Path, accent: str,
+                            before_write: Callable[[Path], None] | None = None) -> bool:
+    if path.is_symlink():
+        raise BridgeError('Configuração redirecionada; Aparência preservada.', 'appearance-config')
+    previous = path.read_text(encoding='utf-8')
+    updated = account_appearance_text(previous, accent)
+    if updated == previous:
+        return False
+    if before_write:
+        before_write(path)
+    if path.read_text(encoding='utf-8') != previous:
+        raise BridgeError('Configuração mudou durante ajuste; tente novamente.', 'appearance-race')
+    atomic_write(path, updated.encode())
+    return True
+
+
 def iso(value: dt.datetime | None = None) -> str:
     return (value or now()).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -1548,6 +1634,19 @@ class Bridge:
             extra = ('\ncli_auth_credentials_store = "file"\nforced_login_method = "chatgpt"\n'
                      if self.paths.instance else "")
             atomic_write(self.paths.codex_config, (OWNED_CONFIG + extra).encode())
+        self.sync_account_theme()
+
+    def sync_account_theme(self) -> bool:
+        if not self.paths.instance or not self.paths.codex_config.is_file():
+            return False
+        accent = (self.env.get('PZ_CHATGPT_WEB_ACCOUNT_COLOR')
+                  or self.load_state().get('accountAppearanceAccent'))
+        if not accent:
+            return False
+        def backup(path: Path) -> None:
+            private_dir(self.paths.journal)
+            atomic_write(self.paths.journal / f'appearance-{sha256_file(path)}.toml', path.read_bytes())
+        return sync_account_appearance(self.paths.codex_config, accent, backup)
 
     def migrate_owned_config(self, state: dict[str, Any]) -> bool:
         """Replace the approval policy Codex no longer accepts, in config and baseline alike."""
@@ -3224,6 +3323,7 @@ class Bridge:
         launcher = shutil.which(DESKTOP_COMMAND, path=self.env.get("PATH"))
         if not launcher:
             raise BridgeError("Codex Desktop não encontrado no PATH", "desktop-missing")
+        self.sync_account_theme()
         env = dict(self.env)
         env["CODEX_HOME"] = str(self.paths.codex_home)
         env["CODEX_MULTI_LAUNCH"] = "1"

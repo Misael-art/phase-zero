@@ -195,6 +195,7 @@ class CodexProfiles:
                 raise ProfileError('Cor reservada ou já usada por outro perfil. Escolha outra cor.')
             row.update(label=label, color=color)
             self._save(rows)
+        self.sync_appearance(row)
         if not row.get("archived"):
             self.shortcuts(profile_id, existing_only=True)
         return row
@@ -467,6 +468,36 @@ class CodexProfiles:
             ledger_record(module="ai-codex-profiles", action="prepare", created=[str(target)],
                           reversible=True)
         self.prepare_desktop_dirs(row)
+        self.sync_appearance(row)
+
+    def sync_appearance(self, row: dict) -> int:
+        """A profile's native/Web Appearance follows its colour; default is untouched."""
+        if row['id'] == 'current':
+            return 0
+        self._check_paths(row)
+        from linux.ai.chatgpt_web_bridge import BridgeError, sync_account_appearance
+        accent = COLORS[row['color']]
+        bridge = self.bridge(row)
+        changed = 0
+        for path in (self.native_home(row) / 'config.toml', bridge.paths.codex_config):
+            if not path.is_file():
+                continue
+            try:
+                updated = sync_account_appearance(
+                    path, accent, lambda target: backup_file(target, module='ai-codex-profiles'))
+            except BridgeError as error:
+                raise ProfileError(str(error)) from None
+            if updated:
+                changed += 1
+                ledger_record(module='ai-codex-profiles', action='appearance',
+                              modified=[str(path)], reversible=True)
+        if bridge.paths.state.is_file():
+            state = bridge.load_state()
+            if state.get('accountAppearanceAccent') != accent:
+                backup_file(bridge.paths.state, module='ai-codex-profiles')
+                state['accountAppearanceAccent'] = accent
+                bridge.save_state(state)
+        return changed
 
     def prepare_desktop_dirs(self, row: dict) -> int:
         """Repair folder discovery for existing/new native and Web desktops."""
@@ -498,6 +529,8 @@ class CodexProfiles:
             env["PZ_CHATGPT_WEB_INSTANCE"] = row["id"]
             env["PZ_CHATGPT_WEB_SLOT"] = str(row["slot"])
             env["PZ_CHATGPT_WEB_ROOT"] = str(self.profile_base(row) / "web")
+            if row.get('color') in COLORS:
+                env['PZ_CHATGPT_WEB_ACCOUNT_COLOR'] = COLORS[row['color']]
         return Bridge(env=env)
 
     def status(self) -> dict:
@@ -656,6 +689,7 @@ class CodexProfiles:
 
     def shortcuts(self, profile_id: str, *, existing_only: bool = False) -> dict:
         row = self.require_active(profile_id)
+        self.sync_appearance(row)
         folders = [self.data / "applications"]
         if self.desktop_dir().is_dir():
             folders.append(self.desktop_dir())
@@ -829,12 +863,13 @@ class CodexProfiles:
                     'NoDisplay': 'true', 'X-PhaseZero-HiddenBy': 'codex-profiles'}), 0o755)
                 hidden.append(str(candidate))
         # Existing bridge wrappers run their stable snapshot after reboot.
-        primary_bridge = self.bridge(self.get('current'))
-        if primary_bridge.paths.manager_script.is_file():
-            for path in (primary_bridge.paths.manager_script, primary_bridge.paths.manager_secret_store,
-                         primary_bridge.paths.manager_windows_secret_store):
-                backup_file(path, module='ai-codex-profiles')
-            primary_bridge.install_managed_entrypoint()
+        for row in [self.get('current'), *rows]:
+            bridge = self.bridge(row)
+            if bridge.paths.manager_script.is_file():
+                for path in (bridge.paths.manager_script, bridge.paths.manager_secret_store,
+                             bridge.paths.manager_windows_secret_store):
+                    backup_file(path, module='ai-codex-profiles')
+                bridge.install_managed_entrypoint()
         ledger_record(module='ai-codex-profiles', action='organize-menu',
                       modified=hidden, reversible=True)
         return {'organized': True, 'accounts': len(rows) + 1, 'hiddenDuplicates': len(hidden)}

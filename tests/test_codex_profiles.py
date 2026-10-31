@@ -779,3 +779,81 @@ def test_primary_legacy_aliases_retire_but_browser_login_stays_in_place(manager)
     assert (menu / "codex-desktop.desktop").exists()
     assert manager.browser_home(manager.get("current")) == browser
     assert (browser / "Cookies").read_text() == "private-browser-sentinel"
+
+
+
+def test_native_and_web_appearance_follow_color_preserving_primary_and_other_preferences(manager):
+    import tomllib
+    primary = manager.native_home(manager.get("current")) / "config.toml"
+    primary.parent.mkdir()
+    primary.write_text('[desktop]\nappearanceTheme="system"\n# primary untouched\n')
+    primary_before = primary.read_bytes()
+    row = manager.add("A", "verde")
+    manager.prepare_native(row)
+    native = manager.native_home(row) / "config.toml"
+    bridge = manager.bridge(row)
+    bridge.seed_codex_home()
+    for path in (native, bridge.paths.codex_config):
+        config = tomllib.loads(path.read_text())
+        assert config["desktop"]["appearanceLightChromeTheme"]["accent"] == "#15803d"
+        assert config["desktop"]["appearanceDarkChromeTheme"]["accent"] == "#15803d"
+    # The helper also accepts the nested-table format produced by the app.
+    from linux.ai.chatgpt_web_bridge import sync_account_appearance
+    custom = '[desktop]\nappearanceTheme="light"\nsansFontSize=19\n[desktop.appearanceDarkChromeTheme]\nsurface="#202428"\n'
+    native.write_text(custom)
+    manager.rename(row["id"], "A", "laranja")
+    after = tomllib.loads(native.read_text())["desktop"]
+    assert after["appearanceTheme"] == "light" and after["sansFontSize"] == 19
+    assert after["appearanceDarkChromeTheme"]["surface"] == "#202428"
+    assert after["appearanceDarkChromeTheme"]["accent"] == "#c2410c"
+    assert tomllib.loads(bridge.paths.codex_config.read_text())["desktop"]["appearanceLightChromeTheme"]["accent"] == "#c2410c"
+    assert primary.read_bytes() == primary_before
+    assert manager.sync_appearance(manager.get("current")) == 0
+    assert manager.sync_appearance(manager.get(row["id"])) == 0
+
+
+def test_appearance_preserves_unrelated_toml_semantics_and_is_idempotent():
+    import tomllib
+    from linux.ai.chatgpt_web_bridge import account_appearance_text
+    original = ('# retain this comment\nmodel="test"\napproval_policy="on-request"\n'
+                '[projects."/space path"]\ntrust_level="trusted"\n'
+                '[desktop]\nappearanceTheme="dark"\n'
+                '[desktop.appearanceLightChromeTheme.fonts]\nui="Inter"\n'
+                '[mcp_servers.example]\nurl="http://localhost:1234/mcp"\n')
+    result = account_appearance_text(original, "#15803d")
+    before = tomllib.loads(original)
+    after = tomllib.loads(result)
+    for key in before:
+        if key != "desktop":
+            assert before[key] == after[key]
+    assert "# retain this comment" in result
+    assert after["desktop"]["appearanceLightChromeTheme"]["fonts"]["ui"] == "Inter"
+    assert account_appearance_text(result, "#15803d") == result
+
+
+def test_appearance_rejects_corruption_and_ambiguous_syntax_without_writes(manager):
+    from linux.ai.chatgpt_web_bridge import sync_account_appearance
+    row = manager.add("A")
+    manager.prepare_native(row)
+    path = manager.native_home(row) / "config.toml"
+    for content in ['broken [', 'desktop={appearanceTheme="light"}\n',
+                    '[desktop]\nappearanceDarkChromeTheme="wrong-type"\n']:
+        path.write_text(content)
+        with pytest.raises(BridgeError, match="preservada"):
+            sync_account_appearance(path, "#15803d")
+        assert path.read_text() == content
+        with pytest.raises(ProfileError, match="preservada"):
+            manager.sync_appearance(row)
+        assert path.read_text() == content
+
+
+def test_web_appearance_reloads_saved_account_color_without_inherited_environment(manager):
+    import tomllib
+    row = manager.add("A", "verde")
+    bridge = manager.bridge(row)
+    bridge.seed_codex_home()
+    bridge.save_state({"accountAppearanceAccent": "#c2410c"})
+    bridge.env.pop("PZ_CHATGPT_WEB_ACCOUNT_COLOR")
+    assert bridge.sync_account_theme()
+    assert tomllib.loads(bridge.paths.codex_config.read_text())["desktop"]["appearanceDarkChromeTheme"]["accent"] == "#c2410c"
+    assert not bridge.sync_account_theme()

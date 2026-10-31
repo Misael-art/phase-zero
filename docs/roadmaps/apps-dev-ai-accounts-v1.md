@@ -3351,3 +3351,44 @@ visual. Defaults dos protocolos Codex já apontavam a codex-desktop.desktop.
 Cache KDE/MIME atualizado; nenhum app encerrado. 204 testes focados passaram,
 com GUI real e desktop-file-validate. Evidência privada:
 `~/.cache/phasezero-dev/evidence/codex-icons-20261030/`.
+
+
+### Aparência pela cor da conta — 2026-10-31
+
+Cor do perfil agora também alimenta **Aparência → destaque** nos temas claro e
+escuro do Codex Desktop nativo/Web. Instalação `current` e seu Web padrão não
+são escritos, incluindo preferências já existentes. Fontes, modo light/dark/
+system, fundo, contraste, cores semânticas e configurações fora de Aparência
+são preservados. Temas ainda inexistentes partem dos defaults do pacote local;
+só o destaque recebe a cor reservada à conta.
+
+Contrato confirmado na documentação oficial de Aparência
+(https://learn.chatgpt.com/docs/reference/settings#appearance) e no bundle do
+pacote instalado: chaves `desktop.appearanceLightChromeTheme` e
+`desktop.appearanceDarkChromeTheme`, campo `accent`. Schema TOML usa objetos
+inline/nested e omite fontes nullable ausentes. Nenhuma preferência é obtida
+por cópia da instalação padrão.
+
+Helper único `account_appearance_text` / `sync_account_appearance` no bridge,
+reutilizado por `CodexProfiles.sync_appearance`. Editor reescreve somente tabelas
+`desktop`, valida TOML antes/depois e exige igualdade semântica de tudo fora dos
+dois temas. Preserva valores existentes de cada tema, alterando apenas accent;
+preenche defaults faltantes. Backup antes de gravar, idempotência e comparação
+do conteúdo detectam edições concorrentes. TOML inválido, tipo inesperado ou
+sintaxe ambígua que não passe a validação são recusados sem sobrescrever.
+
+Preparo nativo, criação/atualização de atalhos, Nome/cor e Organizar reaplicam
+preferência. Web recebe `PZ_CHATGPT_WEB_ACCOUNT_COLOR` no processo selecionado e
+`accountAppearanceAccent` no estado quando já configurado; seed/Desktop e
+snapshot standalone usam mesmo helper após reboot. Organizador atualiza
+snapshots existentes tanto do padrão quanto dos perfis, com backup do código;
+nenhuma cor é aplicada ao padrão. Web ainda não preparado recebe tema no seed,
+sem criar antecipadamente uma instalação/estado de login.
+
+208 testes focados passaram. Servidor real `codex app-server --stdio` em HOME
+anônimo respondeu `config/read` com ambos os destaques corretos, sem login ou
+chamada de inferência. Host: duas configurações nativas existentes atualizadas;
+Web das contas adicionais ainda não preparado. Hashes dos arquivos primários,
+auth e semântica fora de Aparência permaneceram iguais. Nenhum app reiniciado;
+janelas já abertas podem precisar ser reabertas para reler preferências.
+Evidência privada: `~/.cache/phasezero-dev/evidence/codex-appearance-20261031/`.

@@ -57,7 +57,7 @@ class CodexProfileDialog(QDialog):
         self.setWindowTitle("Identificar conta Codex" if row else "Adicionar conta Codex")
         layout = QVBoxLayout(self)
         note = QLabel("Escolha um apelido e uma cor. Depois abra Desktop e entre na conta desejada. "
-                      "Login fica salvo neste perfil; cada conta tem seu próprio ID.")
+                      "Login fica salvo neste perfil; cada conta tem seu próprio ID. Aparência nativa/Web acompanha a cor escolhida; padrão mantém suas cores.")
         note.setWordWrap(True)
         layout.addWidget(note)
         form = QFormLayout()
@@ -119,7 +119,7 @@ class CodexProfilesPanel(QWidget):
         organize = QPushButton('Organizar ícones e menu Codex')
         organize.setObjectName('organizeCodexMenu')
         organize.clicked.connect(lambda: self._request('Organizar menu Codex', ('organize',), mutable=True,
-                                  impact='Padroniza nomes/ícones e oculta entradas Codex antigas; preserva aplicativos e sessões.'))
+                                  impact='Padroniza nomes/ícones, sincroniza Aparência por cor e oculta entradas Codex antigas; preserva instalação padrão e sessões.'))
         self._layout.addWidget(organize)
         cleanup = QPushButton("Limpar instalações personalizadas")
         cleanup.setObjectName("clearCustomCodexProfiles")

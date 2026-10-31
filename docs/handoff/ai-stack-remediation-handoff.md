@@ -437,3 +437,33 @@ Próximo passo: reabrir **PhaseZero — Contas Codex** para recarregar classe Qt
 atualizada; menu do host já foi corrigido. Homologação de login A/B/Web,
 identidade real, cotas e onboarding permanece do operador. Não houve instalação
 ou atualização do pacote de produto 1.22.11, merge ou release.
+
+
+## 10. Aparência acompanha a cor da conta — 2026-10-31
+
+Base lógica `eaca07b5`; raiz/branch/PR #129 preservados, incluindo commits
+concorrentes de entrada Steam Deck. User autorizou tema de Aparência pela cor
+do perfil e confirmou prosseguimento. `current` e Web padrão ficam intocados.
+
+Configurações nativas `desktop.appearanceLightChromeTheme.accent` e
+`desktop.appearanceDarkChromeTheme.accent` passam a acompanhar cor registrada,
+nos perfis nativo/Web. Helper único no bridge faz patch TOML validado, backup,
+idempotência e preservação semântica; atualizações de cor/atalhos/preparo e
+organizador integram política. Metadata de cor do Web sustenta reentrada;
+snapshots existentes são atualizados com backup. Detalhes/limites no roadmap.
+
+208 testes focados passaram, cobrindo tema nativo/Web, principal intocado,
+fontes/fundo/mode preservados, formato nested/inline emitido pelo app, TOML
+inválido/ambíguo recusado, idempotência e cor persistida de Web sem env herdado.
+Probe real app-server/config/read confirmou duas chaves com destaque verde em
+HOME anônimo; nenhum login, prompt de modelo ou inferência foi realizado.
+
+Host: duas contas adicionais existentes receberam dois config.toml nativos;
+seus Webs ainda não preparados receberão tema no seed. Configs do padrão/auth
+permaneceram byte a byte iguais e demais configurações equivalentes por hash
+semântico. Sem encerrar app, mudar sandbox/rota ou reiniciar sessão. Evidência
+privada: `~/.cache/phasezero-dev/evidence/codex-appearance-20261031/`.
+
+Próximo passo: reabrir janelas dos perfis personalizados para reler Aparência.
+Padrão mantém cores/preferências atuais. Login real, cota e Web autenticado
+continuam gates distintos; alteração de tema não os homologa.
