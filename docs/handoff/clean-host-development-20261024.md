@@ -65,7 +65,7 @@ mkdir additional
 tar -xzf phasezero-additional-wip-20261024.tar.gz -C additional
 ```
 
-No Windows, conferir SHA-256 via `Get-FileHash` ou Git Bash. Ler README do repositório privado e manifestos extraídos antes de restaurar. Inspecionar bundle e patches em worktrees separados; não aplicar WIP diretamente em `main`. O resgate **não** inclui `.mimosa/`, `uber-defesa-privada/`, VMs/ISOs, credenciais, sessões, ai-memory ou estado de serviços. Essas partes não podem ser reconstruídas só com GitHub. Windows VM local foi declarada descartável pelo operador.
+No Windows, conferir SHA-256 via `Get-FileHash` ou Git Bash. Ler README do repositório privado e manifestos extraídos antes de restaurar. Inspecionar bundle e patches antes de aplicar no checkout canônico registrado; não recriar worktrees nem aplicar WIP sem revisão. O resgate **não** inclui `.mimosa/`, `uber-defesa-privada/`, VMs/ISOs, credenciais, sessões, ai-memory ou estado de serviços. Essas partes não podem ser reconstruídas só com GitHub. Windows VM local foi declarada descartável pelo operador.
 
 ## Primeiro uso, Arch / Manjaro / BigLinux
 
@@ -110,7 +110,7 @@ Instala Git/Python pelo winget; caso winget falte, tenta o App Installer oficial
 
 ## Fluxo de desenvolvimento limpo
 
-1. Verificar `git status`, `git fetch origin`, SHA/tag, PRs e CI. Criar branch `codex/<tema>` e worktree próprio a partir de `origin/main` atual. Não trabalhar em checkout sujo nem em `/tmp`/`XDG_RUNTIME_DIR`.
+1. Verificar `git status`, `git fetch origin`, SHA/tag, PRs e CI. Reutilizar checkout canônico e branch/PR de continuidade registrados. Preservar alterações locais alheias; não criar clones/worktrees. Não trabalhar em `/tmp`/`XDG_RUNTIME_DIR`.
 2. Ler `AGENTS.md`, roadmap da área e esta auditoria. Reproduzir defeito e rodar baseline de testes afetados antes de editar. Separar mudanças por contrato e adicionar teste de regressão que observe efeito real, sem espelhar implementação.
 3. Rodar validações locais com HOME/XDG sandboxados, temporários fora de `/run/user`, recursos monitorados. Sem VM física/boot, Docker real, login, pacote de produto ou alteração de serviço no host de desenvolvimento. Para gates físicos, usar host descartável/operação agendada, evidência antes/depois e rollback.
 4. `git diff --check`, ShellCheck/Bash syntax ou Parser/Pester, pytest focal e CI. Revisar segredos e destinos de escrita. Commit pequeno, push, PR com SHA/base, prova, limites e próximo passo. Não promover release por suíte parcial.
@@ -119,7 +119,7 @@ Instala Git/Python pelo winget; caso winget falte, tenta o App Installer oficial
 
 | Prioridade | Frente | Ação concreta | Aceite necessário |
 |---|---|---|---|
-| P0 | Preservação | Recuperar resgate privado, conferir WIP Bonsai/WinVM, revisar segredos e publicar commits pertinentes em PRs próprios. | Hash remoto do tar, manifestos, bundle/patches em worktrees isolados e testes específicos antes de cada PR. Estado privado do host permanece fora do resgate. |
+| P0 | Preservação | Recuperar resgate privado, conferir WIP Bonsai/WinVM, revisar segredos e publicar commits pertinentes em PRs próprios. | Hash remoto do tar, manifestos, bundle/patches revisados no checkout canônico e testes específicos antes de cada PR. Estado privado do host permanece fora do resgate. |
 | P0 | IA/Contas | PXA-006/008/009: provar sessão/cota reais; grant vinculado a consumidor **e requisição**; fallback pago bloqueado. | G3 no provedor real, logs sem segredo e teste negativo de consumidor sem grant. Gateway saudável ≠ cada provider pronto. |
 | P0 | WinVM | Integrar #114 antes de #116; revisar WIP de integridade esparsa. Não reusar guest apagado. | G2 Windows descartável: first boot, OVMF/TPM, QGA/rede, boot direto, tela/resolução, GPU fallback; ledger de RAM/disco e rollback. |
 | P1 | ChatGPT Web | Integrar #117 antes de #122, com escopo/grants e recuperação após reboot. | Prova real read/write somente dentro da autorização, revogação e ausência de fallback indevido. Full ainda não certificado. |
@@ -146,3 +146,69 @@ Usar formato do roadmap Homelab: objetivo, IDs, branch/worktree, HEAD inicial/fi
 ## Recuperação organizada — 2026-10-26
 
 Raiz única neste host: `/home/misael/Projects/PhaseZero`, base `808108a9e4b9de528f5056b1715cf8cb21ed42dc`. Perfil UI preparado pelo wrapper e doctor aprovado; 42 testes de inventário/Contas passaram em Qt offscreen. Os dois resgates privados foram baixados e conferidos pelos hashes publicados. Histórico de 18 pontas preservado em refs locais de recuperação, sem recriar worktrees; patches conservados para revisão, três não aplicam diretamente à continuidade. Nenhum WIP foi mesclado nem serviço/VM/conta foi homologado. Próximo passo: revisar WIP por contrato e respeitar dependências dos PRs, usando o mesmo checkout.
+
+## Correções de quota, atualizações e controles IA — 2026-11-01
+
+Objetivo/IDs: corrigir seis defeitos confirmados e inconsistências de observação,
+PXA-006/009. Owner: adaptadores IA e UI nativa. Raiz única
+`/home/misael/Projects/PhaseZero`, branch `codex/clean-host-dev-bootstrap`, PR #129.
+HEAD inicial `a2fb4ab49bf237ab0194d2a134d1de35539118f9`; commit de implementação
+`72c81569b0469d38fa077b0c4c2fb7b53e6e61a3`; commit deste handoff identificável
+por `git log -1 -- docs/handoff/clean-host-development-20261024.md`.
+
+Arquivos: `linux/ai/quota_meter.py`, novo `quota_tray.py`, `desktop-apps.sh`,
+`linux/pz`, `linux/ui_native/pages/ai_dev.py`; regressões em `test_quota_meter.py`,
+novo `test_quota_tray.py`, `test_ai_quota_card.py`, `linux-ai-desktop.sh`.
+README separa stable/beta; roadmap Apps/IA registra maturidade, dependências e aceite.
+Instruções antigas deste handoff passam a usar checkout único.
+
+Corrigido: cache Claude antes era compartilhado por TTL, reset passado inventava 100%,
+callbacks liberavam controles, coleta HTTP bloqueava Qt, disable-updates descartava erro,
+e aliases de ajuda IA não existiam. Cache agora considera credencial/conta/organização,
+expiração e logout; dados vencidos/falhas ficam desconhecidos. Coleta tem processo único,
+prazo global e encerramento; respostas de outra conta são descartadas. UI mantém trava
+recebida e não transforma instalação/versão desconhecida em ausência/sucesso. Atualizações
+exigem estado confirmado; ajuda reutiliza tabela CLI sem serviços.
+
+**Fixture no host `misael-jupiter`, BigLinux/Manjaro:** doctor UI aprovado no ambiente
+provisionado `/home/misael/.local/share/phasezero-dev/venv-ui`. Rodada final com fontes
+congeladas, HOME/XDG privados, TMPDIR/PYTEST_DEBUG_TEMPROOT persistentes e Qt offscreen:
+**149 passed em 124,43 s**:
+
+```bash
+QT_QPA_PLATFORM=offscreen /home/misael/.local/share/phasezero-dev/venv-ui/bin/python -m pytest \
+  tests/test_quota_meter.py tests/test_quota_tray.py tests/test_ai_quota_card.py \
+  tests/test_product_inventory.py tests/test_status_contract.py \
+  tests/test_product_status_loader.py tests/test_catalog_visibility.py \
+  tests/test_chatgpt_web_card.py -q
+```
+
+`bash tests/linux-ai-desktop.sh`: passou, incluindo systemctl stub com falha, ausência,
+desabilitado, ainda ativo e repetição. Bash syntax, ShellCheck dos scripts alterados,
+compilação Python e `git diff --check`: passaram. Caminho oficial `linux/pz ai quota status
+--json` executado com rollout privado no host: observação vencida→desconhecido;
+nova observação→5% restante, sem rede/conta/serviço. Primeiro preparo dessa fixture usou
+CODEX_HOME fora do HOME canônico e não encontrou conta; corrigido para HOME/.codex,
+respeitando o adaptador de perfis existente, sem mudar o produto.
+
+Duas rodadas anteriores não são baseline válido: comandos Bash liam `linux/pz` enquanto
+arquivo era regravado, produzindo erro transitório de sintaxe após JSON (130 e 142 testes
+passaram, respectivamente). A rodada final congelada acima passou integralmente.
+Sem gates desativados. Suites sequenciais, sem instalação, elevação, serviço, VM ou boot.
+`linux/repairs/reparo-touch-auto.sh` alheio continua untracked e preservado.
+
+**CI/PR:** checks da base observados verdes (jobs opcionais skipped). PR #129 reutilizado;
+checks do novo SHA devem ser consultados após push e antes de merge. Sem merge/release/deploy.
+Revisão local de diff, tamanhos (<10 MiB cada) e padrões de segredo sem achados;
+Gitleaks local ausente, portanto scan remoto continua necessário. Nenhuma credencial real
+usada nos testes adicionados. Memória histórica solicitada retornou 404 e busca exata vazia;
+memória relacionada consultada via CLI disponível (MCP não exposto), aprendizado registrado
+em `notes/phasezero-quota-cache-tray-fixes-20261101.md`.
+
+**Alvo real/pêndencias:** nenhum aceite G2/G3/G4 novo. Bandeja do compositor real, duas contas
+reais, Windows limpo, boot/display, Homelab remoto e usabilidade continuam pendentes;
+fixtures Qt/CLI não os homologam. Grants 9Router continuam bloqueados até upstream vincular
+conta/consumidor/requisição, com teste negativo e sem fallback pago. ADR 0005 preservada.
+Próximo passo exato: conferir CI no SHA remoto; depois, com operador/ambiente descartável
+autorizados, executar matriz conta A→B→logout→expiração→offline, comparar quota/plano com
+origem oficial e verificar interação/fechamento da bandeja sob coleta lenta simulada.
