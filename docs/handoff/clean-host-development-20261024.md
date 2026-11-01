@@ -234,3 +234,65 @@ Próximo passo exato: operador liberar `refs/tags/v1.22.12` no mecanismo central
 continuidade para este repositório/SHA; então `git push origin v1.22.12` pelo fluxo normal.
 Workflow oficial valida CI exata e constrói/publica beta com checksums. Conferir assets,
 digests e notas; não promover stable nem instalar pacote no host por esta autorização.
+
+
+## Revisão independente e integração DeepSeek Harness — 2026-11-01
+
+Objetivo: conferir correções anteriores e estruturar o Harness oficial no mesmo fluxo
+de instalação, catálogo, contas e UI. IDs: seis defeitos de quota/desktop/help,
+PXA-006/009 e DSH-001..010. Checkout único `/home/misael/Projects/PhaseZero`;
+branch `codex/clean-host-dev-bootstrap`, PR #129.
+HEAD inicial `53d62e2d14f7edafe5cefea77f46fb0a7dca5cc0`;
+HEAD final de implementação `93684352e078cbcc39df6f7ddf24c429dc85ef05`.
+
+**Resultado da revisão:** seis defeitos anteriores passaram em reprodução/regressão.
+Baseline independente: 149 testes e suíte shell desktop. Plano amplo continua parcial:
+contas reais, bandeja do compositor, Windows limpo, boot/display, Homelab e G4
+permanecem gates próprios. Inferência 9Router continua bloqueada; ADR 0005 preservada.
+
+**Implementação:** PR #127 (`336abb7d`) consultado e portado seletivamente, sem
+merge nem novo checkout. Catálogo/inventário, manager Linux, adapter Windows, pins,
+lock/SBOM e ficha nativa próprios do Harness. Ficha oferece instalação, rota conta/API,
+pasta/porta com prévia vinculada, abrir/parar/verificar/atualizar estado; avançado
+oferece plano, atualização fixada e remoção. Contas navega para a mesma ficha.
+Correções adicionais: arquivos de runtime verificados, diagnóstico parcial honesto,
+troca de porta exige parada, erro JSON para porta inválida, encerramento Linux limpa
+grupo próprio, falha de ativação não deixa candidato órfão. Metadados agora entram
+em todas receitas Linux, além do Arch. Status UI de quota recebe orçamento de 40 s.
+Resumo técnico completo em `docs/roadmaps/deepseek-harness-implementation-handoff.md`.
+
+**Testes no host:** 257 testes afetados passaram em 107,28 s; refinamentos finais
+retestados em 134 testes UI/contas/catálogo/loader e 45 manager/inventário, todos verdes.
+`packaging/install-root-smoke.sh`, `tests/linux-ai-desktop.sh`, Bash/ShellCheck,
+parser PowerShell de três arquivos e PSScriptAnalyzer dos adapters Windows passaram.
+Leitura do CLI PowerShell no Linux não criou raiz de runtime. Scanner local Gitleaks
+ausente; padrões locais e hook de commit não encontraram achados; scanner CI permanece
+gate remoto. Novo arquivo máximo 674686 bytes. Sem segredos reais em fixtures.
+
+**Pacote:** arquivo de fontes do commit 93684352 usado como insumo descartável do
+builder Debian oficial; pacote extraído em raiz de teste, sem instalação no host.
+CLI extraído respondeu `not-installed` e `quota=unknown` sem criar DSH_HOME;
+pins/package/lock/SBOM conferidos byte a byte.
+SHA-256 do .deb de fixture:
+`729ea448c787cf5491f54e45eddeb630861203e5c52e0a6f90ce7fc3f0d4fbf1`.
+Esse .deb é evidência local regenerável, não artefato da release pública 1.22.12.
+
+**UI:** Xvfb próprio, dark/light, 100/150/200%, 800×600/1280×800, navegação por
+teclado, ausência de overflow e alvo real de ponteiro passaram. Botão principal
+reusa estilo do produto. Capturas e receipt de validação ficam em
+`~/.cache/phasezero-dev/evidence/deepseek-harness-20261101.BENSJwrK/`.
+Fixture/screenshot não certifica conta, acessibilidade física ou sessão autenticada.
+
+**Estado/continuidade:** Node/Harness reais não foram instalados/iniciados no host;
+nenhuma conta, inferência paga, serviço real, VM, boot ou sessão KDE alterados.
+Pins npm/Node revalidados nas origens oficiais sem baixar runtime. PR #126/#127,
+main e tags preservados. Código novo posterior à tag é incremento ainda sem release.
+Arquivo alheio `linux/repairs/reparo-touch-auto.sh` e acréscimo prévio de 27 linhas
+neste handoff foram preservados fora deste commit. Fontes protegidas por commit;
+fixtures próprias regeneráveis serão removidas após fechamento.
+
+**CI/PR e próximo passo:** enviar implementação/handoff à continuidade e conferir
+SHA remoto/checks do PR #129; jobs novos Arch/Windows fazem instalação limpa em
+runners descartáveis. Depois, sob ambiente e conta autorizados, provar login/reabertura,
+identidade/cota e sandbox real antes de promover Experimental. Sem merge, deploy,
+instalação de produto no host ou nova release nesta tarefa.
