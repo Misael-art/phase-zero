@@ -3418,3 +3418,38 @@ por hash, iguais. Janela HMAIL estava executando outra tarefa: não foi encerrad
 recarga visual dessa janela permanece pendente até reabertura após a tarefa.
 Prova anônima não homologa sessão autenticada ou recarga ao vivo.
 Evidência privada: `~/.cache/phasezero-dev/evidence/codex-green-window-20261031/`.
+
+### PXA-006/009 — observações e controles de quota — 2026-11-01
+
+Owner: adaptadores IA (`quota_meter.py`) e página IA & Dev (`ai_dev.py`).
+Incremento no checkout canônico, branch `codex/clean-host-dev-bootstrap`, PR #129.
+Base `a2fb4ab49bf237ab0194d2a134d1de35539118f9`.
+
+- Cache Claude: chave SHA-256 de credencial, contexto local e metadados de conta/organização;
+  mudança/logout/expiração invalida dados. Token não é persistido no cache. Falha de consulta
+  não reapresenta quota antiga como atual. Cache válido da mesma identidade permanece útil.
+- Quota: reset transcorrido exige nova observação; restante agregado fica desconhecido
+  enquanto alguma janela estiver vencida. CLI, UI e bandeja distinguem desconhecido e zero;
+  origem e horário da observação são apresentados quando disponíveis.
+- Bandeja: coleta em QProcess único, HTTP limitado por chamada e prazo global de 40 s;
+  resultado de conta alterada é descartado. Encerramento mata e aguarda processo próprio.
+- UI: callbacks compartilham bloqueio recebido por `block_while_running`; instalação e
+  atualização desconhecidas não viram ausência/desligamento. `CommandRunner` mantém guarda.
+- Atualizações desktop: êxito exige timer confirmado inativo e desabilitado/mascarado ou
+  ausente. Falha de barramento não equivale a ausência. Ajuda IA não consulta serviços.
+
+Maturidade por recurso: regressões locais validam contrato em fixture, não conta/sessão
+real, bandeja do compositor, disponibilidade upstream ou usabilidade. Fonte Codex continua
+sendo rollout local; Claude usa endpoint de uso/perfil; contagem Web e renovação Grok não
+são quota oficial. Não há promoção de canal/release neste incremento.
+
+G2/G3/G4 seguem pendentes. `request_scoped_grants_enforced=False` e bloqueios dos
+consumidores 9Router permanecem. Dependência upstream: enforcement conta→consumidor→requisição;
+aceite exige teste negativo de consumidor sem grant e ausência de fallback pago. ADR 0005
+preservada: política de instalação não cria sandbox de execução.
+
+Próximo aceite real: em ambiente descartável com operador autorizado, comparar conta A/B
+no endpoint oficial e na UI; desconectar/expirar e desligar rede; verificar que dados antigos
+ficam desconhecidos. Na bandeja real, manter coleta lenta simulada, interagir com menu e
+fechar; confirmar processo coletor encerrado. Não usar conta privada como fixture automática.
+Evidência e resultados do lote: handoff `clean-host-development-20261024.md`.

@@ -124,7 +124,7 @@ o que era seu volta a ser seu, em vez de simplesmente sumir.
 
 Vai contribuir em máquina nova? Use [bootstrap e handoff de desenvolvimento](docs/handoff/clean-host-development-20261024.md). Esse caminho prepara ferramentas de código/teste sem instalar serviços ou VMs do produto. [Auditoria do estado atual](docs/audits/status-20261024/README.md) registra o que ainda falta homologar.
 
-Sempre pela [página de Releases](https://github.com/Misael-art/PhaseZero/releases/latest). Cada versão traz **7 artefactos** + `SHA256SUMS-<versão>`.
+Canal **stable**: [última release estável](https://github.com/Misael-art/PhaseZero/releases/latest). Canal **beta**: escolher explicitamente uma pré-release na [lista de Releases](https://github.com/Misael-art/PhaseZero/releases); `/latest` não seleciona betas. Cada versão traz **7 artefactos** + `SHA256SUMS-<versão>`.
 
 ### 1. Baixar e conferir o checksum
 

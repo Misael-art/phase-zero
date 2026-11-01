@@ -109,3 +109,44 @@ def test_running_lock_disables_new_controls(qapp, monkeypatch, tmp_path):
     page._on_status_ready("ai.desktop.status", "", {"claudeDesktop": {"installed": True, "version": "1"}})
     page.block_while_running(True)
     assert not page.quota_toggle.isEnabled() and not page.desktop_update.isEnabled()
+
+
+@pytest.mark.parametrize('callback', ['success', 'error', 'check'])
+def test_late_callbacks_preserve_operation_lock(qapp, monkeypatch, tmp_path, callback):
+    page = build_page(monkeypatch, tmp_path)
+    page.block_while_running(True)
+    page._on_status_ready('ai.quota.status', '', PAYLOAD)
+    page._on_status_ready('ai.desktop.status', '', {
+        'claudeDesktop': {'installed': True}, 'updater': {'timerEnabled': False}})
+    if callback == 'error':
+        page._on_status_failed('ai.quota.status', 'offline')
+        page._on_status_failed('ai.desktop.status', 'offline')
+    elif callback == 'check':
+        page._on_status_ready('ai.desktop.claude.check', '', {'available': True, 'latest': '2'})
+    controls = [page.quota_toggle, page.quota_refresh, page.desktop_update,
+                page.desktop_auto, page.desktop_check]
+    assert all(not b.isEnabled() for b in controls)
+    page.block_while_running(False)
+    assert all(b.isEnabled() for b in controls)
+
+
+def test_missing_desktop_fields_remain_unknown(qapp, monkeypatch, tmp_path):
+    page = build_page(monkeypatch, tmp_path)
+    page._on_status_ready('ai.desktop.status', '', {})
+    assert page._claude_installed is None
+    assert not page.desktop_install.isEnabled() and not page.desktop_update.isEnabled()
+    assert 'desconhecida' in page.desktop_state.text()
+
+
+def test_expired_quota_is_visible_as_unknown(qapp, monkeypatch, tmp_path):
+    page = build_page(monkeypatch, tmp_path)
+    page._on_quota_status({'meters': [{'remaining': None, 'freshness': 'expired', 'windows': []}]})
+    text = ' '.join(label.text() for label in page._quota_rows)
+    assert 'n/d' in text and 'Observação vencida' in text
+
+
+def test_empty_update_check_never_claims_latest_version(qapp, monkeypatch, tmp_path):
+    page = build_page(monkeypatch, tmp_path)
+    page._on_claude_check({})
+    assert 'desconhecida' in page.desktop_state.text()
+    assert page.desktop_state.property('state') == 'warning'

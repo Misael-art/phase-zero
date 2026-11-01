@@ -161,6 +161,8 @@ Usage:
   pz ai desktop install-claude Install official Claude Desktop for current user
   pz ai quota status          Remaining plan quota and renewal (Codex/Claude/Grok)
   pz ai quota install         Start quota meters in the system tray at login
+  pz ai quota remove          Stop tray meters and remove managed autostart
+  pz ai quota set-renewal grok --day N  Configure estimated renewal (not observed quota)
   pz ai desktop check-claude   Check signed repo for a newer Claude Desktop (no changes)
   pz ai desktop update-claude  Update Claude Desktop when newer
   pz ai desktop install-qwen   Install official Qwen Code Desktop AppImage
@@ -586,6 +588,11 @@ cmd_ai() {
     local sub="${1:-}" target="${2:-}"
     [ -z "$sub" ] && { pz_error "usage: pz ai (status|setup|init|omo|compat|token-economy|secrets|mcp|policy|ollama|webui) ..."; return 1; }
     case "$sub" in
+        help|-h|--help)
+            printf 'PhaseZero AI — help (read-only)\n\n'
+            usage | sed -n '/^  *pz ai /p'
+            printf '\nUse pz ai desktop help or pz ai quota --help for options.\n'
+            ;;
         policy)
             shift
             bash "$PZ_ROOT/linux/server/ai-policy-broker.sh" "${@:-status}"

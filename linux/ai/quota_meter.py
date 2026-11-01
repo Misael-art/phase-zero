@@ -18,6 +18,7 @@ import argparse
 import base64
 import datetime as dt
 import json
+import hashlib
 import os
 import sys
 import time
@@ -131,24 +132,27 @@ def window(name: str, used: Any, resets: Any, now: dt.datetime) -> dict[str, Any
     reset_at = parse_time(resets)
     if left is None:
         return None
-    renewed = bool(reset_at and reset_at <= now)
-    return {"name": name, "remaining": 100 if renewed else left,
+    expired = bool(reset_at and reset_at <= now)
+    return {"name": name, "remaining": None if expired else left,
+            "observedRemaining": left, "freshness": "expired" if expired else "observed",
             "resetsAt": reset_at.isoformat() if reset_at else None,
-            "renewedSinceSeen": renewed}
+            "resetElapsed": expired}
 
 
 def meter(meter_id: str, label: str, provider: str, color: str, windows: list[dict[str, Any]],
           **extra: Any) -> dict[str, Any]:
     windows = [item for item in windows if item]
     # The tightest window is the one that blocks the next request.
-    tight = min(windows, key=lambda item: item["remaining"]) if windows else None
+    known = [item for item in windows if item["remaining"] is not None]
+    expired = any(item.get("freshness") == "expired" for item in windows)
+    tight = min(known, key=lambda item: item["remaining"]) if known and not expired else None
     value = tight["remaining"] if tight else None
     for item in windows:
         item["level"] = level(item["remaining"])
     return {"id": meter_id, "label": label, "provider": provider, "color": color,
             "remaining": value, "level": level(value),
             "resetsAt": tight["resetsAt"] if tight else extra.pop("resetsAt", None),
-            "windows": windows, **extra}
+            "windows": windows, "freshness": "expired" if expired else "observed" if tight else "unknown", **extra}
 
 
 # ---- Codex -----------------------------------------------------------------
@@ -216,6 +220,7 @@ def codex_meters(env: dict[str, str], now: dt.datetime) -> list[dict[str, Any]]:
             plan=claims.get("plan") or plan_name((limits or {}).get("plan_type")),
             subscriptionUntil=claims.get("subscriptionUntil"),
             subscriptionCheckedAt=claims.get("subscriptionCheckedAt"),
+            source="codex-rollout-rate-limits",
             seenAt=dt.datetime.fromtimestamp(seen, dt.timezone.utc).isoformat() if seen else None,
             error=None if limits else "sem registro de limite; use esta conta uma vez"))
     return result
@@ -292,25 +297,47 @@ def next_anniversary(start: dt.datetime, now: dt.datetime) -> dt.datetime:
     return candidate
 
 
+def claude_cache_identity(env: dict[str, str], token: str) -> str:
+    """Conservative scope: credential rotation, account/org metadata and config location.
+
+    A token digest is an invalidation key, never an authentication credential.
+    """
+    config = Path(env.get("CLAUDE_CONFIG_DIR") or Path(env.get("HOME") or Path.home()) / ".claude")
+    credentials = load_json(config / ".credentials.json")
+    # Include all credential metadata so organization/account changes invalidate both caches.
+    account = load_json(config.with_suffix(".json"))
+    account = account.get("oauthAccount") if isinstance(account, dict) else None
+    material = json.dumps([str(config.resolve()), token, credentials, account], sort_keys=True)
+    return hashlib.sha256(material.encode()).hexdigest()
+
+
+def clear_claude_cache(env: dict[str, str]) -> None:
+    for path in (cache_file(env), cache_file(env).with_name("quota-meter-claude-profile.json")):
+        path.unlink(missing_ok=True)
+
+
 def claude_profile(env: dict[str, str], token: str, now: dt.datetime,
                    fetch: Callable[[str, dict[str, str]], Any] | None,
                    use_cache: bool) -> dict[str, Any]:
     path = cache_file(env).with_name("quota-meter-claude-profile.json")
+    identity = claude_cache_identity(env, token)
     cached = load_json(path) if use_cache else None
-    if isinstance(cached, dict) and time.time() - cached.get("at", 0) < CLAUDE_PROFILE_CACHE_SECONDS:
+    if (isinstance(cached, dict) and cached.get("identity") == identity
+            and 0 <= now.timestamp() - cached.get("at", 0) < CLAUDE_PROFILE_CACHE_SECONDS):
         return cached.get("profile") or {}
     headers = {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20",
                "User-Agent": "PhaseZero-quota-meter"}
     try:
         payload = (fetch or http_json)(CLAUDE_PROFILE_URL, headers)
     except (OSError, ValueError):
-        return (cached or {}).get("profile") or {} if isinstance(cached, dict) else {}
+        path.unlink(missing_ok=True)
+        return {}
     org = (payload or {}).get("organization") if isinstance(payload, dict) else None
     org = org if isinstance(org, dict) else {}
     profile = {"plan": plan_name(org.get("organization_type")),
                "status": org.get("subscription_status"),
                "createdAt": org.get("subscription_created_at")}
-    write_private(path, {"at": time.time(), "profile": profile})
+    write_private(path, {"at": now.timestamp(), "identity": identity, "profile": profile})
     return profile
 
 
@@ -321,29 +348,39 @@ def claude_meter(env: dict[str, str], now: dt.datetime,
     credentials = load_json(config_dir / ".credentials.json")
     oauth = (credentials or {}).get("claudeAiOauth") if isinstance(credentials, dict) else None
     if not isinstance(oauth, dict) or not oauth.get("accessToken"):
+        clear_claude_cache(env)
         return None
+    expires = oauth.get("expiresAt")
+    if isinstance(expires, (int, float)) and expires / 1000 <= now.timestamp():
+        clear_claude_cache(env)
+        return meter("claude:default", "Claude (Code + Desktop)", "claude", CLAUDE_COLOR, [],
+                     error="login do Claude expirado; abra o Claude Code para renovar")
+    identity = claude_cache_identity(env, oauth["accessToken"])
     plan = oauth.get("subscriptionType")
     cached = load_json(cache_file(env)) if use_cache else None
     payload = None
-    if isinstance(cached, dict) and time.time() - cached.get("at", 0) < CLAUDE_CACHE_SECONDS:
+    if isinstance(cached, dict) and cached.get("identity") != identity:
+        clear_claude_cache(env)
+        cached = None
+    if isinstance(cached, dict) and 0 <= now.timestamp() - cached.get("at", 0) < CLAUDE_CACHE_SECONDS:
         payload = cached.get("usage")
     error = None
     if payload is None:
-        expires = oauth.get("expiresAt")
-        if isinstance(expires, (int, float)) and expires / 1000 < time.time():
-            error = "login do Claude expirado; abra o Claude Code para renovar"
-        else:
-            headers = {"Authorization": f"Bearer {oauth['accessToken']}",
-                       "anthropic-beta": "oauth-2025-04-20", "User-Agent": "PhaseZero-quota-meter"}
-            try:
-                payload = (fetch or http_json)(CLAUDE_USAGE_URL, headers)
-                write_private(cache_file(env), {"at": time.time(), "usage": payload})
-            except urllib.error.HTTPError as failure:
-                error = f"Anthropic respondeu HTTP {failure.code}"
-            except (OSError, ValueError) as failure:
-                error = f"uso indisponível: {failure.__class__.__name__}"
-            if error and isinstance(cached, dict):
-                payload = cached.get("usage")
+        headers = {"Authorization": f"Bearer {oauth['accessToken']}",
+                   "anthropic-beta": "oauth-2025-04-20", "User-Agent": "PhaseZero-quota-meter"}
+        try:
+            payload = (fetch or http_json)(CLAUDE_USAGE_URL, headers)
+            if not isinstance(payload, dict):
+                raise ValueError("invalid usage response")
+            cached = {"at": now.timestamp(), "identity": identity, "usage": payload}
+            write_private(cache_file(env), cached)
+        except urllib.error.HTTPError as failure:
+            error = f"Anthropic respondeu HTTP {failure.code}"
+        except (OSError, ValueError) as failure:
+            error = f"uso indisponível: {failure.__class__.__name__}"
+        if error:
+            clear_claude_cache(env)
+            payload = None
     windows = []
     if isinstance(payload, dict):
         for key, label in (("five_hour", "5 horas"), ("seven_day", "semanal"),
@@ -351,15 +388,16 @@ def claude_meter(env: dict[str, str], now: dt.datetime,
             item = payload.get(key)
             if isinstance(item, dict):
                 windows.append(window(label, item.get("utilization"), item.get("resets_at"), now))
-    profile = claude_profile(env, oauth["accessToken"], now, fetch, use_cache)
+    profile = claude_profile(env, oauth["accessToken"], now, fetch, use_cache) if not error else {}
     created = parse_time(profile.get("createdAt"))
     # Anthropic exposes no paid-until date; monthly billing renews on the signup day.
     renewal = next_anniversary(created, now).isoformat() if created and profile.get(
         "status") in (None, "active") else None
     return meter("claude:default", "Claude (Code + Desktop)", "claude", CLAUDE_COLOR, windows,
-                 plan=profile.get("plan") or plan_name(plan), subscriptionUntil=renewal,
+                 plan=(profile.get("plan") or plan_name(plan)) if not error else None, subscriptionUntil=renewal,
                  subscriptionEstimated=bool(renewal), subscriptionStatus=profile.get("status"),
-                 error=error)
+                 seenAt=dt.datetime.fromtimestamp((cached or {}).get("at", now.timestamp()), dt.timezone.utc).isoformat() if payload else None,
+                 source="anthropic-oauth-usage", error=error)
 
 
 def http_json(url: str, headers: dict[str, str]) -> Any:
@@ -414,7 +452,7 @@ def countdown(target: str | None, now: dt.datetime) -> str:
         return "renovação desconhecida"
     seconds = int((moment - now).total_seconds())
     if seconds <= 0:
-        return "renovado"
+        return "reset passado; aguardando nova observação"
     days, rest = divmod(seconds, 86400)
     hours, rest = divmod(rest, 3600)
     minutes = rest // 60
@@ -445,8 +483,13 @@ def describe(item: dict[str, Any], now: dt.datetime) -> str:
     sub = subscription_text(item)
     if sub:
         lines.append(f"  {sub}")
+    if item.get("seenAt"):
+        lines.append(f"  observado: {item['seenAt']}")
+    if item.get("source"):
+        lines.append(f"  origem: {item['source']}")
     for win in item.get("windows", []):
-        lines.append(f"  {LEVEL_MARKS[win.get('level')]} {win['name']}: {win['remaining']}% · "
+        lines.append(f"  {LEVEL_MARKS[win.get('level')]} {win['name']}: "
+                     f"{str(win['remaining']) + '%' if win['remaining'] is not None else 'n/d (observação vencida)'} · "
                      f"{countdown(win.get('resetsAt'), now)}")
     if item.get("error"):
         lines.append(f"  ⚠ {item['error']}")
@@ -505,11 +548,16 @@ def run_tray(env: dict[str, str]) -> int:  # pragma: no cover - needs a desktop 
     heartbeat = QTimer()
     heartbeat.timeout.connect(lambda: None)
     heartbeat.start(500)
+    from linux.ai.quota_tray import TrayCollector
+    collector = TrayCollector(env, app)
+    app.aboutToQuit.connect(collector.close)
     icons: dict[str, QSystemTrayIcon] = {}
 
     def refresh() -> None:
+        collector.refresh()
+
+    def display(items: list[dict[str, Any]]) -> None:
         now = dt.datetime.now(dt.timezone.utc)
-        items = collect(env, now)
         seen = set()
         for item in items:
             seen.add(item["id"])
@@ -531,6 +579,13 @@ def run_tray(env: dict[str, str]) -> int:  # pragma: no cover - needs a desktop 
         for key in [key for key in icons if key not in seen]:
             icons.pop(key).hide()
 
+    def failed(message: str) -> None:
+        for tray in icons.values():
+            tray.setIcon(render_icon({"color": "#888888", "remaining": None}))
+            tray.setToolTip(message)
+
+    collector.ready.connect(display)
+    collector.failed.connect(failed)
     refresh()
     timer = QTimer()
     timer.timeout.connect(refresh)
@@ -538,6 +593,7 @@ def run_tray(env: dict[str, str]) -> int:  # pragma: no cover - needs a desktop 
     try:
         return app.exec()
     finally:
+        collector.close()
         if tray_pid(env) == os.getpid():
             pid_file(env).unlink(missing_ok=True)
 

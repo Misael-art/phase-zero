@@ -143,6 +143,7 @@ class AiDevPage(BasePage):
         by_id: dict[str, ActionSpec] | None = None, parent: QWidget | None = None,
     ) -> None:
         super().__init__(root, runner, actions, by_id, parent)
+        self._operation_running = False
         self._payload: dict = {}
         self._technical_widgets: list[QWidget] = []
         self._bridge_buttons: dict[str, QPushButton] = {}
@@ -314,13 +315,19 @@ class AiDevPage(BasePage):
             badge.setMinimumWidth(52)
             badge.setProperty("state", _LEVEL_STATES.get(item.get("level"), "info"))
             badge.setProperty("quotaLevel", item.get("level") or "")
-            parts = [countdown(item.get("resetsAt"), now)]
+            parts = ["Observação vencida · use Atualizar" if item.get("freshness") == "expired" else countdown(item.get("resetsAt"), now)]
+            if item.get("seenAt"):
+                parts.append(f"observado: {item['seenAt']}")
+            if item.get("source"):
+                parts.append(f"origem: {item['source']}")
+            if item.get("error"):
+                parts.append(str(item["error"]))
             sub = subscription_text(item)
             if sub:
                 parts.append(sub)
             detail = QLabel(" · ".join(parts))
             detail.setWordWrap(True)
-            tips = [f"{w['name']}: {w['remaining']}% · {countdown(w.get('resetsAt'), now)}"
+            tips = [f"{w['name']}: {str(w['remaining']) + '%' if w['remaining'] is not None else 'n/d'} · {countdown(w.get('resetsAt'), now)}"
                     for w in item.get("windows") or []]
             if item.get("error"):
                 tips.append(str(item["error"]))
@@ -333,8 +340,8 @@ class AiDevPage(BasePage):
             empty = QLabel("Nenhuma conta Codex, Claude ou Grok encontrada neste host.")
             self.quota_grid.addWidget(empty, 0, 0, 1, 4)
             self._quota_rows.append(empty)
-        self.quota_toggle.setEnabled(True)
-        self.quota_refresh.setEnabled(True)
+        self.quota_toggle.setEnabled(not self._operation_running)
+        self.quota_refresh.setEnabled(not self._operation_running)
 
     # ---- desktop apps -------------------------------------------------------
 
@@ -389,16 +396,17 @@ class AiDevPage(BasePage):
             self.desktop_state.setText("● Consultando repositório assinado…")
             self.status_loader.fetch(_CLAUDE_CHECK_ID, ["ai", "desktop", "check-claude"])
 
-    def _apply_desktop_buttons(self, running: bool = False) -> None:
+    def _apply_desktop_buttons(self) -> None:
+        running = self._operation_running
         installed = self._claude_installed
         if self.desktop_install is not None:
             self.desktop_install.setVisible(installed is False)
-            self.desktop_install.setEnabled(not running)
+            self.desktop_install.setEnabled(not running and installed is False)
         if self.desktop_update is not None:
             self.desktop_update.setVisible(installed is not False)
             self.desktop_update.setEnabled(not running and installed is True)
-        self.desktop_check.setEnabled(not running and installed is True)
-        self.desktop_auto.setEnabled(not running and installed is True)
+        self.desktop_check.setEnabled(not running and installed is True and not self.status_loader.running(_CLAUDE_CHECK_ID))
+        self.desktop_auto.setEnabled(not running and installed is True and self._updates_on is not None)
         self.desktop_auto.setText("Desligar atualização automática" if self._updates_on
                                   else "Ligar atualização automática")
         action = self.by_id.get("ai.desktop.updates.off" if self._updates_on else "ai.desktop.updates.on")
@@ -406,10 +414,13 @@ class AiDevPage(BasePage):
 
     def _on_desktop_status(self, payload: dict) -> None:
         claude = payload.get("claudeDesktop") if isinstance(payload.get("claudeDesktop"), dict) else {}
-        installed = bool(claude.get("installed"))
+        installed = claude.get("installed") if isinstance(claude.get("installed"), bool) else None
         self._claude_installed = installed
-        self._updates_on = bool((payload.get("updater") or {}).get("timerEnabled"))
-        if not installed:
+        enabled = (payload.get("updater") or {}).get("timerEnabled")
+        self._updates_on = enabled if isinstance(enabled, bool) else None
+        if installed is None:
+            self._set_label_state(self.desktop_state, "● Instalação desconhecida · use Atualizar para verificar", "warning")
+        elif not installed:
             self._set_label_state(self.desktop_state, "● Claude Desktop não instalado", "info")
         elif claude.get("launcherManaged") is False:
             self._set_label_state(self.desktop_state,
@@ -418,7 +429,7 @@ class AiDevPage(BasePage):
         else:
             self._set_label_state(self.desktop_state,
                                   f"● Claude Desktop {claude.get('version')} instalado · atualização automática "
-                                  + ("ligada" if (payload.get("updater") or {}).get("timerEnabled") else "desligada"),
+                                  + ("ligada" if self._updates_on is True else "desligada" if self._updates_on is False else "desconhecida"),
                                   "success")
         self._apply_desktop_buttons()
 
@@ -429,8 +440,10 @@ class AiDevPage(BasePage):
             if payload.get("running"):
                 text += " · o app aberto segue na versão atual até reabrir"
             self._set_label_state(self.desktop_state, text, "warning")
-        else:
+        elif payload.get("available") is False and installed and latest:
             self._set_label_state(self.desktop_state, f"● Claude Desktop {installed} é a versão mais nova", "success")
+        else:
+            self._set_label_state(self.desktop_state, "● Versão mais nova desconhecida · tente Verificar atualização", "warning")
         self._apply_desktop_buttons()
 
     def _set_label_state(self, label: QLabel, text: str, state: str) -> None:
@@ -647,7 +660,8 @@ class AiDevPage(BasePage):
         self.bridge_state.style().unpolish(self.bridge_state)
         self.bridge_state.style().polish(self.bridge_state)
 
-    def _apply_bridge_buttons(self, running: bool = False) -> None:
+    def _apply_bridge_buttons(self) -> None:
+        running = self._operation_running
         for name, button in self._bridge_buttons.items():
             button.setEnabled(not running and (name != "chatgptWebOpen" or self._bridge_ready))
 
@@ -879,7 +893,7 @@ class AiDevPage(BasePage):
             return
         if action_id != "ai.status" or not isinstance(parsed, dict):
             return
-        self.refresh_button.setEnabled(True)
+        self.refresh_button.setEnabled(not self._operation_running)
         self._payload = parsed
         mode = str(parsed.get("mode") or "degraded")
         recs = parsed.get("recommendations") if isinstance(parsed.get("recommendations"), list) else []
@@ -933,7 +947,7 @@ class AiDevPage(BasePage):
     def _on_status_failed(self, action_id: str, message: str) -> None:
         if action_id == _QUOTA_STATUS_ID:
             self._set_label_state(self.quota_state, "● Não foi possível ler as franquias. Use Atualizar.", "warning")
-            self.quota_refresh.setEnabled(True)
+            self.quota_refresh.setEnabled(not self._operation_running)
             return
         if action_id in (_DESKTOP_STATUS_ID, _CLAUDE_CHECK_ID):
             self._set_label_state(self.desktop_state, "● Não foi possível consultar o Claude Desktop. Tente de novo.", "warning")
@@ -955,7 +969,7 @@ class AiDevPage(BasePage):
             return
         if action_id != "ai.status":
             return
-        self.refresh_button.setEnabled(True)
+        self.refresh_button.setEnabled(not self._operation_running)
         self.state_label.setText("● Estado indisponível")
         self.state_detail.setText("Não foi possível ler o host. Tente atualizar.")
         self._set_state("error")
@@ -973,11 +987,12 @@ class AiDevPage(BasePage):
             widget.setVisible(enabled)
 
     def block_while_running(self, running: bool) -> None:
+        self._operation_running = running
         self.refresh_button.setEnabled(not running)
         self.repair_button.setEnabled(not running)
-        self._apply_bridge_buttons(running)
+        self._apply_bridge_buttons()
         self.quota_toggle.setEnabled(not running)
         self.quota_refresh.setEnabled(not running)
-        self._apply_desktop_buttons(running)
+        self._apply_desktop_buttons()
         if not running and self.isVisible():
             self.reload()

@@ -50,12 +50,15 @@ def test_codex_meter_is_regressive_and_uses_the_tightest_window(env):
     assert main["resetsAt"].startswith("2026-11-03")
 
 
-def test_expired_window_counts_as_renewed(env):
+def test_expired_window_requires_new_observation(env):
     home = Path(env["HOME"]) / ".codex"
     past = int((NOW - dt.timedelta(minutes=5)).timestamp())
     rollout(home, codex_limits({"used_percent": 100.0, "window_minutes": 300, "resets_at": past}))
     item = next(m for m in qm.codex_meters(env, NOW) if m["id"] == "codex:current")
-    assert item["remaining"] == 100 and item["windows"][0]["renewedSinceSeen"] is True
+    assert item["remaining"] is None and item["freshness"] == "expired"
+    assert "observação vencida" in qm.describe(item, NOW)
+    rollout(home, codex_limits({"used_percent": 5, "resets_at": int((NOW + dt.timedelta(hours=2)).timestamp())}))
+    assert qm.codex_meters(env, NOW)[0]["remaining"] == 95
 
 
 def test_claude_meter_reads_usage_without_leaking_the_token(env):
@@ -115,7 +118,7 @@ def test_next_monthly_clamps_short_months():
 
 def test_countdown_text():
     assert qm.countdown(None, NOW) == "renovação desconhecida"
-    assert qm.countdown((NOW - dt.timedelta(seconds=1)).isoformat(), NOW) == "renovado"
+    assert qm.countdown((NOW - dt.timedelta(seconds=1)).isoformat(), NOW) == "reset passado; aguardando nova observação"
     assert "em 2h 30min" in qm.countdown((NOW + dt.timedelta(hours=2, minutes=30)).isoformat(), NOW)
     assert "em 3d 0h" in qm.countdown((NOW + dt.timedelta(days=3)).isoformat(), NOW)
 
@@ -201,3 +204,88 @@ def test_claude_plan_and_estimated_renewal(env):
     assert item["subscriptionEstimated"] is True
     assert item["subscriptionUntil"].startswith("2026-11-29")
     assert "renova (estimado) 29/11/2026" in qm.describe(item, NOW)
+
+
+def credential(env, token, **metadata):
+    path = Path(env['HOME']) / '.claude/.credentials.json'
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps({'claudeAiOauth': {'accessToken': token,
+                    'expiresAt': 9_999_999_999_000, **metadata}}))
+    return path
+
+
+def test_claude_account_cache_rotation_org_logout_and_same_account(env):
+    path = credential(env, 'fixture-A', organizationUuid='org-A')
+    calls = []
+
+    def fetch(url, headers):
+        calls.append(url)
+        is_a = headers['Authorization'].endswith('fixture-A')
+        if url == qm.CLAUDE_PROFILE_URL:
+            return {'organization': {'organization_type': 'max' if is_a else 'pro'}}
+        return {'five_hour': {'utilization': 10 if is_a else 95,
+                             'resets_at': (NOW + dt.timedelta(hours=2)).isoformat()}}
+
+    assert qm.claude_meter(env, NOW, fetch)['remaining'] == 90
+    assert qm.claude_meter(env, NOW, fetch)['plan'] == 'Max'
+    assert len(calls) == 2
+    credential(env, 'fixture-B', organizationUuid='org-B')
+    b = qm.claude_meter(env, NOW, fetch)
+    assert b['remaining'] == 5 and b['plan'] == 'Pro' and len(calls) == 4
+    credential(env, 'fixture-B', organizationUuid='org-C')
+    qm.claude_meter(env, NOW, fetch)
+    assert len(calls) == 6
+    for cache in qm.cache_file(env).parent.glob('quota-meter-claude*.json'):
+        assert 'fixture-' not in cache.read_text()
+    path.unlink()
+    assert qm.claude_meter(env, NOW, fetch) is None
+    assert not qm.cache_file(env).exists()
+
+
+@pytest.mark.parametrize('failure', ['expired', 'network'])
+def test_claude_cache_never_masks_expiry_or_failed_refresh(env, failure):
+    credential(env, 'fixture-A')
+
+    def fetch(url, headers):
+        return ({'organization': {'organization_type': 'max'}} if url == qm.CLAUDE_PROFILE_URL
+                else {'five_hour': {'utilization': 10, 'resets_at': (NOW + dt.timedelta(hours=2)).isoformat()}})
+
+    qm.claude_meter(env, NOW, fetch)
+    if failure == 'expired':
+        credential(env, 'fixture-A', expiresAt=int((NOW - dt.timedelta(seconds=1)).timestamp()*1000))
+        later = NOW
+    else:
+        later = NOW + dt.timedelta(seconds=qm.CLAUDE_CACHE_SECONDS + 1)
+
+    def unavailable(*args):
+        if failure == 'expired':
+            pytest.fail('expired credential must not query network')
+        raise OSError('simulated offline')
+
+    result = qm.claude_meter(env, later, unavailable)
+    assert result['remaining'] is None and result['error']
+    assert result.get('plan') is None and not qm.cache_file(env).exists()
+
+
+def test_expired_window_invalidates_aggregate_even_with_fresh_weekly_window():
+    item = qm.meter('x', 'x', 'codex', '#fff', [
+        qm.window('5h', 95, (NOW-dt.timedelta(days=2)).isoformat(), NOW),
+        qm.window('week', 10, (NOW+dt.timedelta(days=1)).isoformat(), NOW)])
+    assert item['remaining'] is None and item['level'] is None
+
+
+def test_profile_failure_drops_old_plan_and_org_metadata_invalidates_cache(env):
+    credential(env, 'fixture')
+    assert qm.claude_profile(env, 'fixture', NOW, lambda *_: {
+        'organization': {'organization_type': 'max'}}, True)['plan'] == 'Max'
+    account = Path(env['HOME']) / '.claude.json'
+    account.write_text(json.dumps({'oauthAccount': {'organizationUuid': 'new-org'}}))
+    calls = []
+
+    def fail(*args):
+        calls.append(1)
+        raise OSError('offline')
+
+    assert qm.claude_profile(env, 'fixture', NOW, fail, True) == {}
+    assert calls == [1]
+    assert not qm.cache_file(env).with_name('quota-meter-claude-profile.json').exists()

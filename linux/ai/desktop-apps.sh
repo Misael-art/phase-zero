@@ -892,6 +892,31 @@ repair_all() {
     install_services
 }
 
+disable_updates() {
+    local unit=phasezero-ai-desktop-update.timer state
+    # A failed bus/query is not evidence that the timer is absent.
+    state="$(systemctl --user show "$unit" --property=LoadState --value)" || {
+        pz_error "Cannot query update timer; check systemctl --user status $unit"
+        return 1
+    }
+    if [[ "$state" != not-found ]]; then
+        systemctl --user disable --now "$unit" || {
+            pz_error "Cannot disable update timer; check systemctl --user status $unit"
+            return 1
+        }
+    fi
+    state="$(systemctl --user show "$unit" --property=LoadState,ActiveState,UnitFileState)" || {
+        pz_error "Cannot confirm update timer state; retry disable-updates"
+        return 1
+    }
+    if ! grep -qx 'ActiveState=inactive' <<< "$state" ||
+       ! grep -Eq '^(UnitFileState=(disabled|masked)|LoadState=not-found)$' <<< "$state"; then
+        pz_error "Update timer is not confirmed inactive and disabled; check systemctl --user status $unit"
+        return 1
+    fi
+    pz_info "AI desktop automatic updates disabled (run install-services to enable)"
+}
+
 main() {
     local action="${1:-status}"
     case "$action" in
@@ -909,8 +934,7 @@ main() {
         check-codex) check_codex ;;
         install-services) install_services ;;
         disable-updates)
-            systemctl --user disable --now phasezero-ai-desktop-update.timer >/dev/null 2>&1 || true
-            pz_info "AI desktop automatic updates disabled (run install-services to enable)" ;;
+            disable_updates ;;
         update) update_all ;;
         repair) repair_all ;;
         help|-h|--help) usage ;;
