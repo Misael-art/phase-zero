@@ -212,3 +212,25 @@ conta/consumidor/requisição, com teste negativo e sem fallback pago. ADR 0005 
 Próximo passo exato: conferir CI no SHA remoto; depois, com operador/ambiente descartável
 autorizados, executar matriz conta A→B→logout→expiração→offline, comparar quota/plano com
 origem oficial e verificar interação/fechamento da bandeja sob coleta lenta simulada.
+
+## Release beta solicitada — 2026-11-01
+
+Operador autorizou release e push após correções. `packaging/release.sh 1.22.12
+--channel beta` preparou commit `5731c5cc5fcff3ae072fb82d4da6b765db3c78d8` e tag anotada
+local `v1.22.12`, atualizando metadados oficiais de versão/pacotes. Branch de continuidade
+foi enviada e SHA remoto confirmado. Três testes de canal passaram; diff do bump e
+`git diff --check` aprovados. Código funcional conserva validação anterior de 149 testes.
+
+**Bloqueio real:** push da tag recusado pelo hook central
+`/home/misael/Projects/.workspace/hooks/pre-push` → `workspace.py:208`:
+“criação, exclusão ou destino de branch fora da continuidade registrada”. O guard aceita
+somente atualização da branch registrada; não possui exceção de release para refs/tags.
+Nenhuma alteração no guard, bypass, API alternativa de criação da tag, merge ou mudança
+nas tags anteriores foi executada. Tag nova permanece apenas local. Workflow de release
+não iniciou; não existem novos artefatos publicados. CI do SHA de release ainda precisa
+concluir verde, sem allow_red_ci.
+
+Próximo passo exato: operador liberar `refs/tags/v1.22.12` no mecanismo central de
+continuidade para este repositório/SHA; então `git push origin v1.22.12` pelo fluxo normal.
+Workflow oficial valida CI exata e constrói/publica beta com checksums. Conferir assets,
+digests e notas; não promover stable nem instalar pacote no host por esta autorização.
