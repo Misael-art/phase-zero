@@ -85,6 +85,8 @@ _REPRESENTED_ELSEWHERE = {
 _QUOTA_STATUS_ID = "ai.quota.status"
 _DESKTOP_STATUS_ID = "ai.desktop.status"
 _CLAUDE_CHECK_ID = "ai.desktop.claude.check"
+_HARNESS_STATUS_ID = "ai.deepseek-harness-status"
+_HARNESS_ACTIONS = ("status", "plan", "install", "update", "start", "open", "stop", "doctor", "uninstall")
 _LEVEL_STATES = {"green": "success", "yellow": "warning", "red": "error"}
 _BRIDGE_STATUS_ID = "private.chatgpt-web.status"
 _BRIDGE_ARGS = ("ai", "chatgpt-web")
@@ -151,9 +153,13 @@ class AiDevPage(BasePage):
         self._quota_toggle_id = "ai.quota.install"
         self._updates_on: bool | None = None
         self._quota_rows: list[QWidget] = []
+        self._harness_payload: dict | None = None
+        self._harness_buttons: dict[str, QPushButton] = {}
 
     def build(self) -> None:
-        for action_id in _PRIMARY_IDS | _REPRESENTED_ELSEWHERE:
+        for action_id in _PRIMARY_IDS | _REPRESENTED_ELSEWHERE | {
+            f"ai.deepseek-harness-{name}" for name in _HARNESS_ACTIONS
+        }:
             action = self.by_id.get(action_id)
             if action is not None:
                 self.mark_represented(action)
@@ -208,6 +214,7 @@ class AiDevPage(BasePage):
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
         layout.addLayout(cards)
+        layout.addWidget(self._build_harness_card())
         layout.addWidget(self._build_quota_card())
         layout.addWidget(self._build_desktop_apps_card())
         layout.addWidget(self._build_bonsai_card())
@@ -219,6 +226,154 @@ class AiDevPage(BasePage):
         self._layout.addWidget(scroll, 1)
         self.status_loader.status_ready.connect(self._on_status_ready)
         self.status_loader.status_failed.connect(self._on_status_failed)
+
+    def _build_harness_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        card.setProperty("cardRole", "deepseekHarness")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        layout.addWidget(SectionHeader(
+            "DeepSeek Harness · Experimental",
+            "Agente oficial de desenvolvimento, com conta e API independentes do DeepSeek Proxy.",
+        ))
+        self.harness_state = QLabel("● Verificando DeepSeek Harness…")
+        self.harness_state.setObjectName("deepseekHarnessState")
+        self.harness_state.setWordWrap(True)
+        self.harness_state.setAccessibleName("Estado do DeepSeek Harness")
+        layout.addWidget(self.harness_state)
+        journey = QLabel("Instalar → Conectar → Escolher pasta → Verificar → Abrir → Parar")
+        journey.setObjectName("deepseekHarnessJourney")
+        journey.setWordWrap(True)
+        journey.setAccessibleName("Etapas do DeepSeek Harness")
+        layout.addWidget(journey)
+        self.harness_next = QLabel("Próximo passo: aguarde a leitura do estado local.")
+        self.harness_next.setObjectName("sectionCaption")
+        self.harness_next.setWordWrap(True)
+        layout.addWidget(self.harness_next)
+        primary_row = QHBoxLayout()
+        secondary_row = QHBoxLayout()
+        for index, (name, label) in enumerate((
+            ("install", "Instalar"), ("start", "Conectar / escolher pasta"),
+            ("open", "Abrir"), ("stop", "Parar"), ("doctor", "Verificar"),
+            ("status", "Atualizar estado"),
+        )):
+            button = self._action_button(
+                f"ai.deepseek-harness-{name}", label, primary=name in {"install", "start", "open"}, direct=True,
+            )
+            if button is not None:
+                button.setProperty("harnessRole", name)
+                button.setAccessibleName(label)
+                if name == "status":
+                    button.clicked.disconnect()
+                    button.clicked.connect(self._fetch_harness)
+                self._harness_buttons[name] = button
+                (primary_row if index < 3 else secondary_row).addWidget(button)
+        primary_row.addStretch()
+        secondary_row.addStretch()
+        layout.addLayout(primary_row)
+        layout.addLayout(secondary_row)
+        boundary = QLabel(
+            "Experimental · conta, saldo e cota exigem verificação própria. "
+            "A política de arquivos não limita rede nem processos; isolamento do runtime ainda não comprovado."
+        )
+        boundary.setObjectName("deepseekHarnessBoundary")
+        boundary.setWordWrap(True)
+        layout.addWidget(boundary)
+        advanced = QWidget()
+        advanced_layout = QVBoxLayout(advanced)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        details = QLabel(
+            "Perfil Web sob demanda, porta loopback configurável e telemetria desativada. "
+            "ACP/SDK, plugins/MCPs e início automático aguardam integração validada. "
+            "Proxy/9Router continua bloqueado até grants por requisição. Conta e API não fazem fallback. "
+            "V8 limitado a 2 GiB; ferramentas e processos filhos não têm cota rígida."
+        )
+        details.setObjectName("deepseekHarnessAdvanced")
+        details.setWordWrap(True)
+        advanced_layout.addWidget(details)
+        row = QHBoxLayout()
+        for name, label in (("plan", "Revisar instalação"), ("update", "Atualizar versão"), ("uninstall", "Remover")):
+            button = self._action_button(f"ai.deepseek-harness-{name}", label, primary=False, direct=True)
+            if button is not None:
+                button.setProperty("harnessRole", name)
+                button.setAccessibleName(label)
+                self._harness_buttons[name] = button
+                row.addWidget(button)
+        advanced_layout.addLayout(row)
+        advanced.setVisible(self._advanced_mode)
+        self._technical_widgets.append(advanced)
+        layout.addWidget(advanced)
+        self._apply_harness_buttons()
+        self.harness_card = card
+        return card
+
+    def _fetch_harness(self) -> None:
+        action = self.by_id.get(_HARNESS_STATUS_ID)
+        if action is not None:
+            self.status_loader.fetch_action(action)
+
+    def focus_journey(self, key: str) -> None:
+        if key == "deepseek-harness":
+            scroll = self.findChild(QScrollArea)
+            if scroll is not None:
+                scroll.ensureWidgetVisible(self.harness_state, 8, 8)
+            for name in ("install", "start", "open", "doctor"):
+                button = self._harness_buttons.get(name)
+                if button is not None and button.isEnabled() and not button.isHidden():
+                    button.setFocus()
+                    break
+
+    def _apply_harness_buttons(self) -> None:
+        payload = self._harness_payload or {}
+        installed = payload.get("installed")
+        running = payload.get("runtimeState") in {"running", "starting-or-unhealthy"}
+        state = payload.get("state")
+        enabled = not self._operation_running
+        available = {
+            "install": installed is False and not running,
+            "start": installed is True and not running and payload.get("memoryBudget") == "sufficient",
+            "open": running and state == "running", "stop": running,
+            "update": installed is True and not running,
+            "uninstall": (installed is True or state == "degraded") and not running,
+            "doctor": True, "plan": True,
+            "status": not self.status_loader.running(_HARNESS_STATUS_ID),
+        }
+        for name, button in self._harness_buttons.items():
+            button.setEnabled(enabled and available.get(name, False))
+            if name in {"install", "start", "open"}:
+                button.setVisible(available[name])
+
+    def _on_harness_status(self, payload: dict) -> None:
+        self._harness_payload = payload
+        state = str(payload.get("state", "unknown"))
+        installed = payload.get("installed")
+        route = {"account": "conta DeepSeek", "api": "chave API"}.get(payload.get("authRoute"), "não escolhida")
+        if state == "running":
+            self._set_label_state(self.harness_state, f"● Web ativo em loopback · rota {route}", "success")
+            self.harness_next.setText(
+                "Próximo passo: abra o Harness, conecte a conta ou configure a API em Settings → Models "
+                "e confirme a pasta no seletor do app. Sessão, cota e saldo ainda não verificados."
+            )
+        elif payload.get("runtimeState") == "starting-or-unhealthy":
+            self._set_label_state(self.harness_state, "● Runtime iniciado · saúde ainda não confirmada", "warning")
+            self.harness_next.setText("Próximo passo: atualize o estado, use Verificar ou Pare o runtime antes de tentar outra configuração.")
+        elif state == "degraded":
+            self._set_label_state(self.harness_state, "● DeepSeek Harness precisa de atenção", "warning")
+            self.harness_next.setText("Próximo passo: use Verificar para diagnosticar runtime e recuperação.")
+        elif installed is True:
+            self._set_label_state(self.harness_state, f"● Versão {payload.get('installedVersion', '')} instalada · parado", "info")
+            self.harness_next.setText("Próximo passo: escolha uma rota e uma pasta para iniciar; instalação não confirma login.")
+        elif installed is False:
+            self._set_label_state(self.harness_state, "● DeepSeek Harness não instalado", "info")
+            self.harness_next.setText("Próximo passo: revise a instalação. Preparar o app não inicia serviços nem conecta contas.")
+        else:
+            self._set_label_state(self.harness_state, "● Estado do DeepSeek Harness desconhecido", "warning")
+            self.harness_next.setText("Próximo passo: atualize o estado ou use Verificar.")
+        if payload.get("memoryBudget") != "sufficient":
+            self.harness_next.setText(self.harness_next.text() + " Início exige pelo menos 2 GiB de memória disponível medida.")
+        self._apply_harness_buttons()
 
     # ---- quotas and subscriptions -----------------------------------------
 
@@ -799,6 +954,7 @@ class AiDevPage(BasePage):
         self.status_loader.fetch_action(action)
         self.status_loader.fetch("private.bonsai.status", ["ai", "claude", "bonsai-status"])
         self._fetch_quota()
+        self._fetch_harness()
         if not self.status_loader.running(_DESKTOP_STATUS_ID):
             self.status_loader.fetch(_DESKTOP_STATUS_ID, ["ai", "desktop", "status"])
         self.bridge_card.setVisible(_bridge_opted_in())
@@ -811,6 +967,9 @@ class AiDevPage(BasePage):
         self.state_label.style().polish(self.state_label)
 
     def _on_status_ready(self, action_id: str, _stdout: str, parsed: object) -> None:
+        if action_id == _HARNESS_STATUS_ID and isinstance(parsed, dict):
+            self._on_harness_status(parsed)
+            return
         if action_id == _QUOTA_STATUS_ID and isinstance(parsed, dict):
             self._on_quota_status(parsed)
             return
@@ -945,6 +1104,11 @@ class AiDevPage(BasePage):
             self._set_state("info")
 
     def _on_status_failed(self, action_id: str, message: str) -> None:
+        if action_id == _HARNESS_STATUS_ID:
+            self._harness_payload = None
+            self._set_label_state(self.harness_state, "● Estado Harness indisponível. Use Atualizar estado.", "warning")
+            self._apply_harness_buttons()
+            return
         if action_id == _QUOTA_STATUS_ID:
             self._set_label_state(self.quota_state, "● Não foi possível ler as franquias. Use Atualizar.", "warning")
             self.quota_refresh.setEnabled(not self._operation_running)
@@ -988,6 +1152,7 @@ class AiDevPage(BasePage):
 
     def block_while_running(self, running: bool) -> None:
         self._operation_running = running
+        self._apply_harness_buttons()
         self.refresh_button.setEnabled(not running)
         self.repair_button.setEnabled(not running)
         self._apply_bridge_buttons()

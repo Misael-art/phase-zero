@@ -31,6 +31,7 @@ bash "$ROOT/packaging/linux/export-source.sh" "$SOURCE_TMP"
 STAGE="$(mktemp -d "$INSTALL_BASE/.stage.XXXXXX")"
 install -d "$STAGE/packaging/linux"
 cp -a "$SOURCE_TMP/linux" "$SOURCE_TMP/profiles" "$SOURCE_TMP/assets" "$SOURCE_TMP/version.json" "$STAGE/"
+cp -a "$SOURCE_TMP/packaging/deepseek-harness" "$STAGE/packaging/"
 install -m 0755 "$SOURCE_TMP/packaging/linux/phasezero-control-center" \
     "$STAGE/packaging/linux/phasezero-control-center"
 find "$STAGE" -type d -name __pycache__ -prune -exec rm -rf -- {} +

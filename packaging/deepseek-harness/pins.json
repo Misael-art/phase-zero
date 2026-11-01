@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-20",
+  "status": "experimental",
+  "node": {
+    "version": "24.22.0",
+    "source": "https://nodejs.org/dist/v24.22.0/SHASUMS256.txt",
+    "platforms": {
+      "linux-x64": {
+        "url": "https://nodejs.org/dist/v24.22.0/node-v24.22.0-linux-x64.tar.xz",
+        "sha256": "cc2f601cee82d9a5a233302fe307abc600727035fd7d2c3a3571755989e95008"
+      },
+      "win32-x64": {
+        "url": "https://nodejs.org/dist/v24.22.0/node-v24.22.0-win-x64.zip",
+        "sha256": "f9683a19877e12a9b167305c8db71040d812876359de21f0d2e97c3f321f80c3"
+      }
+    }
+  },
+  "harness": {
+    "name": "@deepseek-ai/dsh",
+    "version": "0.2.1-rc.2",
+    "registry": "https://registry.npmjs.org/",
+    "tarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.2.1-rc.2.tgz",
+    "integrity": "sha512-tvY+yhfKRifthbqPe/OK0AYxM5ZkvqfYq/jMYgJcEUxiRRL1Vwra3Ti5TB6AXgSWQdiPHYh/Vp6SJa9yHwMNuw==",
+    "shasum": "a502d1551aabc881020e3cb7961c38901565731a",
+    "repository": "https://github.com/deepseek-ai/deepseek-harness",
+    "tag": "dsh-v0.2.1-rc.2",
+    "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+    "license": "MIT",
+    "engineRange": "^22.19.0 || >=24.0.0"
+  }
+}

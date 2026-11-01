@@ -46,6 +46,7 @@ class AccountChannel:
     requirements: str
     login_method: str
     maturity: str
+    destination: str = ""
 
 
 ACCOUNT_CHANNELS = (
@@ -68,6 +69,20 @@ ACCOUNT_CHANNELS = (
         "Configuração local apenas; validade de sessão e cota não verificadas aqui.",
     ),
     AccountChannel(
+        "deepseek-harness-account", "DeepSeek Harness · conta",
+        "Rota de conta do Harness, mantida em DSH_HOME próprio.",
+        "Login explícito no Web UI do Harness; cookies do navegador pessoal não são importados.",
+        "Experimental. Sessão, perfil, saldo e cota ficam desconhecidos até observação do upstream.",
+        destination="IA & Dev",
+    ),
+    AccountChannel(
+        "deepseek-harness-api", "DeepSeek Harness · chave API",
+        "Rota API separada com DSH_HOME próprio.",
+        "Insira a chave em Settings → Models no Harness. O Harness guarda a chave no próprio cofre de credenciais local.",
+        "Experimental. Presença da chave não prova validade, cota nem saldo; nenhum probe de inferência automático.",
+        destination="IA & Dev",
+    ),
+    AccountChannel(
         "9router-provider", "Provedores no 9Router",
         "Registro de provedor já existente na configuração do 9Router.",
         "Cadastro e autenticação geridos pelo dashboard do 9Router.",
@@ -78,6 +93,8 @@ ACCOUNT_CHANNELS = (
 
 class AccountChannelsDialog(QDialog):
     """Explain known account channels without starting provider login flows."""
+
+    destination_requested = Signal(str, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -123,6 +140,14 @@ class AccountChannelsDialog(QDialog):
                 line.setObjectName(f"accountChannel_{key}")
                 line.setWordWrap(True)
                 details.addWidget(line)
+            if channel.destination:
+                open_app = QPushButton("Abrir DeepSeek Harness")
+                open_app.setObjectName("openHarnessFromAccounts")
+                open_app.setAccessibleName(f"Abrir gerenciador de {channel.name}")
+                open_app.clicked.connect(
+                    lambda _checked=False, target=channel.destination: self._open_destination(target)
+                )
+                details.addWidget(open_app)
             cards.addWidget(card)
         cards.addStretch()
         scroll.setWidget(content)
@@ -131,6 +156,10 @@ class AccountChannelsDialog(QDialog):
         close.setObjectName("closeAccountChannels")
         close.clicked.connect(self.accept)
         layout.addWidget(close, 0, Qt.AlignRight)
+
+    def _open_destination(self, category: str) -> None:
+        self.accept()
+        self.destination_requested.emit(category, "deepseek-harness")
 
 
 class AddApiCredentialDialog(QDialog):
@@ -377,7 +406,9 @@ class AccountsPage(BasePage):
         self.status_loader.status_failed.connect(self._source_failed)
 
     def _show_channel_catalog(self) -> None:
-        AccountChannelsDialog(self).exec()
+        dialog = AccountChannelsDialog(self)
+        dialog.destination_requested.connect(self.request_category)
+        dialog.exec()
 
     def consume_action_values(self, action: ActionSpec) -> dict[str, str]:
         return self.codex_profiles.consume_action_values(action)

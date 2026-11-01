@@ -337,6 +337,7 @@ def test_hidden_ai_dev_page_probes_only_when_opened(qapp):
         assert calls == [("ai.status", ["ai", "status"]),
                          ("private.bonsai.status", ["ai", "claude", "bonsai-status"]),
                          ("ai.quota.status", ["ai", "quota", "status", "--json"]),
+                         ("ai.deepseek-harness-status", ["ai", "deepseek-harness", "status", "--json"]),
                          ("ai.desktop.status", ["ai", "desktop", "status"])]
     finally:
         window.close()
@@ -384,7 +385,7 @@ def test_add_connection_lists_supported_channel_requirements_and_maturity(qapp):
                 "accountChannel_login", "accountChannel_maturity",
             }
         ]
-        assert len(channels) == 4
+        assert len(channels) == 6
         copy = " ".join(label.text() for label in dialog.findChildren(QLabel))
         assert "Requisitos:" in copy
         assert "Tipo de login:" in copy

@@ -229,6 +229,13 @@ Launchers e layout `~/Emulation`. BIOS, keys, ROMs: **só importação local** d
 
 Roteamento e proxies no Control Center. Segredos no cofre gerido; stdout JSON sem valores crus. 9Router **recusa** subir se `HOSTNAME`/`PORT` estiverem vazios (não volta a bind `0.0.0.0:3000`).
 
+**DeepSeek Harness oficial (Experimental):** IA & Dev oferece instalação, escolha de
+conta/API, pasta e porta, abertura Web, parada e diagnóstico. Modo avançado reúne
+prévia, atualização por versão fixada e remoção com dados preservados. Contas e
+conexões leva à mesma ficha. Node fica no runtime privado; instalar não inicia o
+agente. Login, cota e isolamento exigem validação própria. Não usa DeepSeek Proxy
+nem habilita fallback para API paga. [Operação e limites](packaging/deepseek-harness/README.md).
+
 ---
 
 ## Limites

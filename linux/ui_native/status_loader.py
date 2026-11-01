@@ -57,6 +57,8 @@ _HOST_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _HOST_ID = re.compile(r"^hlh-[0-9a-f]{12}$")
 _VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 _ACTION_TIMEOUT_MS = {
+    # Quota can query usage and profile serially, each bounded at 15 seconds.
+    "ai.quota.status": 40_000,
     # Windows status includes bounded libvirt, Samba, disk and boot probes.
     # Slower storage/daemon recovery can legitimately exceed the generic UI
     # budget without meaning that the VM state is unavailable.
