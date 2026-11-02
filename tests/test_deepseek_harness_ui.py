@@ -83,6 +83,22 @@ def test_mcp_config_inventory_does_not_claim_verified_connection(page):
     assert "reparar" in page._status_labels["mcp"].text()
 
 
+def test_browser_login_requires_account_route_and_current_supervisor(page):
+    payload = {"installed": True, "state": "running", "runtimeState": "running",
+               "memoryBudget": "sufficient", "authRoute": "account"}
+    page._on_status_ready(STATUS, "", payload)
+    assert page._harness_buttons["login"].isHidden()
+    payload["connectionFeatures"] = ["account-oauth"]
+    page._on_status_ready(STATUS, "", payload)
+    button = page._harness_buttons["login"]
+    assert not button.isHidden() and button.isEnabled()
+    requested = []; page.action_requested.connect(requested.append); button.click()
+    assert requested[-1].args == ("ai", "deepseek-harness", "login", "--json")
+    payload["authRoute"] = "api"
+    page._on_status_ready(STATUS, "", payload)
+    assert button.isHidden() and not button.isEnabled()
+
+
 def test_start_form_and_preview_bind_route_workspace_and_custom_port(page):
     action = page.by_id["ai.deepseek-harness-start"]
     dialog = ParameterDialog(action)

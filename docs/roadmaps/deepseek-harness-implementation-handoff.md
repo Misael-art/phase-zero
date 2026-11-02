@@ -236,3 +236,104 @@ commits. Version remains 1.22.12 beta / changelog Unreleased; requested Bitbucke
 destination still unresolved, no tag or release created. Next publication step:
 resolve destination, verify required exact-SHA CI, then use the eligible official
 release path. No cryptographic signature was produced or claimed.
+
+## Guided access, wallet and AI dashboard — 2026-11-02
+
+Objective: remove the blank-workspace dead end, offer official DeepSeek browser
+sign-in and reusable API wallet selection, and summarize IA & Dev observations.
+Canonical checkout/branch and draft PR #129 remain unchanged. Base:
+`6df58403e5025a085aa622f528bfe4ba078e55d9`; feature:
+`26d817aef8c4b1f7cfcafcde2473287c079ecce0`; installed product source:
+`e0ea0127747af23d5ca10cca7e063b62d1dbacc0`. Qt fixture cleanup: `d2a87bd1`.
+Handoff commit identifiable with `git log -1 --format=%H --` this document.
+
+### Implementation and ownership
+
+- Native Linux connection dialog suggests saved/context/detected project (this
+  host: `/home/misael/Projects/PhaseZero`), permits changing it, offers friendly
+  account/API choices and keeps the default loopback port under Advanced.
+- Official Account controller owns OAuth/PKCE, state, callback and exchange.
+  `deepseek_harness_auth.py` implements only Account state/sign-in RPC with
+  authenticated local cookies and named-object arguments. Authorization URL,
+  cookie and launch token stay in supervisor memory. Project UI exposes only
+  presence/attempt phase; valid session, model, quota and balance are not inferred.
+- `CredentialVault` owns the shared registry path and selected-provider lookup.
+  Guided API selection uses an existing active DeepSeek ID or saves a new masked
+  stdin key to the OS vault after preflight. Explicit consent covers this consumer
+  and API charges. No key enters argv, preview, JSON or logs. New-key save followed
+  by later startup failure leaves the saved wallet entry available for retry.
+- Each wallet ID has a distinct API home. Upstream file credentials take priority
+  over environment, so a native saved `DEEPSEEK_API_KEY` blocks wallet use. The
+  owned supervisor checks selection/overrides every two seconds and stops that
+  runtime on removal/invalidation; it never substitutes another key/provider.
+  This is process-lifetime binding, not request-level proxy enforcement. Existing
+  gateway/grant gates remain blocked. Legacy manual API homes remain separate.
+- New dashboard projects the existing status callbacks: CLI/IDE installation,
+  active services, memory reachability, configured MCP targets, router health,
+  efficiency profiles and Harness. Individual components expand on demand;
+  quotas remain immediately below. Failed readings clear their observations.
+  MCP inventory alone no longer claims a verified connection in either view.
+- Standing user policy is in `AGENTS.md`; no second key store, memory owner,
+  polling daemon, dependency or credential-import flow was added.
+
+### Evidence and actual host change
+
+- **Fixture on Linux:** final combined relevant suite **220 passed in 117.12 s**.
+  Final MCP label/OAuth capability follow-up **10 passed**. Coverage includes selected provider,
+  missing/removed keys, no secret in argv/output, native override refusal,
+  no key lookup/write during preview, stdin save, owned-child injection and
+  stop on revocation. Bash parser, official ShellCheck options, compile checks,
+  generated web/native catalog coherence and local documentation links passed.
+- **UI Xvfb:** dark/light, 100/150/200%, 800×600 and 1280×800; OAuth/new-key forms,
+  running/stopped Harness with OAuth retry visible, keyboard, screen bounds and
+  no horizontal overflow. Screenshots were inspected.
+  These fixtures do not certify physical touch, accessibility compliance or login.
+- **Pinned upstream runtime:** actual DSH `0.2.1-rc.2` / private Node `24.22.0`
+  started in a separate temporary HOME using the installed runtime read-only,
+  returned `signed-out` through the Account adapter and stopped. No sign-in or
+  inference request was sent. Initial argument-array prototype failed against
+  upstream; named-object payload fixed it, protected by an HTTP contract test.
+- **Native OS wallet:** owned dummy entry store/selected lookup/removal passed;
+  plaintext metadata contained no key and the OS entry was removed. No operator
+  credential was read, copied or used for a provider call.
+- **Packaging:** isolated per-user install and `install-root-smoke.sh` passed,
+  including metadata, imports and deployed-tree checksum. Then official user
+  installer deployed immutable `e0ea0127` source on the actual host. Seven core
+  installed files matched source bytes. Backup of prior PhaseZero runtime:
+  `~/.local/share/phasezero/backups/1.22.12.20261102004456.2208578/`.
+- **Installed UI/CLI:** source under `~/.local/share/phasezero/current` presents
+  six dashboard tiles, prefilled project, two auth choices and wallet selection.
+  Offscreen probe used real installed Harness status; other probes were stubbed,
+  no action dispatched and no key read. Host doctor passes local checks with
+  `state=partial`; operator Harness remains installed/stopped, awaiting connection.
+  Existing open Central windows need reopening. Old live supervisors advertise no
+  new connection feature; explicit stop/reconnect loads the new protocol.
+- Private evidence: `~/.cache/phasezero-dev/harness-connect/` (0700), including
+  `final-combined.log`, UI matrices/screenshots, `real-runtime-receipt.json`,
+  `os-wallet-receipt.json`, installation provenance and installed UI/CLI receipts.
+  Durable learning: `gotchas/deepseek-guided-wallet-and-dashboard-20261102.md`.
+
+### Gates, rollback and next action
+
+Baseline CI on `6df58403` had 36 successful checks, 2 skipped and one Python
+failure: timed out restoring global Qt style after the reflow fixture. Cleanup
+now destroys its own window before global repolish and avoids resetting an
+unchanged style; all original viewport/control assertions and timeout remain.
+Local combined suite passed; new exact-SHA CI still needs observation.
+No Homelab workload, VM, boot, host service, account or inference was exercised.
+
+Native dialog/dashboard/wallet binding are Linux Qt features. Windows retains
+existing PowerShell lifecycle and upstream Web account/API flow; native Windows
+wallet-selector parity is not certified. Actual browser authorization, provider
+validity, account/model execution, quota, request grants, native memory-client
+wiring and sandbox enforcement remain open. DSH stays Experimental. No new
+release/tag; version remains 1.22.12 beta, requested Bitbucket destination pending.
+
+Next operator path: reopen Central → IA & Dev → DeepSeek Harness → Conectar /
+escolher pasta. Keep suggested project or choose another; select browser account
+or consented wallet API, finish official authorization, then confirm project/model
+in upstream Web UI. No key should be pasted into chat or shell arguments.
+Rollback: stop the owned Harness first; use the preserved PhaseZero runtime backup
+through the user installer/recovery path. Runtime uninstall preserves all homes
+and workspace. Unrelated clean-host handoff edits and touch-repair script remain
+untouched and excluded from commits. No cryptographic signing claimed.
