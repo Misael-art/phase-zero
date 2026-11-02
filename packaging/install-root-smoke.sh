@@ -10,6 +10,7 @@
 #   - UI module imports (offscreen)
 #   - deployed tree matches the source tree (checksum)
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
@@ -23,6 +24,7 @@ cp -r "$ROOT/linux" "$DEST/linux"
 cp -r "$ROOT/assets" "$DEST/assets"
 mkdir -p "$DEST/packaging"
 cp -r "$ROOT/packaging/deepseek-harness" "$DEST/packaging/"
+cp -r "$ROOT/packaging/ai-memory" "$DEST/packaging/"
 cp "$ROOT/version.json" "$DEST/version.json"
 
 export PZ_STATE_ROOT="$TMP/state"
@@ -47,6 +49,10 @@ test ! -e "$PZ_DSH_ROOT"
 for metadata in pins.json package.json package-lock.json sbom.cdx.json; do
     cmp "$ROOT/packaging/deepseek-harness/$metadata" "$DEST/packaging/deepseek-harness/$metadata"
 done
+echo "== installed memory metadata and non-mutating plan =="
+cmp "$ROOT/packaging/ai-memory/pins.json" "$DEST/packaging/ai-memory/pins.json"
+"$PZ" ai memory plan --json | jq -e '.ok and .version == "3.3.1"' >/dev/null
+test ! -e "$XDG_CONFIG_HOME/phasezero/ai-memory/portability.json"
 
 echo "== profiles --json contract =="
 "$PZ" server homelab profiles --json | jq -e \

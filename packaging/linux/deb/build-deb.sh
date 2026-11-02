@@ -37,6 +37,7 @@ chmod 0755 "$PKG/DEBIAN/postinst"
 cp -a "$SOURCE/linux" "$SOURCE/profiles" "$SOURCE/assets" "$SOURCE/version.json" "$PKG/usr/lib/phasezero/"
 install -d "$PKG/usr/lib/phasezero/packaging"
 cp -a "$SOURCE/packaging/deepseek-harness" "$PKG/usr/lib/phasezero/packaging/"
+cp -a "$SOURCE/packaging/ai-memory" "$PKG/usr/lib/phasezero/packaging/"
 find "$PKG/usr/lib/phasezero" -type d -name __pycache__ -exec rm -rf {} +
 install -m755 "$SOURCE/packaging/linux/phasezero-control-center" "$PKG/usr/bin/"
 # PZ-AUD-001: ship `pz` on PATH (SSH bridge calls it remotely).

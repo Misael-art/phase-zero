@@ -71,8 +71,8 @@ ide_record() {
 memory_reachable() {
     if command -v curl >/dev/null 2>&1; then
         local code
-        code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "${AI_MEMORY_URL%/}/mcp" 2>/dev/null || echo 000)"
-        [ "$code" != "000" ] && return 0
+        code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "${AI_MEMORY_URL%/}/healthz" 2>/dev/null || echo 000)"
+        [ "$code" = "200" ] && return 0
     fi
     return 1
 }

@@ -44,3 +44,30 @@ Pacote depende de GnuPG e da função nativa de backup/restore do `ai-memory`.
 Senha esquecida torna o pacote irrecuperável. Sessões de navegador precisam de
 novo login após reinstalação; decisão intencional para não transportar cookies.
 
+## Extensão: automação e múltiplos hosts (2026-11-01)
+
+O envelope automático também usa OpenPGP AES-256/S2K SHA-512. Uma chave aleatória
+por conjunto de memória fica no Secret Service/Windows Credential Manager já
+existente; configuração contém apenas referência opaca. Cofre indisponível
+bloqueia operação, sem fallback para arquivo. Exportação da chave de recuperação
+exige senha por stdin e gera pacote OpenPGP separado. Importação em outro host
+vincula o mesmo conjunto sem copiar identidade do equipamento.
+
+Backup integral e conhecimento compartilhado têm contratos diferentes. Backup
+usa snapshot nativo consistente, histórico bruto complementar e configuração
+externa dentro do envelope criptografado. Credenciais de provedores e sessões
+de navegador ficam fora da automação. Conhecimento usa companion oficial
+`ai-memory-wikisync`, famílias e projetos explicitamente cadastrados, escritas
+condicionais e conflitos preservados. Não se mesclam bancos SQLite nem se faz
+pull/merge Git na wiki ativa. Metadados de transporte não substituem origem e
+datas históricas dos registros.
+
+Mídias precisam de cadastro e identidade de volume; arquivos publicados são
+imutáveis e verificados antes do manifesto de conclusão. GitHub usa repositório
+dedicado privado, identidade fixada, conteúdo criptografado e autenticação
+existente do GitHub CLI. Conhecimento pequeno usa Git; snapshots integrais usam
+assets de releases do repositório de memória, sem alterar releases PhaseZero.
+Privacidade e identidade são revalidadas antes de cada publicação. Exclusões
+de conhecimento nunca são propagadas automaticamente. Restauração exige plano,
+pré-backup e ciclo coordenado do serviço; reparar nunca apaga memória.
+

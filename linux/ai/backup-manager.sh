@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 PZ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=../lib/common.sh
@@ -95,7 +96,33 @@ memory_backup_to() {
 }
 
 memory_restore_from() {
-    "$AI_MEMORY_BIN" restore --data-dir "$AI_MEMORY_DATA_DIR" --config "$AI_MEMORY_CONFIG" --from "$1" --force
+    local active=false result=0
+    # Only this user's configured unit. A sandboxed HOME must never stop the
+    # real desktop user's service through the inherited systemd user bus.
+    if [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/ai-memory.service" ] && \
+        systemctl --user is-active --quiet ai-memory.service; then
+        local fragment
+        fragment="$(systemctl --user show ai-memory.service --property=FragmentPath --value)"
+        [ "$fragment" = "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/ai-memory.service" ] || {
+            pz_error "foreign systemd user service preserved"; return 1;
+        }
+        python3 - "$fragment" "$AI_MEMORY_DATA_DIR" <<'PY' || {
+import shlex
+import sys
+from pathlib import Path
+command = next((line[10:] for line in Path(sys.argv[1]).read_text().splitlines() if line.startswith('ExecStart=')), '')
+args = shlex.split(command)
+index = args.index('--data-dir') + 1 if '--data-dir' in args else -1
+raise SystemExit(0 if index > 0 and Path(args[index]).resolve() == Path(sys.argv[2]).resolve() else 1)
+PY
+            pz_error "memory service data directory mismatch"; return 1;
+        }
+        active=true
+        systemctl --user stop ai-memory.service || return 1
+    fi
+    "$AI_MEMORY_BIN" restore --data-dir "$AI_MEMORY_DATA_DIR" --config "$AI_MEMORY_CONFIG" --from "$1" --force || result=$?
+    if $active; then systemctl --user start ai-memory.service || result=1; fi
+    return "$result"
 }
 
 create_bundle() {
@@ -156,11 +183,12 @@ decrypt_and_verify() {
     fi
     printf '%s' "$PASSPHRASE" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
         --decrypt --output "$inner" "$bundle" || { pz_error "wrong passphrase or damaged bundle"; return 3; }
-    tar -tzf "$inner" | awk '/^\// || /(^|\/)\.\.($|\/)/ {bad=1} END {exit bad}' || {
-        pz_error "unsafe archive path"; return 4;
-    }
-    install -d -m 700 "$temp/extracted"
-    tar -C "$temp/extracted" -xzf "$inner"
+    PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" python3 - "$inner" "$temp/extracted" <<'PY'
+import sys
+from pathlib import Path
+from linux.ai.memory_manager import unpack
+unpack(Path(sys.argv[1]), Path(sys.argv[2]))
+PY
     jq -e '.schemaVersion == 1 and .format == "phasezero-ai-portability/v1" and (.items|type=="array")' \
         "$temp/extracted/manifest.json" >/dev/null || { pz_error "invalid manifest"; return 4; }
     while IFS=$'\t' read -r entry expected; do
@@ -242,6 +270,14 @@ restore_bundle() {
         '{schemaVersion:1,ok:true,status:"restored",rollback:$rollback,
           next:"Reabra os clientes e execute pz ai doctor. Logins de navegador continuam exigindo autenticação nova."}'
 }
+
+if [[ "$ACTION" = create || "$ACTION" = export || "$ACTION" = restore ]]; then
+    lock_root="${XDG_STATE_HOME:-$HOME/.local/state}/phasezero/ai-memory"
+    install -d -m 700 "$lock_root"
+    [ ! -L "$lock_root/operation.lock" ] || { pz_error "unsafe operation lock"; exit 2; }
+    exec {memory_lock_fd}>"$lock_root/operation.lock"
+    flock -n "$memory_lock_fd" || { pz_error "another memory operation is running"; exit 1; }
+fi
 
 case "$ACTION" in
     plan) plan_json ;;

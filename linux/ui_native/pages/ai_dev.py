@@ -14,6 +14,7 @@ from ..command_runner import CommandRunner
 from ..models import ActionSpec
 from ..widgets import SectionHeader, themed_icon
 from .base import BasePage
+from .memory import MemoryCard, STATUS_ID as MEMORY_STATUS_ID
 
 
 _PRIMARY_IDS = {
@@ -204,16 +205,18 @@ class AiDevPage(BasePage):
         ), 1, 0)
         cards.addWidget(self._tool_card(
             "Agentes no host",
-            "RTK, Caveman, memória e ponte admin",
+            "RTK, Caveman e ponte admin",
             "compat",
             "ai.compat",
             "Configurar",
-            "ai.memory",
-            "Memória",
+            "ai.admin",
+            "Ponte admin",
         ), 1, 1)
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
         layout.addLayout(cards)
+        self.memory_card = MemoryCard(self)
+        layout.addWidget(self.memory_card)
         layout.addWidget(self._build_harness_card())
         layout.addWidget(self._build_quota_card())
         layout.addWidget(self._build_desktop_apps_card())
@@ -315,6 +318,16 @@ class AiDevPage(BasePage):
             self.status_loader.fetch_action(action)
 
     def focus_journey(self, key: str) -> None:
+        if key in {"memory", "ai-memory"}:
+            scroll = self.findChild(QScrollArea)
+            if scroll is not None:
+                scroll.ensureWidgetVisible(self.memory_card.state, 8, 8)
+            for name in ("install", "sync", "repair", "portability-status"):
+                button = self.memory_card.buttons[name]
+                if button.isEnabled() and not button.isHidden():
+                    button.setFocus()
+                    break
+            return
         if key == "deepseek-harness":
             scroll = self.findChild(QScrollArea)
             if scroll is not None:
@@ -955,6 +968,7 @@ class AiDevPage(BasePage):
         self.status_loader.fetch("private.bonsai.status", ["ai", "claude", "bonsai-status"])
         self._fetch_quota()
         self._fetch_harness()
+        self.memory_card.fetch()
         if not self.status_loader.running(_DESKTOP_STATUS_ID):
             self.status_loader.fetch(_DESKTOP_STATUS_ID, ["ai", "desktop", "status"])
         self.bridge_card.setVisible(_bridge_opted_in())
@@ -967,6 +981,12 @@ class AiDevPage(BasePage):
         self.state_label.style().polish(self.state_label)
 
     def _on_status_ready(self, action_id: str, _stdout: str, parsed: object) -> None:
+        if action_id == MEMORY_STATUS_ID:
+            if isinstance(parsed, dict):
+                self.memory_card.update_status(parsed)
+            else:
+                self.memory_card.failed()
+            return
         if action_id == _HARNESS_STATUS_ID and isinstance(parsed, dict):
             self._on_harness_status(parsed)
             return
@@ -1104,6 +1124,9 @@ class AiDevPage(BasePage):
             self._set_state("info")
 
     def _on_status_failed(self, action_id: str, message: str) -> None:
+        if action_id == MEMORY_STATUS_ID:
+            self.memory_card.failed()
+            return
         if action_id == _HARNESS_STATUS_ID:
             self._harness_payload = None
             self._set_label_state(self.harness_state, "● Estado Harness indisponível. Use Atualizar estado.", "warning")
@@ -1152,6 +1175,7 @@ class AiDevPage(BasePage):
 
     def block_while_running(self, running: bool) -> None:
         self._operation_running = running
+        self.memory_card.apply_buttons()
         self._apply_harness_buttons()
         self.refresh_button.setEnabled(not running)
         self.repair_button.setEnabled(not running)

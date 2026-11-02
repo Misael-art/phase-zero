@@ -236,6 +236,13 @@ conexões leva à mesma ficha. Node fica no runtime privado; instalar não inici
 agente. Login, cota e isolamento exigem validação própria. Não usa DeepSeek Proxy
 nem habilita fallback para API paga. [Operação e limites](packaging/deepseek-harness/README.md).
 
+**Memória dos agentes:** IA & Dev reúne instalar/reparar, projetos compartilhados,
+dispositivos cadastrados, GitHub privado, sincronização manual/automática e
+restauração verificada. Conhecimento circula entre hosts; backup completo mantém
+histórico por equipamento. Conteúdo remoto sai criptografado; chave fica no cofre
+do sistema. Exporte recuperação antes de depender de outro host.
+[Configuração, recuperação e evidências](docs/roadmaps/ai-memory-portability-v1.md).
+
 ---
 
 ## Limites

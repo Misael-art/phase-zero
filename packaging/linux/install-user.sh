@@ -32,8 +32,10 @@ STAGE="$(mktemp -d "$INSTALL_BASE/.stage.XXXXXX")"
 install -d "$STAGE/packaging/linux"
 cp -a "$SOURCE_TMP/linux" "$SOURCE_TMP/profiles" "$SOURCE_TMP/assets" "$SOURCE_TMP/version.json" "$STAGE/"
 cp -a "$SOURCE_TMP/packaging/deepseek-harness" "$STAGE/packaging/"
+cp -a "$SOURCE_TMP/packaging/ai-memory" "$STAGE/packaging/"
 install -m 0755 "$SOURCE_TMP/packaging/linux/phasezero-control-center" \
     "$STAGE/packaging/linux/phasezero-control-center"
+install -m 0755 "$SOURCE_TMP/packaging/linux/pz" "$STAGE/packaging/linux/pz"
 find "$STAGE" -type d -name __pycache__ -prune -exec rm -rf -- {} +
 rm -rf -- "$SOURCE_TMP"
 SOURCE_TMP=""

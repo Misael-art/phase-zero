@@ -77,10 +77,12 @@ _DESKTOP_ENTRY_HINTS = {
 # `server.llm` keeps its model/server workflow, but delegates the package setup
 # to the canonical Ollama installer.
 _CANONICAL_APP_ACTIONS = {
+    "app.ai-memory": "ai.memory",
     "app.ollama": "ai.ollama",
     "app.deepseek-harness": "ai.deepseek-harness-install",
 }
 _INSTALL_AUTHORITY_BY_ACTION = {
+    "ai.memory": "linux/ai/memory_manager.py",
     "ai.deepseek-harness-install": "linux/ai/deepseek_harness_manager.py",
     "ai.ollama": "linux/ai/setup-ollama.sh",
     "server.llm": "linux/ai/setup-ollama.sh",

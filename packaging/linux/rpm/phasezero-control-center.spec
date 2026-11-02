@@ -28,6 +28,7 @@ install -d %{buildroot}%{_datadir}/icons/hicolor/scalable/apps
 cp -a linux profiles assets version.json %{buildroot}%{_libdir}/phasezero/
 install -d %{buildroot}%{_libdir}/phasezero/packaging
 cp -a packaging/deepseek-harness %{buildroot}%{_libdir}/phasezero/packaging/
+cp -a packaging/ai-memory %{buildroot}%{_libdir}/phasezero/packaging/
 install -m755 packaging/linux/phasezero-control-center %{buildroot}%{_bindir}/
 # PZ-AUD-001: ship `pz` on PATH (SSH bridge calls it remotely).
 install -m755 packaging/linux/pz %{buildroot}%{_bindir}/

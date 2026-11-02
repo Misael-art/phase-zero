@@ -112,6 +112,12 @@ exit 0
 SH
     chmod 0700 "$SHADOW_ROOT/linux/ai/$script"
 done
+cat > "$SHADOW_ROOT/linux/ai/memory_manager.py" <<'PY'
+import os
+import sys
+with open(os.environ['PZ_SETUP_ALL_CALLS'], 'a') as calls:
+    calls.write('memory_manager.py ' + ' '.join(sys.argv[1:]) + '\n')
+PY
 export PZ_SETUP_ALL_CALLS="$TMP_ROOT/setup-all.calls"
 setup_all_stdout="$TMP_ROOT/setup-all.stdout"
 setup_all_stderr="$TMP_ROOT/setup-all.stderr"
@@ -126,9 +132,13 @@ test "$setup_all_rc" -eq 69
 grep -q 'Open WebUI omitted: request-bound account grants are unavailable' "$setup_all_stderr"
 grep -q 'Hermes omitted: per-request account grants are unavailable' "$setup_all_stderr"
 grep -q 'OpenClaw omitted: per-request account grants are unavailable' "$setup_all_stderr"
-for script in setup-openclaw.sh setup-memory.sh setup-admin-bridge.sh \
+for script in setup-openclaw.sh memory_manager.py setup-admin-bridge.sh \
     setup-agent-compat.sh setup-usagebar.sh setup-codexbar.sh setup-ides.sh; do
     grep -q "^$script " "$PZ_SETUP_ALL_CALLS"
 done
+if grep -q '^setup-memory.sh ' "$PZ_SETUP_ALL_CALLS"; then
+    echo 'FAIL: aggregate setup invoked both memory installers' >&2
+    exit 1
+fi
 
 echo "PASS: Hermes consumers fail closed before network, config, launcher, or service work"

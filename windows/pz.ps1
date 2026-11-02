@@ -3,6 +3,18 @@
 param([Parameter(Position = 0, ValueFromRemainingArguments = $true)][string[]]$PzArguments)
 
 $ErrorActionPreference = 'Stop'
+if ($PzArguments -and $PzArguments.Count -ge 2 -and $PzArguments[0] -eq 'ai' -and $PzArguments[1] -in @('memory','ai-memory')) {
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $python) { $python = Get-Command python3 -ErrorAction SilentlyContinue }
+    if (-not $python) {
+        [Console]::Out.WriteLine('{"ok":false,"state":"blocked","reason":"python-3.11-required"}')
+        exit 1
+    }
+    $memoryManager = Join-Path (Split-Path -Parent $PSScriptRoot) 'linux/ai/memory_manager.py'
+    $memoryArguments = if ($PzArguments.Count -gt 2) { @($PzArguments[2..($PzArguments.Count - 1)]) } else { @('status') }
+    & $python.Source $memoryManager @memoryArguments
+    exit $LASTEXITCODE
+}
 $manager = Join-Path $PSScriptRoot 'ai\deepseek-harness.ps1'
 
 function Write-UsageError {

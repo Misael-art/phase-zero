@@ -882,7 +882,7 @@ setup_all() {
     install_rtk_fallback
     configure_rtk
     install_headroom || true
-    bash "$PZ_ROOT/linux/ai/setup-memory.sh" setup >/dev/null || pz_warn "ai-memory setup skipped/failed"
+    python3 "$PZ_ROOT/linux/ai/memory_manager.py" install >/dev/null || pz_warn "ai-memory setup skipped/failed"
     if [ -z "$WORKSPACE_ROOT" ]; then
         WORKSPACE_ROOT="$(registered_workspace_root || true)"
     fi

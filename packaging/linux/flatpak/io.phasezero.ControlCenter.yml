@@ -31,6 +31,7 @@ modules:
       - cp -a linux profiles assets version.json /app/lib/phasezero/
       - install -d /app/lib/phasezero/packaging
       - cp -a packaging/deepseek-harness /app/lib/phasezero/packaging/
+      - cp -a packaging/ai-memory /app/lib/phasezero/packaging/
       - chmod +x /app/lib/phasezero/linux/pz /app/lib/phasezero/linux/ui/native.sh
       - install -Dm755 packaging/linux/phasezero-control-center /app/bin/phasezero-control-center
       - install -Dm644 packaging/linux/io.phasezero.ControlCenter.desktop /app/share/applications/io.phasezero.ControlCenter.desktop

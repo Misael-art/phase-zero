@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "version": "3.3.1",
+  "repository": "https://github.com/akitaonrails/ai-memory",
+  "source": {
+    "url": "https://codeload.github.com/akitaonrails/ai-memory/tar.gz/refs/tags/v3.3.1",
+    "sha256": "231d01efce7ae868d48736102e180e252b9c0dc3939615d354ea51b77d80b129"
+  },
+  "assets": {
+    "linux-x86_64": {"name": "ai-memory-linux-x86_64.tar.gz", "size": 22535953, "sha256": "2045a115745a949d89cfc6a709da110a29b98fd6f2b63a928442ce949550fad4"},
+    "linux-aarch64": {"name": "ai-memory-linux-aarch64.tar.gz", "size": 21138636, "sha256": "6a3ba000bd675a45f42236b68ea7c9e5818562a68379cee407ae26650b77cd57"},
+    "windows-x86_64": {"name": "ai-memory-windows-x86_64.zip", "size": 25050463, "sha256": "99dcde5b7af450fe6212b23eccb43af3f608aadcd6999bf8c484efc7d08705db"}
+  }
+}

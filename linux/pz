@@ -219,6 +219,7 @@ Usage:
   pz ai backup create          Exporta ai-memory e acessos em pacote AES-256
   pz ai backup verify          Valida senha, paths e SHA-256 sem restaurar
   pz ai backup restore --plan  Prévia obrigatória da restauração e rollback
+  pz ai memory <action>        Memória: status|install|repair|sync|backup|scope-add|device-add|github|automatic|key-export|key-import|verify|restore-plan|restore
   pz ai 9router status         Router health and redacted providers; clients stay blocked
   pz ai 9router install        Install loopback service; consumer use still requires grants
   pz ai 9router dashboard      Blocked until per-request connection grants are enforceable
@@ -691,6 +692,10 @@ cmd_ai() {
             shift
             bash "$PZ_ROOT/linux/ai/backup-manager.sh" "${@:-plan}"
             ;;
+        memory|ai-memory)
+            shift
+            python3 "$PZ_ROOT/linux/ai/memory_manager.py" "${@:-status}"
+            ;;
         9router|router9|smart-router)
             shift
             bash "$PZ_ROOT/linux/ai/9router-manager.sh" "${@:-status}"
@@ -780,7 +785,7 @@ cmd_ai() {
                 omo|openagent|oh-my-openagent) bash "$PZ_ROOT/linux/ai/setup-omo.sh" setup ;;
                 hermes)   bash "$PZ_ROOT/linux/ai/setup-hermes.sh" ;;
                 openclaw) bash "$PZ_ROOT/linux/ai/setup-openclaw.sh" ;;
-                memory|ai-memory) bash "$PZ_ROOT/linux/ai/setup-memory.sh" setup ;;
+                memory|ai-memory) python3 "$PZ_ROOT/linux/ai/memory_manager.py" install ;;
                 admin|admin-bridge|bigsudo) bash "$PZ_ROOT/linux/ai/setup-admin-bridge.sh" setup ;;
                 rtk)      bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" install-rtk ;;
                 caveman|caverman) bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" rules ;;
@@ -823,7 +828,7 @@ cmd_ai() {
                         pz_warn "OpenClaw omitted: per-request account grants are unavailable; other setup steps continue"
                         setup_blocked=69
                     fi
-                    bash "$PZ_ROOT/linux/ai/setup-memory.sh" setup
+                    python3 "$PZ_ROOT/linux/ai/memory_manager.py" install
                     bash "$PZ_ROOT/linux/ai/setup-admin-bridge.sh" setup
                     bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" setup
                     bash "$PZ_ROOT/linux/ai/setup-usagebar.sh" setup

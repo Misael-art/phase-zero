@@ -189,6 +189,71 @@ def _with_impact(action: ActionSpec) -> ActionSpec:
     return replace(action, impact=impact, preview_kind_override=kind)
 
 
+def _memory_actions() -> list[ActionSpec]:
+    status = ("ai", "memory", "status", "--json")
+    result = []
+    for name, title, description, arguments, parameters, mutable in (
+        ("portability-status", "Atualizar estado da memória", "Serviço, destinos e último backup verificado.", ("status",), (), False),
+        ("repair", "Reparar memória", "Repara serviço e integrações; preserva memória e destinos.", ("repair",), (), True),
+        ("sync", "Sincronizar agora", "Compartilha conhecimento cadastrado e atualiza backups vencidos.", ("sync",), (), True),
+        ("backup", "Criar backup completo", "Snapshot criptografado por host nos destinos cadastrados.", ("backup",), (), True),
+        ("scope-add", "Adicionar projeto", "Compartilha famílias de conhecimento; histórico completo continua no backup por host.",
+         ("scope-add", "--project", "{project}", "--workspace", "{workspace}", "--repo-path", "{repoPath}", "--families", "{families}", "--identity", "{identity}"),
+         (_p("project", "Nome do projeto no ai-memory"), _p("workspace", "Workspace", placeholder="default"),
+          _p("repoPath", "Pasta do projeto", "path"), _p("families", "Famílias compartilhadas", placeholder="concepts,decisions,gotchas,notes"),
+          _p("identity", "ID compartilhado de outro host (opcional)", required=False, placeholder="Sem remoto Git, copie ID retornado no primeiro host")), True),
+        ("device-add", "Cadastrar dispositivo", "Vincula volume montado; dados existentes são preservados.",
+         ("device-add", "--path", "{path}"), (_p("path", "Raiz do dispositivo montado", "path"),), True),
+        ("device-remove", "Desvincular dispositivo", "Interrompe uso automático; preserva arquivos no dispositivo.",
+         ("device-remove", "--id", "{id}"), (_p("id", "Dispositivo cadastrado"),), True),
+        ("scope-remove", "Parar compartilhamento do projeto", "Preserva conhecimento local e backups; remove somente vínculo de compartilhamento.",
+         ("scope-remove", "--id", "{id}"), (_p("id", "Projeto cadastrado"),), True),
+        ("github", "Conectar repositório privado", "Reutiliza login GitHub CLI; exige repositório dedicado privado.",
+         ("github", "--repository", "{repository}"), (_p("repository", "Repositório GitHub", placeholder="usuario/memoria-privada"),), True),
+        ("github-login", "Entrar no GitHub", "Abre autenticação oficial em terminal privado; códigos e tokens ficam fora do painel.",
+         ("github-login",), (), True),
+        ("github-open-backups", "Backups no GitHub", "Abre lista de snapshots privados para download manual e recuperação verificada.",
+         ("github-open-backups",), (), False),
+        ("github-create", "Criar repositório privado", "Cria destino dedicado privado e vincula conjunto de memória.",
+         ("github", "--repository", "{repository}", "--create"), (_p("repository", "Novo repositório GitHub", placeholder="usuario/memoria-privada"),), True),
+        ("github-remove", "Desvincular GitHub", "Preserva repositório e backups remotos; interrompe sincronização deste host.",
+         ("github-remove",), (), True),
+        ("settings", "Frequência e retenção", "Define frequência de conhecimento, backup completo e quantidade de snapshots por host.",
+         ("settings", "--interval", "{interval}", "--backup-hours", "{hours}", "--keep", "{keep}"),
+         (_p("interval", "Conhecimento: intervalo em minutos", "choice", choices=("15", "30", "60")),
+          _p("hours", "Backup completo: intervalo em horas", "choice", choices=("24", "12", "48")),
+          _p("keep", "Snapshots preservados por host", "choice", choices=("7", "14", "30"))), True),
+        ("automatic-on", "Ligar sincronização automática", "Conhecimento a cada 15 minutos; backup diário; detecção de mídia cadastrada.",
+         ("automatic", "--enabled", "yes"), (), True),
+        ("automatic-off", "Pausar sincronização automática", "Pausa agendamento e detector; mantém memória e backups.",
+         ("automatic", "--enabled", "no"), (), True),
+        ("verify", "Verificar backup", "Confere descriptografia, inventário e hashes sem restaurar.",
+         ("verify", "--path", "{path}"), (_p("path", "Backup automático criptografado", "file"),), False),
+        ("restore", "Restaurar backup", "Revisa origem, faz pré-backup e coordena serviço. Configuração local é preservada.",
+         ("restore", "--path", "{path}", "--confirm", "RESTORE", "--expected-sha256", "{expectedSha256}"), (_p("path", "Backup automático criptografado", "file"),), True),
+        ("key-export", "Guardar chave de recuperação", "Exporta chave protegida por senha para cadastrar outro host ou recuperar cofre.",
+         ("key-export", "--path", "{path}", "--passphrase-stdin"),
+         (_p("path", "Novo arquivo de recuperação (.gpg)", "save-file"), _p("passphrase", "Senha de recuperação", "secret", placeholder="mínimo 12 caracteres")), True),
+        ("key-import", "Cadastrar este host pela chave", "Importe antes de cadastrar projetos e destinos. Identidade deste host permanece própria.",
+         ("key-import", "--path", "{path}", "--passphrase-stdin"),
+         (_p("path", "Chave de recuperação (.gpg)", "file"), _p("passphrase", "Senha de recuperação", "secret")), True),
+        ("resolve", "Resolver conflito de conhecimento", "Resolve somente conflito selecionado; mantém cópia criptografada da versão recebida.",
+         ("resolve", "--id", "{id}", "--prefer", "{prefer}"), (_p("id", "ID do conflito"), _p("prefer", "Versão a preservar: server = local, repo = recebida", "choice", choices=("server", "repo"))), True),
+    ):
+        preview = (("ai", "memory", "restore-plan", "--path", "{path}") if name == "restore" else
+                   ("ai", "memory", "conflict-plan", "--id", "{id}") if name == "resolve" else status)
+        result.append(replace(_a("ai.memory-" + name, "IA & Dev", title, description,
+                         ("ai", "memory", *arguments, "--json"), "document-save" if name == "backup" else "view-refresh",
+                         mutable=mutable, preview=preview if mutable else None, parameters=parameters,
+                         stdin_parameter="passphrase" if name.startswith("key-") else "",
+                         status_args=status,
+                         risk="high" if name in {"restore", "resolve"} else "normal",
+                         group="Memória", visibility="advanced"), timeout_s=2700 if mutable else 120,
+                         preview_bindings=(("expectedSha256", "sha256"),) if name == "restore" else (),
+                         impact=description if name == "resolve" else ""))
+    return result
+
+
 def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSpec]:
     actions: list[ActionSpec] = [
         _a("system.doctor", "Visão geral", "Diagnóstico completo", "Audita host, boot, jogos, IA e integrações.", ("doctor",), "dialog-information", badge="Seguro"),
@@ -611,6 +676,7 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
         ]
     )
 
+    actions.extend(_memory_actions())
     ai_rows = [
         ("status", "Status IA", "Stack local e agentes.", ("ai", "status"), None),
         ("doctor", "Diagnóstico dos conectores", "Audita as integrações MCP — o que liga os agentes a ferramentas e memória.", ("ai", "doctor"), None),
@@ -625,7 +691,7 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
         ("opencode", "Alinhar versão OpenCode", "Alinha CLI e desktop.", ("ai", "opencode", "sync"), ("ai", "opencode", "version-status")),
         ("opencode-free", "Modelo free OpenCode", "Corrige 'Interrompido' com modelo free (deepseek-flash).", ("ai", "opencode", "free-model"), ("ai", "opencode", "status")),
         ("omo", "Instalar OMO", "Plugin oh-my-openagent.", ("ai", "omo", "setup"), ("ai", "omo", "status")),
-        ("memory", "Instalar ai-memory", "Memória persistente de agentes.", ("ai", "setup", "memory"), ("ai", "status")),
+        ("memory", "Instalar ai-memory", "Instala memória e sincronizador oficial; preserva dados antes de migrar.", ("ai", "memory", "install"), ("ai", "memory", "plan")),
         ("ollama", "Instalar Ollama", "Runtime local de modelos.", ("ai", "setup", "ollama"), ("ai", "status")),
         ("webui", "Uso bloqueado — Open WebUI", "Não instala nem inicia um cliente que pode usar credenciais sem grant por requisição.", ("ai", "setup", "webui"), ("ai", "webui", "status")),
         ("webui-status", "Status Open WebUI", "Container e resposta HTTP local, sem alterar o serviço.", ("ai", "webui", "status"), None),

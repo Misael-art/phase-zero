@@ -1908,7 +1908,7 @@ function Get-UiHealthTextCanonicalStatus {
                                 <TextBlock x:Name="HealthAiUsagebarStatusText" Foreground="#CBD5E1" FontSize="13" TextWrapping="Wrap" Text="ai-usagebar: Ausente"/>
                             </StackPanel>
                         </Button>
-                        <Button x:Name="HealthAiMemoryCard" Tag="ai-memory" Style="{StaticResource HealthCardButton}" Margin="0,0,8,0" ToolTip="Validar somente ai-memory">
+                        <Button x:Name="HealthAiMemoryCard" Tag="ai-memory" Style="{StaticResource HealthCardButton}" Margin="0,0,8,0" ToolTip="Instalar, reparar, sincronizar e proteger memória">
                             <StackPanel>
                                 <TextBlock Style="{StaticResource SectionLabel}" Text="ai-memory"/>
                                 <TextBlock x:Name="HealthAiMemoryStatusText" Foreground="#CBD5E1" FontSize="13" TextWrapping="Wrap" Text="ai-memory: Ausente"/>
@@ -7843,7 +7843,10 @@ $ui.HealthRebootCard.Add_Click({     Invoke-UiHealthScopedDoctor -Scope 'reboot'
 $ui.HealthSecretsCard.Add_Click({    Invoke-UiHealthScopedDoctor -Scope 'secrets'     -StatusTextBlock $ui.HealthSecretsStatusText })
 $ui.HealthGithubCard.Add_Click({     Invoke-UiHealthScopedDoctor -Scope 'github'      -StatusTextBlock $ui.HealthGithubStatusText })
 $ui.HealthAiUsagebarCard.Add_Click({ Invoke-UiHealthScopedDoctor -Scope 'ai-usagebar' -StatusTextBlock $ui.HealthAiUsagebarStatusText })
-$ui.HealthAiMemoryCard.Add_Click({   Invoke-UiHealthScopedDoctor -Scope 'ai-memory'   -StatusTextBlock $ui.HealthAiMemoryStatusText })
+$ui.HealthAiMemoryCard.Add_Click({
+    . (Join-Path $PSScriptRoot 'windows/ai/memory-ui.ps1')
+    Show-PhaseZeroMemoryWindow -Owner $window -RepoRoot $PSScriptRoot
+})
 $ui.HealthAionUiCard.Add_Click({     Invoke-UiHealthScopedDoctor -Scope 'aionui'      -StatusTextBlock $ui.HealthAionUiStatusText })
 $ui.HealthDeckCard.Add_Click({       Invoke-UiHealthScopedDoctor -Scope 'steamdeck'   -StatusTextBlock $ui.HealthDeckStatusText })
 $ui.HealthRollbackCard.Add_Click({   Invoke-UiHealthScopedDoctor -Scope 'rollback'    -StatusTextBlock $ui.HealthRollbackStatusText })

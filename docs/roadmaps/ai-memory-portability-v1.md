@@ -1,0 +1,145 @@
+# ai-memory: portabilidade, recuperação e interface
+
+Owner: adaptadores IA, catálogo e UI existentes. Contrato de criptografia:
+[ADR 0002](../adr/0002-ai-portability-backup.md). Pins únicos:
+`packaging/ai-memory/pins.json`. Baseline de implementação: `69a471cd`;
+branch de continuidade `codex/clean-host-dev-bootstrap`, PR #129.
+
+## Escopo e contratos
+
+- MEM-001: remover espelhamento destrutivo Windows. Não copiar SQLite ativo,
+  escolher unidade por letra/pasta ou exportar antes de preservar exclusivos.
+- MEM-002: instalação nativa verificada 3.3.1, snapshot anterior à migração,
+  recuperação após falha e companion oficial compilado de fonte fixada.
+- MEM-003: snapshots OpenPGP por host, inventário/hash, extração sem links ou
+  traversal, pré-backup e ciclo coordenado do serviço na restauração.
+- MEM-004: conhecimento por projeto via `ai-memory-wikisync`, baselines locais
+  por peer e escritas condicionais. Exclusões não propagam. Conflitos mantêm
+  versão recebida criptografada; resolução seleciona um conflito por vez.
+- MEM-005: dispositivos cadastrados por volume/manifesto e publicações
+  imutáveis. Detector observa conexão a cada 10 segundos; timer recupera
+  tentativas perdidas. Caminho manual usa exatamente o mesmo worker.
+- MEM-006: GitHub privado, identidade revalidada, conhecimento pequeno em Git
+  e snapshots completos em assets de releases do repositório dedicado.
+- MEM-007: opções nativas para instalar, reparar, cadastrar projetos/destinos,
+  autenticar GitHub, sincronizar, automatizar, recuperar chave e restaurar.
+
+Não é replicação multiwriter de SQLite. Conhecimento pode circular entre
+hosts; snapshots completos preservam histórico por host. Para consultar todo
+histórico numa única instância, escolher servidor autoritativo ai-memory em
+frente própria, sem inventar fusão de backups. Backup nativo contém estado
+interno do ai-memory, inclusive possíveis dados de autenticação do próprio
+servidor. Arquivos de credenciais de provedores/navegador ficam fora da
+automação. Todo conteúdo remoto sai criptografado.
+
+## Operação
+
+```bash
+pz ai memory install
+pz ai memory status --json
+pz ai memory scope-add --workspace default --project <nome-existente> \
+  --repo-path <checkout> --families concepts,decisions,gotchas,notes
+# Host novo: --create-project cria escopo por API, com registro de inscrição.
+pz ai memory github --repository <usuario/repositorio-privado>
+# Novo destino dedicado: acrescente --create. Nunca usar repositório de código.
+pz ai memory device-add --path <raiz-do-volume-montado>
+pz ai memory sync
+pz ai memory settings --interval 15 --backup-hours 24 --keep 7
+pz ai memory automatic --enabled yes
+```
+
+Automação exige runtime instalado; não aponta serviço de produção ao checkout.
+No Linux, instalação de usuário usa `packaging/linux/install-user.sh`, incluindo
+CLI `pz`, UI e pins. Timer/worker são units de usuário; não instalam serviço de
+sistema, Docker, gateway ou banco novo. Pausar usa `automatic --enabled no`.
+Windows usa o mesmo owner Python e tasks de usuário; bootstrap legado delega
+à mesma entrada. Diretório de instalação Windows customizado exige migração
+explícita; não é adotado silenciosamente.
+
+Projetos devem ser selecionados na memória existente; nomes de pasta não
+identificam projeto. Vínculo compartilhado deriva do remoto Git normalizado.
+Somente GitHub tem equivalência conhecida entre SSH/HTTPS e capitalização;
+outros servidores preservam protocolo e case do caminho. Sem remoto, gera-se
+ID próprio: copie o `scopeId` retornado e informe `--identity <scopeId>` no outro
+host. Campo equivalente existe na UI. Nunca inferir equivalência por basename.
+Snapshot completo inclui metadados dos vínculos, sem referências de cofre;
+restauração guarda esses dados na pasta de recuperação para revisão e novo
+cadastro. Não copiar automaticamente caminhos locais ou identidade do host antigo.
+Novo host importa chave, cadastra checkout/projeto e conecta mesmo destino.
+Login GitHub reutiliza `gh`; não concede chave de descriptografia nem escolhe
+automaticamente todos os projetos.
+
+Chave automática aleatória fica somente no Secret Service/WinCred existente.
+Na UI, **Guardar recuperação** gera arquivo OpenPGP protegido por senha que
+entra por stdin. Guardar arquivo e senha independentemente do host; senha
+nunca deve ser enviada no chat. **Importar recuperação** precede cadastro de
+destinos/projetos no novo host e não copia UUID do host anterior.
+
+```bash
+pz ai memory verify --path <snapshot.gpg>
+pz ai memory restore-plan --path <snapshot.gpg>
+pz ai memory restore --path <snapshot.gpg> --confirm RESTORE \
+  --expected-sha256 <hash-retornado-pelo-plano>
+```
+
+Restauração preserva configuração local; configuração externa do backup fica
+no diretório de recuperação para revisão. Histórico bruto complementar recebe
+troca coordenada e cópia anterior identificada. Não há restauração automática
+quando uma mídia é conectada. Conteúdo/origem/datas do registro permanecem na
+página original; manifesto registra transporte e sidecar preserva origem de
+versões compartilhadas. `firstObservedAt` não inventa data histórica ausente.
+
+Limites iniciais: pacote de conhecimento até 8 MiB; arquivo GitHub de snapshot
+até 2 GB pelo orçamento do adaptador. Cadastro, verificação e falta de espaço
+falham sem substituir último objeto válido. Retenção remove apenas snapshots
+do próprio host após substituto verificado. Git guarda histórico de blobs;
+reduzir retenção de snapshots não apaga histórico Git.
+Falhas de rede/autenticação GitHub usam retentativa crescente com jitter,
+limitada a seis horas. Sincronização manual ignora espera. Backups continuam
+independentes de conflitos de conhecimento. Arquivos de conhecimento sem mudança
+não geram novos objetos nem expulsam versões úteis na mídia.
+
+## Evidência em 2026-11-01
+
+Host: BigLinux/Manjaro, `misael-jupiter`. Instalação real 1.31.1 → 3.3.1,
+serviço ativo em loopback com API e MCP/hooks dos agentes detectados aplicados.
+Release Linux de 22.535.953 bytes e fonte do companion verificadas pelos pins.
+Snapshot anterior à migração preservado em estado privado do usuário; instalação
+também mantém rollback próprio, fora do Git.
+
+Rehearsal em cópia isolada: 3.478 páginas, 1.835 sessões, 842.919 observações e
+177 handoffs. Contagens e todos os campos originais compartilhados entre
+schemas permaneceram idênticos, por comparação de hashes linha a linha. Store
+real continua recebendo eventos; contagem posterior naturalmente difere.
+
+Teste nativo opt-in: duas instâncias descartáveis com binário/companion reais,
+troca nos dois sentidos, origem/data preservadas, edição concorrente recusada,
+snapshot online criptografado e restauração nativa com SQLite íntegro. Restore
+usa namespace PID próprio; nenhum serviço de produção é parado pelo teste.
+
+GitHub real: repositório dedicado privado validado; 133 arquivos de conhecimento
+retornaram pela API e passaram descriptografia/inventário/hash. Snapshot completo
+foi enviado; tamanho e digest confirmados pelo GitHub. Cópia completa remota não
+foi baixada para este teste: excede limite local de download manual de 70 MB.
+Recuperação de snapshot completo foi provada com fixture nativa local; não
+confundir isso com recuperação integral daquele asset remoto.
+
+Fixtures Python cobrem chave fora de config, senha errada, archive traversal/
+links, exclusividade de worker, disco/dispositivo, identidade/privacidade GitHub,
+conflitos, preservação de backup apesar de conflito de conhecimento, origem de
+projeto e rollback de migração/restauração. Probes Qt usam Xvfb, temas claro/
+escuro, 800×600/1280×800 e escalas 100/150/200%; teclado e ponteiro são medidos.
+Fixtures e capturas não homologam toque físico, leitor de tela ou Windows.
+
+## Gates e continuidade
+
+Handoff final deve registrar commit, testes/checks e instalação do runtime/
+agendamento realmente observados. Não publicar dados, chaves, dumps ou URL de
+backup privado no Git do produto. Evidências locais ficam em diretório privado
+de cache `phasezero-dev/ai-memory-implementation`, com snapshots de rollback no
+estado privado `phasezero/ai-portability` e `phasezero/ai/memory-upgrades`.
+
+Pendentes de alvo: Windows nativo/WPF e tasks, dois equipamentos físicos,
+remoção abrupta de USB/SD, recuperação após perda real do cofre, acessibilidade
+física. Chave de recuperação exige exportação local pelo operador. Sem merge,
+release de produto, inferência paga ou homologação genérica de todos os hosts.

@@ -580,7 +580,7 @@ Describe 'AI coding tool support' {
         $catalog.Contains('ai-memory') | Should Be $true
         [string]$catalog['ai-memory'].GitHubRepo | Should Be 'akitaonrails/ai-memory'
         [string]$catalog['ai-memory'].InstallSupport | Should Be 'native-release'
-        [string]$catalog['ai-memory'].ReleaseTag | Should Be 'v1.1.0'
+        [string]$catalog['ai-memory'].ReleaseTag | Should Be 'v3.3.1'
         [string]$catalog['ai-memory'].ServerUrl | Should Be 'http://127.0.0.1:49374'
         [string]$catalog['ai-memory'].ReleaseAssets['windows'].Name | Should Be 'ai-memory-windows-x86_64.zip'
         [string]$catalog['ai-memory'].ReleaseAssets['windows'].Sha256 | Should Match '^[a-f0-9]{64}$'

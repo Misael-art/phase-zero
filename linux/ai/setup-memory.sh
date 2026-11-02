@@ -15,18 +15,27 @@ AI_MEMORY_ENV="${AI_MEMORY_ENV:-$AI_MEMORY_CONFIG_DIR/env}"
 LOCAL_BIN="${PZ_LOCAL_BIN:-$HOME/.local/bin}"
 AI_MEMORY_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/phasezero/ai"
 AI_MEMORY_INTEGRATIONS_STATE="$AI_MEMORY_STATE_DIR/memory-integrations.json"
+RECOVERY_REQUIRED="$AI_MEMORY_STATE_DIR/ai-memory-recovery-required.json"
 
 # Audited upstream release. Native binary avoids the old Docker-wrapper split:
 # the agent runs on the host, while only the server may remain containerized.
-AI_MEMORY_VERSION="${AI_MEMORY_VERSION:-1.31.1}"
+PINS="$PZ_ROOT/packaging/ai-memory/pins.json"
+AI_MEMORY_VERSION="${AI_MEMORY_VERSION:-$(jq -r '.version' "$PINS")}"
 AI_MEMORY_RELEASE_BASE="${AI_MEMORY_RELEASE_BASE:-https://github.com/akitaonrails/ai-memory/releases/download/v${AI_MEMORY_VERSION}}"
-AI_MEMORY_SHA256_X86_64="${AI_MEMORY_SHA256_X86_64:-ee3bde8d2e843127152dc7a89b0c06bf3a64cf7c2894eedf69d8d2b4ec7b68cb}"
-AI_MEMORY_SHA256_AARCH64="${AI_MEMORY_SHA256_AARCH64:-cdb80e14779cacca2aa479ee95a1ba2d0c1bd0dbb56297dcd37d0267cd4d6f84}"
+AI_MEMORY_SHA256_X86_64="${AI_MEMORY_SHA256_X86_64:-$(jq -r '.assets["linux-x86_64"].sha256' "$PINS")}"
+AI_MEMORY_SHA256_AARCH64="${AI_MEMORY_SHA256_AARCH64:-$(jq -r '.assets["linux-aarch64"].sha256' "$PINS")}"
+MEMORY_RUNTIME="${XDG_DATA_HOME:-$HOME/.local/share}/phasezero/ai-memory/native/$AI_MEMORY_VERSION"
 
 ai_memory_cmd() {
     command -v ai-memory 2>/dev/null || {
         [ -x "$LOCAL_BIN/ai-memory" ] && echo "$LOCAL_BIN/ai-memory"
     }
+}
+
+user_service_bus_owned() {
+    local server_home
+    server_home="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^HOME=//p')"
+    [ "$server_home" = "$HOME" ]
 }
 
 is_phasezero_docker_wrapper() {
@@ -61,7 +70,8 @@ ai_memory_asset() {
 }
 
 install_native_release() {
-    local row asset expected work archive actual binary existing="" current=""
+    local row asset expected work archive actual binary existing="" current="" was_active=false rollback="" reuse_runtime=false
+    [ ! -f "$RECOVERY_REQUIRED" ] || { pz_error "memory recovery required; inspect $RECOVERY_REQUIRED before retrying"; return 1; }
     row="$(ai_memory_asset)" || {
         pz_error "unsupported ai-memory Linux architecture: $(uname -m)"
         return 1
@@ -74,23 +84,74 @@ install_native_release() {
             pz_info "ai-memory already current: $existing ($current)"
             return 0
         fi
+        local installed_version
+        installed_version="$(sed -nE 's/^ai-memory ([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p' <<< "$current")"
+        if [ -n "$installed_version" ] && [ "$(printf '%s\n%s\n' "$AI_MEMORY_VERSION" "$installed_version" | sort -V | tail -1)" != "$AI_MEMORY_VERSION" ]; then
+            pz_error "newer ai-memory preserved; downgrade requires explicit migration review"
+            return 1
+        fi
     fi
     pz_check_deps curl tar sha256sum >/dev/null
     work="$(mktemp -d)"
     trap 'rm -rf -- "${work:?}"; trap - RETURN' RETURN
     archive="$work/$asset"
-    curl -fL "$AI_MEMORY_RELEASE_BASE/$asset" -o "$archive"
+    if [ -n "${AI_MEMORY_RELEASE_ARCHIVE:-}" ]; then
+        cp -- "$AI_MEMORY_RELEASE_ARCHIVE" "$archive"
+    else
+        curl -fL --max-filesize 70000000 "$AI_MEMORY_RELEASE_BASE/$asset" -o "$archive"
+    fi
     actual="$(sha256sum "$archive" | awk '{print $1}')"
     if [ "$actual" != "$expected" ]; then
         pz_error "ai-memory checksum mismatch. expected=$expected actual=$actual"
         return 1
     fi
-    tar -xzf "$archive" -C "$work"
-    binary="$work/ai-memory"
+    mkdir "$work/payload"
+    tar -xzf "$archive" -C "$work/payload"
+    binary="$work/payload/ai-memory"
     [ -f "$binary" ] || { pz_error "ai-memory binary missing from $asset"; return 1; }
+    if [ -e "$MEMORY_RUNTIME" ]; then
+        if [ -f "$MEMORY_RUNTIME/ai-memory" ] && \
+            [ "$(sha256sum "$MEMORY_RUNTIME/ai-memory" | awk '{print $1}')" = "$(sha256sum "$binary" | awk '{print $1}')" ]; then
+            reuse_runtime=true
+        else
+            pz_error "existing runtime candidate differs from verified release; preserved for review"
+            return 1
+        fi
+    fi
     mkdir -p "$LOCAL_BIN" "$AI_MEMORY_STATE_DIR"
-    [ -f "$LOCAL_BIN/ai-memory" ] && pz_backup_file "$LOCAL_BIN/ai-memory" user >/dev/null
-    install -m 0755 "$binary" "$LOCAL_BIN/ai-memory"
+    write_default_config
+    if [ -n "$existing" ]; then
+        rollback="$AI_MEMORY_STATE_DIR/memory-upgrades/$(date +%Y%m%dT%H%M%S)-$$"
+        install -d -m 700 "$rollback"
+        cp -L -- "$existing" "$rollback/ai-memory-before"
+        chmod 700 "$rollback/ai-memory-before"
+        "$existing" --data-dir "$AI_MEMORY_DATA_DIR" --config "$AI_MEMORY_CONFIG" backup --to "$rollback/data-before.tar.gz" >/dev/null
+        chmod 600 "$rollback/data-before.tar.gz"
+    fi
+    if user_service_bus_owned && systemctl --user is-active --quiet ai-memory.service; then
+        was_active=true
+        systemctl --user stop ai-memory.service
+    fi
+    mkdir -p "$(dirname "$MEMORY_RUNTIME")"
+    if ! $reuse_runtime; then mv "$work/payload" "$MEMORY_RUNTIME"; fi
+    ln -s "$MEMORY_RUNTIME/ai-memory" "$LOCAL_BIN/.ai-memory-candidate-$$"
+    mv -Tf "$LOCAL_BIN/.ai-memory-candidate-$$" "$LOCAL_BIN/ai-memory"
+    if ! "$LOCAL_BIN/ai-memory" --data-dir "$AI_MEMORY_DATA_DIR" --config "$AI_MEMORY_CONFIG" init >/dev/null; then
+        if [ -n "$rollback" ]; then
+            "$LOCAL_BIN/ai-memory" --data-dir "$AI_MEMORY_DATA_DIR" --config "$AI_MEMORY_CONFIG" restore --from "$rollback/data-before.tar.gz" --force >/dev/null || {
+                jq -n --arg snapshot "$rollback/data-before.tar.gz" --arg binary "$rollback/ai-memory-before" \
+                    '{state:"required",snapshot:$snapshot,previousBinary:$binary,service:"stopped"}' > "$RECOVERY_REQUIRED"
+                chmod 600 "$RECOVERY_REQUIRED"
+                pz_error "migration rollback failed; preserved $rollback; service remains stopped"; return 1;
+            }
+            install -m 755 "$rollback/ai-memory-before" "$LOCAL_BIN/.ai-memory-rollback-$$"
+            mv -Tf "$LOCAL_BIN/.ai-memory-rollback-$$" "$LOCAL_BIN/ai-memory"
+        fi
+        $was_active && systemctl --user start ai-memory.service
+        pz_error "ai-memory migration failed; previous snapshot preserved"
+        return 1
+    fi
+    $was_active && systemctl --user start ai-memory.service
     pz_record_created ai "$LOCAL_BIN/ai-memory"
     jq -n --arg version "$AI_MEMORY_VERSION" --arg asset "$asset" \
         --arg source "$AI_MEMORY_RELEASE_BASE/$asset" --arg sha256 "$expected" \
@@ -103,6 +164,29 @@ install_native_release() {
 
 install_ai_memory() {
     install_native_release
+}
+
+install_sync_companion() {
+    local work source_url expected actual cargo_cmd
+    cargo_cmd="$(command -v cargo || true)"
+    mkdir -p "$AI_MEMORY_STATE_DIR"
+    [ -n "$cargo_cmd" ] || { [ ! -x "$HOME/.cargo/bin/cargo" ] || cargo_cmd="$HOME/.cargo/bin/cargo"; }
+    [ -n "$cargo_cmd" ] || { pz_error "Rust toolchain required for official ai-memory-wikisync"; return 1; }
+    work="$(mktemp -d)"
+    trap 'rm -rf -- "${work:?}"; trap - RETURN' RETURN
+    source_url="$(jq -r '.source.url' "$PINS")"
+    expected="$(jq -r '.source.sha256' "$PINS")"
+    if [ -n "${AI_MEMORY_SOURCE_ARCHIVE:-}" ]; then cp -- "$AI_MEMORY_SOURCE_ARCHIVE" "$work/source.tar.gz"
+    else curl -fL --max-filesize 70000000 "$source_url" -o "$work/source.tar.gz"; fi
+    actual="$(sha256sum "$work/source.tar.gz" | awk '{print $1}')"
+    [ "$actual" = "$expected" ] || { pz_error "ai-memory companion source checksum mismatch"; return 1; }
+    tar -xzf "$work/source.tar.gz" -C "$work" "ai-memory-$AI_MEMORY_VERSION/companions/ai-memory-wikisync"
+    CARGO_BUILD_JOBS=1 "$cargo_cmd" install --locked --path "$work/ai-memory-$AI_MEMORY_VERSION/companions/ai-memory-wikisync" \
+        --root "${XDG_DATA_HOME:-$HOME/.local/share}/phasezero/ai-memory/wikisync" --force
+    mkdir -p "$LOCAL_BIN"
+    ln -sfn "${XDG_DATA_HOME:-$HOME/.local/share}/phasezero/ai-memory/wikisync/bin/ai-memory-wikisync" "$LOCAL_BIN/ai-memory-wikisync"
+    jq -n --arg version "$AI_MEMORY_VERSION" --arg sha256 "$expected" '{schemaVersion:1,sourceVersion:$version,sourceSha256:$sha256}' \
+        > "$AI_MEMORY_STATE_DIR/wikisync-install.json"
 }
 
 write_default_config() {
@@ -131,6 +215,7 @@ init_ai_memory() {
     cmd="$(ai_memory_cmd || true)"
     [ -n "$cmd" ] || { pz_error "ai-memory not installed; init unavailable"; return 1; }
     mkdir -p "$AI_MEMORY_DATA_DIR" "$AI_MEMORY_CONFIG_DIR"
+    systemctl --user is-active --quiet ai-memory.service && return 0
     if "$cmd" --data-dir "$AI_MEMORY_DATA_DIR" --config "$AI_MEMORY_CONFIG" init >/dev/null 2>&1; then
         return 0
     fi
@@ -150,7 +235,7 @@ install_user_service() {
         if is_phasezero_docker_wrapper "$cmd"; then
             exec_start="$cmd serve --transport http --bind 127.0.0.1:49374"
         else
-            exec_start="$cmd --data-dir $AI_MEMORY_DATA_DIR --config $AI_MEMORY_CONFIG serve --transport http --bind 127.0.0.1:49374"
+            exec_start="\"$cmd\" --data-dir \"$AI_MEMORY_DATA_DIR\" --config \"$AI_MEMORY_CONFIG\" serve --transport http --bind 127.0.0.1:49374 --enable-api"
         fi
         pz_write_managed_file "$service_path" <<EOF
 [Unit]
@@ -170,9 +255,15 @@ EOF
     else
         pz_info "existing ai-memory user service preserved: $service_path"
     fi
+    if ! user_service_bus_owned; then
+        pz_error "systemd user bus belongs to another HOME or is unavailable; service file written only"
+        return 1
+    fi
     if systemctl --user daemon-reload >/dev/null 2>&1; then
-        systemctl --user enable --now ai-memory.service >/dev/null 2>&1 || \
-            pz_warn "could not enable ai-memory user service; run: systemctl --user enable --now ai-memory.service"
+        systemctl --user enable --now ai-memory.service >/dev/null 2>&1 || return 1
+        if grep -q 'PhaseZero managed' "$service_path"; then
+            systemctl --user restart ai-memory.service || return 1
+        fi
     else
         pz_warn "systemd user session unavailable; service file written only"
     fi
@@ -267,6 +358,7 @@ dry_run() {
 
 configure_ai_memory() {
     local init_ok=true wire_ok=true
+    [ ! -f "$RECOVERY_REQUIRED" ] || { pz_error "memory recovery required; automatic repair refused"; return 1; }
     write_default_config
     init_ai_memory || init_ok=false
     install_user_service
@@ -281,6 +373,7 @@ case "${1:-setup}" in
         configure_ai_memory
         ;;
     install) install_ai_memory ;;
+    install-sync) install_sync_companion ;;
     configure) configure_ai_memory ;;
     service)
         write_default_config
