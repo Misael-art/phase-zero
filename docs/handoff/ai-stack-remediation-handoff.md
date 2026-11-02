@@ -579,3 +579,70 @@ carrega também texto atualizado da UI. SHA de entrada tinha 35 checks positivos
 incremento, sem reprodução em `main` nesta sessão. PR continua draft, sem
 merge/release; aguardar checks do incremento e tratar gates pendentes na frente
 correta antes de publicação.
+
+### Codex Web por plano e cor própria — 2026-11-02
+
+Incremento `e53cd0cd`, mesma branch e PR #129. Owner: domínio existente de
+perfis Codex; bridge continua dono da conexão, permissões e cofre. Pedido
+implementado em UI/CLI: automático habilita Pro/Pro Lite, demais planos ou plano
+desconhecido/vencido ficam desabilitados. Override por conta é reversível;
+cancelar diálogo não mostra preferência ainda não salva. Desligar preferência
+preserva sessões existentes; não implica autostart nem concede ferramenta.
+
+Novas contas recebem `webColor` exclusivo ao criar; paleta Web não coincide com
+65 cores nativas. Organizador migra metadados antigos e ícones. Web principal
+também ganha fundo/destaque próprios; nativo principal permanece intocado.
+Modo Web de perfis exige `tools_enable` idempotente e abre `desktop("tools")`,
+sem fallback silencioso. UI oferece Verificar conexão e Conectar ferramentas;
+saída separa `connectionReady` de `executionVerified`, sem expor identidade/chave.
+
+Host aplicado pelo organizador oficial: uma Pro Lite habilitada e duas Plus
+desabilitadas em automático. Web principal usa destaque `#eb15da`, distinto
+das três cores nativas atuais. Configuração principal, todas as configurações
+nativas e auth.json presentes mantiveram hashes; opções Web fora de Aparência
+preservadas. Rota ativa, política válida e daemon em loopback. Nenhum app do
+operador foi fechado. Janelas já abertas precisam recarregar para mostrar tema.
+
+Instalador oficial por usuário aplicado de export Git imutável `e53cd0cd`;
+runtime permanece 1.22.12. Quatro módulos instalados comparados por SHA-256;
+snapshot estável do bridge atualizado. Backup anterior:
+`~/.local/share/phasezero/backups/1.22.12.20261102080250.3928001/`.
+Recuperação RetroFE preservada pelo digest. CLI instalado confirmou
+`connectionReady=true`, `executionVerified=false`. Render da UI instalada,
+com identidade ocultada, confirmou exatamente um preparo Web habilitado e dois
+desabilitados. UI antiga precisa ser reaberta para carregar código novo.
+
+Validação local: 159 regressões passaram; 13 testes de UI reexecutados após
+ajuste do diálogo de preferência passaram. Layout claro/escuro em 100/150/200%
+e larguras 560/1280 sem overflow horizontal e com controles alcançáveis. Texto
+das 130 superfícies nativa/Web tem contraste ≥ 4,5:1. Wrapper dev-ui pronto;
+diff revisado sem segredos ou WIP alheio.
+
+**Limite real de ferramentas:** infraestrutura passou em 12 gates. Leitura de
+canary foi tentada por Codex Web. Controle inicial `read-only` foi recusado por
+ausência de rede no contexto confiável. Segundo teste herdou permissões já
+escolhidas pelo operador (`inherit`, `danger-full-access`, `on-request`), sem
+alterar configuração, mas automação 6.1.17 falhou localizando seletor de
+raciocínio na página ChatGPT (`locator.click` timeout). Não retornou canary;
+arquivo ficou igual, sem fallback para API. Sessão local e conector ativo não
+homologam execução de ferramenta. Última release consultada ainda é 6.1.17.
+Não editar bundle verificado, forjar contexto ou ampliar permissões para
+transformar essa falha em sucesso.
+
+Próximo passo indispensável: resolver compatibilidade de seleção de modelo/
+raciocínio no upstream por versão auditada e repetir uma leitura real antes de
+declarar acesso funcional às ferramentas. Mudança de idioma/layout da página
+não foi aplicada à conta como tentativa de contorno. Este incremento entrega
+padrões/cores/conexão, mas não encerra homologação de execução do host.
+
+Evidência privada: `~/.cache/phasezero-dev/codex-web-policy/`, especialmente
+`final-tests.log`, `final-ui-tests.log`, `ui-proof.json`, `host-tools-before.json`,
+`host-tool-proof/{receipt,profile-receipt}.json`, `host-applied.json`,
+`installed-source.json`, `installed-tools-status.json`, `installed-ui.json`.
+Fonte exportada é regenerável com `git archive e53cd0cd`, sem segundo checkout.
+Aprendizado durável registra limites da prova; nenhum transcript privado vai ao Git.
+
+CI de entrada `bb0afd7e` teve `shell-test` falhando em hot-backup SQLite do
+Homelab (REV-002), observado antes deste incremento; logs preservados. Não foi
+reproduzido em main nesta sessão nem alterado fora da frente. PR permanece
+draft; merge/release dependem dos gates pendentes e da prova de ferramentas.
