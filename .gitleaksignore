@@ -14,3 +14,6 @@ a549f827b89d017238a1e5fd46e94c35ed4eefc3:tests/linux-homelab.sh:generic-api-key:
 # Mapa do controle no plasmoid. O campo "keys" é o atalho mostrado na tela
 # (Ctrl+Shift+Tab no L1), não uma credencial. generic-api-key casa o nome.
 b623574efeea3c27bdf3fe3231062cf2923a6c54:linux/steamdeck/plasmoid/org.phasezero.deckpanel/contents/data/deck-shortcuts.json:generic-api-key:42
+# Inventário da auditoria visual: SHA-256 dos arquivos-fonte capturados,
+# não credencial. generic-api-key casa a chave "tokens.py" + hex longo.
+17a13fef952b10c6e30c351b754e0bc6016f13c3:docs/audits/visual-system-20261102/inventory.json:generic-api-key:153
