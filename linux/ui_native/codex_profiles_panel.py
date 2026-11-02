@@ -6,14 +6,14 @@ import json
 import re
 from xml.etree import ElementTree
 
-from PySide6.QtCore import Signal, Qt, QTimer
-from PySide6.QtGui import QPixmap, QPainter, QColor, QIcon, QPainterPath, QLinearGradient
+from PySide6.QtCore import Signal, Qt, QTimer, QSignalBlocker
+from PySide6.QtGui import QPixmap, QPainter, QColor, QIcon, QPainterPath, QLinearGradient, QPalette
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget, QScrollArea,
 )
 
-from linux.ai.codex_profiles import COLORS, CodexProfiles, ProfileError
+from linux.ai.codex_profiles import COLORS, WEB_COLORS, CodexProfiles, ProfileError
 from .models import ActionSpec
 
 
@@ -57,7 +57,8 @@ class CodexProfileDialog(QDialog):
         self.setWindowTitle("Identificar conta Codex" if row else "Adicionar conta Codex")
         layout = QVBoxLayout(self)
         note = QLabel("Escolha um apelido e uma cor. Depois abra Desktop e entre na conta desejada. "
-                      "Login fica salvo neste perfil; cada conta tem seu próprio ID. Aparência nativa/Web acompanha a cor escolhida; padrão mantém suas cores.")
+                      "Login fica salvo neste perfil; cada conta tem seu próprio ID. "
+                      "Web recebe cor exclusiva, diferente da janela nativa e das outras contas.")
         note.setWordWrap(True)
         layout.addWidget(note)
         form = QFormLayout()
@@ -193,6 +194,15 @@ class CodexProfilesPanel(QWidget):
             self._request("Identificar perfil Codex", ("rename", row["id"], "--metadata-stdin"), mutable=True,
                           metadata={"label": dialog.label.text(), "color": dialog.color.currentData()})
 
+    def _request_web_policy(self, row, combo):
+        mode = combo.currentData()
+        # The action dialog may be cancelled. Show the saved preference until
+        # the existing runner completes and refreshes the account cards.
+        with QSignalBlocker(combo):
+            combo.setCurrentIndex(combo.findData(row["webAccess"]["preference"]))
+        self._request("Preferência Codex Web", ("web-policy", row["id"], "--mode", mode),
+                      mutable=True, impact="Salva preferência somente desta conta. Não inicia, encerra ou autentica aplicativos.")
+
     def _completed(self, result):
         if str(getattr(result, "action_id", "")).startswith("ai.codex-profiles."):
             self.refresh()
@@ -310,6 +320,35 @@ class CodexProfilesPanel(QWidget):
             line.addStretch()
             layout.addLayout(line)
             web_line = QHBoxLayout()
+            access = row["webAccess"]
+            preference_line = QHBoxLayout()
+            web_swatch = QLabel()
+            web_swatch.setFixedSize(14, 14)
+            border = self.palette().color(QPalette.WindowText).name()
+            web_swatch.setStyleSheet(f"background: {WEB_COLORS[row['webColor']]}; border: 1px solid {border}; border-radius: 4px;")
+            preference_line.addWidget(web_swatch)
+            web_badge = QLabel("Web")
+            preference_line.addWidget(web_badge)
+            policy = QComboBox()
+            policy.setObjectName("codexProfileWebPolicy")
+            policy.setProperty("profileId", row["id"])
+            for label, value in (("Padrão do plano · Pro", "auto"),
+                                 ("Habilitado nesta conta", "on"), ("Desabilitado nesta conta", "off")):
+                policy.addItem(label, value)
+            policy.setCurrentIndex(policy.findData(access["preference"]))
+            policy.setToolTip("Automático: Pro e Pro Lite habilitados; demais planos e plano desconhecido desabilitados. "
+                              "Mudar preferência preserva sessões abertas e não concede permissões de ferramentas.")
+            policy.currentIndexChanged.connect(lambda _index, policy=policy, row=row:
+                                               self._request_web_policy(row, policy))
+            preference_line.addWidget(policy, 1)
+            layout.addLayout(preference_line)
+            web_state = QLabel(("Habilitado" if access["enabled"] else "Desabilitado")
+                               + " · plano " + (access["plan"] if access["plan"] != "unknown" else "a identificar no Desktop")
+                               + (" · assinatura observada vencida" if access["expired"] else "")
+                               + ". Login Web e ferramentas são verificados separadamente.")
+            web_state.setObjectName("codexProfileWebState")
+            web_state.setWordWrap(True)
+            layout.addWidget(web_state)
             for text, object_name, args, mutable in (
                 ("Preparar / login Web", "codexProfileWebSetup", ("terminal", row["id"], "--task", "web-setup"), False),
                 ("Abrir Web Desktop", "codexProfileWeb", ("open", row["id"], "--surface", "web"), False),
@@ -321,11 +360,28 @@ class CodexProfilesPanel(QWidget):
                 button.clicked.connect(lambda _checked=False, args=args, text=text, mutable=mutable:
                                        self._request(text, args, mutable=mutable))
                 if object_name == "codexProfileWeb":
-                    button.setEnabled(row["webConfigured"])
-                    button.setToolTip("Conclua preparação e login Web deste perfil.")
+                    button.setEnabled(access["enabled"] and row["webConfigured"])
+                    button.setToolTip("Abre com ferramentas do host após validar login, túnel, conector e permissões.")
+                elif object_name == "codexProfileWebSetup":
+                    button.setEnabled(access["enabled"])
                 web_line.addWidget(button)
             web_line.addStretch()
             layout.addLayout(web_line)
+            tools_line = QHBoxLayout()
+            for text, action in (("Verificar conexão", "status"), ("Conectar ferramentas", "enable")):
+                tools_button = QPushButton(text)
+                tools_button.setObjectName("codexProfileWebTools" + action.title())
+                tools_button.setProperty("profileId", row["id"])
+                tools_button.setEnabled(access["enabled"] and (action == "status" or row["webConfigured"]))
+                tools_button.setToolTip("Conclua Preparar / login Web e registre permissões MCP e chave de túnel desta conta. "
+                                       "Verificar conexão não substitui um teste real de ferramenta.")
+                tools_button.clicked.connect(lambda _checked=False, row=row, action=action, text=text:
+                    self._request(text, ("web-tools", row["id"], "--action", action), mutable=action == "enable",
+                                  impact="Usa gates e chave de túnel registrados para esta conta no cofre; "
+                                         "não copia credenciais. Ferramentas respeitam sandbox e aprovações do host."))
+                tools_line.addWidget(tools_button)
+            tools_line.addStretch()
+            layout.addLayout(tools_line)
             manage_line = QHBoxLayout()
             login = QPushButton("Login CLI")
             login.setObjectName("codexProfileLogin")

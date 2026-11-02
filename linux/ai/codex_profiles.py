@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import colorsys
+import datetime as dt
 from contextlib import contextmanager
 import json
 import os
@@ -40,6 +41,20 @@ for _index in range(61):
 PROFILE_ID = re.compile(r"pz-[0-9a-f]{12}\Z")
 CURRENT = {"id": "current", "label": "Principal", "color": "azul", "slot": 0}
 MAX_PROFILES = 64
+WEB_COLORS = {}
+for _index in range(MAX_PROFILES + 1):
+    # Separate accent family: Web windows never reuse a native account colour.
+    _rgb = colorsys.hsv_to_rgb((_index * 0.61803398875 + 0.43) % 1, 0.91, 0.92)
+    WEB_COLORS[f"web-{_index + 1:02d}"] = '#' + ''.join(f'{round(c * 255):02x}' for c in _rgb)
+
+
+def _next_web_color(used: set[str], native: list[str]) -> str:
+    def rgb(value):
+        return tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
+    occupied = [rgb(color) for color in native] + [rgb(WEB_COLORS[key]) for key in used]
+    return max((key for key in WEB_COLORS if key not in used),
+               key=lambda key: min(sum((a - b) ** 2 for a, b in zip(rgb(WEB_COLORS[key]), other))
+                                   for other in occupied))
 
 
 class ProfileError(RuntimeError):
@@ -115,13 +130,16 @@ class CodexProfiles:
                 or current.get("color") not in COLORS):
             raise ProfileError("Identificação da conta atual inválida.")
         self._current = {**CURRENT, "label": _text(current["label"])}
+        for key in ("webColor", "webEnabled"):
+            if key in current:
+                self._current[key] = current[key]
         rows = document.get("profiles")
         if not isinstance(rows, list) or len(rows) > MAX_PROFILES:
             raise ProfileError("Registro de perfis inválido.")
         ids, slots = set(), set()
         for row in rows:
             if (not isinstance(row, dict) or not PROFILE_ID.fullmatch(str(row.get("id", "")))
-                    or set(row) - {"id", "label", "color", "slot", "archived"}
+                    or set(row) - {"id", "label", "color", "slot", "archived", "webColor", "webEnabled"}
                     or row.get("color") not in COLORS or type(row.get("slot")) is not int
                     or not 1 <= row["slot"] <= MAX_PROFILES
                     or row["id"] in ids or row["slot"] in slots
@@ -131,6 +149,15 @@ class CodexProfiles:
             _text(row["label"])
             ids.add(row["id"])
             slots.add(row["slot"])
+        web_colors = set()
+        for row in [self._current, *rows]:
+            if "webEnabled" in row and type(row["webEnabled"]) is not bool:
+                raise ProfileError("Preferência Web inválida; registro preservado.")
+            if "webColor" in row:
+                if (not isinstance(row["webColor"], str) or row["webColor"] not in WEB_COLORS
+                        or row["webColor"] in web_colors):
+                    raise ProfileError("Cor Web inválida ou repetida; registro preservado.")
+                web_colors.add(row["webColor"])
         return rows
 
     @contextmanager
@@ -146,7 +173,9 @@ class CodexProfiles:
     def _save(self, rows: list[dict]) -> None:
         backup_file(self.registry, module="ai-codex-profiles")
         _write(self.registry, json.dumps({"schemaVersion": 1, "profiles": rows,
-                                         "current": {key: self._current[key] for key in ("label", "color")}}, indent=2) + "\n")
+                                         "current": {key: self._current[key] for key in
+                                                     ("label", "color", "webColor", "webEnabled")
+                                                     if key in self._current}}, indent=2) + "\n")
         ledger_record(module="ai-codex-profiles", action="metadata", modified=[str(self.registry)],
                       reversible=True)
 
@@ -158,6 +187,53 @@ class CodexProfiles:
             if row["id"] == profile_id:
                 return row
         raise ProfileError("Perfil não encontrado. Atualize a lista de contas.")
+
+    def web_colors(self) -> dict[str, str]:
+        rows = self.rows()
+        profiles = [self._current, *rows]
+        assigned = {r["id"]: r["webColor"] for r in profiles if "webColor" in r}
+        used = set(assigned.values())
+        for row in profiles:
+            if row["id"] not in assigned:
+                color = _next_web_color(used, [COLORS[r['color']] for r in profiles])
+                assigned[row["id"]] = color
+                used.add(color)
+        return assigned
+
+    def web_access(self, row: dict) -> dict:
+        from linux.ai.quota_meter import subscription_claims, parse_time
+        try:
+            claims = subscription_claims(self.native_home(row) / "auth.json")
+        except (OSError, ValueError, TypeError, AttributeError):
+            claims = {}
+        until = parse_time(claims.get("subscriptionUntil"))
+        expired = until is not None and until <= dt.datetime.now(dt.timezone.utc)
+        plan = claims.get("plan")
+        default = plan in {"Pro", "Pro Lite"} and not expired
+        return {"plan": plan or "unknown", "source": "local-subscription-claims",
+                "expired": expired, "defaultEnabled": default,
+                "preference": "auto" if "webEnabled" not in row else "on" if row["webEnabled"] else "off",
+                "enabled": row.get("webEnabled", default)}
+
+    def set_web_policy(self, profile_id: str, mode: str) -> dict:
+        if mode not in {"auto", "on", "off"}:
+            raise ProfileError("Preferência Web desconhecida.")
+        with self.locked():
+            rows = self.rows()
+            row = self._current if profile_id == "current" else next((r for r in rows if r["id"] == profile_id), None)
+            if row is None:
+                raise ProfileError("Perfil não encontrado.")
+            if mode == "auto":
+                row.pop("webEnabled", None)
+            else:
+                row["webEnabled"] = mode == "on"
+            self._save(rows)
+        return {"profileId": profile_id, "webAccess": self.web_access(row), "runningSessionsPreserved": True}
+
+    def require_web_enabled(self, row: dict) -> None:
+        if not self.web_access(row)["enabled"]:
+            raise ProfileError("Codex Web desabilitado nesta conta. Padrão automático habilita somente Pro; "
+                               "ajuste Acesso Web no painel ou entre na conta Pro pelo Desktop.")
 
     def add(self, label: str, color: str | None = None) -> dict:
         label = _text(label)
@@ -176,6 +252,10 @@ class CodexProfiles:
                 raise ProfileError("Limite local de 64 perfis atingido.")
             row = {"id": "pz-" + uuid.uuid4().hex[:12], "label": label,
                    "color": color, "slot": available[0]}
+            assigned = self.web_colors()
+            self._current["webColor"] = assigned["current"]
+            row["webColor"] = _next_web_color(set(assigned.values()),
+                                              [COLORS[r['color']] for r in [self._current, *rows, row]])
             rows.append(row)
             self._save(rows)
         return row
@@ -471,20 +551,22 @@ class CodexProfiles:
         self.sync_appearance(row)
 
     def sync_appearance(self, row: dict) -> int:
-        """A profile's native/Web Appearance follows its colour; default is untouched."""
-        if row['id'] == 'current':
-            return 0
+        """Native accounts keep their colour; every Web window has a separate one."""
         self._check_paths(row)
         from linux.ai.chatgpt_web_bridge import BridgeError, sync_account_appearance
         accent = COLORS[row['color']]
+        web_accent = WEB_COLORS[row.get('webColor') or self.web_colors()[row['id']]]
         bridge = self.bridge(row)
         changed = 0
-        for path in (self.native_home(row) / 'config.toml', bridge.paths.codex_config):
+        targets = [(bridge.paths.codex_config, web_accent)]
+        if row['id'] != 'current':
+            targets.append((self.native_home(row) / 'config.toml', accent))
+        for path, selected_accent in targets:
             if not path.is_file():
                 continue
             try:
                 updated = sync_account_appearance(
-                    path, accent, lambda target: backup_file(target, module='ai-codex-profiles'))
+                    path, selected_accent, lambda target: backup_file(target, module='ai-codex-profiles'))
             except BridgeError as error:
                 raise ProfileError(str(error)) from None
             if updated:
@@ -493,9 +575,9 @@ class CodexProfiles:
                               modified=[str(path)], reversible=True)
         if bridge.paths.state.is_file():
             state = bridge.load_state()
-            if state.get('accountAppearanceAccent') != accent:
+            if state.get('accountAppearanceAccent') != web_accent:
                 backup_file(bridge.paths.state, module='ai-codex-profiles')
-                state['accountAppearanceAccent'] = accent
+                state['accountAppearanceAccent'] = web_accent
                 bridge.save_state(state)
         return changed
 
@@ -529,28 +611,33 @@ class CodexProfiles:
             env["PZ_CHATGPT_WEB_INSTANCE"] = row["id"]
             env["PZ_CHATGPT_WEB_SLOT"] = str(row["slot"])
             env["PZ_CHATGPT_WEB_ROOT"] = str(self.profile_base(row) / "web")
-            if row.get('color') in COLORS:
-                env['PZ_CHATGPT_WEB_ACCOUNT_COLOR'] = COLORS[row['color']]
+        web_color = row.get('webColor') or self.web_colors().get(row['id'])
+        if web_color:
+            env['PZ_CHATGPT_WEB_ACCOUNT_COLOR'] = WEB_COLORS[web_color]
         return Bridge(env=env)
 
     def status(self) -> dict:
         profiles = self.rows()
         rows = [dict(self._current), *(row for row in reversed(profiles) if not row.get("archived")),
                 *(row for row in reversed(profiles) if row.get("archived"))]
+        colors = self.web_colors()
+        rows = [{**row, "webColor": colors[row['id']]} for row in rows]
         # Local evidence only. Presence must never be called authenticated.
         return {"schemaVersion": 1, "profiles": [
             {**row, "nativeCredential": "present" if (self.native_home(row) / "auth.json").is_file()
              else "unknown", "session": "unverified", "quota": "unknown",
-             "webConfigured": self.bridge(row).paths.state.is_file()}
+             "webConfigured": self.bridge(row).paths.state.is_file(),
+             "webAccess": self.web_access(row)}
             for row in rows], "cliInstalled": bool(shutil.which("codex", path=self.env.get("PATH"))),
             "desktopInstalled": bool(shutil.which("codex-desktop", path=self.env.get("PATH")))}
 
     @staticmethod
-    def icon_svg(row: dict) -> str:
+    def icon_svg(row: dict, *, web_color: str | None = None) -> str:
         template = (Path(__file__).with_name('assets') / 'codex-account.svg').read_text()
-        if row['id'] == 'current':
+        if row['id'] == 'current' and web_color is None:
             return template
-        rgb = tuple(int(COLORS[row['color']][i:i + 2], 16) for i in (1, 3, 5))
+        accent = WEB_COLORS[web_color] if web_color else COLORS[row['color']]
+        rgb = tuple(int(accent[i:i + 2], 16) for i in (1, 3, 5))
         top = '#' + ''.join(f'{round(c + (255-c)*0.38):02x}' for c in rgb)
         bottom = '#' + ''.join(f'{round(c*0.90):02x}' for c in rgb)
         return template.replace('#aaa0ff', top).replace('#433bff', bottom)
@@ -561,6 +648,8 @@ class CodexProfiles:
 
     def _launch(self, profile_id: str, surface: str) -> dict:
         row = self.require_active(profile_id)
+        if surface == "web":
+            self.require_web_enabled(row)
         self.prepare_native(row)
         if surface == "web":
             bridge = self.bridge(row)
@@ -572,7 +661,10 @@ class CodexProfiles:
             if not bridge.launcher_active() or not bridge.runner.port_in_use(bridge.paths.port):
                 self.prepare_web_package(profile_id)
                 bridge.setup(login_wait=0)
-            return bridge.desktop("tools" if (bridge.upstream_config() or {}).get("mode") == "full" else "web")
+            # Idempotent upstream flow also verifies a previously configured
+            # tunnel/connector; an old Full flag alone does not prove access.
+            bridge.tools_enable()
+            return bridge.desktop("tools")
         env = self.profile_env(row)
         if surface == "browser":
             browser = next((shutil.which(name, path=self.env.get("PATH")) for name in
@@ -626,7 +718,9 @@ class CodexProfiles:
             return self._terminal(profile_id, task)
 
     def _terminal(self, profile_id: str, task: str) -> dict:
-        self.require_active(profile_id)
+        row = self.require_active(profile_id)
+        if task == "web-setup":
+            self.require_web_enabled(row)
         pz = Path(__file__).resolve().parents[1] / "pz"
         command = [str(pz), "ai", "codex-profiles"]
         command += ["web", profile_id, "setup"] if task == "web-setup" else [task, profile_id]
@@ -705,6 +799,8 @@ class CodexProfiles:
         pz = Path(__file__).resolve().parents[1] / "pz"
         icon = base / "account.svg"
         _write(icon, self.icon_svg(row))
+        web_icon = base / "account-web.svg"
+        _write(web_icon, self.icon_svg(row, web_color=self.web_colors()[row['id']]))
         paths = []
         wrappers = []
         for surface, label, terminal in (("desktop", "Desktop", False), ("cli", "CLI", True),
@@ -740,7 +836,7 @@ class CodexProfiles:
                 content = ("[Desktop Entry]\nType=Application\n"
                            f"Name=Codex{' Web' if surface == 'web' else ''} {label_text}"
                            + (f' — {label}' if surface in {'cli', 'browser'} else '') + '\n'
-                           f'Exec="{_desktop_exec_path(wrapper)}"\nIcon={icon}\n'
+                           f'Exec="{_desktop_exec_path(wrapper)}"\nIcon={web_icon if surface == "web" else icon}\n'
                            f"Terminal={str(terminal).lower()}\nCategories=Development;\n"
                            + (f"StartupWMClass=phasezero-codex-{profile_id}-browser\n" if surface == "browser"
                               else "StartupWMClass=codex-desktop\n" if surface in {"desktop", "web"} else "") +
@@ -787,7 +883,7 @@ class CodexProfiles:
                             and 'X-PhaseZero-Managed=codex-profiles' in old.read_text()):
                         backup_file(old, module='ai-codex-profiles')
                         old.unlink()
-        ledger_record(module="ai-codex-profiles", action="shortcuts", created=paths + wrappers + [str(icon)],
+        ledger_record(module="ai-codex-profiles", action="shortcuts", created=paths + wrappers + [str(icon), str(web_icon)],
                       reversible=True)
         return {"installed": True, "profileId": profile_id, "count": len(paths)}
 
@@ -832,8 +928,12 @@ class CodexProfiles:
                     row['color'] = next(key for key in COLORS if key not in unavailable)
                     unavailable.add(row['color'])
                 used.add(row['color'])
+            assigned = self.web_colors()
             if self._current['label'] == 'Conta atual':
                 self._current['label'] = 'Principal'
+            self._current['webColor'] = assigned['current']
+            for row in rows:
+                row['webColor'] = assigned[row['id']]
             self._save(rows)
         for row in [self.get('current'), *rows]:
             if not row.get('archived'):
@@ -930,6 +1030,12 @@ def main(argv: list[str] | None = None) -> int:
     rename.add_argument("--label")
     rename.add_argument("--metadata-stdin", action="store_true")
     rename.add_argument("--color", choices=COLORS, default="azul")
+    policy = sub.add_parser("web-policy")
+    policy.add_argument("id")
+    policy.add_argument("--mode", choices=("auto", "on", "off"), required=True)
+    tools = sub.add_parser("web-tools")
+    tools.add_argument("id")
+    tools.add_argument("--action", choices=("status", "enable"), default="status")
     for verb in ("open", "login", "shortcuts", "web", "archive", "restore"):
         command = sub.add_parser(verb)
         command.add_argument("id")
@@ -973,6 +1079,23 @@ def main(argv: list[str] | None = None) -> int:
             manager.shortcuts(result['id'])
         elif args.command == "rename":
             result = manager.rename(args.id, args.label, args.color)
+        elif args.command == "web-policy":
+            result = manager.set_web_policy(args.id, args.mode)
+        elif args.command == "web-tools":
+            row = manager.require_active(args.id)
+            bridge = manager.bridge(row)
+            if args.action == "enable":
+                manager.require_web_enabled(row)
+                bridge.tools_enable()
+            checks = (bridge.tools_steps() if bridge.load_state().get("optIn") else
+                      {"ready": False, "steps": [{"id": "setup", "ok": False}], "next": {"id": "setup"}})
+            result = {"connectionReady": checks["ready"], "executionVerified": False,
+                      "checks": {step["id"]: step["ok"] for step in checks["steps"]},
+                      "nextStep": (checks.get("next") or {}).get("id"),
+                      "guidance": "Ferramentas exigem login Web, permissões MCP e chave de túnel "
+                                  "desta conta no cofre. Consulte requisitos no cartão IA & Dev. "
+                                  "Acesso ao host respeita sandbox e aprovação do perfil. "
+                                  "Esta consulta verifica conexão; execução exige teste real de ferramenta."}
         elif args.command == "shortcuts":
             result = manager.shortcuts(args.id)
         elif args.command in {"archive", "restore"}:
@@ -985,6 +1108,7 @@ def main(argv: list[str] | None = None) -> int:
             from linux.ai.chatgpt_web_bridge import main as bridge_main
             bridge = manager.bridge(manager.require_active(args.id))
             if args.args[:1] in (["setup"], ["fetch"]):
+                manager.require_web_enabled(manager.get(args.id))
                 manager.prepare_native(manager.get(args.id))
                 manager.prepare_web_package(args.id)
             # main's explicit env seam keeps one bridge implementation.
@@ -1004,8 +1128,10 @@ def main(argv: list[str] | None = None) -> int:
     except (ProfileError, OSError) as error:
         print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
         return 1
-    except RuntimeError:
-        print(json.dumps({"ok": False, "error": "Perfil Web indisponível; verifique setup deste ID."}))
+    except RuntimeError as error:
+        print(json.dumps({"ok": False, "code": getattr(error, "code", "profile-web-unavailable"),
+                          "error": "Perfil Web ou ferramentas indisponíveis. Conclua Preparar / login Web "
+                                   "e use Verificar conexão nesta conta para identificar requisito pendente."}))
         return 1
     if args.redacted:
         if args.command == "list":
@@ -1015,7 +1141,8 @@ def main(argv: list[str] | None = None) -> int:
             summary = {key: result[key] for key in ('removed', 'selected', 'dryRun',
                        'primaryPreserved', 'primaryWebPreserved', 'remoteRevocation',
                        'accounts', 'organized', 'hiddenDuplicates', 'visibleLaunchersPerActiveAccount',
-                       'primaryFirst', 'preservesApplicationsAndSessions') if key in result}
+                       'primaryFirst', 'preservesApplicationsAndSessions',
+                       'connectionReady', 'executionVerified', 'checks', 'nextStep', 'guidance') if key in result}
             if 'runtimeRemaining' in result:
                 summary['runtimeRemainingCount'] = len(result['runtimeRemaining'])
             result = {"ok": result.get('ok', True), "operation": args.command,

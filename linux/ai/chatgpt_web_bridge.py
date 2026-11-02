@@ -2023,7 +2023,7 @@ class Bridge:
         self.sync_account_theme()
 
     def sync_account_theme(self) -> bool:
-        if not self.paths.instance or not self.paths.codex_config.is_file():
+        if not self.paths.codex_config.is_file():
             return False
         accent = (self.env.get('PZ_CHATGPT_WEB_ACCOUNT_COLOR')
                   or self.load_state().get('accountAppearanceAccent'))

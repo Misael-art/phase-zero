@@ -28,7 +28,7 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def build_page(monkeypatch, tmp_path, opted_in: bool):
+def build_page(monkeypatch, tmp_path, opted_in: bool, plan="Pro"):
     root = tmp_path / "chatgpt-web"
     root.mkdir()
     state = {"schemaVersion": 1}
@@ -36,6 +36,7 @@ def build_page(monkeypatch, tmp_path, opted_in: bool):
         state["optIn"] = {"at": "2026-10-12T00:00:00Z"}
     (root / "state.json").write_text(json.dumps(state))
     monkeypatch.setenv("PZ_CHATGPT_WEB_ROOT", str(root))
+    monkeypatch.setattr("linux.ai.quota_meter.subscription_claims", lambda _: {"plan": plan})
     catalog = build_catalog(ROOT)
     actions = [action for action in catalog if action.category == "IA & Dev"]
     page = AiDevPage(ROOT, CommandRunner(ROOT), actions, by_id={a.id: a for a in catalog})
@@ -165,3 +166,13 @@ def test_bridge_card_follows_the_running_lock(qapp, monkeypatch, tmp_path):
 
     page.block_while_running(True)
     assert not any(button.isEnabled() for button in card.findChildren(QPushButton))
+
+
+def test_non_pro_web_default_keeps_stop_and_diagnostics_available(qapp, monkeypatch, tmp_path):
+    page, _ = build_page(monkeypatch, tmp_path, opted_in=True, plan="Plus")
+    page._on_status_ready("private.chatgpt-web.status", "", STATUS)
+    buttons = buttons_of(card_of(page))
+    for key in ("chatgptWebOpen", "chatgptWebSetup", "chatgptWebToolsOn", "chatgptWebSmoke", "chatgptWebUpdate"):
+        assert not buttons[key].isEnabled()
+    assert buttons["chatgptWebDisable"].isEnabled()
+    assert buttons["chatgptWebTools"].isEnabled()

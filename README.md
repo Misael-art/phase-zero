@@ -254,6 +254,13 @@ com o pacote local verificado. **Preparar ou reparar** usa a mesma recuperação
 Feche somente o Codex do perfil Web antes de reiniciar a integração. Estado
 pronto exige rota ativa e bridge respondendo; teste com mensagem continua explícito.
 
+Em **Contas Codex → Web**, padrão automático habilita **Pro/Pro Lite** e desabilita
+demais planos, plano desconhecido ou assinatura observada vencida. Preferência pode
+ser ajustada por conta. Janela e ícone Web recebem cor exclusiva, distinta dos
+perfis nativos. Abrir Web exige modo com ferramentas e validação de túnel/conector;
+**Verificar conexão** separa conexão apta de execução real comprovada. Permissões
+do host e login de cada conta continuam necessários.
+
 
 Para instalar o Harness no host, use **IA & Dev → DeepSeek Harness → Instalar**
 ou `pz ai deepseek-harness install --json`. A instalação é separada de iniciar;

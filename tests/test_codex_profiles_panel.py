@@ -128,6 +128,31 @@ def test_primary_icon_first_and_picker_excludes_used_colors(panel):
     dialog.close()
 
 
+def test_web_plan_defaults_and_policy_changes_are_scoped_to_selected_account(panel, monkeypatch):
+    widget, manager, a, b, app = panel
+    from linux.ai import quota_meter
+    monkeypatch.setattr(quota_meter, "subscription_claims", lambda path:
+                        {"plan": "Pro Lite" if path.parent == manager.native_home(a) else "Plus"})
+    widget.refresh()
+    app.sendPostedEvents(None, QEvent.DeferredDelete)
+    from PySide6.QtWidgets import QComboBox
+    policies = {p.property("profileId"): p for p in widget.findChildren(QComboBox, "codexProfileWebPolicy")}
+    setup = {p.property("profileId"): p for p in widget.findChildren(QPushButton, "codexProfileWebSetup")}
+    assert setup[a["id"]].isEnabled() and not setup[b["id"]].isEnabled()
+    assert all(p.currentData() == "auto" for p in policies.values())
+    actions = []
+    widget.action_requested.connect(actions.append)
+    policies[b["id"]].setCurrentIndex(policies[b["id"]].findData("on"))
+    assert actions[-1].args[-4:] == ("web-policy", b["id"], "--mode", "on")
+    assert actions[-1].mutable
+    assert policies[b["id"]].currentData() == "auto"  # unsaved/cancelled action does not change the UI claim
+    tool = next(p for p in widget.findChildren(QPushButton, "codexProfileWebToolsStatus")
+                if p.property("profileId") == a["id"])
+    tool.click()
+    assert actions[-1].args[-4:] == ("web-tools", a["id"], "--action", "status")
+    assert not actions[-1].mutable
+
+
 
 def test_panel_and_logo_work_when_optional_qtsvg_module_is_unavailable(panel):
     import subprocess

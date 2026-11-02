@@ -3178,6 +3178,59 @@ plugins e MCPs iguais. PID reutilizado ficou intacto. Evidência privada:
 `native-migration/receipt.json`. Nenhuma mensagem de teste ou inferência enviada;
 esta prova não renova homologação de cota, escrita/MCP ou sessão no provedor.
 
+### PXA-010: padrão por plano, identidade Web e ferramentas — 2026-11-02
+
+Owner continua `linux/ai/codex_profiles.py`, com UI em
+`linux/ui_native/codex_profiles_panel.py` e cartão privado IA & Dev. Não cria
+gerenciador de contas, cofre ou instalação concorrente.
+
+- **Padrão automático:** Pro e Pro Lite habilitados; Plus, Free, demais planos,
+  plano desconhecido e assinatura observada vencida desabilitados. Pro Lite é
+  tratado como família Pro, correspondente à conta principal deste host. Usa
+  `subscription_claims`/`parse_time` das franquias, sem imprimir tokens nem
+  consultar provedor durante renderização. Claim local orienta preferência;
+  não comprova autenticação, cota ou permissão MCP.
+- **Escolha por conta:** UI oferece automático/habilitado/desabilitado;
+  `pz ai codex-profiles web-policy <id> --mode auto|on|off` persiste somente
+  preferência opcional `webEnabled` no registro existente. Auto remove override.
+  Desabilitado impede preparar/abrir Web pelos fluxos de conta, sem encerrar
+  sessões existentes. Diagnóstico/desligamento do cartão IA & Dev permanecem
+  disponíveis. Habilitado não significa autostart, login ou permissão concedida.
+- **Cor própria do Web:** campo opcional `webColor`, paleta de 65 cores
+  separada das 65 nativas. Novas contas reservam cor na criação; seleção favorece
+  distância RGB das cores ocupadas. Cores persistidas permanecem estáveis;
+  organizador migra registros antigos sob lock. Há até 130 cores de janela
+  distintas, incluindo Web principal. Fundo/destaque claro/escuro usam renderer
+  existente; ícone `account-web.svg` e amostra de cor acompanham. A configuração
+  nativa principal continua intocada. Renomear cor nativa não reaproveita cor Web.
+- **Ferramentas:** abrir Web usa `tools_enable` idempotente e `desktop("tools")`.
+  O próprio bridge valida chave, elegibilidade, túnel e conector; flag Full antiga
+  sozinha não basta, nem ocorre fallback silencioso para Browser-only. UI oferece
+  Verificar conexão/Conectar ferramentas por ID, via adaptador tipado `web-tools`.
+  Segredos ficam no cofre e a conta não herda chave/sessão de outra. Resultado
+  separa `connectionReady` de `executionVerified`; consulta de conexão não prova
+  ferramenta executada. Sandbox/aprovações existentes permanecem obrigatórios.
+
+Teste real do host: 12 gates de infraestrutura passaram. Uma tentativa de leitura
+de canary descartável em `read-only` foi recusada por ausência de rede no contexto
+confiável; teste seguinte herdou exatamente permissões já existentes do perfil,
+sem mudar configuração. Esse turno falhou antes de devolver conteúdo: automação
+upstream 6.1.17 não localiza seletor de raciocínio na UI atual do ChatGPT
+(`locator.click` timeout). Canary e configuração principal ficaram iguais; não
+houve fallback para API nem concessão nova. Consulta upstream ainda informa
+6.1.17 como última versão. **Execução real das ferramentas não homologada**;
+conexão saudável não resolve esse bloqueio da automação de navegador. Não editar
+bundle verificado ou desativar guardas para mascarar erro.
+
+Regressão cobre padrões Pro/Pro Lite/Plus/Free/Business/desconhecido/vencido,
+override/restauração auto por conta, bloqueio antes de preparar estado, ausência
+de fallback sem ferramentas, 65 cores Web distintas das nativas, migração de
+legados e preservação de configuração principal. Contraste de texto das 130
+superfícies ≥ 4,5:1. Evidências privadas em
+`~/.cache/phasezero-dev/codex-web-policy/`: testes, UI claro/escuro em 100/150/200%
+e larguras 560/1280, gates de conexão, receipts de canary e instalação. Limite de
+homologação e próximo passo upstream seguem no handoff do stack IA.
+
 ### Contas Codex no painel — incremento de 2026-10-29
 
 PXA-006/010: implementação Linux de perfis de conta em **Contas e conexões →

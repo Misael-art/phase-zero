@@ -817,6 +817,10 @@ class AiDevPage(BasePage):
         self.bridge_account.setWordWrap(True)
         self.bridge_account.setAccessibleName("Permissão da conta ChatGPT para ferramentas")
         layout.addWidget(self.bridge_account)
+        self.bridge_policy = QLabel("")
+        self.bridge_policy.setObjectName("chatgptWebPolicy")
+        self.bridge_policy.setWordWrap(True)
+        layout.addWidget(self.bridge_policy)
         self.bridge_next = QLabel("")
         self.bridge_next.setObjectName("cardDescription")
         self.bridge_next.setProperty("bridgeRole", "next")
@@ -846,6 +850,7 @@ class AiDevPage(BasePage):
                 "chatgptWebOpen": "Abre o Codex Desktop no perfil dedicado, em janela separada.",
                 "chatgptWebTools": "Mostra os requisitos e limites reais das ferramentas.",
             }[name])
+            button.setProperty("bridgeEnabledToolTip", button.toolTip())
             button.clicked.connect(
                 lambda _checked=False, spec=action: self.action_requested.emit(spec))
             self._bridge_buttons[name] = button
@@ -864,8 +869,30 @@ class AiDevPage(BasePage):
 
     def _apply_bridge_buttons(self) -> None:
         running = self._operation_running
+        from linux.ai.codex_profiles import CodexProfiles, ProfileError
+        access = {}
+        try:
+            manager = CodexProfiles()
+            access = manager.web_access(manager.get("current"))
+            enabled = access["enabled"]
+        except (ProfileError, OSError):
+            enabled = False
+        if hasattr(self, "bridge_policy"):
+            self.bridge_policy.setText(
+                ("Codex Web habilitado" if enabled else "Codex Web desabilitado")
+                + (" pelo padrão do plano (Pro/Pro Lite)." if access.get("preference") == "auto"
+                   else " pela preferência desta conta.")
+                + " Ajuste em Contas e conexões → Contas Codex.")
+        starting = {"chatgptWebOpen", "chatgptWebSetup", "chatgptWebToolsOn",
+                    "chatgptWebSmoke", "chatgptWebUpdate"}
         for name, button in self._bridge_buttons.items():
-            button.setEnabled(not running and (name != "chatgptWebOpen" or self._bridge_ready))
+            button.setEnabled(not running and (enabled or name not in starting)
+                              and (name != "chatgptWebOpen" or self._bridge_ready))
+            if not enabled and name in starting:
+                button.setToolTip("Codex Web desabilitado nesta conta. Padrão automático habilita "
+                                  "Pro/Pro Lite; ajuste Acesso Web em Contas e conexões → Contas Codex.")
+            elif name in starting:
+                button.setToolTip(button.property("bridgeEnabledToolTip") or "")
 
     def _on_bridge_status(self, payload: dict) -> None:
         def node(key: str) -> dict:
@@ -929,9 +956,8 @@ class AiDevPage(BasePage):
             elif gate_detail:
                 self.bridge_tools.setText(f"Com ferramentas: bloqueado — {gate_detail}.")
             else:
-                self.bridge_tools.setText("Com ferramentas: ativo — o conector lê o workspace "
-                                          "da tarefa; escrita local recusada (sandbox somente "
-                                          "leitura). Abrir já usa este modo.")
+                self.bridge_tools.setText("Com ferramentas: conexão ativa. Acesso ao host respeita "
+                                          "sandbox e aprovações do perfil. Abrir já usa este modo.")
         elif isinstance(blockers, list) and blockers:
             self.bridge_tools.setText(f"Com ferramentas: bloqueado — {blockers[0]}.")
         elif gate_id == "plan-full":

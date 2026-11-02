@@ -293,6 +293,7 @@ def test_desktop_socket_limit_counts_utf8_bytes_and_compact_defaults():
 
 def test_web_open_restarts_only_its_saved_bridge_after_logout_or_reboot(manager):
     row = manager.add("A")
+    manager.set_web_policy(row["id"], "on")
     bridge = manager.bridge(row)
     bridge.opt_in({"experimental", "unofficial", "unsigned", "same-user-boundary", "no-quota-promise"})
     calls = []
@@ -302,9 +303,115 @@ def test_web_open_restarts_only_its_saved_bridge_after_logout_or_reboot(manager)
          patch.object(manager, "desktop_profiles_supported", return_value=True), \
          patch.object(bridge, "launcher_active", return_value=False), \
          patch.object(bridge, "setup", side_effect=lambda **kw: calls.append(kw)), \
-         patch.object(bridge, "desktop", return_value={"desktop": "started"}):
+         patch.object(bridge, "tools_enable") as enable, \
+         patch.object(bridge, "desktop", return_value={"desktop": "started"}) as desktop:
         assert manager.launch(row["id"], "web") == {"desktop": "started"}
+        enable.assert_called_once_with()
+        desktop.assert_called_once_with("tools")
     assert calls == [row["id"], {"login_wait": 0}]
+
+
+@pytest.mark.parametrize("plan,until,enabled", [
+    ("pro", "2099-01-01T00:00:00Z", True), ("prolite", None, True),
+    ("plus", None, False), ("free", None, False), ("team", None, False),
+    ("business", None, False), (None, None, False),
+    ("pro", "2000-01-01T00:00:00Z", False),
+])
+def test_web_default_uses_local_subscription_metadata_without_claiming_auth(manager, plan, until, enabled):
+    import base64
+    row = manager.add("Account")
+    auth = manager.native_home(row) / "auth.json"
+    auth.parent.mkdir(parents=True)
+    payload = {"https://api.openai.com/auth": {"chatgpt_plan_type": plan,
+                                              "chatgpt_subscription_active_until": until}}
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    auth.write_text(json.dumps({"tokens": {"id_token": "fixture." + encoded + ".signature"}}))
+    before = auth.read_bytes()
+    result = manager.web_access(row)
+    assert result["enabled"] is enabled and result["defaultEnabled"] is enabled
+    assert result["preference"] == "auto"
+    assert auth.read_bytes() == before
+    assert "tokens" not in json.dumps(manager.status())
+
+
+def test_web_preference_is_persisted_per_account_and_auto_can_be_restored(manager):
+    a, b = manager.add("A"), manager.add("B")
+    assert not manager.web_access(a)["enabled"]
+    manager.set_web_policy(a["id"], "on")
+    fresh = CodexProfiles(manager.env)
+    assert fresh.web_access(fresh.get(a["id"]))["enabled"]
+    assert not fresh.web_access(fresh.get(b["id"]))["enabled"]
+    fresh.set_web_policy("current", "off")
+    assert fresh.web_access(fresh.get("current"))["preference"] == "off"
+    fresh.set_web_policy(a["id"], "auto")
+    assert fresh.web_access(fresh.get(a["id"]))["preference"] == "auto"
+
+
+def test_disabled_web_cannot_start_or_prepare_native_state(manager):
+    row = manager.add("Unknown plan")
+    with patch.object(manager, "prepare_native") as prepare:
+        with pytest.raises(ProfileError, match="desabilitado"):
+            manager.launch(row["id"], "web")
+        prepare.assert_not_called()
+    with pytest.raises(ProfileError, match="desabilitado"):
+        manager.terminal(row["id"], "web-setup")
+
+
+def test_web_never_silently_opens_without_host_tools(manager):
+    row = manager.add("A")
+    manager.set_web_policy(row["id"], "on")
+    bridge = manager.bridge(row)
+    bridge.opt_in({"experimental", "unofficial", "unsigned", "same-user-boundary", "no-quota-promise"})
+    with patch.object(manager, "bridge", return_value=bridge), \
+         patch.object(manager, "prepare_native"), \
+         patch.object(manager, "check_desktop_socket_path"), \
+         patch.object(manager, "desktop_profiles_supported", return_value=True), \
+         patch.object(bridge, "launcher_active", return_value=True), \
+         patch.object(bridge.runner, "port_in_use", return_value=True), \
+         patch.object(bridge, "tools_enable", side_effect=BridgeError("missing permission", "tools-blocked")), \
+         patch.object(bridge, "desktop") as desktop:
+        with pytest.raises(BridgeError, match="missing permission"):
+            manager.launch(row["id"], "web")
+        desktop.assert_not_called()
+
+
+def test_every_web_colour_is_unique_across_native_and_web_windows(manager):
+    from linux.ai.codex_profiles import COLORS, WEB_COLORS
+    for index in range(64):
+        manager.add(f"Account {index}")
+    rows = manager.status()["profiles"]
+    native = {COLORS[r["color"]] for r in rows}
+    web = {WEB_COLORS[r["webColor"]] for r in rows}
+    assert len(native) == len(web) == 65 and not native & web
+    assert len({r["webColor"] for r in rows}) == 65
+
+
+def test_web_tools_status_is_redacted_and_does_not_claim_execution_for_unprepared_account(manager):
+    row = manager.add("Private account")
+    script = Path(__file__).resolve().parents[1] / "linux/ai/codex_profiles.py"
+    result = subprocess.run([sys.executable, str(script), "--redacted", "web-tools", row["id"]],
+                            env=manager.env, capture_output=True, text=True, check=True)
+    data = json.loads(result.stdout)
+    assert data["connectionReady"] is False and data["executionVerified"] is False
+    assert data["nextStep"] == "setup"
+    assert row["id"] not in result.stdout and row["label"] not in result.stdout
+
+
+def test_web_palette_migration_preserves_ids_and_primary_config(manager):
+    row = manager.add("A")
+    document = json.loads(manager.registry.read_text())
+    document["current"].pop("webColor", None)
+    document["profiles"][0].pop("webColor", None)
+    manager.registry.write_text(json.dumps(document))
+    primary = manager.native_home(manager.get("current")) / "config.toml"
+    primary.parent.mkdir(parents=True)
+    primary.write_text('model="native-model"\n')
+    before = primary.read_bytes()
+    manager.organize()
+    fresh = CodexProfiles(manager.env)
+    assert fresh.get(row["id"])["webColor"] != fresh.get("current")["webColor"]
+    assert primary.read_bytes() == before
+    assert fresh.get(row["id"])["id"] == row["id"]
 
 
 def test_panel_metadata_uses_stdin_and_redacted_output(manager):
@@ -793,12 +900,14 @@ def test_native_and_web_appearance_follow_color_preserving_primary_and_other_pre
     native = manager.native_home(row) / "config.toml"
     bridge = manager.bridge(row)
     bridge.seed_codex_home()
-    for path in (native, bridge.paths.codex_config):
+    from linux.ai.codex_profiles import WEB_COLORS
+    web_accent = WEB_COLORS[row["webColor"]]
+    for path, accent in ((native, "#15803d"), (bridge.paths.codex_config, web_accent)):
         config = tomllib.loads(path.read_text())
-        assert config["desktop"]["appearanceLightChromeTheme"]["accent"] == "#15803d"
-        assert config["desktop"]["appearanceDarkChromeTheme"]["accent"] == "#15803d"
-        assert config["desktop"]["appearanceDarkChromeTheme"]["surface"] == "#174227"
-        assert config["desktop"]["appearanceLightChromeTheme"]["surface"] == "#dcece2"
+        assert config["desktop"]["appearanceLightChromeTheme"]["accent"] == accent
+        assert config["desktop"]["appearanceDarkChromeTheme"]["accent"] == accent
+    assert tomllib.loads(native.read_text())["desktop"]["appearanceDarkChromeTheme"]["surface"] == "#174227"
+    assert tomllib.loads(native.read_text())["desktop"]["appearanceLightChromeTheme"]["surface"] == "#dcece2"
     # The helper also accepts the nested-table format produced by the app.
     from linux.ai.chatgpt_web_bridge import sync_account_appearance
     custom = '[desktop]\nappearanceTheme="light"\nsansFontSize=19\n[desktop.appearanceDarkChromeTheme]\nsurface="#202428"\n'
@@ -808,7 +917,7 @@ def test_native_and_web_appearance_follow_color_preserving_primary_and_other_pre
     assert after["appearanceTheme"] == "light" and after["sansFontSize"] == 19
     assert after["appearanceDarkChromeTheme"]["surface"] == "#5c2813"
     assert after["appearanceDarkChromeTheme"]["accent"] == "#c2410c"
-    assert tomllib.loads(bridge.paths.codex_config.read_text())["desktop"]["appearanceLightChromeTheme"]["accent"] == "#c2410c"
+    assert tomllib.loads(bridge.paths.codex_config.read_text())["desktop"]["appearanceLightChromeTheme"]["accent"] == web_accent
     assert primary.read_bytes() == primary_before
     assert manager.sync_appearance(manager.get("current")) == 0
     assert manager.sync_appearance(manager.get(row["id"])) == 0
@@ -836,7 +945,7 @@ def test_appearance_preserves_unrelated_toml_semantics_and_is_idempotent():
 def test_account_surfaces_remain_distinct_and_default_text_readable():
     import tomllib
     from linux.ai.chatgpt_web_bridge import account_appearance_text
-    from linux.ai.codex_profiles import COLORS
+    from linux.ai.codex_profiles import COLORS, WEB_COLORS
 
     def luminance(colour):
         channels = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
@@ -845,14 +954,14 @@ def test_account_surfaces_remain_distinct_and_default_text_readable():
         return sum(c * weight for c, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
 
     surfaces = {"Light": set(), "Dark": set()}
-    for colour in COLORS.values():
+    for colour in [*COLORS.values(), *WEB_COLORS.values()]:
         desktop = tomllib.loads(account_appearance_text("", colour))["desktop"]
         for variant in surfaces:
             theme = desktop[f"appearance{variant}ChromeTheme"]
             surface, ink = luminance(theme["surface"]), luminance(theme["ink"])
             assert (max(surface, ink) + 0.05) / (min(surface, ink) + 0.05) >= 4.5
             surfaces[variant].add(theme["surface"])
-    assert all(len(values) == len(COLORS) for values in surfaces.values())
+    assert all(len(values) == len(COLORS) + len(WEB_COLORS) for values in surfaces.values())
 
 
 def test_appearance_rejects_corruption_and_ambiguous_syntax_without_writes(manager):
