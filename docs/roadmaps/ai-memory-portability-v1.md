@@ -143,3 +143,26 @@ Pendentes de alvo: Windows nativo/WPF e tasks, dois equipamentos físicos,
 remoção abrupta de USB/SD, recuperação após perda real do cofre, acessibilidade
 física. Chave de recuperação exige exportação local pelo operador. Sem merge,
 release de produto, inferência paga ou homologação genérica de todos os hosts.
+
+
+## Fechamento no host
+
+Implementação: `37448e62556b3257776f7c7450b0c5f7c25718c9`. Runtime de usuário
+instalado do arquivo imutável desse commit pelo instalador oficial, após ensaio
+em HOME isolado. CLI/UI/desktop entry/pins presentes; launcher oficial renderizou
+no desktop. Probe da ficha instalada, sem respostas simuladas, exibiu memória
+ativa, automação ligada, GitHub em dia e botão Sincronizar habilitado. Timer e watcher habilitados e ativos; units usam caminho estável
+`~/.local/share/phasezero/current`. Execução real do worker terminou com status 0,
+`Result=success`; GitHub em dia, sem duplicar backup completo ainda dentro de 24 h.
+
+Checks locais: rodada ampla 156 pytest; rodada final 75 pytest, com sobreposição.
+Installed-root smoke, três suites Bash afetadas, ShellCheck, parser/analyzer
+PowerShell e três contratos Pester passaram. Matriz Qt: 24 combinações de tema,
+escala, dimensão e modo avançado, com teclado/ponteiro e sem overflow. Suite
+legada ai-tools limitada por Pester Linux; não declarada aprovada. PR #129 recebe
+incremento sem merge/release; checks remotos devem corresponder ao SHA final.
+
+Automação está operacional com chave no cofre; recuperação após perda do cofre
+permanece dependente da exportação pelo operador. Nenhuma mídia física cadastrada
+neste host. Backups/dados/chaves/URL do destino privado não foram publicados no
+repositório de código. Trabalho alheio mantido fora dos commits.

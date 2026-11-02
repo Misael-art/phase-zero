@@ -296,3 +296,45 @@ SHA remoto/checks do PR #129; jobs novos Arch/Windows fazem instalação limpa e
 runners descartáveis. Depois, sob ambiente e conta autorizados, provar login/reabertura,
 identidade/cota e sandbox real antes de promover Experimental. Sem merge, deploy,
 instalação de produto no host ou nova release nesta tarefa.
+
+
+## ai-memory: instalação real e portabilidade criptografada — 2026-11-01
+
+Implementação `37448e62556b3257776f7c7450b0c5f7c25718c9`, mesma branch/PR #129.
+Relatório e contrato: `docs/roadmaps/ai-memory-portability-v1.md`.
+
+**Host Linux:** ai-memory 1.31.1 → 3.3.1 instalado, companion oficial compilado
+com fonte/pins verificados; serviço ativo em loopback/API, MCP/hooks reparados.
+Migração ensaiada preservou contagens e hashes de todos os campos originais.
+Snapshots anteriores protegidos em estado privado, fora do Git.
+
+Runtime PhaseZero de usuário instalado pelo script oficial a partir de arquivo
+imutável daquele commit; CLI, UI, desktop entry e pins presentes. Instalação
+ensaiada antes em HOME isolado. Não incluiu alterações alheias do checkout.
+Timer de 15 minutos e watcher de mídia habilitados; units apontam para runtime
+estável `~/.local/share/phasezero/current`, não checkout. Oneshot real terminou
+`Result=success`, status 0, sincronização GitHub em dia. Backup completo diário,
+retenção de sete snapshots por host. Destino dedicado privado, conteúdo remoto
+criptografado; 133 arquivos retornaram e passaram inventário/hash. Asset completo
+enviado com digest/tamanho confirmados; download integral remoto não realizado
+por exceder limite manual de 70 MB. Restauração completa provada com fixture local.
+
+**Validação:** rodada ampla 156 pytest; últimos refinamentos 75 pytest (conjuntos
+sobrepostos), incluindo binário/companion nativos em duas instâncias descartáveis,
+conflito e restauração com SQLite íntegro. Bash ai/backup/grant-gate, ShellCheck,
+installed-root smoke, parsing/analyzer PowerShell e três contratos Pester passaram.
+Suite legada ai-tools não executável com módulo Pester Linux disponível; Windows
+nativo permanece gate. Qt/Xvfb claro/escuro, duas dimensões, escalas 100/150/200%
+(24 combinações) com teclado/ponteiro passaram; launcher oficial abriu no desktop.
+
+**Limites:** exportação da chave depende de senha escolhida localmente pelo
+operador. Dois hosts físicos, USB/SD com retirada abrupta, Windows/WPF/tasks e
+acessibilidade física continuam pendentes. Sem merge, nova release, VM, boot ou
+inferência paga. Evidências privadas identificadas no cache
+`phasezero-dev/ai-memory-implementation`; rollback em `phasezero/ai-portability`
+e `phasezero/ai/memory-upgrades`. Aprendizado registrado pela CLI nativa no
+projeto resolvido pelo remoto, sem duplicar escopo pelo nome da pasta.
+
+Alterações anteriores deste handoff (+27 linhas) e script touch alheio preservados
+fora do incremento. Próximo passo: conferir checks do SHA final do PR #129,
+exportar recuperação local e executar gates físicos antes de ampliar homologação.
