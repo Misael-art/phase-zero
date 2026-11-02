@@ -236,6 +236,14 @@ conexões leva à mesma ficha. Node fica no runtime privado; instalar não inici
 agente. Login, cota e isolamento exigem validação própria. Não usa DeepSeek Proxy
 nem habilita fallback para API paga. [Operação e limites](packaging/deepseek-harness/README.md).
 
+Para instalar o Harness no host, use **IA & Dev → DeepSeek Harness → Instalar**
+ou `pz ai deepseek-harness install --json`. A instalação é separada de iniciar;
+para conferir, execute `pz ai deepseek-harness doctor --json`. Versões fixadas:
+DSH `0.2.1-rc.2` e Node `24.22.0`. Arquivos Node/npm para Linux x64 somam
+171.671.463 bytes (~164 MiB), antes de eventuais downloads dos hooks nativos.
+Neste workspace, downloads acima de 70 MB precisam ser iniciados manualmente
+pelo operador. [Parâmetros, origens e validação](packaging/deepseek-harness/README.md#installation-budget-and-operating-parameters).
+
 **Memória dos agentes:** IA & Dev reúne instalar/reparar, projetos compartilhados,
 dispositivos cadastrados, GitHub privado, sincronização manual/automática e
 restauração verificada. Conhecimento circula entre hosts; backup completo mantém

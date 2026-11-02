@@ -1614,7 +1614,10 @@ fi
 if rg -q 'ai-memory:latest' "$REPO_ROOT/linux/ai/setup-memory.sh"; then
     echo "FAIL: ai-memory:latest found in setup-memory"; exit 1
 fi
-rg -q 'AI_MEMORY_VERSION=.*1\.31\.1' "$REPO_ROOT/linux/ai/setup-memory.sh"
+# Native versions and verified assets are owned by the shared pin manifest.
+rg -q 'AI_MEMORY_VERSION=.*jq -r.*\.version.*PINS' "$REPO_ROOT/linux/ai/setup-memory.sh"
+jq -e '.version == "3.3.1" and ([.assets[] | .sha256 | test("^[a-f0-9]{64}$")] | all)' \
+    "$REPO_ROOT/packaging/ai-memory/pins.json" >/dev/null
 rg -q 'AI_MEMORY_SHA256_X86_64=' "$REPO_ROOT/linux/ai/setup-memory.sh"
 rg -q 'install_native_release' "$REPO_ROOT/linux/ai/setup-memory.sh"
 echo "  adapters hardened ok"

@@ -338,6 +338,8 @@ def test_hidden_ai_dev_page_probes_only_when_opened(qapp):
                          ("private.bonsai.status", ["ai", "claude", "bonsai-status"]),
                          ("ai.quota.status", ["ai", "quota", "status", "--json"]),
                          ("ai.deepseek-harness-status", ["ai", "deepseek-harness", "status", "--json"]),
+                         ("ai.memory-portability-status", ["ai", "memory", "status", "--json"]),
+                         ("ai.token-economy", ["ai", "token-economy", "status", "--json"]),
                          ("ai.desktop.status", ["ai", "desktop", "status"])]
     finally:
         window.close()

@@ -6,15 +6,21 @@ As versões seguem a data de build em `version.json`.
 ## [Unreleased]
 
 ### Corrigido
+- **Coerência das novas telas IA.** Catálogo web regenerado a partir do catálogo nativo; consultas diferidas incluem memória/eficiência. Testes Windows acompanham os novos caminhos de gerenciamento; gate Homelab consulta manifesto central da versão de ai-memory.
 - **Integridade das instalações Windows.** Conclusão do instalador deixa de aparecer como prova de saúde. Gerenciador oferece verificação somente leitura de QCOW2, cadeia de snapshot e arquivos essenciais do Windows, com estados separados para problema, instalação parcial, VM ocupada e resultado inconclusivo; nenhuma remoção automática.
 - **Espaço dos discos Windows.** UI separa capacidade virtual, blocos físicos do disco base, snapshot, mídias e cópia ativada. Criação QCOW2 explicita `preallocation=off`; discos existentes permanecem preservados e dinâmicos. Snapshots retêm blocos e não há promessa de recuperar espaço apagando arquivos no guest.
 - **Login Bonsai bloqueado por diagnóstico antigo.** Estado histórico vencido deixa de representar indisponibilidade atual. Tentativa explícita usa CLI oficial, após verificar metadados npm; HTTP 404, timeout e resposta inválida continuam bloqueando sem inventar versão ou apagar credenciais. Disponibilidade para tentar não comprova autenticação, sessão utilizável ou proxy.
 - **Botão de login sem terminal.** Ação passa a abrir o mesmo gerenciador em terminal privado quando os gates permitem; códigos não passam pelo painel. Logins gerenciados ficam serializados, interrupções têm restauração e journal de recuperação; consultas npm também são serializadas.
 
 ### Adicionado
+- **DeepSeek Harness oficial, Experimental.** Instalação com DSH `0.2.1-rc.2`, Node privado `24.22.0`, lockfile/SBOM, verificação de integridade, ativação atômica e recuperação. UI reúne instalar, escolher conta/API e pasta, abrir, parar, verificar e operações avançadas. Instalar não inicia o agente; rotas permanecem separadas, sem fallback pago.
+- **Memória portátil entre hosts.** ai-memory `3.3.1`, sincronização de conhecimento por escopos, dispositivos cadastrados e backup completo criptografado por host em repositório GitHub privado. UI oferece instalar/reparar, sincronizar, configurar automação e restaurar; recuperação exige exportar a chave pelo fluxo oficial.
+- **Perfis de eficiência por projeto/agente.** Básico por padrão, econômico opcional e memória exigida em ambos. Configuração nativa preserva regras existentes, detecta drift e permite recuperação; medição local e comparação A/B distinguem estimativas de tokens, uso informado e economia comprovada.
 - **Reparar terminal e sessão sob demanda.** Atalho padrão no menu e área de trabalho recupera falta de espaço no runtime da sessão arquivando somente fixtures inativas verificadas, com backup. Novos temporários de agentes/testes passam ao disco; aplicações abertas, sessão KDE e host permanecem ativos.
 
 ### Limitações
+- Novidades permanecem em `Unreleased` até versão, destino e gates de publicação serem confirmados. Release existente não é alterada. DeepSeek Harness continua Experimental: instalação real neste host, conta, inferência, cota e isolamento ainda não homologados; download completo exige ação manual do operador neste workspace.
+- Compressão RTK medida em comandos locais não comprova redução da fatura de uma tarefa completa. Headroom é opcional e sua rota gerenciada permanece bloqueada enquanto autenticação, memória e transporte não forem homologados. Mudança de perfil não altera modelo, conta ou permissões.
 - Bonsai ainda retorna HTTP 404 no npm; credencial local vencida e disponibilidade atual do provedor não comprovada. Nenhum login real bem-sucedido, inferência ou proxy genérico declarado funcional.
 
 ## [1.22.5] - 2026-10-11

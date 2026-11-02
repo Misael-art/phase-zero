@@ -97,3 +97,52 @@ pwsh .\windows\pz.ps1 ai deepseek-harness start --workspace $PWD --auth-route ac
 pwsh .\windows\pz.ps1 ai deepseek-harness open --json
 pwsh .\windows\pz.ps1 ai deepseek-harness stop --json
 ```
+
+## Installation budget and operating parameters
+
+Linux x64 archive metadata rechecked on 2026-11-01: Node SHA-256 and DSH npm
+integrity still match `pins.json`. The locked Linux x64 npm closure contains
+563 distinct archives, totaling 139,655,863 bytes; Node adds 32,015,600 bytes.
+Total compressed input: **171,671,463 bytes** (~164 MiB). Native build hooks may
+require additional downloads. Keep the existing 512 MiB free-disk / 2 GiB
+available-memory checks; this budget does not replace either check. The installer
+uses an isolated npm cache, so unrelated user-cache contents are not a saving.
+
+| Parameter | Managed value / operator choice |
+|---|---|
+| Runtime | `@deepseek-ai/dsh@0.2.1-rc.2`, private Node `24.22.0` |
+| Default root | `${XDG_DATA_HOME:-~/.local/share}/phasezero/deepseek-harness`; `PZ_DSH_ROOT` is an explicit override |
+| Lifecycle | Install prepares files; start/open/stop are explicit; autostart disabled |
+| Address | `127.0.0.1`, default port `3080`; operator may choose `1024–65535` |
+| Authentication | Explicit `account` or `api`; separate `homes` under managed root, no automatic fallback |
+| Workspace | Existing operator-selected folder; confirm again in upstream workspace picker |
+| Telemetry | `DSH_TELEMETRY_DISABLED=1` |
+| Memory bound | `NODE_OPTIONS=--max-old-space-size=2048`; native allocations and children not capped |
+| Requested policy | `workspace-write + ask`; enforcement remains unknown |
+| Extensions | Plugins/MCP opt-in; ai-memory connection requires client-specific verification |
+| Efficiency | Basic default, economy optional per project/client; configuration does not prove session consumption |
+| Credentials | Enter through upstream UI; never place in command arguments, documentation or logs |
+| Recovery | Atomic runtime activation; stop/uninstall preserve account/API homes and workspace |
+
+The Node archive is
+`https://nodejs.org/dist/v24.22.0/node-v24.22.0-linux-x64.tar.xz`, SHA-256
+`cc2f601cee82d9a5a233302fe307abc600727035fd7d2c3a3571755989e95008`.
+DSH comes from
+`https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.2.1-rc.2.tgz`;
+its SHA-512 integrity and every transitive URL/integrity are recorded in
+`pins.json` and `package-lock.json`. The official installer verifies these inputs
+and activates only a completed runtime. Do not unpack files into the runtime by
+hand or bypass the memory/disk preflight.
+
+This workspace requires an operator to initiate downloads above 70,000,000 bytes,
+including the combined parts of one package. Use the Install button or run
+`pz ai deepseek-harness install --json` manually; then inspect `status --json`
+and `doctor --json`. Local installation is pending until those receipts exist.
+A successful doctor can establish local runtime health while still reporting
+account, model and sandbox checks as unverified.
+
+Memory and efficiency share their existing owners:
+[portable memory](../../docs/roadmaps/ai-memory-portability-v1.md) and
+[project/client profiles](../../docs/roadmaps/ai-token-economy-v1.md). Do not copy
+another client's credentials, hooks or MCP configuration into Harness to make
+its status appear connected.

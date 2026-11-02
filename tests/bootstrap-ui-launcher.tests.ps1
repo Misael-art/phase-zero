@@ -938,7 +938,7 @@ Describe 'Health scoped validation per card' {
         $raw = Get-Content -Path $uiScriptPath -Raw
 
         foreach ($expected in @(
-            'Content="Tokens e memória IA"',
+            'Content="Memória e eficiência"',
             'Content="Reparar tokens/memória"',
             'Content="Compilador Windows"',
             'Content="Otimizar Windows"',
@@ -970,11 +970,13 @@ Describe 'Health scoped validation per card' {
         $raw | Should Match 'Validar somente'
     }
 
-    It 'wires each card click to a scoped doctor run' {
+    It 'opens memory management and scopes diagnostics for the other health cards' {
         $raw = Get-Content -Path $uiScriptPath -Raw
-        foreach ($scope in @('wsl','winget','reboot','secrets','github','ai-usagebar','ai-memory','aionui','steamdeck','rollback')) {
+        foreach ($scope in @('wsl','winget','reboot','secrets','github','ai-usagebar','aionui','steamdeck','rollback')) {
             $raw | Should Match ([regex]::Escape("Invoke-UiHealthScopedDoctor -Scope '" + $scope + "'"))
         }
+        $raw | Should Match ([regex]::Escape("Show-PhaseZeroMemoryWindow -Owner `$window -RepoRoot `$PSScriptRoot"))
+        $raw | Should Match ([regex]::Escape("windows/ai/memory-ui.ps1"))
         # O helper de card deve disparar Start-RunExecution com intent doctor e o escopo do card.
         $raw | Should Match "Start-RunExecution -MaintenanceIntent 'doctor' -DoctorScope \`$Scope"
     }
@@ -982,8 +984,8 @@ Describe 'Health scoped validation per card' {
     It 'adds token memory, Windows optimization, AI connection and compiler buttons with their scopes' {
         $raw = Get-Content -Path $uiScriptPath -Raw
         $raw | Should Match ([regex]::Escape('x:Name="HealthAgentToolsButton"'))
-        $raw | Should Match ([regex]::Escape('Tokens e memória IA'))
-        $raw | Should Match ([regex]::Escape("Invoke-UiHealthScopedDoctor -Scope 'agent-tools'"))
+        $raw | Should Match ([regex]::Escape('Memória e eficiência'))
+        $raw | Should Match ([regex]::Escape("Show-PhaseZeroEconomyWindow -Owner `$window -RepoRoot `$PSScriptRoot"))
         $raw | Should Match ([regex]::Escape("Invoke-UiHealthScopedDoctor -Scope 'windows-optimization'"))
         $raw | Should Match ([regex]::Escape("Invoke-UiHealthScopedDoctor -Scope 'mcp'"))
         $raw | Should Match ([regex]::Escape("Invoke-UiHealthScopedDoctor -Scope 'msvc'"))
@@ -1013,10 +1015,10 @@ Describe 'Health scoped validation per card' {
 }
 
 Describe 'Health tokens/memory validation and repair flow' {
-    It 'wires token memory validation to the agent-tools scope' {
+    It 'opens project and agent efficiency settings from the memory action' {
         $raw = Get-Content -Path $uiScriptPath -Raw
         $raw | Should Match ([regex]::Escape('x:Name="HealthAgentToolsButton"'))
-        $raw | Should Match ([regex]::Escape("Invoke-UiHealthScopedDoctor -Scope 'agent-tools'"))
+        $raw | Should Match ([regex]::Escape("Show-PhaseZeroEconomyWindow -Owner `$window -RepoRoot `$PSScriptRoot"))
     }
 
     It 'adds a confirmation-gated repair that computes a scoped plan and applies each item by its real flow' {
