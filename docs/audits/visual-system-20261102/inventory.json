@@ -1,0 +1,1510 @@
+{
+  "schema": "phasezero-visual-review/1",
+  "date": "2026-11-02",
+  "recorded_at_utc": "2026-11-02T11:04:04.394210+00:00",
+  "initial_head": "bb0afd7e508ae07afda3c988819a802241430f16",
+  "head_when_inventory_recorded": "e53cd0cdae65e91e45560506ad1eea87cdd91540",
+  "capture_limits": "Qt offscreen, 1440x1024, host probes/reload suppressed. Working tree included unrelated Codex changes; hashes recorded after capture. Three pages visually inspected; remaining registry mapped only. No native Windows/compositor/real-account validation.",
+  "counts": {
+    "native_categories": 22,
+    "category_svg": 25,
+    "svg_with_unresolved_colors": 25,
+    "webapp_ico": 36,
+    "ico_without_16": 10,
+    "ico_without_256": 15,
+    "installed_phasezero_shortcuts_without_icon": 10
+  },
+  "categories": [
+    {
+      "name": "Início",
+      "icon_reference": "go-home",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Visão geral",
+      "icon_reference": "view-dashboard",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Perfis",
+      "icon_reference": "package-x-generic",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Linux",
+      "icon_reference": "distributor-logo",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Steam Deck",
+      "icon_reference": "input-gaming",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Windows VM",
+      "icon_reference": "computer",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Waydroid",
+      "icon_reference": "phone",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Servidor",
+      "icon_reference": "network-server",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Homelab",
+      "icon_reference": "folder-remote",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Emulação",
+      "icon_reference": "applications-games",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Boot Direto",
+      "icon_reference": "system-reboot",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Flatpak",
+      "icon_reference": "system-software-install",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Recursos",
+      "icon_reference": "preferences-plugin",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Desenvolvimento",
+      "icon_reference": "applications-development",
+      "source_review": "registry_mapping",
+      "screen_capture": true
+    },
+    {
+      "name": "Contas e conexões",
+      "icon_reference": "avatar-default",
+      "source_review": "registry_mapping",
+      "screen_capture": true
+    },
+    {
+      "name": "IA & Dev",
+      "icon_reference": "applications-development",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Proxies IA",
+      "icon_reference": "network-server",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Roteamento IA",
+      "icon_reference": "network-transmit-receive",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Aplicativos",
+      "icon_reference": "applications-other",
+      "source_review": "registry_mapping",
+      "screen_capture": true
+    },
+    {
+      "name": "Ajustes",
+      "icon_reference": "preferences-system",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Temas",
+      "icon_reference": "preferences-desktop-theme",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    },
+    {
+      "name": "Resultados",
+      "icon_reference": "text-x-log",
+      "source_review": "registry_mapping",
+      "screen_capture": false
+    }
+  ],
+  "source_hashes_recorded_after_capture": {
+    "scripts/generate_icons.py": "f394318a0acebc41562df0ea9dd70d30af626bc4a96428956ea0e6089a331be5",
+    "linux/ui_native/tokens.py": "685109592e8dace9f38dfd169ab4745fd352856717574d82db84c6c1931245d5",
+    "linux/ui_native/theme.qss": "3a992062e60ca5c8211ba05093579879f2d3b912b72f53985708e5300efa74bd",
+    "linux/ui_native/icons.py": "902a5afb77909d25bf80f66b02dd4a5877fbe93ba41f63ecd9c761c4270a9b2f",
+    "linux/ui_native/widgets.py": "93bdf17ed3c6922cd364384213f8ed3ea217323c0b00cec0ab52947f984546b7",
+    "linux/ui_native/catalog.py": "2cb10d49a01ce8850da3e3ac1b0943c31a47bd0e85ab83edd812c3d6b43f769d",
+    "linux/ui_native/main_window.py": "83a3b977ed58413a8f1784eacba6e5faed4b83f1ee2bc34431512d6e1bc9b9e3",
+    "linux/ui_native/pages/registry.py": "0976d18d848d270f0d546372880d7e613908b6e44b4a8d0dfdfdd1f2357121b0",
+    "linux/ui_native/pages/product_registry.py": "0bc406581c3c776cb0a3e3c95f3a0158c9823b0f4b088385fc8f3e40a524dede",
+    "linux/ui_native/pages/development.py": "302cf8518bb7b2a374d415e1e8c69d63fc32b56926188fd2366dfeb249be6033",
+    "linux/ui_native/pages/accounts.py": "3ba51051fca9fa9276803a113dbab067abb9a32813b2aad3e71973f28f687321",
+    "linux/ui_native/pages/ai_dev.py": "fe3a5c7521f5346e511461ad82da23252d880e06a52f20c9349506b3f1d97a3a",
+    "linux/ui_native/codex_profiles_panel.py": "52dbe247bddc9c34434ba1d6ed0c8627bbcf01f47480dd5ab8d13d9ff4fe6852",
+    "linux/ai/codex_profiles.py": "fcd028a9effc3b733a109a8edd6e6affe36b6830c701a47444638dda128139b8",
+    "linux/repairs/manager.py": "14eb1e8493db53ecaf08a028440e209d2aec6d62f024a1e5f2c416b1858c1fad",
+    "packaging/linux/io.phasezero.ControlCenter.svg": "833aef3c9d18fab70af1a4adc2cce4257ce456ba0c194ab4f841b53a4eb28b4e",
+    "packaging/linux/io.phasezero.ControlCenter.desktop": "df60eb08519c8689f9df93daace4c3a0673dd78e073323709c72b09206eb815e",
+    "bootstrap-ui.ps1": "82cc18e52f7f7b5d5d43fef03051e12e0e1dc1be9f7a6f0ad62f12dc3c1261d0",
+    "bootstrap-tools.ps1": "6e80d213fbb541f259b082640851db71496ddc6664f22bac9dae3c7b0ffd67da",
+    "linux/ui/templates/dashboard.html": "e82222b75b86af34b7c54a39d52687bae0b8510e66afca0caf9811aaa5f3cfbc",
+    "linux/ui/tui.sh": "c74b81c33213790db984be51bcbfbf9b0939354318e2e74aca171e3d4161c6b1"
+  },
+  "category_icons": [
+    {
+      "path": "assets/icons/hicolor/scalable/apps/applications-development.svg",
+      "sha256": "2911e203acd3660e90de72e932b761a860f3ed12849d81b83341799a5a7edf66",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/applications-games.svg",
+      "sha256": "ad564537f47786716b277776095d91c20e294c3d6b1af6c10d0ee37f61fdc014",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/applications-internet.svg",
+      "sha256": "9f6e3aa9d9284019707e3d50f49426ae2d56ec0f524ec25ee4bc0e68d6032eb3",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/applications-multimedia.svg",
+      "sha256": "02eea273c3718d4c9d708e2db5e79287264e0bcbf204e07c1c900faf12d662a6",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/applications-other.svg",
+      "sha256": "e999e998e62db3f11644a8079bdb1ae5d3a4d64ec9c4bf6c9852b24b9054a10e",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/applications-science.svg",
+      "sha256": "3db641f429468a3dd5fb20b385c5955d85350ce6d0523f5d1ca13b74c45bdf9c",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/appointment-missed.svg",
+      "sha256": "70585477e0d40f4ec1dfc5a9dd09aaa01e23cf17dda29cfa966b51ec0bde4bd5",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/computer.svg",
+      "sha256": "160829000d5730e3b4f77cec09f079fe14250ff21f10df2dceabd8586d6a3dcf",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/edit-unlink.svg",
+      "sha256": "4ac2bd6bcd35802d0f45fb405c37c8dcbbdfe878be8a8260808073fb7afbb15f",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/folder-remote.svg",
+      "sha256": "536c34390c0f29a4aa10a3b1218f6ca2c4e50900c1e5b52e443c790b521987a4",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/go-home.svg",
+      "sha256": "dc7b16b3626eb42e52db4175b439623557e2d06a9c55b861c7d1229e572a93c9",
+      "unresolved_color_tokens": [
+        "{accent}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/input-gaming.svg",
+      "sha256": "d5200ed440025546316ad13ba02ea265f858d89870a27ba0edca8d9d4a461542",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/network-server.svg",
+      "sha256": "23493e87be79802c2eab0e4040e0e5b9880b3eb2e4d57bc2ffccc488ce7744fd",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/network-transmit-receive.svg",
+      "sha256": "65091970ae77fb71b34d9ba84b8cdb0e854a41a2e43587ebbc36775cf7b0f15a",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/office-applications.svg",
+      "sha256": "88bd58ab52afbc164cc95d5d74f127c5344687655d56ed5215adb446774e0241",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/package-x-generic.svg",
+      "sha256": "24ffb54a0e30728af6acb64c62388fe9368895551d579aa24e2f46f18a5b3763",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/phone.svg",
+      "sha256": "65b5eadd18c312a81b54e25915d06a75d0fcd8d85af6d5c46307f4cfca67ad35",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/preferences-desktop-keyboard-shortcuts.svg",
+      "sha256": "fb36056e3bfbb36fc60d116317aa407364f111a5496a436fe0ab1438af1532fa",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/preferences-plugin.svg",
+      "sha256": "b4c340655d6ca1d91a1a81a5f2006144b28eb7a1e1c81e638e443e7b2d0cfba9",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/preferences-system-gaming.svg",
+      "sha256": "3b73609d1bca92b0ba8b7bd78f9a2133443ca7045c52c74957f3f383b8e98f97",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/preferences-system.svg",
+      "sha256": "058f568b7315f99e3ad2fad2d751713c09c5734921485293baecc11ddacf29c5",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/system-reboot.svg",
+      "sha256": "8aa3c904dc8309c16c108fb62bd4d528b51c1086df0013fb1df6c87a684dbc6c",
+      "unresolved_color_tokens": [
+        "{accent}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/system-software-install.svg",
+      "sha256": "e7a39160f252c8fba8fe56e3408d0249920d586dd2553df18ffaabf11d760ea0",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/text-x-log.svg",
+      "sha256": "c8ed16b59108e78169caac55e5043e708908e0beef278f442ffebb51a32dd96e",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    },
+    {
+      "path": "assets/icons/hicolor/scalable/apps/view-dashboard.svg",
+      "sha256": "c594dd19ffec9b1ba03da1212f387d705bac94869a68c1584a2e792c65e96c67",
+      "unresolved_color_tokens": [
+        "{accent}",
+        "{muted}"
+      ]
+    }
+  ],
+  "webapp_icons": [
+    {
+      "path": "assets/webapp-icons/amazon-prime-video.ico",
+      "sha256": "be49c84879168dead59c66fa0777e1307bd2ab889a9600c497f64c7428bc3c81",
+      "bytes": 1150,
+      "frames": [
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/bolt-new.ico",
+      "sha256": "1df029145cac76ff0b312a3673f746167d660e4f169fa980dfcb7d165f8c1a65",
+      "bytes": 227174,
+      "frames": [
+        [
+          203,
+          256
+        ],
+        [
+          38,
+          48
+        ],
+        [
+          25,
+          32
+        ],
+        [
+          13,
+          16
+        ]
+      ],
+      "has_16": false,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/discord.ico",
+      "sha256": "fe62aacfad116a77c4a60ae48ff1717bd2b5454f1c4e340fd1fb61e0b9d947c6",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/dropbox.ico",
+      "sha256": "cea5e9723b3015393aab82b51d58d40aab548cac866b66af5c1b79d031d69877",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/gemini.ico",
+      "sha256": "4e3214693df5289ead4233e20f78c12f992073c92d592e5b21505f814e8b4acd",
+      "bytes": 370070,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/gmail.ico",
+      "sha256": "5d1630612955e0924aac7746f94a8a83bd37d87d929c74c7a1e5e822a88a4bb6",
+      "bytes": 27473,
+      "frames": [
+        [
+          256,
+          256
+        ]
+      ],
+      "has_16": false,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/google-agenda.ico",
+      "sha256": "c7e5609e7dfb3c462f2e04abfa7c3818e1d1529dfb91dda48e3907850e9f606a",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/google-ai-studio.ico",
+      "sha256": "b5eca6f6c103d18c15b507d65299106a2567128ec0fcb02b2f368c0e68faf445",
+      "bytes": 370070,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/google-docs.ico",
+      "sha256": "16640c06f6249fdafd7828fd8425753abc360864dfd88f66704a32c38943c805",
+      "bytes": 4286,
+      "frames": [
+        [
+          32,
+          32
+        ]
+      ],
+      "has_16": false,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/google-drive.ico",
+      "sha256": "16640c06f6249fdafd7828fd8425753abc360864dfd88f66704a32c38943c805",
+      "bytes": 4286,
+      "frames": [
+        [
+          32,
+          32
+        ]
+      ],
+      "has_16": false,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/google-keep.ico",
+      "sha256": "c7e5609e7dfb3c462f2e04abfa7c3818e1d1529dfb91dda48e3907850e9f606a",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/google-meet.ico",
+      "sha256": "8674076c0ce47b556204d1ef1441edb9920360e8a8b9ec47a4176131f88fb2b7",
+      "bytes": 370070,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/google-sheets.ico",
+      "sha256": "fa2a7993933bd5c2a6c3e8d5bcfccfc29584c7a0389d50f103bc3177a3f98111",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/google-slides.ico",
+      "sha256": "fa2a7993933bd5c2a6c3e8d5bcfccfc29584c7a0389d50f103bc3177a3f98111",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/icloud.ico",
+      "sha256": "5abc82b050a4a03e9e7a2e7eed1806e79c04b46fe7c5791a02b7a3da788b50d0",
+      "bytes": 15406,
+      "frames": [
+        [
+          16,
+          16
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          48,
+          48
+        ]
+      ],
+      "has_16": true,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/kimi.ico",
+      "sha256": "82dc4455113baa928b4eeb98f3ac17e4384811d8446ad831f3bd10581eff5e12",
+      "bytes": 16958,
+      "frames": [
+        [
+          64,
+          64
+        ]
+      ],
+      "has_16": false,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/lovable-dev.ico",
+      "sha256": "67be6fe2a238297eecbf5426ebaea0222e95a73daa7cfd1ab3ce966b6272b661",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/manus.ico",
+      "sha256": "e029a28515ee5f34e8442c48e8beb7c27f78da76aeecd4b2c1d29eb601e91d32",
+      "bytes": 46449,
+      "frames": [
+        [
+          16,
+          16
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          256,
+          256
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/mega.ico",
+      "sha256": "37127c1a29c164cdaa75ec72ae685094c2468fe0577f743cb1f307d23dd35ec1",
+      "bytes": 6518,
+      "frames": [
+        [
+          16,
+          16
+        ],
+        [
+          32,
+          32
+        ]
+      ],
+      "has_16": true,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/netflix.ico",
+      "sha256": "abe8012eb65c0dc0ac3e87dcc1e60e1908ebd8f12b7c47a5df1856f7a7bb1edd",
+      "bytes": 16958,
+      "frames": [
+        [
+          64,
+          64
+        ]
+      ],
+      "has_16": false,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/notion.ico",
+      "sha256": "1a25f3b898a2778e1d3044853e372623701c2a01d14a4fe2c455018b77f71cb6",
+      "bytes": 370070,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/office-excel.ico",
+      "sha256": "52feb0ad2f908a288f0195ebe3aee908d2258e51db89e5cca731cb3cc4c36007",
+      "bytes": 259926,
+      "frames": [
+        [
+          256,
+          233
+        ],
+        [
+          48,
+          44
+        ],
+        [
+          32,
+          29
+        ],
+        [
+          16,
+          15
+        ]
+      ],
+      "has_16": false,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/office-powerpoint.ico",
+      "sha256": "52feb0ad2f908a288f0195ebe3aee908d2258e51db89e5cca731cb3cc4c36007",
+      "bytes": 259926,
+      "frames": [
+        [
+          256,
+          233
+        ],
+        [
+          48,
+          44
+        ],
+        [
+          32,
+          29
+        ],
+        [
+          16,
+          15
+        ]
+      ],
+      "has_16": false,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/office-word.ico",
+      "sha256": "6f4377af1d17fcfdda14ad102e1393513dc5ba9460cc93e9eb439323c218b896",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/onedrive.ico",
+      "sha256": "071513836c35f4c849f8d0efd2f64c762b0a8f1a0e281c863ac43a4138a146a0",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/photopea.ico",
+      "sha256": "b00bcfdb858dff986939a8eb3d13c35ef34d21650fee8479025976ddcb6e9a46",
+      "bytes": 370070,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/slack.ico",
+      "sha256": "4fd3cddc170cb38ff02baae1fb10f032b1c91c5f6ed02258e8d28a3f1bdd9054",
+      "bytes": 24499,
+      "frames": [
+        [
+          16,
+          16
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          256,
+          256
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/spotify.ico",
+      "sha256": "0f31d2eacc14d9e4ff0462210d15547cbe67935d32713b8605629f0f6cf5f378",
+      "bytes": 15086,
+      "frames": [
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/telegram-web.ico",
+      "sha256": "e389055bf836a8dc18a83b7471bdd06bbca929a80bbe8281b3ed90a778ac416f",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/trello.ico",
+      "sha256": "6245384a876e446ac4c95de04e2598c8d68023d845f4151599584afabc6203ab",
+      "bytes": 2710,
+      "frames": [
+        [
+          256,
+          256
+        ]
+      ],
+      "has_16": false,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/v0-dev.ico",
+      "sha256": "ab854426529081b73981de039b31ff0d00b28d50d7e9faf6fa2fe0d9479d6a8b",
+      "bytes": 285478,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/whatsapp-web.ico",
+      "sha256": "e6b77d832661fe106716b920e3f9ab5a9e70e1829adafd44b57196de581963ed",
+      "bytes": 32988,
+      "frames": [
+        [
+          64,
+          64
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          24,
+          24
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/xiaomi-ai-studio.ico",
+      "sha256": "1773d203af19aff61a3800859886cf05cf679f4c142fbfb35aa6d069982d20db",
+      "bytes": 4582,
+      "frames": [
+        [
+          16,
+          16
+        ],
+        [
+          16,
+          16
+        ],
+        [
+          16,
+          16
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/youtube.ico",
+      "sha256": "8bb1d0fa43a17436d59dd546f6f74c76dc44735def7522c22d8031166db8911d",
+      "bytes": 1150,
+      "frames": [
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": false
+    },
+    {
+      "path": "assets/webapp-icons/z-ai.ico",
+      "sha256": "b7357eb4d77e629c75c05c222eff66a54ca8fa9ab2ddb467159b283cb8b865e9",
+      "bytes": 370070,
+      "frames": [
+        [
+          256,
+          256
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "has_16": true,
+      "has_256": true
+    },
+    {
+      "path": "assets/webapp-icons/zoom.ico",
+      "sha256": "58b6fee1a883d9b798dea9dbf8f262fb8875e035bfa571792b8967c4c0434d26",
+      "bytes": 4286,
+      "frames": [
+        [
+          32,
+          32
+        ]
+      ],
+      "has_16": false,
+      "has_256": false
+    }
+  ],
+  "installed_shortcuts_missing_icon": [
+    {
+      "entry": "phasezero-activities-overview.desktop",
+      "scope": "user"
+    },
+    {
+      "entry": "phasezero-reboot-steamos-plus.desktop",
+      "scope": "user"
+    },
+    {
+      "entry": "phasezero-shortcut-cheatsheet.desktop",
+      "scope": "user"
+    },
+    {
+      "entry": "phasezero-steam-gamepad-ui.desktop",
+      "scope": "user"
+    },
+    {
+      "entry": "phasezero-steamdeck-dev.desktop",
+      "scope": "user"
+    },
+    {
+      "entry": "phasezero-steamdeck-docked-monitor.desktop",
+      "scope": "user"
+    },
+    {
+      "entry": "phasezero-steamdeck-docked-tv.desktop",
+      "scope": "user"
+    },
+    {
+      "entry": "phasezero-steamdeck-handheld.desktop",
+      "scope": "user"
+    },
+    {
+      "entry": "phasezero-virtual-keyboard.desktop",
+      "scope": "user"
+    },
+    {
+      "entry": "phasezero-voice-typing.desktop",
+      "scope": "user"
+    }
+  ],
+  "current_tokens": {
+    "dark": {
+      "declared_contrast_failures": [],
+      "text_muted_on_surface": 2.674,
+      "text_muted_on_bg": 3.122,
+      "base_px": 13,
+      "secondary_px": 11
+    },
+    "light": {
+      "declared_contrast_failures": [],
+      "text_muted_on_surface": 3.404,
+      "text_muted_on_bg": 3.023,
+      "base_px": 13,
+      "secondary_px": 11
+    }
+  },
+  "candidate_palettes": {
+    "dark": {
+      "tokens": {
+        "bg": "#14151A",
+        "surface": "#1E2028",
+        "text": "#F3F4F7",
+        "secondary": "#B0B5C3",
+        "accent": "#7854E8",
+        "on_accent": "#FFFFFF",
+        "success": "#77D6A3",
+        "warning": "#F4C26A",
+        "error": "#FF9696",
+        "focus": "#B39AF5"
+      },
+      "computed_pairs": [
+        {
+          "foreground": "text",
+          "background": "surface",
+          "ratio": 14.774,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "secondary",
+          "background": "surface",
+          "ratio": 7.926,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "success",
+          "background": "surface",
+          "ratio": 9.232,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "warning",
+          "background": "surface",
+          "ratio": 9.882,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "error",
+          "background": "surface",
+          "ratio": 7.78,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "focus",
+          "background": "surface",
+          "ratio": 6.853,
+          "minimum": 3.0
+        },
+        {
+          "foreground": "on_accent",
+          "background": "accent",
+          "ratio": 4.962,
+          "minimum": 4.5
+        }
+      ],
+      "status": "candidate_not_approved"
+    },
+    "light": {
+      "tokens": {
+        "bg": "#F5F6FA",
+        "surface": "#FFFFFF",
+        "text": "#20232D",
+        "secondary": "#5E6677",
+        "accent": "#6540D8",
+        "on_accent": "#FFFFFF",
+        "success": "#186C4E",
+        "warning": "#875500",
+        "error": "#B72D43",
+        "focus": "#6540D8"
+      },
+      "computed_pairs": [
+        {
+          "foreground": "text",
+          "background": "surface",
+          "ratio": 15.675,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "secondary",
+          "background": "surface",
+          "ratio": 5.765,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "success",
+          "background": "surface",
+          "ratio": 6.375,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "warning",
+          "background": "surface",
+          "ratio": 6.307,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "error",
+          "background": "surface",
+          "ratio": 6.052,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "focus",
+          "background": "surface",
+          "ratio": 6.406,
+          "minimum": 3.0
+        },
+        {
+          "foreground": "on_accent",
+          "background": "accent",
+          "ratio": 6.406,
+          "minimum": 4.5
+        }
+      ],
+      "status": "candidate_not_approved"
+    },
+    "graphite": {
+      "tokens": {
+        "bg": "#10161C",
+        "surface": "#1A242D",
+        "text": "#EAF1F3",
+        "secondary": "#A6B7C5",
+        "accent": "#67D5BC",
+        "on_accent": "#0E1A17",
+        "success": "#80DDA9",
+        "warning": "#F4C26A",
+        "error": "#FF9696",
+        "focus": "#67D5BC"
+      },
+      "computed_pairs": [
+        {
+          "foreground": "text",
+          "background": "surface",
+          "ratio": 13.773,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "secondary",
+          "background": "surface",
+          "ratio": 7.646,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "success",
+          "background": "surface",
+          "ratio": 9.619,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "warning",
+          "background": "surface",
+          "ratio": 9.573,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "error",
+          "background": "surface",
+          "ratio": 7.537,
+          "minimum": 4.5
+        },
+        {
+          "foreground": "focus",
+          "background": "surface",
+          "ratio": 8.86,
+          "minimum": 3.0
+        },
+        {
+          "foreground": "on_accent",
+          "background": "accent",
+          "ratio": 10.028,
+          "minimum": 4.5
+        }
+      ],
+      "status": "candidate_not_approved"
+    }
+  },
+  "reference_access": {
+    "figma_1133751281916939807": "HTTP 403; not imported. Optional source question unanswered; explicitly stated official-reference assumption used for exploration. Visual approval still pending.",
+    "apple_guidelines": "opened_and_screenshot_inspected",
+    "google_identity": "opened; sign-in guidelines, not Google Play logo pack",
+    "google_play_legacy": "timeout; official Partner Marketing Hub found in search, direct open timeout",
+    "steam_branding": "opened",
+    "samsung_badges": "official_search_results",
+    "huawei_appgallery": "opened; overview only",
+    "amazon_resources": "not_accessible",
+    "microsoft_store_badges": "provided URL not accessible; official historical PDF found, not selected as current source"
+  },
+  "privacy": "No account nicknames, profile IDs, desktop Exec values, credentials, sessions or private runtime paths stored.",
+  "byte_identical_webapp_assets": [
+    [
+      "assets/webapp-icons/google-agenda.ico",
+      "assets/webapp-icons/google-keep.ico"
+    ],
+    [
+      "assets/webapp-icons/google-docs.ico",
+      "assets/webapp-icons/google-drive.ico"
+    ],
+    [
+      "assets/webapp-icons/google-sheets.ico",
+      "assets/webapp-icons/google-slides.ico"
+    ],
+    [
+      "assets/webapp-icons/office-excel.ico",
+      "assets/webapp-icons/office-powerpoint.ico"
+    ]
+  ],
+  "mockups": [
+    {
+      "display_order": 1,
+      "path": "mockups/01-obsidiana.png",
+      "actual_dimensions": [
+        1487,
+        1058
+      ],
+      "bytes": 1562052,
+      "sha256": "47e6e06704c800f76bfc27939a52c1b28edce53c236d8f1afb7c1e6731909d27",
+      "visual_review": "inspected in generatedImage output; navigation/icon semantics caveats recorded in README"
+    },
+    {
+      "display_order": 2,
+      "path": "mockups/02-porcelana.png",
+      "actual_dimensions": [
+        1487,
+        1058
+      ],
+      "bytes": 1654169,
+      "sha256": "98e85a726ab236c52ce9b0e2bf31c5aa5a27f4eacde83e3439f74114422ded17",
+      "visual_review": "inspected in generatedImage output; navigation/icon semantics caveats recorded in README"
+    },
+    {
+      "display_order": 3,
+      "path": "mockups/03-grafite.png",
+      "actual_dimensions": [
+        1487,
+        1058
+      ],
+      "bytes": 1590517,
+      "sha256": "39fdd2e09bf707c2756e8fa8d8240bfe7db96ae16ccecd1c0dba5a669c85b978",
+      "visual_review": "inspected in generatedImage output; navigation/icon semantics caveats recorded in README"
+    }
+  ]
+}

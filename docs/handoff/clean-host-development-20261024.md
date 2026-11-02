@@ -383,3 +383,29 @@ promove perfil automaticamente. Obter pares reais equivalentes com mesmo
 aceite/modelo/runtime/revisão antes de afirmar ganho total. Conferir CI do SHA
 final; sem merge ou release. Acréscimo prévio de 27 linhas neste handoff e
 script touch alheio permanecem fora do incremento.
+
+## Proposta visual e inventário de ícones — 2026-11-02
+
+Pedido do operador limitado a mockups para aprovação; implementação caberá a outro
+agente. [Auditoria e plano](../audits/visual-system-20261102/README.md) preservam
+três direções independentes, prompts, paletas, inventário sanitizado e cinco capturas
+de evidência. Base inicial `bb0afd7e`; fonte evoluiu por outra tarefa durante a
+revisão. Hashes/HEAD do inventário e limites da fixture estão registrados no JSON.
+
+Achados: 25 SVGs com tokens de cor não substituídos; dez atalhos PhaseZero sem
+ícone; 36 ICOs com resoluções/identidades desiguais, incluindo quatro pares
+byte-idênticos entre produtos distintos. Pares adicionais de texto fraco exigem
+revisão; gate de contraste declarado atual não falhou. Nenhuma correção de produto
+foi aplicada. Figma retornou 403; mockups usaram capturas locais e referência Apple
+oficial, com lacuna informada. Seleção visual permanece pendente.
+
+Validação: bootstrap UI `ready: true`; render Qt offscreen 1440×1024 com HOME/XDG
+isolados e probes suprimidos; fontes/links, PNGs, contagens e contraste das paletas
+candidatas conferidos. Não certifica Windows, compositor, conta, touch/controller,
+leitor de tela, Homelab ou boot físico. Trabalho anterior em AGENTS.md, acréscimo
+prévio deste handoff e script de touch foram preservados fora deste incremento.
+
+Próximo passo: operador selecionar direção 1/2/3 ou refinamento; próximo agente
+parte do plano e dos owners existentes. Sem implementação, instalação, merge,
+deploy ou release por esta entrega. Commit documental exato pode ser localizado
+com `git log -1 -- docs/audits/visual-system-20261102`.
