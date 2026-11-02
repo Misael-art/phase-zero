@@ -1965,7 +1965,7 @@ function Get-UiHealthTextCanonicalStatus {
                         </Border>
                     </Grid>
                     <WrapPanel Margin="0,0,0,16">
-                        <Button x:Name="HealthAgentToolsButton" Style="{StaticResource PrimaryBtn}" Content="Tokens e memória IA" Height="32" Margin="0,0,8,8" ToolTip="Valida ferramentas de contexto, memória e economia de tokens usadas pelos assistentes."/>
+                        <Button x:Name="HealthAgentToolsButton" Style="{StaticResource PrimaryBtn}" Content="Memória e eficiência" Height="32" Margin="0,0,8,8" ToolTip="Escolher projeto, perfil por agente, comparar saída local e revisar componentes."/>
                         <Button x:Name="HealthAgentToolsRepairButton" Style="{StaticResource GhostBtn}" Content="Reparar tokens/memória" Height="32" Margin="0,0,8,8" ToolTip="Repara somente itens ausentes desse grupo, com confirmação e sem gravar segredos."/>
                         <Button x:Name="HealthMsvcButton" Style="{StaticResource GhostBtn}" Content="Compilador Windows" Height="32" Margin="0,0,8,8" ToolTip="Valida ferramentas de compilação e bibliotecas do Windows usadas por dependências nativas."/>
                         <Button x:Name="HealthWindowsOptButton" Style="{StaticResource GhostBtn}" Content="Otimizar Windows" Height="32" Margin="0,0,8,8" ToolTip="Mostra recomendações seguras de desempenho e manutenção sem aplicar alterações automáticas."/>
@@ -7852,7 +7852,10 @@ $ui.HealthDeckCard.Add_Click({       Invoke-UiHealthScopedDoctor -Scope 'steamde
 $ui.HealthRollbackCard.Add_Click({   Invoke-UiHealthScopedDoctor -Scope 'rollback'    -StatusTextBlock $ui.HealthRollbackStatusText })
 
 # Tokens e memória IA: valida ferramentas de contexto, memória e economia de tokens.
-$ui.HealthAgentToolsButton.Add_Click({ Invoke-UiHealthScopedDoctor -Scope 'agent-tools' })
+$ui.HealthAgentToolsButton.Add_Click({
+    . (Join-Path $PSScriptRoot 'windows/ai/token-economy-ui.ps1')
+    Show-PhaseZeroEconomyWindow -Owner $window -RepoRoot $PSScriptRoot
+})
 $ui.HealthAgentToolsRepairButton.Add_Click({ Invoke-UiHealthAgentToolsRepair })
 # Otimização Windows: só diagnostica, sem aplicar ajustes automáticos.
 $ui.HealthWindowsOptButton.Add_Click({ Invoke-UiHealthScopedDoctor -Scope 'windows-optimization' })

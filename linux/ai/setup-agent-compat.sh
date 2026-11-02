@@ -183,14 +183,16 @@ configure_rtk() {
 
 install_headroom() {
     ensure_local_bin
+    local version
+    version="$(jq -er '.headroomVersion' "$PZ_ROOT/assets/agent-skills/token-economy.json")"
     if tool_path headroom >/dev/null 2>&1; then
         pz_info "headroom already installed: $(tool_path headroom)"
         return 0
     fi
     if command -v uv >/dev/null 2>&1; then
-        uv tool install --reinstall 'headroom-ai[proxy]' || uv tool install --reinstall headroom-ai
+        uv tool install "headroom-ai[proxy]==$version"
     elif command -v pipx >/dev/null 2>&1; then
-        pipx install --include-deps 'headroom-ai[proxy]' || pipx install headroom-ai
+        pipx install --include-deps "headroom-ai[proxy]==$version"
     else
         pz_warn "uv/pipx missing; cannot install Headroom"
         return 1
@@ -513,6 +515,11 @@ status_json() {
         WORKSPACE_ROOT=""
         mode="needs-project"
     fi
+    # Read-only status can resolve current Git project without writing rules.
+    if [ -z "$WORKSPACE_ROOT" ]; then
+        WORKSPACE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+        [ -z "$WORKSPACE_ROOT" ] || workspace_source="current-git-project"
+    fi
     rtk_path="$(tool_path rtk || true)"
     memory_path="$(tool_path ai-memory || true)"
     headroom_path="$(tool_path headroom || true)"
@@ -556,9 +563,9 @@ status_json() {
           stateFile:$stateFile,
           tools:{
             caveman:{id:"caveman",status:(if $rulesOk then "available" else "missing-rules" end),role:"style",configured:$rulesOk},
-            rtk:{id:"rtk",status:(if $rtkPath != "" then "available" else "absent" end),role:"shell-compression",path:$rtkPath,version:$rtkVersion,docs:$docs,configured:($rtkPath != "")},
-            aiMemory:{id:"ai-memory",status:(if $memoryPath != "" then "available" else "absent" end),role:"memory-handoff",path:$memoryPath,version:$memoryVersion,configured:($memoryPath != "")},
-            headroom:{id:"headroom",status:(if $headroomPath != "" then "available" else "absent" end),role:"context-compression",path:$headroomPath,version:$headroomVersion,configured:($headroomPath != "")},
+            rtk:{id:"rtk",status:(if $rtkPath != "" then "available" else "absent" end),role:"shell-compression",path:$rtkPath,version:$rtkVersion,docs:$docs,installed:($rtkPath != ""),configured:null,sessionUse:"unverified"},
+            aiMemory:{id:"ai-memory",status:(if $memoryPath != "" then "available" else "absent" end),role:"memory-handoff",path:$memoryPath,version:$memoryVersion,installed:($memoryPath != ""),configured:null,nextAction:"pz ai memory status"},
+            headroom:{id:"headroom",status:(if $headroomPath != "" then "available" else "absent" end),role:"context-compression",path:$headroomPath,version:$headroomVersion,installed:($headroomPath != ""),configured:false,experimental:true,sessionUse:"unverified"},
             ponytail:{id:"ponytail",status:(if $ponytailDetected then "active" else "inactive" end),role:"workspace-architecture",configured:$ponytailDetected},
             aiContextFrugality:{id:"ai-context-frugality",status:(if $frugalityConfigured then "configured" else "notConfigured" end),role:"context-hygiene",configured:$frugalityConfigured},
             graphify:{id:"graphify",status:"notConfigured",role:"placeholder",configured:false,placeholder:true,repairKind:"none"}
@@ -585,7 +592,7 @@ dry_run() {
         --arg workspaceRoot "$WORKSPACE_ROOT" \
         --arg localBin "$LOCAL_BIN" \
         --arg rtkAsset "$asset" \
-        '{tool:"agent-compat",planned:["install RTK release with sha256 verification","run rtk init when available","install Headroom via uv/pipx","configure ai-memory service/hooks","apply Caveman and PhaseZero tool rules","apply Ponytail rules only when workspace detected","write AI context frugality pack","write status state"],workspaceRoot:$workspaceRoot,localBin:$localBin,rtkAsset:$rtkAsset}'
+        '{tool:"agent-compat",planned:["install RTK release with sha256 verification","run rtk init when available","keep experimental Headroom opt-in","configure ai-memory service/hooks","apply Caveman and PhaseZero tool rules","apply Ponytail rules only when workspace detected","write AI context frugality pack","write status state"],workspaceRoot:$workspaceRoot,localBin:$localBin,rtkAsset:$rtkAsset}'
 }
 
 remove_marked_block() {
@@ -881,7 +888,7 @@ cmd_init() {
 setup_all() {
     install_rtk_fallback
     configure_rtk
-    install_headroom || true
+    # Headroom stays available through explicit setup headroom, never a base dependency.
     python3 "$PZ_ROOT/linux/ai/memory_manager.py" install >/dev/null || pz_warn "ai-memory setup skipped/failed"
     if [ -z "$WORKSPACE_ROOT" ]; then
         WORKSPACE_ROOT="$(registered_workspace_root || true)"

@@ -179,7 +179,9 @@ Usage:
   pz ai init --status [<dir>]  Check project rules vs current sources
   pz ai init --list            List registered projects
   pz ai init --undo [<dir>]    Remove managed blocks/files from a project
-  pz ai token-economy status   Alias for compat status and context-frugality audit
+  pz ai token-economy <action> Token profiles, native instructions and measured evidence
+  pz ai token-economy apply --project <dir> --agent <id> --profile basic|economy
+  pz ai token-economy measure --project <dir> --agent <id>  Local output only; no paid calls
   pz ai admin status           Check phasezero-admin/bigsudo escalation bridge
   pz ai policy <action>        AI policy broker (status|set <mode>|check <action>|list)
   pz ai ollama [--pull <m>]    Ollama install/config; model pulls broker-gated
@@ -672,7 +674,11 @@ cmd_ai() {
             shift
             python3 "$PZ_ROOT/linux/ai/quota_meter.py" "${@:-status}"
             ;;
-        compat|agent-compat|tools|token-economy|tokens)
+        token-economy|tokens)
+            shift
+            python3 "$PZ_ROOT/linux/ai/token_economy.py" "${@:-status}"
+            ;;
+        compat|agent-compat|tools)
             shift
             bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" "${@:-status}"
             ;;

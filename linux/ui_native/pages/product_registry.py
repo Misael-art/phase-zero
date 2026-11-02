@@ -743,6 +743,17 @@ class ProductRegistryPage(BasePage):
             notice.setWordWrap(True)
             self._detail_layout.addWidget(notice)
             return
+        economy_agents = {"app.codex": "codex", "app.codex-desktop": "codex", "app.claude-code": "claude-code", "app.opencode": "opencode",
+                          "app.deepseek-harness": "deepseek-harness", "app.hermes": "hermes",
+                          "app.gemini-cli": "gemini", "app.cursor": "cursor", "app.windsurf": "windsurf",
+                          "app.kimi-code": "kimi-code", "app.zcode": "zcode", "app.copilot-cli": "copilot"}
+        agent = economy_agents.get(self._selected_app_id)
+        if agent:
+            efficiency = QPushButton("Memória e eficiência")
+            efficiency.setObjectName("secondaryButton")
+            efficiency.setAccessibleName("Configurar memória e eficiência deste agente")
+            efficiency.clicked.connect(lambda _checked=False, selected=agent: self.request_category("IA & Dev", "economy:" + selected))
+            self._detail_layout.addWidget(efficiency)
         action_ids = [item for item in product.get("actionIds", []) if item in self.by_id]
         action_ids.sort(key=lambda action_id: (
             action_id != product.get("canonicalActionId"),

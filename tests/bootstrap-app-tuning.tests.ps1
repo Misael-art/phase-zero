@@ -89,10 +89,11 @@ Describe 'Bootstrap AppTuning catalog and selection' {
 
         $doc = Get-Content -LiteralPath $docPath -Raw
         $script = Get-Content -LiteralPath $scriptPath -Raw
-        foreach ($expected in @('headroom wrap claude --memory','headroom wrap codex --memory','headroom wrap aider','headroom wrap cursor','OpenClaw: blocked until each request can enforce an explicit account grant (exit 69)','n8n','OpenCode')) {
+        foreach ($expected in @('managed wrapping blocked','ai-memory remains the continuity owner','headroom wrap aider','headroom wrap cursor','OpenClaw: blocked until each request can enforce an explicit account grant (exit 69)','n8n','OpenCode')) {
             $doc | Should Match ([regex]::Escape($expected))
         }
-        $doc | Should Match 'OpenCode.+manual'
+        $doc | Should Match 'OpenCode.+upstream wrapper exists'
+        $script | Should Not Match "'wrap','(?:claude|codex)','--memory'"
         foreach ($expectedAction in @('wrap-claude','wrap-codex','wrap-aider','wrap-cursor','wrap-copilot','wrap-gemini','wrap-openclaw','mcp-install','proxy','stats')) {
             $script | Should Match ([regex]::Escape($expectedAction))
         }

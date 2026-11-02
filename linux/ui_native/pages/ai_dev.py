@@ -15,6 +15,7 @@ from ..models import ActionSpec
 from ..widgets import SectionHeader, themed_icon
 from .base import BasePage
 from .memory import MemoryCard, STATUS_ID as MEMORY_STATUS_ID
+from .economy import EconomyCard, STATUS_ID as ECONOMY_STATUS_ID
 
 
 _PRIMARY_IDS = {
@@ -215,6 +216,8 @@ class AiDevPage(BasePage):
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
         layout.addLayout(cards)
+        self.economy_card = EconomyCard(self)
+        layout.addWidget(self.economy_card)
         self.memory_card = MemoryCard(self)
         layout.addWidget(self.memory_card)
         layout.addWidget(self._build_harness_card())
@@ -318,6 +321,15 @@ class AiDevPage(BasePage):
             self.status_loader.fetch_action(action)
 
     def focus_journey(self, key: str) -> None:
+        if key.startswith("economy"):
+            agent = key.partition(":")[2]
+            if agent:
+                self.economy_card.select_agent(agent)
+            scroll = self.findChild(QScrollArea)
+            if scroll:
+                scroll.ensureWidgetVisible(self.economy_card.summary, 8, 8)
+            self.economy_card.agent.setFocus()
+            return
         if key in {"memory", "ai-memory"}:
             scroll = self.findChild(QScrollArea)
             if scroll is not None:
@@ -722,6 +734,13 @@ class AiDevPage(BasePage):
             buttons.addWidget(secondary)
         buttons.addStretch()
         layout.addLayout(buttons)
+        if cli_key in {"opencode", "claude"}:
+            economy = QPushButton("Memória e eficiência")
+            economy.setObjectName("secondaryButton")
+            agent_id = "claude-code" if cli_key == "claude" else cli_key
+            economy.setAccessibleName(f"Memória e eficiência de {title}")
+            economy.clicked.connect(lambda _checked=False, agent=agent_id: self.focus_journey("economy:" + agent))
+            layout.addWidget(economy)
         card.setProperty("cliKey", cli_key)
         self._bind_status_label(cli_key, status)
         return card
@@ -969,6 +988,7 @@ class AiDevPage(BasePage):
         self._fetch_quota()
         self._fetch_harness()
         self.memory_card.fetch()
+        self.economy_card.fetch()
         if not self.status_loader.running(_DESKTOP_STATUS_ID):
             self.status_loader.fetch(_DESKTOP_STATUS_ID, ["ai", "desktop", "status"])
         self.bridge_card.setVisible(_bridge_opted_in())
@@ -981,6 +1001,9 @@ class AiDevPage(BasePage):
         self.state_label.style().polish(self.state_label)
 
     def _on_status_ready(self, action_id: str, _stdout: str, parsed: object) -> None:
+        if action_id == ECONOMY_STATUS_ID:
+            self.economy_card.update_status(parsed) if isinstance(parsed, dict) else self.economy_card.failed()
+            return
         if action_id == MEMORY_STATUS_ID:
             if isinstance(parsed, dict):
                 self.memory_card.update_status(parsed)
@@ -1124,6 +1147,9 @@ class AiDevPage(BasePage):
             self._set_state("info")
 
     def _on_status_failed(self, action_id: str, message: str) -> None:
+        if action_id == ECONOMY_STATUS_ID:
+            self.economy_card.failed()
+            return
         if action_id == MEMORY_STATUS_ID:
             self.memory_card.failed()
             return
@@ -1176,6 +1202,7 @@ class AiDevPage(BasePage):
     def block_while_running(self, running: bool) -> None:
         self._operation_running = running
         self.memory_card.apply_buttons()
+        self.economy_card.render()
         self._apply_harness_buttons()
         self.refresh_button.setEnabled(not running)
         self.repair_button.setEnabled(not running)

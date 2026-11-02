@@ -228,3 +228,21 @@ fixtures with backup; preserve live locks, ambiguous locks and current fixtures.
 - PR cabe ao incremento revisável; release somente a marco elegível com versão/artefatos/notas e gates completos, dentro da autorização de publicação vigente. Não gerar release por manutenção destas regras. Preserve limites de merge/deploy e falhas preexistentes; acesso autenticado não amplia autorização.
 - Fontes e receitas ficam no Git; bancos, ROMs, assets privados, SDKs, builds, caches e pacotes de resgate seguem owner/destino próprios e recuperação verificável. `.gitignore` não é backup. Novo arquivo acima de 10 MiB exige revisão; downloads acima de 70 MB são manuais, inclusive o pacote dividido, com origem/tamanho/hash/destino preparados.
 - Ao fechar, mantenha apenas os gerados necessários e atualize o handoff existente com SHA, testes no host, limites de validação, bloqueio e próximo passo. Não declare produto pronto quando faltar evidência do alvo real, nem deixe um único exemplar de trabalho útil sem proteção identificada.
+
+<!-- BEGIN PHASEZERO TOKEN ECONOMY codex -->
+Token profile for Codex only: basic. Other clients keep their own profile.
+Preserve user/project instructions, account, model, permissions and all acceptance checks.
+ai-memory stays connected in every profile. Search relevant memory before non-trivial work; retrieve a few relevant pages, never the entire store. Record durable learnings; lifecycle owns routine capture.
+If memory fails or resolves another project, report degraded state and use native ai-memory from this project directory. Never invent recall or create a second memory store.
+Use rg/scoped reads and existing native skills/tool discovery on demand. Preserve lockfiles and diagnostics.
+When RTK is available, use supported filtered commands for human-readable output. rtk proxy does not filter. Use raw output for machine contracts, exact diffs and missing diagnostics.
+<!-- END PHASEZERO TOKEN ECONOMY codex -->
+
+<!-- BEGIN PHASEZERO TOKEN ECONOMY opencode -->
+Token profile for OpenCode only: basic. Other clients keep their own profile.
+Preserve user/project instructions, account, model, permissions and all acceptance checks.
+ai-memory stays connected in every profile. Search relevant memory before non-trivial work; retrieve a few relevant pages, never the entire store. Record durable learnings; lifecycle owns routine capture.
+If memory fails or resolves another project, report degraded state and use native ai-memory from this project directory. Never invent recall or create a second memory store.
+Use rg/scoped reads and existing native skills/tool discovery on demand. Preserve lockfiles and diagnostics.
+When RTK is available, use supported filtered commands for human-readable output. rtk proxy does not filter. Use raw output for machine contracts, exact diffs and missing diagnostics.
+<!-- END PHASEZERO TOKEN ECONOMY opencode -->

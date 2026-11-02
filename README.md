@@ -301,3 +301,5 @@ Tags históricas **não** se movem. Confira sempre o `SHA256SUMS` da versão que
 ## Licença e âmbito
 
 PhaseZero não substitui o instalador do Windows nem o umbrelOS. Não distribui ISOs, ROMs, BIOS nem chaves de consola. Contribuição de apps Homelab: PR no catálogo do repositório, não loja comunitária.
+
+Perfis de eficiência por agente/projeto, memória permanente e medição sem inferência paga: [contrato e operação](docs/roadmaps/ai-token-economy-v1.md).

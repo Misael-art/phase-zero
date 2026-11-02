@@ -11446,7 +11446,7 @@ function Get-BootstrapAppTuningCatalog {
         [ordered]@{ id = 'openwebui-dev-session'; category = 'local-ai-containers'; displayName = 'Open WebUI sob demanda'; description = 'Open WebUI fica em Desktop/Dev e nao inicia junto ao console.'; targetApps = @('open webui','openwebui'); probePaths = @(); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('session','audit'); rollback = @('manual') }
         [ordered]@{ id = 'llamacpp-mtp-template'; category = 'dev-ai'; displayName = 'llama.cpp MTP diagnostic'; description = 'Template de diagnostico para llama.cpp server com MTP/speculative decoding sem baixar modelo.'; targetApps = @('llama.cpp','llamacpp','llama-server'); probePaths = @('$env:USERPROFILE\.llama.cpp\llama-server.exe','$env:LOCALAPPDATA\llama.cpp\llama-server.exe'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('diagnostic','manual-action','audit'); rollback = @('manual'); riskTier = 'experimental'; rollbackScope = 'manual'; safetyNotes = @('Nao baixa modelos', 'Nao altera servidor automaticamente', 'Use somente com modelo/binario que suportam MTP'); installComponents = @('llamacpp-server') }
         [ordered]@{ id = 'agent-config-claude-rtk-template'; category = 'agent-config'; displayName = 'Claude/RTK agent config template'; description = 'Template local para documentar uso de RTK, Claude e providers BYOK sem gravar chaves.'; targetApps = @('claude code','rtk','codex','opencode'); probePaths = @('$env:USERPROFILE\.claude\settings.json','$env:USERPROFILE\.codex\config.toml'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','audit'); rollback = @('manual'); riskTier = 'manual'; rollbackScope = 'file-template'; safetyNotes = @('Nao grava segredos', 'Template manual', 'Revisar antes de aplicar'); installComponents = @('bootstrap-secrets','agent-skills') }
-        [ordered]@{ id = 'headroom-agent-context-compression'; category = 'agent-config'; displayName = 'Headroom agent context compression'; description = 'Gera helper local para Headroom em Claude Code, Codex, Aider, Cursor, Copilot, Gemini, OpenClaw, n8n e MCP sem gravar chaves.'; targetApps = @('headroom','claude code','codex','aider','cursor','copilot','gemini','openclaw','n8n','mcp','opencode'); probePaths = @('$env:USERPROFILE\.local\bin\headroom.exe','$env:APPDATA\Python\Scripts\headroom.exe','.codex\context-packs\headroom-agent-integration.md'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','wrapper-template','audit'); rollback = @('backup-file','manual'); riskTier = 'manual'; rollbackScope = 'file-template'; safetyNotes = @('Nao grava segredos', 'Nao executa wrap automaticamente', 'OpenCode fica proxy/manual ate wrapper upstream maduro'); requiresInteractiveLogin = $false; installComponents = @('headroom-ai') }
+        [ordered]@{ id = 'headroom-agent-context-compression'; category = 'agent-config'; displayName = 'Headroom agent context compression'; description = 'Gera helper local para Headroom em Claude Code, Codex, Aider, Cursor, Copilot, Gemini, OpenClaw, n8n e MCP sem gravar chaves.'; targetApps = @('headroom','claude code','codex','aider','cursor','copilot','gemini','openclaw','n8n','mcp','opencode'); probePaths = @('$env:USERPROFILE\.local\bin\headroom.exe','$env:APPDATA\Python\Scripts\headroom.exe','.codex\context-packs\headroom-agent-integration.md'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','wrapper-template','audit'); rollback = @('backup-file','manual'); riskTier = 'manual'; rollbackScope = 'file-template'; safetyNotes = @('Nao grava segredos', 'Nao executa wrap automaticamente', 'Wrappers gerenciados exigem homologacao de rota, conta e memoria'); requiresInteractiveLogin = $false; installComponents = @('headroom-ai') }
         [ordered]@{ id = 'ai-context-frugality-pack'; category = 'agent-config'; displayName = 'AI context frugality pack'; description = 'Gera regras seguras de higiene de contexto, .aiderignore conservador e skeleton map local para CLIs/IDEs de IA.'; targetApps = @('codex','claude code','aider','headroom','cursor','windsurf','zed','opencode'); probePaths = @('AGENTS.md','.aiderignore','.codex\context-packs\ai-context-frugality.md','.codex\ai-context\repo-skeleton.json'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','skeleton-map','audit'); rollback = @('backup-file','manual'); riskTier = 'conservative'; rollbackScope = 'backup-file'; safetyNotes = @('Nao grava segredos', 'Nao executa reset de sessao', 'Nao ignora lockfiles', 'Skeleton sem corpos de funcao'); requiresInteractiveLogin = $false; installComponents = @() }
         [ordered]@{ id = 'knowledge-vault-obsidian-template'; category = 'knowledge-vault'; displayName = 'Obsidian transcript vault template'; description = 'Template manual de vault Obsidian para transcricoes tecnicas e memoria de projeto.'; targetApps = @('obsidian'); probePaths = @('$env:LOCALAPPDATA\Programs\Obsidian\Obsidian.exe','$env:USERPROFILE\Documents\Obsidian'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('config-template','audit'); rollback = @('file-template'); riskTier = 'manual'; rollbackScope = 'manual'; safetyNotes = @('Nao cria sync remoto', 'Nao instala plugins automaticamente', 'Vault fica sob controle do usuario'); installComponents = @('obsidian') }
         [ordered]@{ id = 'n8n-youtube-workflow-template'; category = 'workflow-automation'; displayName = 'n8n YouTube transcript workflow template'; description = 'Template manual para fluxo n8n de coleta/transcricao, sem credenciais ou execucao automatica.'; targetApps = @('n8n','youtube'); probePaths = @('$env:APPDATA\npm\n8n.cmd','$env:APPDATA\npm\n8n.ps1'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('workflow-template','manual-action','audit'); rollback = @('file-template','manual'); riskTier = 'manual'; rollbackScope = 'manual'; safetyNotes = @('Requer login/API keys do usuario', 'Nao agenda jobs automaticamente', 'Validar fontes e direitos antes de baixar audio'); requiresInteractiveLogin = $true; installComponents = @('n8n') }
@@ -16097,7 +16097,7 @@ function Get-BootstrapComponentCatalog {
     $catalog['goose'] = New-BootstrapComponentDefinition -Name 'goose' -Description 'goose CLI.' -DependsOn @('git-core') -Kind 'goose'
     $catalog['repo-gemini-cli'] = New-BootstrapComponentDefinition -Name 'repo-gemini-cli' -Description 'Clone do repositório gemini-cli.' -DependsOn @('git-core') -Kind 'repo-clone' -Data @{ RepoUrl = 'https://github.com/heartyguy/gemini-cli'; TargetName = 'gemini-cli' }
     $catalog['n8n'] = New-BootstrapComponentDefinition -Name 'n8n' -Description 'n8n global via npm.' -DependsOn @('node-core') -Kind 'npm' -Data @{ Package = 'n8n'; DisplayName = 'n8n'; CommandNames = @('n8n') }
-    $catalog['headroom-ai'] = New-BootstrapComponentDefinition -Name 'headroom-ai' -Description 'Headroom AI context compressor via uv tool.' -DependsOn @('python-core', 'rustup') -Kind 'uvtool' -Data @{ Package = 'headroom-ai[proxy]'; CommandName = 'headroom'; DisplayName = 'Headroom AI (headroom-ai[proxy])'; VersionArgs = @('version'); Stage = 'payload'; Provisioning = 'uvtool'; ValueReason = 'Wrapper/proxy local para compressao de contexto em agentes CLI e OpenAI-compatible.'; ProbePaths = @("$env:USERPROFILE\.local\bin\headroom.exe", "$env:APPDATA\Python\Scripts\headroom.exe"); riskLevel = 'experimental'; officialSource = 'https://pypi.org/project/headroom-ai/'; manualReason = 'Windows pode precisar compilar dependencias Rust quando wheel pronta nao existir; wrappers ficam opt-in.'; requiresGpu = $false; requiresInteractiveLogin = $false } -EstimatedSizeGB 0.5 -RequiresNetwork $true
+    $catalog['headroom-ai'] = New-BootstrapComponentDefinition -Name 'headroom-ai' -Description 'Headroom AI context compressor via uv tool.' -DependsOn @('python-core', 'rustup') -Kind 'uvtool' -Data @{ Package = ('headroom-ai[proxy]==' + [string](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'assets/agent-skills/token-economy.json') -Raw | ConvertFrom-Json).headroomVersion); CommandName = 'headroom'; DisplayName = 'Headroom AI (headroom-ai[proxy])'; VersionArgs = @('--version'); Stage = 'payload'; Provisioning = 'uvtool'; ValueReason = 'Wrapper/proxy local para compressao de contexto em agentes CLI e OpenAI-compatible.'; ProbePaths = @("$env:USERPROFILE\.local\bin\headroom.exe", "$env:APPDATA\Python\Scripts\headroom.exe"); riskLevel = 'experimental'; officialSource = 'https://pypi.org/project/headroom-ai/'; manualReason = 'Windows pode precisar compilar dependencias Rust quando wheel pronta nao existir; wrappers ficam opt-in.'; requiresGpu = $false; requiresInteractiveLogin = $false } -EstimatedSizeGB 0.5 -RequiresNetwork $true
     $catalog['autohotkey'] = New-BootstrapComponentDefinition -Name 'autohotkey' -Description 'AutoHotkey.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'AutoHotkey.AutoHotkey'; DisplayName = 'AutoHotkey'; ProbePaths = @("$env:ProgramFiles\AutoHotkey\AutoHotkey64.exe", "${env:ProgramFiles(x86)}\AutoHotkey\AutoHotkey.exe") }
     $catalog['blender'] = New-BootstrapComponentDefinition -Name 'blender' -Description 'Blender LTS.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'BlenderFoundation.Blender.LTS.4.5'; DisplayName = 'Blender LTS 4.5'; ProbePaths = @("$env:ProgramFiles\Blender Foundation\Blender LTS\blender.exe", "$env:ProgramFiles\Blender Foundation\Blender 4.5\blender.exe") }
     $catalog['ffmpeg'] = New-BootstrapComponentDefinition -Name 'ffmpeg' -Description 'FFmpeg.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'Gyan.FFmpeg'; DisplayName = 'FFmpeg'; ProbePaths = @("${env:LOCALAPPDATA}\Programs\ffmpeg\bin\ffmpeg.exe", "$env:ProgramFiles\ffmpeg\bin\ffmpeg.exe", "$env:ProgramData\chocolatey\bin\ffmpeg.exe") }
@@ -16257,7 +16257,7 @@ function Get-BootstrapProfileCatalog {
     $catalog['server-llm-hermes'] = New-BootstrapProfileDefinition -Name 'server-llm-hermes' -Description 'LLM local + Hermes remoto, com Windows enxugado para menor RAM.' -Items @('ollama', 'hermes-remote', 'os-slim-server')
     $catalog['server-llm-homelab'] = New-BootstrapProfileDefinition -Name 'server-llm-homelab' -Description 'LLM local + servidor caseiro, com Windows enxugado para menor RAM.' -Items @('ollama', 'homelab-stack', 'tailscale', 'os-slim-server')
     $catalog['server-llm-homelab-hermes'] = New-BootstrapProfileDefinition -Name 'server-llm-homelab-hermes' -Description 'Tudo: LLM local + servidor caseiro + Hermes remoto, com Windows enxugado.' -Items @('ollama', 'homelab-stack', 'tailscale', 'hermes-remote', 'os-slim-server')
-    $catalog['ai'] = New-BootstrapProfileDefinition -Name 'ai' -Description 'Desktops, CLIs e proxies locais de IA.' -Items @('claude-desktop', 'claude-code', 'cursor', 'windsurf', 'warp', 'trae', 'opencode-desktop', 'vscode', 'vscode-insiders', 'antigravity', 'autoclaw', 'perplexity', 'codex-installer', 'ollama', 'cherry-studio', 'lm-studio', 'pinokio', 'zed', 'opencode', 'gemini-cli', 'kilo-cli', 'bonsai-cli', 'grok-cli', 'qwen-code', 'copilot-cli', 'codex-cli', 'openclaude-cli', 'mimo-code', 'hermes', 'kimiproxy', 'qwenproxy', 'deepsproxy', 'mimo-ai-proxy', 'antigravity-openai-adapter', 'dockernativemanager', 'ai-proxy-suite', 'ai-usagebar', 'ai-memory', 'aionui', 'headroom-ai', 'promptfoo', 'bootstrap-secrets', 'bootstrap-mcps', 'vscode-extensions', 'claude-config', 'claude-plugins', 'agent-skills', 'agent-compat-runtime', 'aider', 'goose', 'repo-gemini-cli', 'supermaven-vscode')
+    $catalog['ai'] = New-BootstrapProfileDefinition -Name 'ai' -Description 'Desktops, CLIs e proxies locais de IA.' -Items @('claude-desktop', 'claude-code', 'cursor', 'windsurf', 'warp', 'trae', 'opencode-desktop', 'vscode', 'vscode-insiders', 'antigravity', 'autoclaw', 'perplexity', 'codex-installer', 'ollama', 'cherry-studio', 'lm-studio', 'pinokio', 'zed', 'opencode', 'gemini-cli', 'kilo-cli', 'bonsai-cli', 'grok-cli', 'qwen-code', 'copilot-cli', 'codex-cli', 'openclaude-cli', 'mimo-code', 'hermes', 'kimiproxy', 'qwenproxy', 'deepsproxy', 'mimo-ai-proxy', 'antigravity-openai-adapter', 'dockernativemanager', 'ai-proxy-suite', 'ai-usagebar', 'ai-memory', 'aionui', 'promptfoo', 'bootstrap-secrets', 'bootstrap-mcps', 'vscode-extensions', 'claude-config', 'claude-plugins', 'agent-skills', 'agent-compat-runtime', 'aider', 'goose', 'repo-gemini-cli', 'supermaven-vscode')
     $catalog['dev-ai'] = New-BootstrapProfileDefinition -Name 'dev-ai' -Description 'Alias explicito para pilha de IA pesada; opt-in.' -Items @('ai')
     $catalog['automation'] = New-BootstrapProfileDefinition -Name 'automation' -Description 'Automação local.' -Items @('n8n')
     $catalog['security'] = New-BootstrapProfileDefinition -Name 'security' -Description 'Gestores de senha e nuvem.' -Items @('1password', 'proton-drive', 'proton-pass')
@@ -26782,8 +26782,7 @@ function Get-BootstrapCavemanTargetCatalog {
             displayName = 'Cursor'
             runtime = 'npx'
             commands = @(
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'cursor', '--copy')),
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'alchaincyf/huashu-design', '-a', 'cursor', '--copy'))
+                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'cursor', '--copy'))
             )
             fallbackCommands = @()
         }
@@ -26791,8 +26790,7 @@ function Get-BootstrapCavemanTargetCatalog {
             displayName = 'Windsurf'
             runtime = 'npx'
             commands = @(
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'windsurf', '--copy')),
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'alchaincyf/huashu-design', '-a', 'windsurf', '--copy'))
+                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'windsurf', '--copy'))
             )
             fallbackCommands = @()
         }
@@ -26800,8 +26798,7 @@ function Get-BootstrapCavemanTargetCatalog {
             displayName = 'Cline'
             runtime = 'npx'
             commands = @(
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'cline', '--copy')),
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'alchaincyf/huashu-design', '-a', 'cline', '--copy'))
+                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'cline', '--copy'))
             )
             fallbackCommands = @()
         }
@@ -26809,8 +26806,7 @@ function Get-BootstrapCavemanTargetCatalog {
             displayName = 'GitHub Copilot'
             runtime = 'npx'
             commands = @(
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'github-copilot', '--copy')),
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'alchaincyf/huashu-design', '-a', 'github-copilot', '--copy'))
+                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'github-copilot', '--copy'))
             )
             fallbackCommands = @()
         }
@@ -29035,14 +29031,14 @@ function Ensure-BootstrapHeadroomAgentIntegration {
         '- Package source: PyPI headroom-ai[proxy]',
         '',
         'Supported wrappers:',
-        '- Claude Code: `headroom wrap claude --memory`',
-        '- Codex CLI: `headroom wrap codex --memory`',
+        '- Claude Code: managed wrapping blocked pending route/auth/memory homologation; ai-memory remains the continuity owner.',
+        '- Codex CLI: managed wrapping blocked pending route/auth/memory homologation; do not add Headroom --memory.',
         '- Aider: `headroom wrap aider`',
         '- Cursor: `headroom wrap cursor`',
         '- GitHub Copilot CLI: `headroom wrap copilot`',
-        '- Gemini CLI: `headroom wrap gemini`',
+        '- Gemini CLI: wrapper unavailable in tested Headroom 0.32.1; do not advertise it as supported.',
         '- OpenClaw: blocked until each request can enforce an explicit account grant (exit 69).',
-        '- OpenCode: manual proxy only; no stable Headroom wrapper is confirmed upstream yet.',
+        '- OpenCode: upstream wrapper exists; PhaseZero use remains blocked pending route/auth/memory homologation.',
         '',
         'Proxy and automation:',
         '- n8n: run `headroom proxy --port 8787` and point OpenAI-compatible nodes to the local proxy after adding your own credentials in n8n.',
@@ -29094,7 +29090,7 @@ function Invoke-Headroom {
 
 switch ($Action) {
     'status' {
-        Invoke-Headroom -Args @('version')
+        Invoke-Headroom -Args @('--version')
         foreach ($name in @('claude','codex','aider','cursor','copilot','gemini','openclaw','opencode','n8n')) {
             $path = Resolve-PhaseZeroCommand -Name $name
             if ([string]::IsNullOrWhiteSpace($path)) {
@@ -29105,12 +29101,12 @@ switch ($Action) {
         }
     }
     'proxy' { Invoke-Headroom -Args @('proxy','--port','8787') }
-    'wrap-claude' { Invoke-Headroom -Args @('wrap','claude','--memory') }
-    'wrap-codex' { Invoke-Headroom -Args @('wrap','codex','--memory') }
+    'wrap-claude' { Write-Output '{"ok":false,"state":"blocked","reason":"experimental-route-auth-and-memory-homologation-required"}'; exit 69 }
+    'wrap-codex' { Write-Output '{"ok":false,"state":"blocked","reason":"experimental-route-auth-and-memory-homologation-required"}'; exit 69 }
     'wrap-aider' { Invoke-Headroom -Args @('wrap','aider') }
     'wrap-cursor' { Invoke-Headroom -Args @('wrap','cursor') }
     'wrap-copilot' { Invoke-Headroom -Args @('wrap','copilot') }
-    'wrap-gemini' { Invoke-Headroom -Args @('wrap','gemini') }
+    'wrap-gemini' { Write-Output '{"ok":false,"state":"unsupported","reason":"gemini-wrapper-not-supported-by-tested-headroom"}'; exit 69 }
     'wrap-openclaw' {
         Write-Output '{"blocked":true,"usageBlocked":true,"reason":"connection-grant-not-enforceable"}'
         [Console]::Error.WriteLine('OpenClaw blocked: account grants are not bound to each request.')

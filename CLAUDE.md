@@ -157,3 +157,12 @@ Safety:
 - Prefer dry-run, manifest diff, and rollback notes for generated files.
 
 <!-- END PONYTAIL ARCHITECTURE -->
+
+<!-- BEGIN PHASEZERO TOKEN ECONOMY claude-code -->
+Token profile for Claude Code only: basic. Other clients keep their own profile.
+Preserve user/project instructions, account, model, permissions and all acceptance checks.
+ai-memory stays connected in every profile. Search relevant memory before non-trivial work; retrieve a few relevant pages, never the entire store. Record durable learnings; lifecycle owns routine capture.
+If memory fails or resolves another project, report degraded state and use native ai-memory from this project directory. Never invent recall or create a second memory store.
+Use rg/scoped reads and existing native skills/tool discovery on demand. Preserve lockfiles and diagnostics.
+When RTK is available, use supported filtered commands for human-readable output. rtk proxy does not filter. Use raw output for machine contracts, exact diffs and missing diagnostics.
+<!-- END PHASEZERO TOKEN ECONOMY claude-code -->

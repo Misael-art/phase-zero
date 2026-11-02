@@ -254,6 +254,35 @@ def _memory_actions() -> list[ActionSpec]:
     return result
 
 
+def _economy_actions(root: Path) -> list[ActionSpec]:
+    policy = json.loads((root / "assets/agent-skills/token-economy.json").read_text())
+    parameters = (_p("project", "Pasta do projeto", "path"),
+                  _p("agent", "Agente", "choice", choices=tuple(policy["agents"])))
+    result = []
+    for name, title in (("apply", "Aplicar perfil de eficiência"), ("reset", "Restaurar eficiência padrão"),
+                        ("measure", "Comparar saída local do RTK"), ("record", "Importar uso para comparação A/B"),
+                        ("review", "Revisão de componentes de eficiência")):
+        args = ("ai", "token-economy", name, "--project", "{project}", "--agent", "{agent}")
+        fields = parameters
+        if name == "apply":
+            args += ("--profile", "{profile}")
+            fields += (_p("profile", "Perfil", "choice", choices=("basic", "economy")),)
+        if name == "record":
+            args += ("--path", "{path}")
+            fields += (_p("path", "Metadados de uso (.json)", "file"),)
+        preview = ("ai", "token-economy", "plan", "--project", "{project}", "--agent", "{agent}",
+                   "--profile", "{profile}" if name == "apply" else "basic", "--json")
+        if name in {"measure", "record"}:
+            preview = ("ai", "token-economy", "status", "--project", "{project}", "--json")
+        result.append(_a("ai.tokens-" + name, "IA & Dev", title,
+                         "Regras aditivas e evidências; preserva ai-memory, conta, modelo e permissões.",
+                         (*args, "--json"), "view-statistics", mutable=name != "review",
+                         preview=preview if name != "review" else None, parameters=fields,
+                         status_args=("ai", "token-economy", "status", "--json"),
+                         group="Eficiência", visibility="advanced"))
+    return result
+
+
 def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSpec]:
     actions: list[ActionSpec] = [
         _a("system.doctor", "Visão geral", "Diagnóstico completo", "Audita host, boot, jogos, IA e integrações.", ("doctor",), "dialog-information", badge="Seguro"),
@@ -677,6 +706,7 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
     )
 
     actions.extend(_memory_actions())
+    actions.extend(_economy_actions(root))
     ai_rows = [
         ("status", "Status IA", "Stack local e agentes.", ("ai", "status"), None),
         ("doctor", "Diagnóstico dos conectores", "Audita as integrações MCP — o que liga os agentes a ferramentas e memória.", ("ai", "doctor"), None),
@@ -1134,7 +1164,7 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
             _a("ai.desktop.updates.off", "IA & Dev", "Desligar atualização automática dos apps IA", "Desliga o timer de atualização; os apps instalados não mudam.", ("ai", "desktop", "disable-updates"), "edit-undo", mutable=True, preview=("ai", "desktop", "status"), visibility="advanced"),
             _a("ai.desktop.qwen", "IA & Dev", "Instalar Qwen Code Desktop", "Instala AppImage oficial verificada para usuário.", ("ai", "desktop", "install-qwen"), "system-software-install", mutable=True, preview=("ai", "desktop", "status"), visibility="advanced"),
             _a("ai.desktop.codex", "IA & Dev", "Reparar Codex Desktop", "Repara atualização local falha.", ("ai", "desktop", "repair-codex"), "tools-check-spelling", mutable=True, preview=("ai", "desktop", "status"), visibility="advanced"),
-            _a("ai.token-economy", "IA & Dev", "Economia de tokens", "Audita contexto e runtime de agentes.", ("ai", "token-economy", "status"), "utilities-system-monitor", visibility="advanced"),
+            _a("ai.token-economy", "IA & Dev", "Eficiência e memória dos agentes", "Perfis por projeto, vínculo da memória e evidências sem inferência paga.", ("ai", "token-economy", "status", "--json"), "utilities-system-monitor"),
             _a("ai.admin.status", "IA & Dev", "Status admin bridge", "Audita elevação PhaseZero.", ("ai", "admin", "status"), "security-high", visibility="advanced"),
             _a("ai.omo.status", "IA & Dev", "Status OMO", "Audita oh-my-openagent.", ("ai", "omo", "status"), "applications-development", visibility="advanced"),
             _a("ai.omo.doctor", "IA & Dev", "Diagnóstico OMO", "Diagnostica plugin OpenCode.", ("ai", "omo", "doctor"), "system-search", visibility="advanced"),

@@ -148,10 +148,10 @@ Describe 'Bootstrap profile mode' {
         [bool]$components['indextts2'].requiresGpu | Should Be $true
         [string]$components['llamacpp-server'].manualReason | Should Match 'MTP|modelo'
         [string]$components['headroom-ai'].Kind | Should Be 'uvtool'
-        [string]$components['headroom-ai'].Package | Should Be 'headroom-ai[proxy]'
+        [string]$components['headroom-ai'].Package | Should Be ('headroom-ai[proxy]==' + [string](Get-Content -LiteralPath (Join-Path $repoRoot 'assets/agent-skills/token-economy.json') -Raw | ConvertFrom-Json).headroomVersion)
         [string]$components['headroom-ai'].CommandName | Should Be 'headroom'
         (@($components['headroom-ai'].DependsOn) -contains 'rustup') | Should Be $true
-        (@($profiles['ai'].Items) -contains 'headroom-ai') | Should Be $true
+        (@($profiles['ai'].Items) -contains 'headroom-ai') | Should Be $false
     }
 
     It 'declares transcript on-demand app ids and resolves them to components' {
