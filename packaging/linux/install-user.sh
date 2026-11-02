@@ -71,12 +71,18 @@ install -m644 "$ROOT/packaging/linux/io.phasezero.ControlCenter.svg" \
     "$ICON_DIR/io.phasezero.ControlCenter.svg"
 
 prune_install_tree() {
-    local base="$1" keep="$2" protected="${3:-}" index path
-    local -a entries=()
+    local base="$1" keep="$2" protected="${3:-}" index path entry
+    local pattern="${4:-^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$}"
+    local -a entries=() candidates=()
     [ -d "$base" ] || return 0
-    mapfile -d '' entries < <(
+    mapfile -d '' candidates < <(
         find "$base" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\0' | sort -zrn
     )
+    for entry in "${candidates[@]}"; do
+        path="${entry#* }"
+        [[ "${path##*/}" =~ $pattern ]] || continue
+        entries+=("$entry")
+    done
     for ((index = keep; index < ${#entries[@]}; index++)); do
         path="${entries[$index]#* }"
         [ -n "$protected" ] && [ "$(readlink -f "$path")" = "$protected" ] && continue
@@ -86,7 +92,8 @@ prune_install_tree() {
     done
 }
 prune_install_tree "$INSTALL_BASE/releases" 3 "$(readlink -f "$CURRENT_LINK")"
-prune_install_tree "$INSTALL_BASE/backups" 3
+prune_install_tree "$INSTALL_BASE/backups" 3 "" \
+    '^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?\.[0-9]{14}\.[0-9]+$'
 
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
