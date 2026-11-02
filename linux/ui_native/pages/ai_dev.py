@@ -116,8 +116,9 @@ _BRIDGE_BUTTONS = (
      "Envia um turno real pelo bridge. Gasta uma mensagem da sua conta ChatGPT."),
     ("chatgptWebUpdate", "Atualizar app", ("update",), True,
      "Baixa a versão mais nova do Codex Web GPT, confere o SHA-256 publicado na release, "
-     "reinstala o launcher isolado e religa. Feche a janela do Codex Web antes; o login é "
-     "mantido e, se algo falhar, a versão anterior volta."),
+     "migra a integração e religa o launcher isolado. Feche somente o Codex do perfil Web "
+     "antes; login e preferências são mantidos. Se uma atualização ficou incompleta, "
+     "conclui com o pacote local já conferido; clique novamente para retomar."),
     ("chatgptWebDisable", "Desligar", ("disable",), True,
      "Restaura a rota do perfil dedicado e encerra o launcher. O ~/.codex do seu Codex "
      "normal não é alterado; o login do ChatGPT no launcher é mantido."),

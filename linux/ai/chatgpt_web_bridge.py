@@ -792,6 +792,10 @@ class Runner:
             probe.settimeout(0.5)
             return probe.connect_ex(("127.0.0.1", port)) == 0
 
+    def process_start_ticks(self, pid: int) -> str:
+        stat = (Path("/proc") / str(pid) / "stat").read_text(encoding="utf-8")
+        return stat[stat.rfind(")") + 2:].split()[19]
+
     def tunnel_ready(self, profile: Path) -> bool | None:
         """Ask the tunnel client's own health endpoint; None when it cannot be found.
 
@@ -1200,6 +1204,160 @@ class Bridge:
             raise BridgeError("runtime upstream fora do diretório gerenciado", "upstream-escaped")
         return command
 
+    def _runtime_version(self, command: Any) -> str | None:
+        """Recognize only the two Linux command shapes produced by upstream."""
+        if not isinstance(command, list) or not command or not all(isinstance(x, str) for x in command):
+            return None
+        versions = self.paths.core_home / "versions"
+        match = re.fullmatch(re.escape(str(versions)) + r"/([0-9]+\.[0-9]+\.[0-9]+)-linux-x64/(?:bin/codex-chatgpt-web|runtime/bun)",
+                             command[0])
+        if not match:
+            return None
+        root = versions / f"{match[1]}-linux-x64"
+        if command not in ([str(root / "bin/codex-chatgpt-web")],
+                           [str(root / "runtime/bun"), str(root / "app/cli.js")]):
+            return None
+        return match[1]
+
+    def runtime_migration_needed(self) -> bool:
+        version = self._runtime_version((self.upstream_config() or {}).get("runtimeCommand"))
+        return version is not None and version != PIN["version"]
+
+    def _integration_files(self) -> list[Path]:
+        return [self.paths.core_home / "config.json",
+                self.paths.core_home / "codex/integration-journal.json",
+                self.paths.core_home / "codex/integration-journal.recovery.json"]
+
+    def recover_runtime_migration(self) -> bool:
+        """Recover an interrupted local transaction before starting upstream."""
+        receipt = self.paths.journal / "runtime-migration.json"
+        record = self._read_json(receipt) or {}
+        if record.get("status") != "pending":
+            return False
+        if self.launcher_active():
+            raise BridgeError("migração interrompida com launcher ativo; encerre o launcher e tente novamente",
+                              "runtime-migration-busy")
+        originals = []
+        entries = record.get("files", [])
+        if not isinstance(entries, list) or len(entries) != 3 or not all(isinstance(e, dict) for e in entries):
+            raise BridgeError("registro da migração inválido; backups preservados", "runtime-migration-conflict")
+        for entry, path in zip(entries, self._integration_files()):
+            try:
+                backup = Path(entry["backup"])
+                valid = (entry["path"] == str(path) and backup.resolve().is_relative_to(self.paths.journal.resolve())
+                         and sha256_file(backup) == entry["before"]
+                         and sha256_file(path) in {entry["before"], entry["after"]})
+            except (OSError, KeyError, TypeError):
+                valid = False
+            if not valid:
+                raise BridgeError("configuração mudou durante migração; backups preservados",
+                                  "runtime-migration-conflict")
+            originals.append((path, backup.read_bytes()))
+        for path, data in originals:
+            atomic_write(path, data)
+        record["status"] = "rolled-back"
+        atomic_write(receipt, (json.dumps(record, indent=2) + "\n").encode())
+        return True
+
+    def migrate_runtime(self) -> dict[str, Any]:
+        """Rebind an inactive v10 integration to the verified bundled runtime.
+
+        Upstream reconnect intentionally reuses the journal's interrupt command;
+        updating config.runtimeCommand alone keeps executing the previous release.
+        Never guess between divergent baselines or replace user hook commands.
+        """
+        if not self.runtime_migration_needed():
+            return {"runtime": "current"}
+        self.require_opt_in(self.load_state())
+        if self.launcher_active() or self.runner.codex_processes(self.paths.codex_home):
+            raise BridgeError("feche o Codex dedicado antes de migrar o runtime", "runtime-migration-busy")
+        package = self.package_state()
+        if package.get("state") != "verified" or package.get("unpacked") != "verified":
+            raise BridgeError("runtime exige pacote e instalação conferidos", "install-unverified")
+        bundle = self.paths.app / "resources/runtime"
+        manifest = self._read_json(bundle / "manifest.json") or {}
+        target = self.paths.core_home / "versions" / f"{PIN['version']}-linux-x64"
+        if (manifest.get("schemaVersion") != 2 or manifest.get("appVersion") != PIN["version"]
+                or manifest.get("platform") != "linux" or manifest.get("arch") != "x64"
+                or not isinstance(manifest.get("files"), list) or not manifest["files"]):
+            raise BridgeError("manifesto do runtime não reconhecido", "runtime-unverified")
+        if not target.exists():
+            # Prepare the canonical upstream directory before the new launcher
+            # can attempt its own upgrade concurrently with our route activation.
+            private_dir(target.parent)
+            with tempfile.TemporaryDirectory(prefix=".prepare-runtime-", dir=target.parent) as scratch:
+                staged = Path(scratch) / "runtime"
+                shutil.copytree(bundle, staged, symlinks=True)
+                self._verify_runtime_tree(staged, manifest)
+                os.replace(staged, target)
+        self._verify_runtime_tree(target, manifest)
+        files = self._integration_files()
+        try:
+            originals = [p.read_bytes() for p in files]
+            config, journal, recovery = [json.loads(data) for data in originals]
+            old = config["runtimeCommand"]
+            old_command = " ".join("'" + x.replace("'", "'\"'\"'") + "'"
+                                   for x in [*old, "--home", str(self.paths.core_home.resolve()), "hook", "interrupt"])
+            hook = journal["interruptHook"]
+            def trusted_hash(command: str) -> str:
+                payload = {"event_name": "interrupt", "hooks": [
+                    {"async": False, "command": command, "timeout": 3, "type": "command"}]}
+                return "sha256:" + sha256_bytes(json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                                                            separators=(",", ":")).encode())
+            if (journal != recovery or journal.get("version") != 10 or journal.get("active") is not False
+                    or journal.get("configPath") != str(self.paths.codex_config.resolve())
+                    or hook["command"] != old_command or hook["trustedHash"] != trusted_hash(old_command)
+                    or hook["fragment"].count("command = " + json.dumps(old_command, ensure_ascii=False)) != 1
+                    or hook["fragment"].count(hook["trustedHash"]) != 1):
+                raise ValueError("unrecognized journal")
+        except (OSError, ValueError, KeyError, TypeError):
+            raise BridgeError("integração possui baselines ou hooks não reconhecidos; configurações preservadas",
+                              "runtime-migration-conflict") from None
+        command = [str(target / "runtime/bun"), str(target / "app/cli.js")]
+        rendered = " ".join("'" + x.replace("'", "'\"'\"'") + "'"
+                            for x in [*command, "--home", str(self.paths.core_home.resolve()), "hook", "interrupt"])
+        new_hash = trusted_hash(rendered)
+        hook["fragment"] = hook["fragment"].replace(json.dumps(old_command, ensure_ascii=False),
+                                                   json.dumps(rendered, ensure_ascii=False)).replace(hook["trustedHash"], new_hash)
+        hook.update(command=rendered, trustedHash=new_hash)
+        config.update(runtimeCommand=command, releaseVersion=PIN["version"])
+        updated = [(json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode()
+                   for value in (config, journal, journal)]
+        backup_dir = private_dir(self.paths.journal / f"runtime-{time.time_ns()}")
+        record = {"status": "pending", "from": self._runtime_version(old), "to": PIN["version"], "files": []}
+        for index, (path, before, after) in enumerate(zip(files, originals, updated)):
+            backup = backup_dir / f"{index}-{path.name}"
+            atomic_write(backup, before)
+            record["files"].append({"path": str(path), "backup": str(backup),
+                                    "before": sha256_bytes(before), "after": sha256_bytes(after)})
+        receipt = self.paths.journal / "runtime-migration.json"
+        atomic_write(receipt, (json.dumps(record, indent=2) + "\n").encode())
+        try:
+            for path, data in zip(files, updated):
+                atomic_write(path, data)
+        except OSError:
+            self.recover_runtime_migration()
+            raise BridgeError("gravação interrompida; integração anterior restaurada. "
+                              "Confira espaço em disco e clique Atualizar para retomar",
+                              "runtime-migration-write-failed") from None
+        record["status"] = "complete"
+        atomic_write(receipt, (json.dumps(record, indent=2) + "\n").encode())
+        return {"runtime": "migrated", "from": record["from"], "to": record["to"]}
+
+    def _verify_runtime_tree(self, target: Path, manifest: dict[str, Any]) -> None:
+        verified = set()
+        for item in manifest["files"]:
+            relative = Path(item["path"])
+            path = target / relative
+            if (relative.is_absolute() or ".." in relative.parts
+                    or not path.resolve().is_relative_to(target.resolve())
+                    or not path.is_file() or path.stat().st_size != item["size"]
+                    or sha256_file(path) != item["sha256"]):
+                raise BridgeError("runtime alterado ou incompleto; reinstalação necessária", "runtime-unverified")
+            verified.add(item["path"])
+        if not {"runtime/bun", "app/cli.js", "bin/codex-chatgpt-web"} <= verified:
+            raise BridgeError("executáveis ausentes no manifesto", "runtime-unverified")
+
     def upstream_cli(self, args: list[str], timeout: int = 60) -> tuple[int, str, str]:
         """Run the upstream CLI with the same path restrictions as the launcher unit."""
         env = self.upstream_env()
@@ -1209,6 +1367,69 @@ class Bridge:
         for name in ("CODEX_HOME", "CODEX_CHATGPT_WEB_HOME", "CODEX_WEB_GPT_LAUNCHER_DATA_DIR"):
             command.append(f"--setenv={name}={env[name]}")
         return self.runner.run(command + self.runtime_command() + args, env=env, timeout=timeout)
+
+    def repair_stale_tunnel_pid(self) -> bool:
+        """Clear only this profile's proven reused PID, under upstream's own lock.
+
+        tunnel-client 0.0.16 inspects /proc/PID/exe before comparing start ticks.
+        A reused, non-dumpable desktop PID can therefore block connect forever.
+        Never signal it, remove an alias, or reset the shared runtime registry.
+        """
+        config = self.upstream_config() or {}
+        tunnel = config.get("tunnel") or {}
+        binary = self.paths.core_home / "bin/tunnel-client"
+        profile_dir = self.paths.core_home / "tunnel/profiles"
+        if (config.get("mode") != "full" or tunnel.get("binaryPath") != str(binary)
+                or tunnel.get("profileDir") != str(profile_dir) or not binary.is_file()
+                or not binary.resolve().is_relative_to(self.paths.core_home.resolve())):
+            return False
+        self.require_opt_in(self.load_state())
+        if self.launcher_active() or self.runner.codex_processes(self.paths.codex_home):
+            raise BridgeError("encerre o perfil dedicado antes de recuperar o túnel", "codex-running")
+        code, out, _ = self.runner.run([str(binary), "runtimes", "cleanup", "--json"],
+                                      env=self.upstream_env(), timeout=30)
+        try:
+            root = Path(json.loads(out)["state_root"])
+            if code or not root.is_absolute():
+                return False
+        except (ValueError, KeyError, TypeError):
+            return False
+        import fcntl
+        registry = root / "processes.yaml"  # upstream writes JSON to this filename
+        lock = root / "locks/state.lock"
+        if (registry.is_symlink() or lock.is_symlink() or not registry.is_file() or not lock.is_file()
+                or registry.stat().st_uid != os.getuid() or lock.stat().st_uid != os.getuid()):
+            return False
+        try:
+            with lock.open("r+b") as stream:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                before = registry.read_bytes()
+                entries = json.loads(before)
+                alias = tunnel.get("alias")
+                record = entries.get(alias, {})
+                pid, expected = record.get("pid"), record.get("pid_start_time")
+                profile = profile_dir / f"{tunnel.get('profileName')}.yaml"
+                if (record.get("alias") != alias or record.get("mode") != "process"
+                        or not isinstance(pid, int) or pid <= 0 or not isinstance(expected, str)
+                        or not expected.isdigit() or record.get("pid_executable") != str(binary)
+                        or record.get("config_path") != str(profile)
+                        or record.get("profile_path") != str(profile)):
+                    return False
+                current = self.runner.process_start_ticks(pid)
+                if not current.isdigit() or current == expected:
+                    return False
+                # A changing/disappearing PID is ambiguous. Retry through native supervision.
+                if self.runner.process_start_ticks(pid) != current:
+                    return False
+                private_dir(self.paths.journal)
+                backup = self.paths.journal / f"tunnel-processes-{sha256_bytes(before)[:16]}.json"
+                atomic_write(backup, before)
+                record.update(mode="stopped", pid=0, pid_start_time="", pid_executable="",
+                              session_name="", tmux_socket="")
+                atomic_write(registry, (json.dumps(entries, indent=2) + "\n").encode())
+                return True
+        except (OSError, ValueError, IndexError, AttributeError):
+            return False
 
     # ---- isolation -------------------------------------------------------
 
@@ -1720,12 +1941,19 @@ class Bridge:
         self.paths = Paths(self.env)
 
     def update(self, report: Callable[[str, str], None] = lambda *_: None) -> dict[str, Any]:
-        """Move to the newest upstream release, verified by hash; rolls back on failure."""
+        """Verify the new release; keep post-install configuration failures resumable."""
         if self.paths.instance:
             raise BridgeError("atualize pela conta principal; as contas dedicadas reutilizam o pacote",
                               "update-instance")
         self.require_opt_in(self.load_state())
         previous_version = PIN["version"]
+        if self.runtime_migration_needed() or self.load_state().get("updatePending"):
+            report("retomada", "concluindo configuração com o pacote local já conferido")
+            setup = self.setup(report, login_wait=0)
+            state = self.load_state()
+            state.pop("updatePending", None)
+            self.save_state(state)
+            return {"update": "recovered", "version": previous_version, "setup": setup}
         latest = self.latest_release()
         if version_tuple(latest["version"]) <= version_tuple(previous_version):
             return {"update": "current", "version": previous_version}
@@ -1762,7 +1990,19 @@ class Bridge:
                                   "to": latest["version"], "downloaded": fetched["downloaded"],
                                   "note": "hash confere com a release; não comprova identidade do publicador"}
         if was_active:
-            result["setup"] = self.setup(report, login_wait=0)
+            state = self.load_state()
+            state["updatePending"] = {"from": previous_version, "to": latest["version"],
+                                      "at": iso(self.clock())}
+            self.save_state(state)
+            try:
+                result["setup"] = self.setup(report, login_wait=0)
+            except BridgeError as error:
+                raise BridgeError("pacote atualizado; configuração pendente. Clique Atualizar novamente "
+                                  "para retomar com o pacote já conferido. " + str(error),
+                                  error.code) from None
+            state = self.load_state()
+            state.pop("updatePending", None)
+            self.save_state(state)
         return result
 
     # ---- launcher --------------------------------------------------------
@@ -1839,6 +2079,15 @@ class Bridge:
         blocked = self.preflight()["blocked"]
         if blocked:
             raise BridgeError("preflight bloqueou: " + ", ".join(blocked), "preflight")
+        self.recover_runtime_migration()
+        if self.runtime_migration_needed():
+            if self.runner.codex_processes(self.paths.codex_home):
+                raise BridgeError("feche o Codex dedicado antes de atualizar integração", "codex-running")
+            self.route_disable(allow_reset=False)
+            self.migrate_runtime()
+            state = self.load_state()
+            state.setdefault("updatePending", {"to": PIN["version"], "at": iso(self.clock())})
+        self.repair_stale_tunnel_pid()
         for directory in (self.paths.core_home, self.paths.launcher_data):
             private_dir(directory)
         self.seed_codex_home()
@@ -2107,14 +2356,14 @@ class Bridge:
         return {"route": "active", "diff": check["diff"], "backup": str(backup),
                 "next": "Reinicie o Codex do perfil dedicado para carregar a rota."}
 
-    def route_disable(self) -> dict[str, Any]:
+    def route_disable(self, *, allow_reset: bool = True) -> dict[str, Any]:
         state = self.load_state()
         if not self.upstream_config():
             return {"route": "not-installed"}
         code, out, err = self.upstream_cli(["route", "disconnect"])
         route = self.route_status()
         refusal = " ".join([out, err, *map(str, route.get("errors") or [])])
-        if route.get("active") is not False and UPSTREAM_REFUSAL in refusal:
+        if allow_reset and route.get("active") is not False and UPSTREAM_REFUSAL in refusal:
             return self.reset_route(state)
         if code != 0 or route.get("active") is not False:
             raise BridgeError("rota não foi restaurada: " + (err or out).strip()[:300]
@@ -2243,6 +2492,7 @@ class Bridge:
               login_wait: float = LOGIN_WAIT_SECONDS) -> dict[str, Any]:
         """Everything from a recorded opt-in to a working Web model, idempotent."""
         self.require_opt_in(self.load_state())
+        self.recover_runtime_migration()
         steps: list[dict[str, str]] = []
 
         def done(step: str, detail: str) -> None:
@@ -2284,6 +2534,21 @@ class Bridge:
                        "e rode `setup` de novo; o que já foi feito é reaproveitado.",
                        "login-required")
         done("login", "sessão ChatGPT presente no perfil do launcher")
+        if self.runtime_migration_needed():
+            if self.runner.codex_processes(self.paths.codex_home):
+                raise BridgeError("feche o Codex do perfil dedicado e clique Atualizar novamente; "
+                                  "sua sessão e configuração serão mantidas", "codex-running")
+            state = self.load_state()
+            state.setdefault("updatePending", {"to": PIN["version"], "at": iso(self.clock())})
+            self.save_state(state)
+            self.route_disable(allow_reset=False)
+            self.stop_launcher()
+            migration = self.migrate_runtime()
+            self.launch()
+            done("integração", f"runtime e hook migrados: {migration['from']} → {migration['to']}")
+            self._wait(self.descriptor_ready, DESCRIPTOR_WAIT_SECONDS,
+                       "launcher não ficou pronto após migração; clique Atualizar para retomar",
+                       "launcher-timeout")
         if (self.upstream_config() or {}).get("mode") not in {"browser-only", "full"}:
             if not self.upstream_config() and self.runner.port_in_use(self.paths.port):
                 # A daemon from a previous configuration still holds the port.
@@ -2309,7 +2574,13 @@ class Bridge:
             self.restart_launcher()
             self._wait(lambda: self.runner.port_in_use(self.paths.port), DAEMON_WAIT_SECONDS,
                        f"bridge não abriu 127.0.0.1:{self.paths.port}", "daemon-timeout")
+        if self.route_status().get("active") is not True or not self.route_verify()["ok"]:
+            raise BridgeError("bridge iniciou, mas rota ainda não ficou pronta; clique Atualizar "
+                              "ou Preparar ou reparar para retomar", "route-inactive")
         done("bridge", f"respondendo em 127.0.0.1:{self.paths.port}")
+        state = self.load_state()
+        if state.pop("updatePending", None) is not None:
+            self.save_state(state)
         self.runner.notify(NOTIFY_TITLE + " — pronto",
                            "Modelo Web ativo no perfil dedicado.\n"
                            "Abra com: pz ai chatgpt-web desktop\n"

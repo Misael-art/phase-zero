@@ -6,6 +6,8 @@ As versões seguem a data de build em `version.json`.
 ## [Unreleased]
 
 ### Corrigido
+- **Atualização do Codex Web GPT.** Migração transacional do runtime e hook evita misturar launcher novo com CLI antigo. Configuração incompleta pode ser retomada pelo mesmo botão com o pacote já verificado; journals divergentes continuam bloqueados, com backups preservados. Login, preferências e modo Full não são descartados.
+- **Túnel após reutilização de PID.** Recuperação reconhece registro antigo pelas marcas de início do kernel, sob lock nativo, e limpa somente identidade obsoleta do perfil gerenciado. Processo atual, outros aliases, chaves e túnel remoto permanecem preservados. Preparação só conclui com rota ativa e porta respondendo.
 - **Coerência das novas telas IA.** Catálogo web regenerado a partir do catálogo nativo; consultas diferidas incluem memória/eficiência. Testes Windows acompanham os novos caminhos de gerenciamento; gate Homelab consulta manifesto central da versão de ai-memory.
 - **Integridade das instalações Windows.** Conclusão do instalador deixa de aparecer como prova de saúde. Gerenciador oferece verificação somente leitura de QCOW2, cadeia de snapshot e arquivos essenciais do Windows, com estados separados para problema, instalação parcial, VM ocupada e resultado inconclusivo; nenhuma remoção automática.
 - **Espaço dos discos Windows.** UI separa capacidade virtual, blocos físicos do disco base, snapshot, mídias e cópia ativada. Criação QCOW2 explicita `preallocation=off`; discos existentes permanecem preservados e dinâmicos. Snapshots retêm blocos e não há promessa de recuperar espaço apagando arquivos no guest.

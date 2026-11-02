@@ -248,6 +248,12 @@ MCPs/rotas, perfis de eficiência e Harness aparecem em resumo visual; lista
 expansível mostra componentes individuais. Franquias e assinaturas ficam logo
 abaixo. Falha de leitura aparece como desconhecida, sem inventar estado saudável.
 
+**Codex Web já habilitado por opt-in:** **Atualizar app** mantém login e
+preferências, migra runtime e hook juntos e retoma uma configuração incompleta
+com o pacote local verificado. **Preparar ou reparar** usa a mesma recuperação.
+Feche somente o Codex do perfil Web antes de reiniciar a integração. Estado
+pronto exige rota ativa e bridge respondendo; teste com mensagem continua explícito.
+
 
 Para instalar o Harness no host, use **IA & Dev → DeepSeek Harness → Instalar**
 ou `pz ai deepseek-harness install --json`. A instalação é separada de iniciar;

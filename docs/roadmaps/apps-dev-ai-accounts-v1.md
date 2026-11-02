@@ -3126,6 +3126,58 @@ o sandbox do Codex, não o cartão de aprovação do ChatGPT.
   sandbox ficou `read-only` e a escrita foi recusada. Ao final, o host voltou
   ao padrão `inherit`.
 
+### PXA-010: atualização 6.1.14 → 6.1.17 e recuperação de PID — 2026-11-02
+
+Sintoma: **Atualizar app** instalou 6.1.17, preservou login, mas terminou em
+`route-enable-failed`. `config.json.runtimeCommand` e o hook dos journals v10
+ainda apontavam para 6.1.14. Reconectar upstream reutiliza deliberadamente o
+comando do journal; mudar somente o executável do launcher não migra integração.
+Havia também erro de baselines divergentes na tentativa automática upstream.
+
+Manager passa a verificar pacote, árvore instalada e todos os arquivos do
+manifesto do runtime alvo antes da migração. Com launcher e Codex dedicado
+parados, exige journals v10 inativos, iguais, vinculados ao perfil correto e
+hook anterior reconhecido, com hash de confiança válido. Atualiza somente
+runtime/release e comando/hash/fragmento do hook. Mantém duas cópias coerentes,
+backups privados e receipt transacional. Gravação interrompida restaura originais;
+interrupção entre arquivos é recuperada antes de iniciar upstream. Alteração
+concorrente ou baseline desconhecido bloqueia, sem escolher cópia arbitrária nem
+repor configuração antiga por cima de preferências. Migração não usa fallback
+`restored-by-reset`.
+
+Quando o runtime alvo ainda não existe, prepara diretório canônico a partir do
+bundle já verificado, em staging temporário, confere manifesto e ativa por rename.
+Migração acontece antes de iniciar launcher novo: seu atualizador interno não
+disputa os mesmos journals com a reativação PhaseZero.
+
+Atualização conserva `updatePending` quando pacote foi instalado mas preparação
+falhou. Mesmo botão retoma primeiro com artefato local verificado, sem consulta
+de release nem novo download. `setup` compartilha recuperação e só limpa pendência
+com rota ativa, política válida e porta respondendo. UI explica retomada, em vez
+de prometer rollback de versão após toda falha de configuração. Mudanças
+desconhecidas continuam recusadas; gates do modo Full continuam obrigatórios.
+
+Na validação real apareceu bloqueio adicional, anterior ao upgrade:
+`tunnel-client 0.0.16` tentava inspecionar executável de PID antigo reutilizado por
+processo não inspecionável do desktop. Marca de início registrada era diferente
+da atual. Recuperação usa raiz informada pelo CLI nativo, lock persistente
+`locks/state.lock` e JSON nativo `processes.yaml`. Confere alias, perfil,
+executável registrado e duas leituras estáveis de `/proc/<pid>/stat`; somente
+identidade comprovadamente obsoleta vira `stopped`, com backup. Nunca envia sinal
+ao PID, remove aliases, troca cofre nem reinicializa registro compartilhado.
+Identidade incompleta, mesmo processo, outro perfil ou lock ocupado não autorizam
+limpeza. Contrato do lock: [fonte upstream v0.0.16](https://github.com/openai/tunnel-client/blob/v0.0.16/pkg/codexplugin/state/lock.go).
+
+Prova: CLI 6.1.17 real em perfil descartável, sem sessão/inferência, conectou,
+desconectou restaurando configuração e reconectou com journals iguais. Host real
+retomou atualização: `ready=true`, `tools-experimental`, modo Full preservado,
+rota ativa e `127.0.0.1:17841` respondendo. Login presente, configuração principal
+com mesmo SHA-256; modelo, sandbox, aprovação, preferências Desktop, projetos,
+plugins e MCPs iguais. PID reutilizado ficou intacto. Evidência privada:
+`~/.cache/phasezero-dev/codex-web-update/host-repair-receipt.json` e
+`native-migration/receipt.json`. Nenhuma mensagem de teste ou inferência enviada;
+esta prova não renova homologação de cota, escrita/MCP ou sessão no provedor.
+
 ### Contas Codex no painel — incremento de 2026-10-29
 
 PXA-006/010: implementação Linux de perfis de conta em **Contas e conexões →
