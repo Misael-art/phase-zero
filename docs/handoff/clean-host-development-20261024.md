@@ -338,3 +338,48 @@ projeto resolvido pelo remoto, sem duplicar escopo pelo nome da pasta.
 Alterações anteriores deste handoff (+27 linhas) e script touch alheio preservados
 fora do incremento. Próximo passo: conferir checks do SHA final do PR #129,
 exportar recuperação local e executar gates físicos antes de ampliar homologação.
+
+
+## Eficiência dos agentes — implementação e instalação 2026-11-01
+
+Base `faec0240`; implementação `ef98f6f69e440b319c64f28e3971f67cdb91ab8d`.
+Mesma raiz/branch/PR #129. Contrato completo, IDs ECO-001..010, operação,
+fontes, schema A/B e limites: `docs/roadmaps/ai-token-economy-v1.md`.
+
+**Entrega:** owner Python único para perfis por projeto/agente; Padrão essencial
+preserva RTK/higiene/memória, Econômico acrescenta instruções. Regras nativas
+aditivas com backup central, lock, drift, rollback e adoção de blocos canônicos
+em host novo. CLI, catálogo Qt e WPF delegam ao mesmo owner. UI oferece pasta,
+agente, perfil, aplicar/padrão, medição local, importação A/B e revisão; atalhos
+convergem à jornada IA & Dev. Memória continua no manager existente, sem outro
+store. Headroom sai da base automática, instalação nova fixa versão testada;
+wrappers sem contrato ficam bloqueados. Design deixa de ser instalado junto
+com skill de concisão; instalações existentes preservadas.
+
+**Testes:** 150 pytest na rodada ampla; últimos refinamentos em 46 testes
+focados, sobrepostos. Shell IA/compat/grants, ShellCheck, parser/analyzer
+PowerShell e dois contratos Pester 6 passaram. Installed-root smoke passou.
+Xvfb com HOME isolado e xcb: 12 combinações de tema/dimensão/escala com teclado,
+ponteiro e sem overflow. Tentativas que herdaram Wayland não entram no aceite.
+
+**Host:** Padrão aplicado explicitamente a Codex, Claude Code e OpenCode neste
+projeto; conteúdo anterior de AGENTS.md/CLAUDE.md e instruções existentes
+preservados. Runtime de usuário instalado do arquivo imutável da implementação,
+após ensaio do instalador oficial em HOME isolado. CLI instalado confirmou os
+três perfis e receipts de serviço/MCP/hooks. Probe da ficha instalada, com
+backend real e preferências visuais isoladas, confirmou Padrão, memória vinculada
+e botão Aplicar habilitado. ai-memory, timer e watcher continuam ativos. Snapshot da versão anterior do aplicativo fica no backup do instalador;
+backups e cofre da memória permanecem sob seus owners anteriores.
+
+Medição real em estado anterior à commit: 4.325 → 2.978 bytes nos três comandos
+Git fixos, 31,14% de redução local; estimativa 1.082 → 745 tokens. Não comprova
+fatura, sessão inteira ou equivalência de qualidade. Metadados/fingerprint e
+capturas ficam no cache privado `phasezero-dev/token-economy`; sem prompts,
+credenciais ou exportações de uso privadas no Git. Nenhuma inferência paga.
+
+**Limites/próximo passo:** Windows/WPF físico e interpretação por cada modelo
+permanecem sem homologação. Importação A/B é reportada, não atestada, e não
+promove perfil automaticamente. Obter pares reais equivalentes com mesmo
+aceite/modelo/runtime/revisão antes de afirmar ganho total. Conferir CI do SHA
+final; sem merge ou release. Acréscimo prévio de 27 linhas neste handoff e
+script touch alheio permanecem fora do incremento.
