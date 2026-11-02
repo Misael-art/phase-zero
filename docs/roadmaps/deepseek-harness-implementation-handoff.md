@@ -130,3 +130,65 @@ Uninstall removes PhaseZero runtime/state only; it preserves `DSH_HOME` account/
 data and selected workspace. Back up or revoke credentials inside Harness before
 deleting those homes manually. To revert code after merge, revert implementation
 commits in reverse order; do not delete DSH homes as part of code rollback.
+
+## Host installation and publication preparation — 2026-11-01
+
+Objective: install the pinned Harness on the authorized host, document existing
+memory/efficiency settings, update README/changelog and prepare the requested
+publication. Owner: Harness lifecycle and release tooling. Canonical checkout:
+`/home/misael/Projects/PhaseZero`, branch `codex/clean-host-dev-bootstrap`, draft
+[PR #129](https://github.com/Misael-art/phase-zero/pull/129). Initial HEAD:
+`08ca96ef118a1678bb0d4963381a593c83b7c3fa`; implementation/documentation fix:
+`e92f1bd85cd81790f3d72d5d01fc46e671e4119f`. Handoff commit: `git log -1 --format=%H -- docs/roadmaps/deepseek-harness-implementation-handoff.md`.
+
+### Delivered and verified
+
+- README and changelog cover pinned Harness, portable memory and project/client
+  efficiency profiles. Detailed installation parameters remain owned by
+  `packaging/deepseek-harness/README.md`, with links to the two existing roadmaps.
+- Exact-SHA CI on the initial HEAD exposed stale contracts: fallback web catalog,
+  deferred AI page probes, Windows Health routes and hardcoded ai-memory version.
+  Fixed these contracts without disabling gates or changing runtime safeguards.
+- **Fixture on Linux:** 41 Python tests passed (`test_accounts_page`,
+  `test_installation_cohesion`, `test_linux_ui_server`); complete hermetic
+  `tests/linux-homelab.sh` passed; Bash parser and ShellCheck with official CI
+  options passed. Four changed Health assertion blocks passed with Pester 6
+  assertion syntax in a private portable fixture; PowerShell parser passed.
+  Pester 3.4 cannot import its Windows WMI dependency on this Linux host; this
+  portable check does not replace the complete Windows CI suite.
+- Source input metadata rechecked: Node SHA-256 and npm DSH integrity match pins.
+  Linux x64: 563 npm archives, 139,655,863 bytes, plus Node 32,015,600 bytes;
+  **171,671,463 bytes** total, excluding possible native-hook transfers.
+  Metadata obtained using bounded header/range requests; runtime not downloaded.
+- Private receipts, budget, logs and portable assertions:
+  `~/.cache/phasezero-dev/harness-release/` (directory mode 0700).
+  Budget receipt SHA-256: `96f987cc75bc5012a4422a6431894a56b7154188560257aeac7be4e858ec9da0`.
+- Durable learning saved in this project's ai-memory:
+  `gotchas/ai-release-ui-contracts-and-harness-budget-20261101.md`. Host provenance
+  and exact fixes included; no secret or private backup destination published.
+
+### Actual host state, limits and next action
+
+Host `misael-jupiter`, BigLinux/Manjaro x86_64: official installed `pz` reports
+Harness `not-installed`, reason `absent`. Installation remains pending because
+Projects/AGENTS.md §9 requires operator initiation above 70,000,000 bytes, counting
+the full package. Operator action: **IA & Dev → DeepSeek Harness → Instalar** or
+`pz ai deepseek-harness install --json`; then retain `status --json` and
+`doctor --json` receipts. Do not bypass preflight, substitute global Node or copy
+files into the runtime manually. No Harness process, credentials, autostart,
+paid inference, host service or workload was changed in this preparation.
+
+Publication request names Bitbucket, while only GitHub origin is configured and
+no Bitbucket connection/destination was found. Destination clarification is
+pending; do not substitute GitHub or create a remote by guess. README/changelog
+remain `Unreleased`, version stays 1.22.12 beta, no new tag/release or artifact
+publication. Exact-SHA CI must pass before release; no red-CI override. Existing
+release helper also refuses tracked dirty work: unrelated handoff edits and
+untracked touch-repair script were preserved, excluded from this increment.
+Do not stash, revert or commit them to satisfy that gate.
+
+Next: complete the operator-started install, verify actual runtime via its owner,
+record remaining account/sandbox/memory-client gates honestly; resolve publication
+destination; inspect new exact-SHA CI; only then prepare the next eligible beta
+with immutable metadata/tag, build artifacts and checksums through the official
+release workflow. Cryptographic signing has not been performed or claimed.
