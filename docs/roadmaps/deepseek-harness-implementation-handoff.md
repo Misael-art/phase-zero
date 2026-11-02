@@ -192,3 +192,47 @@ record remaining account/sandbox/memory-client gates honestly; resolve publicati
 destination; inspect new exact-SHA CI; only then prepare the next eligible beta
 with immutable metadata/tag, build artifacts and checksums through the official
 release workflow. Cryptographic signing has not been performed or claimed.
+
+## Operator-completed host installation — 2026-11-02 UTC
+
+This supersedes the pending-install state in the previous preparation entry.
+Operator ran the official `pz ai deepseek-harness install --json`; active receipt
+records `2026-11-02T02:41:24Z` (2026-11-01 local time). Runtime was installed on
+`misael-jupiter`, BigLinux/Manjaro x86_64, without bypassing resource or download
+rules. Source baseline remains `3bafdd558d592e7728bd641cf754d0dd9a12ed25` on the
+same canonical branch/PR #129. Only installation documentation changed here;
+unrelated handoff edits and touch-repair script remain excluded.
+
+**Actual host checks:** official installed CLI reports `installed=true`, version
+`0.2.1-rc.2`, runtime `stopped`, configuration `needed`. Doctor returns `ok=true`,
+`localChecksPassed=true`, state `partial`: pins/lock/SBOM and Node/package checks
+pass; approximately 5 GiB RAM available versus the unchanged 2 GiB minimum.
+Private Node executes `--version` as `v24.22.0`; installed npm package declares
+`0.2.1-rc.2`. Installed lockfile equals the repository bytes, SHA-256
+`4bac0867926ac65836ff1d9a1236546ecda2f593703ba15286e1bddbeaf67049`.
+Managed root and active runtime permissions are both `0700`.
+
+**Installed UI state probe:** offscreen Qt loaded the installed PhaseZero source
+and the actual CLI status receipt. Connect/choose folder and Verify are enabled;
+Install/Open are hidden and Stop disabled. Visible text correctly identifies the
+installed, stopped runtime and asks for route/folder; it does not claim login.
+Other host queries were stubbed and no action dispatched. This checks rendering
+and available controls, not the live compositor, pointer, login or inference.
+Private receipts: `host-status-installed.json`, `host-doctor-installed.json`,
+`installed-integrity.json`, `installed-ui-state.json` in the existing protected
+`~/.cache/phasezero-dev/harness-release/` evidence directory.
+
+No route or workspace has been chosen. No Harness process was started; account,
+API validity, quota, model execution, memory-client wiring and sandbox enforcement
+remain unverified. Telemetry remains disabled and autostart off. Next operator
+step: **IA & Dev → DeepSeek Harness → Conectar / escolher pasta**, select account
+or API and the intended existing folder; enter credentials only in upstream UI.
+The pending route/workspace question must be resolved before starting on behalf
+of the operator. Stop/uninstall recovery commands above remain available.
+
+CI snapshot on baseline `3bafdd55`: 27 successful checks, 10 in progress, 2 skipped,
+no observed failure. This is not a completed gate and does not certify subsequent
+commits. Version remains 1.22.12 beta / changelog Unreleased; requested Bitbucket
+destination still unresolved, no tag or release created. Next publication step:
+resolve destination, verify required exact-SHA CI, then use the eligible official
+release path. No cryptographic signature was produced or claimed.

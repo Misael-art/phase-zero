@@ -1,6 +1,6 @@
 # DeepSeek Harness no PhaseZero — auditoria e plano v1
 
-Estado: **implementação Experimental do PR #127 incorporada seletivamente ao checkout canônico em 2026-11-01, após revisão das correções de quota. Integração atual em validação na branch `codex/clean-host-dev-bootstrap`, PR #129. CI histórica de `50e555063d5eabe5d51f32350611cf06ce5ceb96` não certifica o novo incremento. Sem instalação do Harness no host; gates de conta, sandbox, usabilidade e custo seguem abertos.**
+Estado: **implementação Experimental do PR #127 incorporada seletivamente ao checkout canônico em 2026-11-01, após revisão das correções de quota. Integração atual em validação na branch `codex/clean-host-dev-bootstrap`, PR #129. CI histórica de `50e555063d5eabe5d51f32350611cf06ce5ceb96` não certifica o novo incremento. Operador concluiu instalação Linux x64 no host em `2026-11-02T02:41:24Z`; Node privado, versão do pacote e lockfile conferidos. Runtime parado, pasta/rota ainda não escolhidas; gates de conta, sandbox, usabilidade e custo seguem abertos.**
 
 Auditoria: 2026-10-21, host Manjaro/Arch Linux, `origin/main` `ddadd6de4fc5a0b8933c2d312e2f8a6dd7f1aff3`.
 

@@ -19,7 +19,7 @@ As versões seguem a data de build em `version.json`.
 - **Reparar terminal e sessão sob demanda.** Atalho padrão no menu e área de trabalho recupera falta de espaço no runtime da sessão arquivando somente fixtures inativas verificadas, com backup. Novos temporários de agentes/testes passam ao disco; aplicações abertas, sessão KDE e host permanecem ativos.
 
 ### Limitações
-- Novidades permanecem em `Unreleased` até versão, destino e gates de publicação serem confirmados. Release existente não é alterada. DeepSeek Harness continua Experimental: instalação real neste host, conta, inferência, cota e isolamento ainda não homologados; download completo exige ação manual do operador neste workspace.
+- Novidades permanecem em `Unreleased` até versão, destino e gates de publicação serem confirmados. Release existente não é alterada. DeepSeek Harness continua Experimental: instalação Linux real validada com Node privado e lockfile conferido; conta, inferência, cota e isolamento ainda não homologados. Download completo foi iniciado manualmente pelo operador, conforme regra deste workspace.
 - Compressão RTK medida em comandos locais não comprova redução da fatura de uma tarefa completa. Headroom é opcional e sua rota gerenciada permanece bloqueada enquanto autenticação, memória e transporte não forem homologados. Mudança de perfil não altera modelo, conta ou permissões.
 - Bonsai ainda retorna HTTP 404 no npm; credencial local vencida e disponibilidade atual do provedor não comprovada. Nenhum login real bem-sucedido, inferência ou proxy genérico declarado funcional.
 

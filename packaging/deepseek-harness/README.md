@@ -137,7 +137,11 @@ hand or bypass the memory/disk preflight.
 This workspace requires an operator to initiate downloads above 70,000,000 bytes,
 including the combined parts of one package. Use the Install button or run
 `pz ai deepseek-harness install --json` manually; then inspect `status --json`
-and `doctor --json`. Local installation is pending until those receipts exist.
+and `doctor --json`. Retain those receipts to distinguish installation from runtime readiness.
+The operator completed a real Linux x64 install at `2026-11-02T02:41:24Z`; local
+Node/package/lock checks passed. Workspace, route, account/model and sandbox
+enforcement remain unverified; see the
+[host handoff](../../docs/roadmaps/deepseek-harness-implementation-handoff.md).
 A successful doctor can establish local runtime health while still reporting
 account, model and sandbox checks as unverified.
 
