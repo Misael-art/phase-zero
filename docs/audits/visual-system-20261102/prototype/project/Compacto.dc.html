@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Aplicativos compacto 800×600</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.pz{font-family:Inter,"Noto Sans","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.pz *{box-sizing:border-box}
+.pz button{font-family:inherit;cursor:pointer}
+.ic{flex:none;display:block}
+.rail{width:44px;height:44px;border:0;border-radius:8px;background:transparent;color:#B3B3B3;display:flex;align-items:center;justify-content:center}
+.rail.on{background:#13204A;color:#7FA2FF}
+.row{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;border:0;background:transparent;width:100%;text-align:left;color:#F2F2F2}
+.logo{flex:none;width:36px;height:36px;border-radius:9px;border:1px dashed #333333;background:#262626;color:#B3B3B3;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+.badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap}
+</style>
+</helmet>
+<div class="pz" style="width: 800px; height: 600px; display: flex; flex-direction: column; overflow: hidden; background: #0A0A0A; color: #F2F2F2">
+<header style="height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid #333333">
+<div style="width: 28px; height: 28px; border-radius: 7px; background: #245CFF; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">PZ</div>
+<span style="font-size: 15px; font-weight: 600">PhaseZero</span>
+<button aria-label="Buscar em todo o PhaseZero (Ctrl K)" class="rail" style="margin-left: auto"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 11a7 7 0 1 0 14 0 7 7 0 1 0-14 0M21 21l-4.3-4.3"></path></svg></button>
+</header>
+<div style="flex: 1; display: flex; min-height: 0">
+<nav aria-label="Navegação principal" style="width: 60px; flex: none; border-right: 1px solid #333333; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0">
+<button class="rail" aria-label="Início"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"></path></svg></button>
+<button class="rail" aria-label="Steam Deck"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01M17.3 5H6.7a4 4 0 0 0-4 3.6l-.7 6.5A3 3 0 0 0 5 18.4c1 0 1.9-.5 2.4-1.3L9 15h6l1.6 2.1c.5.8 1.4 1.3 2.4 1.3a3 3 0 0 0 3-3.3l-.7-6.5A4 4 0 0 0 17.3 5z"></path></svg></button>
+<button class="rail on" aria-label="Aplicativos" aria-current="page"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"></path></svg></button>
+<button class="rail" aria-label="Contas e conexões"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 9a4 4 0 1 0 8 0 4 4 0 1 0-8 0M12.2 11.8 3 21M6 18l2 2M8.5 15.5l2 2"></path></svg></button>
+<button class="rail" aria-label="Ajustes"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4"></path></svg></button>
+<button class="rail" aria-label="Todas as páginas" style="margin-top: auto"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+</nav>
+<main style="flex: 1; min-width: 0; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: center; gap: 12px">
+<h1 style="margin: 0; font-size: 22px; font-weight: 600; flex: 1">Aplicativos</h1>
+<button style="height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid #333333; background: #262626; color: #F2F2F2; font-size: 13px; font-weight: 600">Verificar estado</button>
+</div>
+<label style="height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 8px; background: #1C1C1C; border: 1px solid #6C6C6C; color: #B3B3B3; font-size: 14px">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"></path></svg>
+<input aria-label="Filtrar aplicativos" placeholder="Filtrar aplicativos" style="flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: #F2F2F2; font: inherit">
+<span style="font-size: 13px">Todos ▾</span>
+</label>
+<div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden">
+<button class="row"><span class="logo">.N</span><span style="flex: 1; min-width: 0"><span style="display: block; font-size: 15px; font-weight: 600">.NET SDK</span><span style="display: block; font-size: 13px; color: #B3B3B3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">SDK e runtime para projetos .NET</span></span><span class="badge" style="background: #1D3329; color: #77D6A3"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M8 12l3 3 5-6"></path></svg>Instalado</span></button>
+<button class="row"><span class="logo">9R</span><span style="flex: 1; min-width: 0"><span style="display: block; font-size: 15px; font-weight: 600">9Router</span><span style="display: block; font-size: 13px; color: #B3B3B3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Roteia pedidos de modelos de IA entre provedores</span></span><span class="badge" style="background: #3A2F1A; color: #F4C26A"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20zM12 9v5M12 17h.01"></path></svg>Atenção</span></button>
+<button class="row"><span class="logo">AM</span><span style="flex: 1; min-width: 0"><span style="display: block; font-size: 15px; font-weight: 600">ai-memory</span><span style="display: block; font-size: 13px; color: #B3B3B3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Memória persistente para agentes de código</span></span><span class="badge" style="background: #1D3329; color: #77D6A3"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M8 12l3 3 5-6"></path></svg>Instalado</span></button>
+<button class="row"><span class="logo">AC</span><span style="flex: 1; min-width: 0"><span style="display: block; font-size: 15px; font-weight: 600">Ananicy Cpp</span><span style="display: block; font-size: 13px; color: #B3B3B3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Ajusta prioridade de processos automaticamente</span></span><span class="badge" style="background: #262626; color: #B3B3B3">Não verificado</span></button>
+<button class="row"><span class="logo">AA</span><span style="flex: 1; min-width: 0"><span style="display: block; font-size: 15px; font-weight: 600">AppArmor</span><span style="display: block; font-size: 13px; color: #B3B3B3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Confinamento de aplicativos por perfil de segurança</span></span><span class="badge" style="background: #262626; color: #B3B3B3">Não verificado</span></button>
+<button class="row"><span class="logo">Au</span><span style="flex: 1; min-width: 0"><span style="display: block; font-size: 15px; font-weight: 600">Audacity</span><span style="display: block; font-size: 13px; color: #B3B3B3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Editor e gravador de áudio</span></span><span class="badge" style="background: #262626; color: #B3B3B3">Não verificado</span></button>
+</div>
+<p style="margin: auto 0 0; font-size: 13px; color: #B3B3B3">Abaixo de 1024 px: detalhe abre em tela própria com “‹ Aplicativos” para voltar.</p>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":800,"height":600}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

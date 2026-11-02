@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Contas e conexões — proposta</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4F43AE}a:hover{color:#3E3490}
+.pz{font-family:Inter,"Noto Sans","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.pz *{box-sizing:border-box}
+.pz button{font-family:inherit;cursor:pointer}
+.ic{flex:none;display:block}
+.nav-item{display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:8px;border:0;background:transparent;color:var(--sec);font-size:14px;font-weight:500;width:100%;text-align:left}
+.nav-item.on{background:var(--sel);color:var(--text)}
+.nav-item.on .ic{color:var(--acc-t)}
+.sec-label{font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--sec);padding:16px 12px 6px;margin:0}
+.btn{height:40px;padding:0 16px;border-radius:8px;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ctl);background:var(--s1);color:var(--text);white-space:nowrap}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:var(--on-acc)}
+.btn.sm{height:36px;padding:0 12px;font-size:13px}
+.btn[disabled]{background:transparent;border:1px dashed var(--line);color:var(--sec);cursor:not-allowed}
+.badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap}
+.b-neu{background:var(--s2);color:var(--sec)}
+.b-ok{background:var(--ok-bg);color:var(--ok)}
+.b-warn{background:var(--warn-bg);color:var(--warn)}
+.b-err{background:var(--err-bg);color:var(--err)}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:12px}
+.ch{display:grid;grid-template-columns:150px 1fr 200px;align-items:center;gap:16px;padding:12px 0;border-top:1px solid var(--line);font-size:14px}
+.ch-name{display:flex;align-items:center;gap:10px;font-weight:600}
+.prov{display:grid;grid-template-columns:1fr 200px 160px 120px;align-items:center;gap:16px;padding:14px 20px;border-top:1px solid var(--line);font-size:14px}
+</style>
+</helmet>
+<div class="pz" style="width: 1440px; height: 1024px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); --bg: #E6E3E5; --s1: #FFFFFF; --s2: #D6D2D4; --sel: #DDDDF3; --line: #B2B4B2; --ctl: #707372; --text: #1E1F21; --sec: #54585A; --acc: #4F43AE; --acc-t: #4F43AE; --on-acc: #FFFFFF; --ok: #1C7341; --ok-bg: #DCEFE3; --warn: #7A5200; --warn-bg: #F6E7C4; --err: #B72D43; --err-bg: #FBE6E9">
+
+<header style="height: 56px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--s1)">
+<div style="width: 32px; height: 32px; border-radius: 8px; background: var(--acc); color: var(--on-acc); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700">PZ</div>
+<div style="display: flex; flex-direction: column; line-height: 1.2">
+<span style="font-size: 15px; font-weight: 600">PhaseZero</span>
+<span style="font-size: 12px; color: var(--sec)">Central de Controle · v1.22.12 beta</span>
+</div>
+<label style="margin-left: 72px; flex: 0 1 480px; height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--ctl); color: var(--sec); font-size: 14px">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="{{ic.search}}"></path></svg>
+<input aria-label="Buscar em todo o PhaseZero" placeholder="Buscar ação, perfil ou módulo" style="flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--text); font: inherit">
+<kbd style="font-family: inherit; font-size: 12px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line)">Ctrl K</kbd>
+</label>
+<div style="margin-left: auto; display: flex; align-items: center; gap: 16px; font-size: 14px; color: var(--sec)">
+<span>Modo avançado: desligado</span>
+<button class="btn sm">PT-BR</button>
+</div>
+</header>
+
+<div style="flex: 1; display: flex; min-height: 0">
+<nav aria-label="Navegação principal" style="width: 248px; flex: none; border-right: 1px solid var(--line); padding: 4px 12px 0; overflow: hidden">
+<sc-for list="{{nav}}" as="g" hint-placeholder-count="5">
+<p class="sec-label">{{g.label}}</p>
+<sc-for list="{{g.items}}" as="it" hint-placeholder-count="4">
+<button class="{{it.cls}}"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.d}}"></path></svg>{{it.name}}</button>
+</sc-for>
+</sc-for>
+</nav>
+
+<main style="flex: 1; min-width: 0; overflow: hidden; padding: 24px 32px; display: flex; flex-direction: column; gap: 20px">
+<div>
+<div style="font-size: 13px; color: var(--sec)">PhaseZero › Contas e conexões</div>
+<div style="display: flex; align-items: flex-end; gap: 16px; margin-top: 8px">
+<div style="flex: 1">
+<h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 600">Contas e conexões</h1>
+<p style="margin: 4px 0 0; font-size: 15px; color: var(--sec)">Identidade aparece só nesta tela. Estado sem prova continua “Não verificado”.</p>
+</div>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 14px"><input type="checkbox" checked style="width: 18px; height: 18px; accent-color: #4F43AE">Ocultar identidade das contas</label>
+<button class="btn"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.refresh}}"></path></svg>Verificar estado</button>
+<button class="btn pri"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Adicionar conexão</button>
+</div>
+</div>
+
+<section class="card" aria-labelledby="codex-h" style="padding: 20px">
+<div style="display: flex; align-items: center; gap: 14px">
+<span style="width: 40px; height: 40px; border-radius: 10px; border: 1px dashed var(--line); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--sec)">logo</span>
+<div style="flex: 1">
+<h2 id="codex-h" style="margin: 0; font-size: 18px; font-weight: 600">Contas Codex</h2>
+<p style="margin: 2px 0 0; font-size: 14px; color: var(--sec)">Cada conta tem Desktop, CLI e Web próprios. Perfis funcionam ao mesmo tempo; não há alternância automática.</p>
+</div>
+<button class="btn sm">Adicionar conta Codex</button>
+<button class="btn sm" aria-haspopup="menu">Gerenciar ▾</button>
+</div>
+
+<div style="margin-top: 16px; border: 1px solid var(--line); border-radius: 10px; padding: 4px 16px 4px">
+<div style="display: flex; align-items: center; gap: 12px; padding: 12px 0">
+<span style="width: 32px; height: 32px; border-radius: 16px; background: #4F43AE; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700">P</span>
+<div style="flex: 1">
+<div style="font-size: 15px; font-weight: 600">Principal <span style="font-weight: 400; color: var(--sec)">· conta ••••@•••</span></div>
+<div style="font-size: 13px; color: var(--sec)">Instalação padrão · protegida contra exclusão</div>
+</div>
+<span class="badge b-neu"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="{{ic.unk}}"></path></svg>Cofre não consultado</span>
+</div>
+<div class="ch"><span class="ch-name"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.app}}"></path></svg>Desktop</span><span><span class="badge b-neu">Sessão não verificada</span> <span style="color: var(--sec); margin-left: 8px">Abra para entrar ou retomar a sessão.</span></span><span style="text-align: right"><button class="btn sm pri">Abrir Desktop</button></span></div>
+<div class="ch"><span class="ch-name"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.term}}"></path></svg>CLI</span><span><span class="badge b-neu">Sessão não verificada</span></span><span style="text-align: right"><button class="btn sm">Abrir CLI</button></span></div>
+<div class="ch"><span class="ch-name"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.globe}}"></path></svg>Web</span><span><span class="badge b-warn"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.warn}}"></path></svg>Precisa conectar</span> <span style="color: var(--sec); margin-left: 8px">Plano: Pro (padrão). Identifique o plano no Desktop antes do login Web.</span></span><span style="text-align: right"><button class="btn sm" disabled title="Disponível depois de abrir o Desktop">Preparar login Web</button></span></div>
+</div>
+
+<div style="margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 12px">
+<span style="width: 32px; height: 32px; border-radius: 16px; background: #0F6E7A; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700">T</span>
+<div style="flex: 1">
+<div style="font-size: 15px; font-weight: 600">Trabalho <span style="font-weight: 400; color: var(--sec)">· conta ••••@•••</span></div>
+<div style="font-size: 13px; color: var(--sec)">Perfil adicional · Desktop, CLI e Web separados</div>
+</div>
+<span class="badge b-ok"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.ok}}"></path></svg>Desktop conectado</span>
+<button class="btn sm">Expandir</button>
+</div>
+</section>
+
+<section class="card" aria-labelledby="prov-h" style="flex: 1; min-height: 0; overflow: hidden">
+<div style="padding: 16px 20px; display: flex; align-items: center">
+<div style="flex: 1">
+<h2 id="prov-h" style="margin: 0; font-size: 18px; font-weight: 600">Provedores de IA</h2>
+<p style="margin: 2px 0 0; font-size: 14px; color: var(--sec)">Ferramentas só recebem credencial validada. Valores nunca aparecem aqui.</p>
+</div>
+</div>
+<div class="prov" style="color: var(--sec); font-size: 12px; font-weight: 600; letter-spacing: .04em; padding-top: 8px; padding-bottom: 8px"><span>PROVEDOR</span><span>CREDENCIAIS</span><span>VALIDAÇÃO</span><span></span></div>
+<div class="prov"><span style="font-weight: 600">OpenAI</span><span>2 salvas · 1 ativa</span><span><span class="badge b-ok"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.ok}}"></path></svg>Validada</span></span><span style="text-align: right"><button class="btn sm">Gerenciar</button></span></div>
+<div class="prov"><span style="font-weight: 600">Anthropic</span><span>1 salva · 1 ativa</span><span><span class="badge b-err"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="{{ic.x}}"></path></svg>Falhou</span></span><span style="text-align: right"><button class="btn sm">Revalidar</button></span></div>
+<div class="prov"><span style="font-weight: 600">OpenRouter</span><span>Nenhuma</span><span><span class="badge b-neu">Não configurado</span></span><span style="text-align: right"><button class="btn sm">Adicionar</button></span></div>
+<div class="prov"><span style="font-weight: 600">GitHub</span><span>1 salva · 1 ativa</span><span><span class="badge b-neu"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="{{ic.unk}}"></path></svg>Não verificado</span></span><span style="text-align: right"><button class="btn sm">Verificar</button></span></div>
+</section>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1024}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var I = {
+      home:'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+      dash:'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',
+      linux:'M3 4h18v16H3zM7 9l3 3-3 3M13 15h4',
+      layers:'M12 2 2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
+      pad:'M6 11h4M8 9v4M15 12h.01M18 10h.01M17.3 5H6.7a4 4 0 0 0-4 3.6l-.7 6.5A3 3 0 0 0 5 18.4c1 0 1.9-.5 2.4-1.3L9 15h6l1.6 2.1c.5.8 1.4 1.3 2.4 1.3a3 3 0 0 0 3-3.3l-.7-6.5A4 4 0 0 0 17.3 5z',
+      monitor:'M3 4h18v12H3zM8 20h8M12 16v4',
+      phone:'M7 2h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM11 18h2',
+      server:'M3 3h18v7H3zM3 14h18v7H3zM7 6.5h.01M7 17.5h.01',
+      homelab:'M3 10.5 12 3l9 7.5V21H3zM9 15.5a4 4 0 0 1 6 0M12 18.5h.01',
+      lib:'M4 4h4v16H4zM10 4h4v16h-4zM16.5 4.5l3.8 1-3.9 14.5-3.8-1z',
+      reboot:'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5',
+      pkg:'M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8',
+      ext:'M4 4h7v4a2 2 0 1 0 4 0V4h5v16H4z',
+      sliders:'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
+      code:'M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM10 11l-2 2 2 2M14 11l2 2-2 2',
+      key:'M11 9a4 4 0 1 0 8 0 4 4 0 1 0-8 0M12.2 11.8 3 21M6 18l2 2M8.5 15.5l2 2',
+      bot:'M5 8h14v12H5zM12 4v4M9 13h.01M15 13h.01M9 17h6',
+      grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
+      palette:'M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2s.9-2 2-2h2a3 3 0 0 0 3-3c0-6-4-11-9-11zM7.5 11h.01M10 7h.01M15 7h.01',
+      search:'M4 11a7 7 0 1 0 14 0 7 7 0 1 0-14 0M21 21l-4.3-4.3',
+      unk:'M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4',
+      ok:'M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M8 12l3 3 5-6',
+      warn:'M12 3 2 20h20zM12 9v5M12 17h.01',
+      x:'M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M15 9l-6 6M9 9l6 6',
+      refresh:'M20 11a8 8 0 0 0-14.9-4L3 9M3 4v5h5M4 13a8 8 0 0 0 14.9 4L21 15M21 20v-5h-5',
+      app:'M3 4h18v16H3zM3 9h18M7 6.5h.01M10 6.5h.01',
+      term:'M4 17l6-6-6-6M12 19h8',
+      globe:'M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18'
+    };
+    var active = 'Contas e conexões';
+    var G = [
+      ['Ações rápidas', [['Início','home'],['Visão geral','dash'],['Linux','linux'],['Perfis','layers']]],
+      ['Plataformas', [['Steam Deck','pad'],['Windows VM','monitor'],['Waydroid','phone'],['Servidor','server'],['Homelab','homelab'],['Emulação','lib']]],
+      ['Sistema', [['Boot Direto','reboot'],['Flatpak','pkg'],['Recursos','ext'],['Ajustes','sliders']]],
+      ['Desktop', [['Aplicativos','grid'],['Temas','palette']]],
+      ['Desenvolvimento e IA', [['Desenvolvimento','code'],['Contas e conexões','key'],['IA & Dev','bot']]]
+    ];
+    var nav = G.map(function (g) { return { label: g[0], items: g[1].map(function (i) { return { name: i[0], d: I[i[1]], cls: 'nav-item' + (i[0] === active ? ' on' : '') }; }) }; });
+    return { ic: I, nav: nav };
+  }
+}
+</script>
+</body>
+</html>
