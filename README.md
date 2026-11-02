@@ -236,6 +236,19 @@ conexões leva à mesma ficha. Node fica no runtime privado; instalar não inici
 agente. Login, cota e isolamento exigem validação própria. Não usa DeepSeek Proxy
 nem habilita fallback para API paga. [Operação e limites](packaging/deepseek-harness/README.md).
 
+Conectar já sugere pasta do projeto, com opção **Trocar pasta**. **Entrar com
+DeepSeek** usa OAuth oficial no navegador; **Usar chave API** permite selecionar
+chave DeepSeek da carteira PhaseZero ou guardar nova chave no cofre do sistema.
+Uso/cobrança exige confirmação. Chave selecionada segue apenas para o processo
+API correspondente, sem aparecer em argumentos ou logs; removê-la da carteira
+interrompe esse runtime gerenciado. Validade, saldo e cota continuam separados.
+
+**Dashboard IA & Dev:** agentes/ferramentas instalados, serviços ativos, memória,
+MCPs/rotas, perfis de eficiência e Harness aparecem em resumo visual; lista
+expansível mostra componentes individuais. Franquias e assinaturas ficam logo
+abaixo. Falha de leitura aparece como desconhecida, sem inventar estado saudável.
+
+
 Para instalar o Harness no host, use **IA & Dev → DeepSeek Harness → Instalar**
 ou `pz ai deepseek-harness install --json`. A instalação é separada de iniciar;
 para conferir, execute `pz ai deepseek-harness doctor --json`. Versões fixadas:

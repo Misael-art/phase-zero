@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 
 from linux.ai.account_adapters import adapt_account_sources
 from linux.ai.account_contract import Account, Connection, Evidence, public_account, redacted_summary
-from linux.ai.credential_vault import CredentialEntry, CredentialVault, CredentialVaultError
+from linux.ai.credential_vault import CredentialEntry, CredentialVault, CredentialVaultError, credential_vault_path
 from linux.ai.grants import CONSENT_RECORD_ADAPTERS, GrantError, GrantLedger
 from linux.ai.secret_store import SecretStoreUnavailable
 
@@ -71,14 +71,14 @@ ACCOUNT_CHANNELS = (
     AccountChannel(
         "deepseek-harness-account", "DeepSeek Harness · conta",
         "Rota de conta do Harness, mantida em DSH_HOME próprio.",
-        "Login explícito no Web UI do Harness; cookies do navegador pessoal não são importados.",
+        "Entrar com DeepSeek abre autorização OAuth oficial no navegador, com callback local do Harness.",
         "Experimental. Sessão, perfil, saldo e cota ficam desconhecidos até observação do upstream.",
         destination="IA & Dev",
     ),
     AccountChannel(
         "deepseek-harness-api", "DeepSeek Harness · chave API",
         "Rota API separada com DSH_HOME próprio.",
-        "Insira a chave em Settings → Models no Harness. O Harness guarda a chave no próprio cofre de credenciais local.",
+        "Selecione chave DeepSeek da carteira PhaseZero ou guarde uma nova ao conectar. Segredo segue apenas para o processo API escolhido.",
         "Experimental. Presença da chave não prova validade, cota nem saldo; nenhum probe de inferência automático.",
         destination="IA & Dev",
     ),
@@ -270,18 +270,7 @@ def _credential_vault_path(
     local_app_data: str | None = None,
     xdg_data_home: str | None = None,
 ) -> Path:
-    current_platform = os.name if platform is None else platform
-    if current_platform == "nt":
-        app_data = local_app_data if local_app_data is not None else os.environ.get("LOCALAPPDATA", "")
-        if not app_data:
-            raise OSError("Windows local application data path is unavailable")
-        return Path(app_data) / "PhaseZero" / "ai-accounts" / "credentials.dpapi"
-    data_home = Path(
-        xdg_data_home
-        if xdg_data_home is not None
-        else os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
-    )
-    return data_home / "phasezero" / "ai-accounts" / "credentials.json"
+    return credential_vault_path(platform=platform, local_app_data=local_app_data, xdg_data_home=xdg_data_home)
 
 
 class AccountsPage(BasePage):

@@ -27,9 +27,25 @@ uses a route-specific `DSH_HOME`, disables telemetry, and requests
 measured. The one-time launch token stays in supervisor memory and never enters
 state or logs. The account and API routes use different homes; a missing API
 key or account session never causes fallback to another route.
-Enter an API key only in Harness's **Settings → Models** while using the API
-route; Harness stores it in that route's home. PhaseZero never reads or copies
-the key and never probes it with paid inference.
+The Linux guided connection offers **Sign in with DeepSeek** and **API key**.
+Account sign-in delegates OAuth/PKCE, state validation, callback and token exchange
+to the pinned upstream Account controller. PhaseZero opens only its returned
+`https://platform.deepseek.com/dsh/authorize` URL and retains the local session
+cookie and authorization URL in supervisor memory. A saved account grant remains
+upstream-owned; its presence is not live validity, quota or balance evidence.
+
+For API, select an active DeepSeek entry from the existing PhaseZero wallet or
+enter a new key in the masked form. New keys go through `CredentialVault` to the
+OS store; only opaque entry metadata goes to disk. Explicit confirmation covers
+this Harness consumer and potential API charges. Backend reads only the selected
+DeepSeek entry and places its value in the owned Node child's environment, after
+stripping ambient keys. It never puts the key in argv, preview, JSON or logs, and
+never sends an inference probe. Each selected entry gets a separate managed home.
+A native saved `DEEPSEEK_API_KEY` override blocks wallet use; removing the selected
+wallet metadata or adding such an override stops the owned runtime within the
+supervisor's two-second inspection interval. This is a process-lifetime binding,
+not a per-request proxy grant or a same-user security boundary. Gateway grants
+remain blocked. Existing CLI/manual upstream API homes remain separate.
 
 The supervisor starts from an empty route-private directory. Upstream loads
 `.env` from its invoking directory and has no Web CLI flag to preselect a
@@ -58,8 +74,8 @@ credentials cannot change this installation.
 The PhaseZero IA & Dev card uses the same manager and canonical product record.
 It offers Install, Connect / choose workspace, Open, Stop, Verify, and Refresh.
 Advanced mode adds install plan, pinned update, and uninstall. Account and API
-entries in Contas e conexões navigate back to this card. Start collects the
-route, existing workspace, and loopback port; its `start-plan` preview displays
+entries in Contas e conexões navigate back to this card. Start suggests the existing project from saved/context/detected checkout, then
+collects route, workspace and loopback port; its `start-plan` preview displays
 those exact choices without writing state or launching the runtime. Unknown
 status disables mutations, and callbacks preserve the active operation lock.
 
@@ -121,7 +137,7 @@ uses an isolated npm cache, so unrelated user-cache contents are not a saving.
 | Requested policy | `workspace-write + ask`; enforcement remains unknown |
 | Extensions | Plugins/MCP opt-in; ai-memory connection requires client-specific verification |
 | Efficiency | Basic default, economy optional per project/client; configuration does not prove session consumption |
-| Credentials | Enter through upstream UI; never place in command arguments, documentation or logs |
+| Credentials | API uses the guided PhaseZero wallet; account uses upstream browser OAuth. Never place keys in command arguments, documentation or logs |
 | Recovery | Atomic runtime activation; stop/uninstall preserve account/API homes and workspace |
 
 The Node archive is
@@ -150,3 +166,28 @@ Memory and efficiency share their existing owners:
 [project/client profiles](../../docs/roadmaps/ai-token-economy-v1.md). Do not copy
 another client's credentials, hooks or MCP configuration into Harness to make
 its status appear connected.
+
+## Linux guided connection and wallet options
+
+`start` / `start-plan` accept `--key-source web|wallet|new`, `--credential-id`,
+`--nickname`, and `--connect`. `web` preserves the prior explicit upstream flow.
+`wallet` requires the selected active DeepSeek ID; it never picks the first key
+or falls back to another provider. `new` reads a single key from stdin **only on
+actual start**, saves it to the OS wallet after preflight, then binds its ID.
+Preview neither reads key material nor writes the wallet. A key saved before a
+later startup failure remains in the wallet for selection on retry.
+
+`--connect` opens official OAuth for the account route, or opens the local Web UI
+for the API route. `pz ai deepseek-harness login --json` retries browser
+sign-in on an already running account route. Local Account RPC uses the pinned
+named-argument protocol and projects only credential-presence/attempt phase.
+Account profile, validity and quota are not inferred from that local state.
+The native form handles all fields and masked stdin; never paste a key into shell
+arguments. If native Secret Service is missing/locked, the flow fails visibly
+and keeps existing keys intact; no plaintext fallback exists.
+
+The new guided dialog/dashboard and wallet lifecycle binding are Linux Qt
+features. Windows retains its existing PowerShell lifecycle and upstream Web
+account/API flow; native Windows wallet-selection parity is not certified here.
+The standing project policy is recorded in `AGENTS.md`; future integrations reuse
+this wallet and their provider's official browser authorization.

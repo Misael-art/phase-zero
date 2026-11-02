@@ -1,8 +1,8 @@
 """Private metadata registry for API credentials held in the OS secret store.
 
-The registry stores only opaque references and user supplied labels. It does
-not validate provider credentials, create sessions, enable connections, or
-grant consumers access.
+The registry stores only opaque references and user supplied labels. Registration alone does not validate provider credentials, create sessions,
+enable connections, or grant consumers access. A lifecycle owner may resolve
+an explicitly selected provider entry after its own user-consent check.
 """
 
 from __future__ import annotations
@@ -38,6 +38,17 @@ _WINDOWS_METADATA_PREFIX = b"PZCRED1\x00"
 
 class CredentialVaultError(RuntimeError):
     """Credential metadata could not be safely read or updated."""
+
+
+def credential_vault_path(*, platform=None, local_app_data=None, xdg_data_home=None) -> Path:
+    """Canonical registry location shared by the UI and explicit consumers."""
+    if (os.name if platform is None else platform) == "nt":
+        app_data = local_app_data if local_app_data is not None else os.environ.get("LOCALAPPDATA", "")
+        if not app_data:
+            raise OSError("Windows local application data path is unavailable")
+        return Path(app_data) / "PhaseZero" / "ai-accounts" / "credentials.dpapi"
+    data = xdg_data_home if xdg_data_home is not None else os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")
+    return Path(data) / "phasezero/ai-accounts/credentials.json"
 
 
 def _label(value: object, name: str) -> str:
@@ -147,6 +158,23 @@ class CredentialVault:
     def entries(self) -> tuple[CredentialEntry, ...]:
         with self._lock:
             return tuple(sorted(self._entries.values(), key=lambda entry: entry.account_id))
+
+    def selected_entry(self, account_id: str, *, provider: str) -> CredentialEntry:
+        """Resolve an explicitly selected active entry, never a provider fallback."""
+        entry = self._entries.get(account_id)
+        if entry is None or entry.state != "active" or entry.provider.casefold() != provider.casefold():
+            raise CredentialVaultError("selected provider credential is unavailable")
+        return entry
+
+    def selected_secret(self, account_id: str, *, provider: str) -> str:
+        entry = self.selected_entry(account_id, provider=provider)
+        try:
+            value = self.secret_store.lookup(entry.secret_ref)
+            return _secret(value)
+        except SecretStoreUnavailable:
+            raise
+        except Exception:
+            raise CredentialVaultError("selected credential could not be read") from None
 
     def add(self, provider: str, nickname: str, secret: str) -> CredentialEntry:
         provider = _label(provider, "provider")

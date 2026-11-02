@@ -3547,14 +3547,14 @@
     {
       "name": "ai.deepseek-harness-start",
       "label": "Conectar e abrir Harness",
-      "command": "linux/pz ai deepseek-harness start --workspace {workspace} --auth-route {authRoute} --port {port} --json",
+      "command": "linux/pz ai deepseek-harness start --workspace {workspace} --auth-route {authRoute} --port {port} --key-source {keySource} --credential-id {credentialId} --nickname {nickname} --connect --json",
       "mutable": true,
       "require_plan": true,
       "module": "IA & Dev",
       "elevated": false,
       "input_kind": "",
       "input_label": "",
-      "plan_command": "linux/pz ai deepseek-harness start-plan --workspace {workspace} --auth-route {authRoute} --port {port} --json"
+      "plan_command": "linux/pz ai deepseek-harness start-plan --workspace {workspace} --auth-route {authRoute} --port {port} --key-source {keySource} --credential-id {credentialId} --nickname {nickname} --json"
     },
     {
       "name": "ai.deepseek-harness-open",
@@ -3566,6 +3566,18 @@
       "elevated": false,
       "input_kind": "",
       "input_label": ""
+    },
+    {
+      "name": "ai.deepseek-harness-login",
+      "label": "Entrar com DeepSeek · OAuth",
+      "command": "linux/pz ai deepseek-harness login --json",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai deepseek-harness status --json"
     },
     {
       "name": "ai.deepseek-harness-stop",

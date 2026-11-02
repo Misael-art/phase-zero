@@ -45,6 +45,7 @@ MIN_FREE_BYTES = 512 * 1024 * 1024
 MIN_AVAILABLE_MEMORY_BYTES = 2 * 1024 * 1024 * 1024
 READY_TIMEOUT_SECONDS = 35
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 PIN_FILE = ROOT / "packaging" / "deepseek-harness" / "pins.json"
 PACKAGE_DIR = ROOT / "packaging" / "deepseek-harness"
 SENSITIVE_ENV = re.compile(
@@ -93,6 +94,20 @@ def install_root() -> Path:
 
 def homes_root() -> Path:
     return app_root() / "homes"
+
+
+def _route_home(route: str, credential_id: str = "") -> Path:
+    # A selected wallet entry never inherits another API key's saved settings.
+    suffix = "api-wallet-" + hashlib.sha256(credential_id.encode()).hexdigest()[:24] if credential_id else route
+    return homes_root() / suffix
+
+
+def _check_wallet_overrides(home: Path) -> None:
+    path = home / ".credentials.yaml"
+    if any(p.is_symlink() for p in (app_root(), homes_root(), home, path)) or (path.exists() and (not path.is_file() or path.stat().st_size > 1024 * 1024)):
+        raise DshError("wallet-native-override", "Managed API credential file is unsafe", "review the selected Harness home")
+    if path.exists() and b"DEEPSEEK_API_KEY" in path.read_bytes():
+        raise DshError("wallet-native-override", "A native saved API key would override the selected wallet key", "remove the API override through Harness settings before using the wallet")
 
 
 def supervisor_file() -> Path:
@@ -367,7 +382,7 @@ def _control(action: str, timeout: float = 3.0) -> dict[str, Any]:
     return result
 
 
-def _base_environment(dsh_home: Path) -> dict[str, str]:
+def _base_environment(dsh_home: Path, api_key: str = "") -> dict[str, str]:
     env = os.environ.copy()
     for name in tuple(env):
         if SENSITIVE_ENV.search(name) or name.upper().startswith("DEEPSEEK_") or UNTRUSTED_NODE_ENV.search(name):
@@ -377,7 +392,21 @@ def _base_environment(dsh_home: Path) -> dict[str, str]:
     env["DSH_PERMISSION_MODE"] = "workspace-write"
     # Bound V8 old-space; this does not sandbox native code or child tools.
     env["NODE_OPTIONS"] = "--max-old-space-size=2048"
+    if api_key:
+        env["DEEPSEEK_API_KEY"] = api_key
     return env
+
+
+def _wallet():
+    from linux.ai.credential_vault import CredentialVault, credential_vault_path
+    return CredentialVault(credential_vault_path())
+
+
+def _selected_key(credential_id: str) -> str:
+    try:
+        return _wallet().selected_secret(credential_id, provider="deepseek")
+    except Exception:
+        raise DshError("wallet-credential-unavailable", "Selected DeepSeek key is unavailable in the secure wallet", "review the selected key in Accounts; no fallback was used") from None
 
 
 def _version_status() -> tuple[str, Path | None, dict[str, Any] | None]:
@@ -411,9 +440,11 @@ def status_payload(command: str = "status") -> dict[str, Any]:
     route = saved.get("authRoute", "unknown")
     pid = supervisor.get("pid") or saved.get("supervisorPid")
     live = _pid_alive(pid)
+    control = {}
     if live:
         try:
-            live = bool(_control("status", timeout=0.5).get("running"))
+            control = _control("status", timeout=4)
+            live = bool(control.get("running"))
         except DshError:
             live = False
     http_ok = False
@@ -439,11 +470,11 @@ def status_payload(command: str = "status") -> dict[str, Any]:
     api_state = "not-selected"
     account_state = "unknown"
     if route in {"account", "api"}:
-        credential_present = (homes_root() / route / ".credentials.yaml").is_file()
+        credential_present = (_route_home(route, saved.get("apiCredentialId", "")) / ".credentials.yaml").is_file()
         if route == "account":
             account_state = "credential file present; session unknown" if credential_present else "unknown"
         else:
-            api_state = "credential file present; validity unknown" if credential_present else "not observed"
+            api_state = "wallet selected; validity unknown" if saved.get("apiCredentialId") else "credential file present; validity unknown" if credential_present else "not observed"
     next_action = {
         "not-installed": "install",
         "degraded": "doctor",
@@ -456,6 +487,12 @@ def status_payload(command: str = "status") -> dict[str, Any]:
         state=overall, reason="" if status == "installed" else status,
         next_action=next_action,
         installed=status == "installed", runtimeState=run_state,
+        requestedWorkspace=saved.get("requestedWorkspace", ""),
+        accountAuth=control.get("account", {}).get("state", account_state),
+        oauth=control.get("account", {}),
+        connectionFeatures=control.get("features", []),
+        lifecycleNotice=saved.get("stopReason", ""),
+        apiCredentialSource="phasezero-wallet" if saved.get("apiCredentialId") else "upstream-or-unselected",
         installationState="present" if status == "installed" else "absent" if status == "absent" else "unknown",
         origin="phasezero" if runtime else "unknown",
         configurationState="needed" if route not in {"account", "api"} else "unknown",
@@ -464,11 +501,11 @@ def status_payload(command: str = "status") -> dict[str, Any]:
         installedVersion=active.get("version", "") if isinstance(active, dict) else "",
         workspace=saved.get("requestedWorkspace", ""),
         workspaceSelection=saved.get("workspaceSelection", "not-selected"), authRoute=route,
-        accountAuth=account_state, apiCredential=api_state,
+        apiCredential=api_state,
         processId=pid if live else None, healthCheck={"loopbackHttp": http_status, "healthy": http_ok},
         availableMemoryBytes=memory_available, requiredMemoryBytes=MIN_AVAILABLE_MEMORY_BYTES,
         memoryBudget=("unknown" if memory_available is None else "sufficient" if memory_available >= MIN_AVAILABLE_MEMORY_BYTES else "insufficient"),
-        dshHome=str(homes_root() / route) if route in {"account", "api"} else "",
+        dshHome=str(_route_home(route, saved.get("apiCredentialId", ""))) if route in {"account", "api"} else "",
         proxyRoute="blocked until request-bound grants are available",
     )
 
@@ -759,9 +796,11 @@ def start_plan(workspace_raw: str, route: str) -> dict[str, Any]:
     return payload
 
 
-def start(workspace_raw: str, route: str) -> dict[str, Any]:
+def start(workspace_raw: str, route: str, *, credential_id: str = "") -> dict[str, Any]:
     if route not in {"account", "api"}:
         raise DshError("auth-route-required", "Select exactly one route: account or api", "choose an auth route explicitly")
+    if credential_id and route != "api":
+        raise DshError("credential-route-mismatch", "Wallet keys belong only to the explicit API route")
     workspace = _workspace_path(workspace_raw)
     status, runtime, _ = _version_status()
     if status != "installed" or runtime is None:
@@ -780,6 +819,7 @@ def start(workspace_raw: str, route: str) -> dict[str, Any]:
                     isinstance(current, dict)
                     and current.get("authRoute") == route
                     and current.get("requestedWorkspace") == str(workspace)
+                    and current.get("apiCredentialId", "") == credential_id
                 ):
                     return status_payload("start")
                 raise DshError(
@@ -795,7 +835,10 @@ def start(workspace_raw: str, route: str) -> dict[str, Any]:
             raise DshError("insufficient-memory", "Harness start requires at least 2 GiB available memory", "close workloads or retry when memory is available")
         if _port_in_use(port):
             raise DshError("port-occupied", f"Loopback port {port} is occupied by another process", "select another PZ_DSH_PORT or stop its owner")
-        launch_dir = homes_root() / route / "launch"
+        if credential_id:
+            _check_wallet_overrides(_route_home(route, credential_id))
+            _selected_key(credential_id)  # Fail before launching or changing state.
+        launch_dir = _route_home(route, credential_id) / "launch"
         _private_dir(launch_dir)
         saved = _load_json(state_file(), {})
         saved = saved if isinstance(saved, dict) else {}
@@ -803,14 +846,15 @@ def start(workspace_raw: str, route: str) -> dict[str, Any]:
             "schemaVersion": 1, "requestedWorkspace": str(workspace),
             "workspace": "", "workspaceSelection": "confirm in Harness Web UI",
             "authRoute": route,
+            "apiCredentialId": credential_id,
             "state": "starting", "port": port, "profile": "web",
             "supervisorPid": None,
             "sandboxPolicy": "workspace-write + ask (requested)",
             "sandboxEnforcement": "unknown", "plugins": [], "updatedAt": utc_now(),
         }
         _atomic_json(state_file(), state)
-        launcher_env = _base_environment(homes_root() / route)
-        args = [sys.executable, str(Path(__file__).resolve()), "_supervise", str(launch_dir), route, str(port), str(runtime), str(workspace)]
+        launcher_env = _base_environment(_route_home(route, credential_id))
+        args = [sys.executable, str(Path(__file__).resolve()), "_supervise", str(launch_dir), route, str(port), str(runtime), str(workspace), credential_id]
         log_path = log_file()
         _private_dir(log_path.parent)
         log_stream = log_path.open("a", encoding="utf-8")
@@ -871,7 +915,7 @@ class _ControlServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
-def _supervise(launch_dir: Path, route: str, port: int, runtime: Path, requested_workspace: Path) -> int:
+def _supervise(launch_dir: Path, route: str, port: int, runtime: Path, requested_workspace: Path, credential_id: str = "") -> int:
     root = app_root()
     lock_path = root / "supervisor.lock"
     lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -884,9 +928,12 @@ def _supervise(launch_dir: Path, route: str, port: int, runtime: Path, requested
             return 3
     nonce = os.urandom(32).hex()
     launch_url: dict[str, str] = {"value": ""}
+    account_session = {"value": None, "url": "", "snapshot": {"state": "unknown", "phase": "unknown"}}
+    account_lock = threading.Lock()
     base_url = f"http://127.0.0.1:{port}/"
     child: subprocess.Popen[str] | None = None
     stop_requested = threading.Event()
+    stop_reason = {"value": ""}
     ready = threading.Event()
     child_group_closed = False
     previous_handlers = {sig: signal.signal(sig, lambda *_: stop_requested.set())
@@ -911,7 +958,40 @@ def _supervise(launch_dir: Path, route: str, port: int, runtime: Path, requested
                 return
             action = payload.get("action")
             if action == "status":
-                self._send({"ok": True, "ready": ready.is_set(), "running": child is not None and child.poll() is None})
+                account = {}
+                if route == "account" and account_session["url"]:
+                    account = account_session["snapshot"]
+                    if account_lock.acquire(blocking=False):
+                        try:
+                            from linux.ai.deepseek_harness_auth import AccountSession
+                            if account_session["value"] is None:
+                                account_session["value"] = AccountSession(account_session["url"], port, version=_read_pins()["harness"]["version"])
+                            account = account_session["value"].state()
+                            account_session["snapshot"] = account
+                        except Exception:
+                            account = {"state": "unknown", "phase": "unavailable"}
+                        finally:
+                            account_lock.release()
+                self._send({"ok": True, "ready": ready.is_set(), "running": child is not None and child.poll() is None,
+                            "account": account, "features": ["account-oauth", "wallet-bindings"]})
+            elif action == "login":
+                if route != "account" or not account_session["url"]:
+                    self._send({"ok": False, "code": "account-route-required", "reason": "Start the account route before browser authorization"}, 400)
+                    return
+                try:
+                    from linux.ai.deepseek_harness_auth import AccountSession
+                    with account_lock:
+                        account_session["snapshot"] = {"state": "unknown", "phase": "initializing"}
+                        if account_session["value"] is None:
+                            account_session["value"] = AccountSession(account_session["url"], port, version=_read_pins()["harness"]["version"])
+                        url = account_session["value"].login_url()
+                        account_session["snapshot"] = account_session["value"].state()
+                    if not webbrowser.open(url, new=2, autoraise=True):
+                        raise RuntimeError
+                    self._send({"ok": True, "opened": True, "state": "authorization-pending"})
+                except Exception:
+                    account_session["snapshot"] = {"state": "unknown", "phase": "failed"}
+                    self._send({"ok": False, "code": "oauth-unavailable", "reason": "Could not open DeepSeek authorization. Open Harness Account settings to retry."})
             elif action == "open":
                 url = launch_url["value"] or base_url
                 # The launch token stays in this process's memory; it never
@@ -949,8 +1029,11 @@ def _supervise(launch_dir: Path, route: str, port: int, runtime: Path, requested
         "startedAt": utc_now(), "ready": False,
     })
     try:
-        dsh_home = homes_root() / route
-        env = _base_environment(dsh_home)
+        dsh_home = _route_home(route, credential_id)
+        if credential_id:
+            _check_wallet_overrides(dsh_home)
+        api_key = _selected_key(credential_id) if credential_id else ""
+        env = _base_environment(dsh_home, api_key)
         argv = _dsh_command(runtime, port)
         child = subprocess.Popen(
             argv, cwd=launch_dir, env=env, stdin=subprocess.DEVNULL,
@@ -962,6 +1045,7 @@ def _supervise(launch_dir: Path, route: str, port: int, runtime: Path, requested
             "schemaVersion": 1, "requestedWorkspace": str(requested_workspace),
             "workspace": "", "workspaceSelection": "confirm in Harness Web UI",
             "authRoute": route,
+            "apiCredentialId": credential_id,
             "state": "starting", "port": port, "profile": "web",
             "sandboxPolicy": "workspace-write + ask (requested)",
             "sandboxEnforcement": "unknown", "plugins": [], "updatedAt": utc_now(),
@@ -974,6 +1058,7 @@ def _supervise(launch_dir: Path, route: str, port: int, runtime: Path, requested
                     url = _startup_url(raw, port)
                     if url:
                         launch_url["value"] = url
+                        account_session["url"] = url
                         ready.set()
                         info = _supervisor_state()
                         info["ready"] = True
@@ -984,24 +1069,36 @@ def _supervise(launch_dir: Path, route: str, port: int, runtime: Path, requested
                             state["updatedAt"] = utc_now()
                             _atomic_json(state_file(), state)
                     with log_file().open("a", encoding="utf-8") as log:
-                        log.write(_redact_line(raw))
+                        line = raw.replace(api_key, "[redacted-api-key]") if api_key else raw
+                        log.write(_redact_line(line))
                         log.flush()
             except (OSError, UnicodeError):
                 pass
 
         reader = threading.Thread(target=collect_output, name="dsh-output", daemon=True)
         reader.start()
+        last_wallet_check = 0.0
         while child.poll() is None and not stop_requested.wait(0.2):
-            pass
+            if credential_id and time.monotonic() - last_wallet_check >= 2:
+                last_wallet_check = time.monotonic()
+                try:
+                    _wallet().selected_entry(credential_id, provider="deepseek")
+                    _check_wallet_overrides(dsh_home)
+                except Exception:
+                    # Removing or invalidating the selected wallet entry revokes
+                    # this owned runtime. Never substitute another stored key.
+                    stop_reason["value"] = "wallet-selection-revoked-or-overridden"
+                    stop_requested.set()
         _terminate_child_group(child)
         child_group_closed = True
         reader.join(timeout=1)
         state = _load_json(state_file(), {})
         if isinstance(state, dict):
             state["state"] = "stopped" if stop_requested.is_set() else "crashed"
+            state["stopReason"] = stop_reason["value"]
             state["updatedAt"] = utc_now()
             _atomic_json(state_file(), state)
-        return child.returncode or 0
+        return 0 if stop_requested.is_set() else child.returncode or 0
     except Exception as exc:
         with log_file().open("a", encoding="utf-8") as log:
             log.write(f"PhaseZero supervisor error: {type(exc).__name__}\n")
@@ -1145,7 +1242,7 @@ def uninstall() -> dict[str, Any]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pz ai deepseek-harness")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("plan", "status", "install", "update", "open", "stop", "doctor", "uninstall"):
+    for name in ("plan", "status", "install", "update", "open", "login", "stop", "doctor", "uninstall"):
         item = sub.add_parser(name)
         item.add_argument("--json", action="store_true", help="emit stable JSON")
     for name in ("start", "start-plan"):
@@ -1153,6 +1250,10 @@ def build_parser() -> argparse.ArgumentParser:
         start_parser.add_argument("--workspace", required=True)
         start_parser.add_argument("--auth-route", required=True, choices=("account", "api"))
         start_parser.add_argument("--port", type=int, help="loopback port (default 3080; retained in local state)")
+        start_parser.add_argument("--key-source", choices=("web", "wallet", "new"), default="web")
+        start_parser.add_argument("--credential-id", default="")
+        start_parser.add_argument("--nickname", default="DeepSeek")
+        start_parser.add_argument("--connect", action="store_true", help="open official account OAuth or the local API UI after starting")
         start_parser.add_argument("--json", action="store_true")
     return parser
 
@@ -1171,7 +1272,42 @@ def _dispatch(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             if args.port < 1024 or args.port > 65535:
                 raise DshError("invalid-port", "Port must be between 1024 and 65535", "choose a user-space loopback port")
             os.environ["PZ_DSH_PORT"] = str(args.port)
-        payload = start_plan(args.workspace, args.auth_route) if args.command == "start-plan" else start(args.workspace, args.auth_route)
+        if args.auth_route == "account" and (args.key_source != "web" or args.credential_id):
+            raise DshError("credential-route-mismatch", "API key selection cannot be used for account login")
+        if args.key_source == "wallet":
+            try:
+                _wallet().selected_entry(args.credential_id, provider="deepseek")
+            except Exception:
+                raise DshError("wallet-credential-unavailable", "Choose an active DeepSeek key from the wallet") from None
+            _check_wallet_overrides(_route_home("api", args.credential_id))
+        elif args.credential_id:
+            raise DshError("credential-source-mismatch", "Select wallet source for an existing credential")
+        if args.command == "start-plan":
+            payload = start_plan(args.workspace, args.auth_route)
+            payload["credentialSource"] = args.key_source
+        else:
+            credential_id = args.credential_id
+            if args.key_source == "new":
+                plan = start_plan(args.workspace, args.auth_route)
+                if not plan["ok"] or plan["runtimeState"] != "stopped":
+                    raise DshError("start-preflight-blocked", "Resolve start preflight before saving a new key", "doctor; stop current runtime first")
+                secret = sys.stdin.readline(65538).rstrip("\r\n")
+                try:
+                    entry = _wallet().add("deepseek", args.nickname or "DeepSeek", secret)
+                    credential_id = entry.account_id
+                except Exception:
+                    raise DshError("wallet-save-failed", "Could not save the new key in the secure wallet; runtime was not started", "repair the OS wallet in Accounts") from None
+                finally:
+                    secret = ""
+            payload = start(args.workspace, args.auth_route, credential_id=credential_id)
+            if args.connect:
+                _control("login" if args.auth_route == "account" else "open", timeout=18)
+                payload = status_payload("start")
+                payload["nextAction"] = "complete authorization on the DeepSeek site" if args.auth_route == "account" else "confirm the project folder in Harness"
+    elif args.command == "login":
+        _control("login", timeout=18)
+        payload = status_payload("login")
+        payload["nextAction"] = "complete authorization on the DeepSeek site"
     elif args.command == "open":
         result = _control("open")
         payload = status_payload("open")
@@ -1195,10 +1331,10 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     if argv and argv[0] == "_supervise":
-        if len(argv) != 6:
+        if len(argv) not in {6, 7}:
             return 2
-        launch_dir, route, port, runtime, requested_workspace = argv[1:]
-        return _supervise(Path(launch_dir), route, int(port), Path(runtime), Path(requested_workspace))
+        launch_dir, route, port, runtime, requested_workspace = argv[1:6]
+        return _supervise(Path(launch_dir), route, int(port), Path(runtime), Path(requested_workspace), argv[6] if len(argv) == 7 else "")
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

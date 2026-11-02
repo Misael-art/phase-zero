@@ -792,10 +792,20 @@ class MainWindow(QMainWindow):
                 self.request_action(pending)
             return
         if action.parameters:
-            dialog = ParameterDialog(action, self)
+            if action.id == "ai.deepseek-harness-start":
+                from .harness_connection import HarnessConnectionDialog
+                page = self.registry.page_for("IA & Dev")
+                saved = (getattr(page, "_harness_payload", None) or {}).get("requestedWorkspace", "")
+                dialog = HarnessConnectionDialog(self.root, self, saved_workspace=saved)
+            else:
+                dialog = ParameterDialog(action, self)
             if dialog.exec() != ParameterDialog.Accepted:
+                if action.id == "ai.deepseek-harness-start":
+                    dialog.key.clear()
                 return
             values = dialog.values()
+            if action.id == "ai.deepseek-harness-start":
+                dialog.key.clear()
 
         self.pending_action = action
         self.pending_value = values.get("input", "")

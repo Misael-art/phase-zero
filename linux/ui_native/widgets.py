@@ -1006,7 +1006,7 @@ class ParameterDialog(QDialog):
                 field.setEchoMode(QLineEdit.Password)
                 field.setPlaceholderText(parameter.placeholder)
                 if not getattr(self, "_secret_note_added", False):
-                    note = QLabel(
+                    note = QLabel("Nova chave será guardada na carteira segura do PhaseZero e usada somente pelo Harness selecionado." if action.id == "ai.deepseek-harness-start" else
                         "Vai direto para o comando por entrada segura: não aparece em logs, "
                         "na linha de comando nem fica guardada na Central."
                     )

@@ -70,6 +70,7 @@ def test_deepseek_harness_is_canonical_and_distinct_from_proxy():
     assert set(harness["actionIds"]) == {
         "ai.deepseek-harness-plan", "ai.deepseek-harness-status", "ai.deepseek-harness-install",
         "ai.deepseek-harness-update", "ai.deepseek-harness-start", "ai.deepseek-harness-open",
+        "ai.deepseek-harness-login",
         "ai.deepseek-harness-stop", "ai.deepseek-harness-doctor", "ai.deepseek-harness-uninstall",
     }
 

@@ -16,6 +16,7 @@ from ..widgets import SectionHeader, themed_icon
 from .base import BasePage
 from .memory import MemoryCard, STATUS_ID as MEMORY_STATUS_ID
 from .economy import EconomyCard, STATUS_ID as ECONOMY_STATUS_ID
+from .ai_overview import AiOverview
 
 
 _PRIMARY_IDS = {
@@ -88,7 +89,7 @@ _QUOTA_STATUS_ID = "ai.quota.status"
 _DESKTOP_STATUS_ID = "ai.desktop.status"
 _CLAUDE_CHECK_ID = "ai.desktop.claude.check"
 _HARNESS_STATUS_ID = "ai.deepseek-harness-status"
-_HARNESS_ACTIONS = ("status", "plan", "install", "update", "start", "open", "stop", "doctor", "uninstall")
+_HARNESS_ACTIONS = ("status", "plan", "install", "update", "start", "open", "login", "stop", "doctor", "uninstall")
 _LEVEL_STATES = {"green": "success", "yellow": "warning", "red": "error"}
 _BRIDGE_STATUS_ID = "private.chatgpt-web.status"
 _BRIDGE_ARGS = ("ai", "chatgpt-web")
@@ -173,6 +174,9 @@ class AiDevPage(BasePage):
         layout.setContentsMargins(2, 2, 8, 12)
         layout.setSpacing(14)
         layout.addWidget(self._build_hero())
+        self.overview = AiOverview(self)
+        layout.addWidget(self.overview)
+        layout.addWidget(self._build_quota_card())
         cards = QGridLayout()
         cards.setContentsMargins(0, 0, 0, 0)
         cards.setHorizontalSpacing(14)
@@ -221,7 +225,6 @@ class AiDevPage(BasePage):
         self.memory_card = MemoryCard(self)
         layout.addWidget(self.memory_card)
         layout.addWidget(self._build_harness_card())
-        layout.addWidget(self._build_quota_card())
         layout.addWidget(self._build_desktop_apps_card())
         layout.addWidget(self._build_bonsai_card())
         layout.addWidget(self._build_bridge_card())
@@ -262,7 +265,7 @@ class AiDevPage(BasePage):
         secondary_row = QHBoxLayout()
         for index, (name, label) in enumerate((
             ("install", "Instalar"), ("start", "Conectar / escolher pasta"),
-            ("open", "Abrir"), ("stop", "Parar"), ("doctor", "Verificar"),
+            ("open", "Abrir"), ("stop", "Parar"), ("doctor", "Verificar"), ("login", "Entrar com DeepSeek"),
             ("status", "Atualizar estado"),
         )):
             button = self._action_button(
@@ -360,6 +363,7 @@ class AiDevPage(BasePage):
             "install": installed is False and not running,
             "start": installed is True and not running and payload.get("memoryBudget") == "sufficient",
             "open": running and state == "running", "stop": running,
+            "login": running and state == "running" and payload.get("authRoute") == "account" and "account-oauth" in payload.get("connectionFeatures", []),
             "update": installed is True and not running,
             "uninstall": (installed is True or state == "degraded") and not running,
             "doctor": True, "plan": True,
@@ -367,7 +371,7 @@ class AiDevPage(BasePage):
         }
         for name, button in self._harness_buttons.items():
             button.setEnabled(enabled and available.get(name, False))
-            if name in {"install", "start", "open"}:
+            if name in {"install", "start", "open", "login"}:
                 button.setVisible(available[name])
 
     def _on_harness_status(self, payload: dict) -> None:
@@ -377,10 +381,18 @@ class AiDevPage(BasePage):
         route = {"account": "conta DeepSeek", "api": "chave API"}.get(payload.get("authRoute"), "não escolhida")
         if state == "running":
             self._set_label_state(self.harness_state, f"● Web ativo em loopback · rota {route}", "success")
-            self.harness_next.setText(
-                "Próximo passo: abra o Harness, conecte a conta ou configure a API em Settings → Models "
-                "e confirme a pasta no seletor do app. Sessão, cota e saldo ainda não verificados."
-            )
+            phase = (payload.get("oauth") or {}).get("phase")
+            if phase in {"initializing", "waiting-browser", "exchanging", "committing"}:
+                step = "Conclua autorização no site DeepSeek."
+            elif payload.get("accountAuth") == "credential-stored":
+                step = "Autorização guardada pelo Harness; abra o app e confirme o projeto."
+            elif payload.get("apiCredentialSource") == "phasezero-wallet":
+                step = "Chave da carteira vinculada ao processo API; abra o app e confirme o projeto."
+            elif "account-oauth" not in payload.get("connectionFeatures", []):
+                step = "Supervisor anterior: pare e conecte novamente para carregar novo fluxo de entrada."
+            else:
+                step = "Use Entrar com DeepSeek ou abra o app para revisar a conexão."
+            self.harness_next.setText(step + " Validade, cota e saldo ainda não verificados.")
         elif payload.get("runtimeState") == "starting-or-unhealthy":
             self._set_label_state(self.harness_state, "● Runtime iniciado · saúde ainda não confirmada", "warning")
             self.harness_next.setText("Próximo passo: atualize o estado, use Verificar ou Pare o runtime antes de tentar outra configuração.")
@@ -389,7 +401,9 @@ class AiDevPage(BasePage):
             self.harness_next.setText("Próximo passo: use Verificar para diagnosticar runtime e recuperação.")
         elif installed is True:
             self._set_label_state(self.harness_state, f"● Versão {payload.get('installedVersion', '')} instalada · parado", "info")
-            self.harness_next.setText("Próximo passo: escolha uma rota e uma pasta para iniciar; instalação não confirma login.")
+            self.harness_next.setText("Chave removida da carteira ou configuração alterada. Revise chave selecionada antes de conectar novamente."
+                                     if payload.get("lifecycleNotice") == "wallet-selection-revoked-or-overridden" else
+                                     "Próximo passo: Conectar sugere seu projeto e oferece login DeepSeek ou chave da carteira.")
         elif installed is False:
             self._set_label_state(self.harness_state, "● DeepSeek Harness não instalado", "info")
             self.harness_next.setText("Próximo passo: revise a instalação. Preparar o app não inicia serviços nem conecta contas.")
@@ -1001,6 +1015,7 @@ class AiDevPage(BasePage):
         self.state_label.style().polish(self.state_label)
 
     def _on_status_ready(self, action_id: str, _stdout: str, parsed: object) -> None:
+        self.overview.update_status(action_id, parsed)
         if action_id == ECONOMY_STATUS_ID:
             self.economy_card.update_status(parsed) if isinstance(parsed, dict) else self.economy_card.failed()
             return
@@ -1147,6 +1162,7 @@ class AiDevPage(BasePage):
             self._set_state("info")
 
     def _on_status_failed(self, action_id: str, message: str) -> None:
+        self.overview.update_status(action_id, None)
         if action_id == ECONOMY_STATUS_ID:
             self.economy_card.failed()
             return

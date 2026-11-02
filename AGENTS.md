@@ -186,6 +186,13 @@ This block is maintained by ai-memory. Re-run
 `ai-memory install-instructions --target AGENTS.md` to refresh.
 <!-- ai-memory:end -->
 
+## Padrão de conexão de IA e carteira de chaves
+
+- Oferecer autenticação oficial pelo navegador/OAuth quando suportada pelo provedor; reutilizar o fluxo upstream, sem importar cookies de outras aplicações.
+- Conexão API deve permitir selecionar chave da carteira PhaseZero ou cadastrar chave nova no mesmo fluxo. Nova chave vai ao cofre nativo do sistema pela `CredentialVault`; metadados guardam somente referência opaca. Nunca criar carteira ou arquivo de segredo concorrente.
+- Seleção exige consumidor explícito e consentimento de uso/cobrança. Segredo não entra em argv, plano, log ou documentação. Remoção da chave deve encerrar seu uso gerenciado; presença da chave não comprova validade, sessão, cota ou saldo. Gates de grants dos proxies permanecem obrigatórios.
+- Sugerir pasta pelo contexto/projeto existente, permitindo trocar antes de confirmar; nunca usar caminho pessoal fixo ou assumir diretório de instalação como workspace.
+
 ## Local test temporary storage
 
 Before local pytest or artifact-heavy test runs, ensure `TMPDIR` and

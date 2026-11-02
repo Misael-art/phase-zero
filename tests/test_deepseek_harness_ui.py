@@ -34,7 +34,7 @@ def test_harness_waits_for_observation_and_exposes_all_catalog_operations(page):
     assert not page._harness_buttons["start"].isEnabled()
     assert page._harness_buttons["doctor"].isEnabled()
     assert set(page._harness_buttons) == {
-        "status", "plan", "install", "update", "start", "open", "stop", "doctor", "uninstall",
+        "status", "plan", "install", "update", "start", "open", "login", "stop", "doctor", "uninstall",
     }
     page._on_status_ready(STATUS, "", {"installed": False, "state": "not-installed", "memoryBudget": "sufficient"})
     assert page._harness_buttons["install"].isEnabled()
@@ -84,11 +84,16 @@ def test_start_form_and_preview_bind_route_workspace_and_custom_port(page):
     dialog._fields["port"].setCurrentText("custom")
     dialog._fields["port.custom"].setText("4199")
     values = dialog.values()
-    assert values == {"workspace": "/tmp/explicit-workspace", "authRoute": "api", "port": "4199"}
+    assert values == {"workspace": "/tmp/explicit-workspace", "authRoute": "api", "port": "4199",
+                      "keySource": "web", "credentialId": "", "nickname": "", "apiKey": ""}
     assert action.preview_args[2] == "start-plan"
-    for name in values:
+    for name in values.keys() - {"apiKey"}:
         assert "{" + name + "}" in action.args
         assert "{" + name + "}" in action.preview_args
+    values["apiKey"] = "fixture-secret-not-for-argv"
+    assert action.stdin_parameter == "apiKey"
+    assert values["apiKey"] not in " ".join(action.resolved_args(values=values))
+    assert values["apiKey"] not in " ".join(action.resolved_args(values=values, preview=True))
     dialog.close()
 
 

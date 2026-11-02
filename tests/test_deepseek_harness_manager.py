@@ -91,6 +91,87 @@ def test_incomplete_runtime_is_never_reported_installed_or_healthy(dsh_root):
     assert runtime.is_dir()
 
 
+def test_wallet_key_enters_only_owned_child_and_removal_stops_it(dsh_root, tmp_path, monkeypatch):
+    runtime, node = _installed_runtime(dsh_root)
+    node.write_text(node.read_text().replace("port = int(", "print(os.environ.get('DEEPSEEK_API_KEY'), flush=True)\nport = int("))
+    manager.log_file().parent.mkdir(mode=0o700)
+    marker = tmp_path / "active-selection"; marker.write_text("active")
+    record = tmp_path / "env.json"
+    monkeypatch.setenv("PZ_DSH_FAKE_ENV_RECORD", str(record))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fixture-unselected-ambient")
+    script = tmp_path / "owned-supervisor.py"
+    script.write_text(f'''import sys
+from pathlib import Path
+sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r})
+from linux.ai import deepseek_harness_manager as m
+class Wallet:
+ def selected_secret(self, credential_id, *, provider):
+  assert credential_id == 'fixture-selected' and provider == 'deepseek'
+  return 'fixture-selected-api-key'
+ def selected_entry(self, credential_id, *, provider):
+  if not Path({str(marker)!r}).exists(): raise RuntimeError('removed')
+m._wallet = Wallet
+raise SystemExit(m._supervise(Path({str(tmp_path)!r}), 'api', {manager._port()}, Path({str(runtime)!r}), Path({str(tmp_path)!r}), 'fixture-selected'))
+''')
+    process = subprocess.Popen([sys.executable, str(script)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.monotonic() + 10
+        captured = None
+        while time.monotonic() < deadline:
+            try:
+                captured = json.loads(record.read_text())
+                break
+            except (FileNotFoundError, json.JSONDecodeError):
+                time.sleep(0.05)
+        assert captured is not None
+        assert captured["apiKey"] == "fixture-selected-api-key"
+        assert "fixture-selected-api-key" not in Path(f"/proc/{process.pid}/cmdline").read_text()
+        marker.unlink()
+        assert process.wait(timeout=10) == 0
+        assert "fixture-selected-api-key" not in manager.log_file().read_text()
+        assert not manager._pid_alive(manager._supervisor_state().get("pid"))
+    finally:
+        if process.poll() is None:
+            process.terminate(); process.wait(timeout=10)
+
+
+def test_new_api_key_is_read_from_stdin_and_saved_without_printing(dsh_root, tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    saved = []
+    class Wallet:
+        def add(self, provider, nickname, key):
+            saved.append((provider, nickname, key))
+            return SimpleNamespace(account_id="fixture-wallet-entry")
+    monkeypatch.setattr(manager, "_wallet", Wallet)
+    monkeypatch.setattr(manager, "start_plan", lambda *_: {"ok": True, "runtimeState": "stopped"})
+    def start(workspace, route, *, credential_id):
+        assert route == "api" and credential_id == "fixture-wallet-entry"
+        return manager._result("start", ok=True, state="running")
+    monkeypatch.setattr(manager, "start", start)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("fixture-api-secret\n"))
+    assert manager.main(["start", "--workspace", str(tmp_path), "--auth-route", "api", "--key-source", "new", "--nickname", "Selected", "--json"]) == 0
+    assert saved == [("deepseek", "Selected", "fixture-api-secret")]
+    assert "fixture-api-secret" not in capsys.readouterr().out
+
+
+def test_wallet_preview_never_reads_key_and_native_override_blocks_start(dsh_root, tmp_path, monkeypatch, capsys):
+    _installed_runtime(dsh_root)
+    monkeypatch.setattr(manager, "_available_memory_bytes", lambda: 4 * 1024**3)
+    class Wallet:
+        def selected_entry(self, *_args, **_kwargs): return object()
+        def selected_secret(self, *_args, **_kwargs): raise AssertionError("preview must not read key")
+    monkeypatch.setattr(manager, "_wallet", Wallet)
+    options = ["--workspace", str(tmp_path), "--auth-route", "api", "--key-source", "wallet", "--credential-id", "fixture-selected", "--json"]
+    assert manager.main(["start-plan", *options]) == 0
+    assert json.loads(capsys.readouterr().out)["credentialSource"] == "wallet"
+    assert not manager.state_file().exists()
+    home = manager._route_home("api", "fixture-selected"); home.mkdir(parents=True)
+    (home / ".credentials.yaml").write_text("version: 1\nrefs:\n  DEEPSEEK_API_KEY: fixture-override\n")
+    assert manager.main(["start", *options]) == 2
+    assert json.loads(capsys.readouterr().out)["reason"] == "wallet-native-override"
+    assert not manager.state_file().exists()
+
+
 def test_start_plan_binds_requested_choices_without_starting_or_writing(dsh_root, tmp_path):
     _installed_runtime(dsh_root)
     report = manager.start_plan(str(tmp_path), "api")
