@@ -617,6 +617,8 @@ ajuste do diálogo de preferência passaram. Layout claro/escuro em 100/150/200%
 e larguras 560/1280 sem overflow horizontal e com controles alcançáveis. Texto
 das 130 superfícies nativa/Web tem contraste ≥ 4,5:1. Wrapper dev-ui pronto;
 diff revisado sem segredos ou WIP alheio.
+Fixtures do cartão usam HOME/XDG próprios, sem depender das preferências de
+conta reais do operador; cinco testes desse cartão passaram após isolamento.
 
 **Limite real de ferramentas:** infraestrutura passou em 12 gates. Leitura de
 canary foi tentada por Codex Web. Controle inicial `read-only` foi recusado por

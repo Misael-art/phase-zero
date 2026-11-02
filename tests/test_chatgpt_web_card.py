@@ -29,6 +29,13 @@ def qapp():
 
 
 def build_page(monkeypatch, tmp_path, opted_in: bool, plan="Pro"):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for key, folder in (("XDG_DATA_HOME", "data"), ("XDG_CONFIG_HOME", "config"),
+                        ("XDG_STATE_HOME", "state"), ("XDG_CACHE_HOME", "cache")):
+        monkeypatch.setenv(key, str(tmp_path / folder))
+        monkeypatch.delenv("PZ_CODEX_ACCOUNTS_" + key, raising=False)
     root = tmp_path / "chatgpt-web"
     root.mkdir()
     state = {"schemaVersion": 1}
