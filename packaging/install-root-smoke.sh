@@ -10,6 +10,7 @@
 #   - UI module imports (offscreen)
 #   - deployed tree matches the source tree (checksum)
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
@@ -21,17 +22,37 @@ mkdir -p "$DEST"
 echo "staging runtime into $DEST"
 cp -r "$ROOT/linux" "$DEST/linux"
 cp -r "$ROOT/assets" "$DEST/assets"
+mkdir -p "$DEST/packaging"
+cp -r "$ROOT/packaging/deepseek-harness" "$DEST/packaging/"
+cp -r "$ROOT/packaging/ai-memory" "$DEST/packaging/"
 cp "$ROOT/version.json" "$DEST/version.json"
 
 export PZ_STATE_ROOT="$TMP/state"
 export PZ_HOMELAB_STATE="$TMP/state/homelab"
 export HOME="$TMP/home"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_STATE_HOME="$HOME/.local/state"
+export XDG_CACHE_HOME="$HOME/.cache"
 mkdir -p "$HOME" "$PZ_STATE_ROOT"
 
 PZ="$DEST/linux/pz"
 
 echo "== version probe =="
 "$PZ" --version | rg -q 'PhaseZero Linux v[0-9]+\.[0-9]+\.[0-9]+'
+
+echo "== installed Harness metadata and read-only report =="
+export PZ_DSH_ROOT="$TMP/absent-harness"
+"$PZ" ai deepseek-harness status --json | jq -e \
+  '.appId == "app.deepseek-harness" and .state == "not-installed" and .quota == "unknown"' >/dev/null
+test ! -e "$PZ_DSH_ROOT"
+for metadata in pins.json package.json package-lock.json sbom.cdx.json; do
+    cmp "$ROOT/packaging/deepseek-harness/$metadata" "$DEST/packaging/deepseek-harness/$metadata"
+done
+echo "== installed memory metadata and non-mutating plan =="
+cmp "$ROOT/packaging/ai-memory/pins.json" "$DEST/packaging/ai-memory/pins.json"
+"$PZ" ai memory plan --json | jq -e '.ok and .version == "3.3.1"' >/dev/null
+test ! -e "$XDG_CONFIG_HOME/phasezero/ai-memory/portability.json"
 
 echo "== profiles --json contract =="
 "$PZ" server homelab profiles --json | jq -e \

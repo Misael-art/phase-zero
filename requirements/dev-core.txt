@@ -1,0 +1,5 @@
+# Contributor tooling. Kept separate from PhaseZero product dependencies.
+pytest>=8,<10
+pytest-timeout>=2,<3
+pillow>=11,<13
+argon2-cffi>=23,<26

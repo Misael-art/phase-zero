@@ -86,6 +86,32 @@ def test_user_install_pruning_cannot_abort_completed_install():
     assert 'if ! rm -rf -- "$path"' in text
 
 
+def test_user_install_retains_component_backups_outside_version_retention(tmp_path):
+    import os
+    text = (ROOT / "packaging/linux/install-user.sh").read_text(encoding="utf-8")
+    # Exercise the real retention function and its production calls in isolation.
+    pruning = text[text.index("prune_install_tree() {"):text.index("\nif command -v update-desktop-database")]
+    base = tmp_path / "install root"
+    releases = base / "releases"
+    backups = base / "backups"
+    releases.mkdir(parents=True)
+    backups.mkdir()
+    for index in range(1, 6):
+        for path in [releases / f"1.22.{index}", backups / f"1.22.{index}.20261102000000.{index}"]:
+            path.mkdir()
+            os.utime(path, (index, index))
+    foreign = backups / "retrofe-input-recovery"
+    foreign.mkdir()
+    evidence = foreign / "preferences.json"
+    evidence.write_text('{"preserve": true}')
+    os.utime(foreign, (0, 0))
+    subprocess.run(["bash", "-euc", 'INSTALL_BASE="$1"; CURRENT_LINK="$1/releases/1.22.5"\n' + pruning,
+                    "retention-test", str(base)], check=True)
+    assert evidence.read_text() == '{"preserve": true}'
+    assert sorted(p.name for p in releases.iterdir()) == ["1.22.3", "1.22.4", "1.22.5"]
+    assert len(list(backups.glob("1.22.*"))) == 3
+
+
 def test_static_action_snapshot_matches_native_catalog():
     from linux.ui_native.catalog import build_catalog
 
@@ -148,3 +174,10 @@ def test_pz_entrypoint_shipped_on_path():
         assert marker in content, f"{path} não instala o wrapper pz"
     hosts = (ROOT / "linux/server/homelab-hosts.sh").read_text(encoding="utf-8")
     assert "/usr/lib/phasezero/linux/pz" in hosts, "bridge perdeu fallback do pz remoto"
+
+
+def test_arch_package_ships_pinned_harness_runtime_closure():
+    pkgbuild = (ROOT / "packaging/linux/aur/PKGBUILD").read_text(encoding="utf-8")
+    assert "packaging/deepseek-harness" in pkgbuild
+    assert "cp -a packaging/deepseek-harness/." in pkgbuild
+    assert (ROOT / "packaging/deepseek-harness/package-lock.json").is_file()

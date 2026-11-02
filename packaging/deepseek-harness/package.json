@@ -1,0 +1,12 @@
+{
+  "name": "phasezero-deepseek-harness-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned runtime closure for the official DeepSeek Harness integration.",
+  "engines": {
+    "node": "24.22.0"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.1-rc.2"
+  }
+}

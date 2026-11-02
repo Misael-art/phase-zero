@@ -1170,7 +1170,7 @@ def test_ui_pages_have_no_duplicate_method_definitions():
 def test_pages_reflow_in_real_window_with_theme(app):
     from unittest.mock import patch
 
-    from PySide6.QtCore import QPoint, QRect
+    from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect
     from PySide6.QtWidgets import QComboBox, QPushButton
 
     from linux.ui_native.app import apply_theme
@@ -1217,10 +1217,14 @@ def test_pages_reflow_in_real_window_with_theme(app):
         finally:
             win.hide()
             win.close()
+            # Destroy this fixture before global repolish; close only hides a
+            # Qt window and leaves its complete widget tree owned by Python.
+            win.deleteLater()
+            QCoreApplication.sendPostedEvents(win, QEvent.DeferredDelete)
             # Restaurar sempre: um assert acima não pode vazar o tema global
             # para os testes seguintes (mascarou a causa real no CI do #97).
             app.setStyleSheet(previous_qss)
-            if previous_style:
+            if previous_style and app.style().objectName() != previous_style:
                 app.setStyle(previous_style)
 
 

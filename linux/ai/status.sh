@@ -71,8 +71,8 @@ ide_record() {
 memory_reachable() {
     if command -v curl >/dev/null 2>&1; then
         local code
-        code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "${AI_MEMORY_URL%/}/mcp" 2>/dev/null || echo 000)"
-        [ "$code" != "000" ] && return 0
+        code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "${AI_MEMORY_URL%/}/healthz" 2>/dev/null || echo 000)"
+        [ "$code" = "200" ] && return 0
     fi
     return 1
 }
@@ -266,10 +266,10 @@ mode="$(jq -r '.mode // empty' <<< "$agent_compat" 2>/dev/null || echo "$mode")"
 
 recommendations="$(mktemp)"
 [ "$memory_available" = "true" ] || echo "linux/pz ai setup memory" >> "$recommendations"
-jq -e '.tools.rtk.configured == true' <<< "$agent_compat" >/dev/null || echo "linux/pz ai setup rtk" >> "$recommendations"
+[ "$rtk_available" = "true" ] || echo "linux/pz ai setup rtk" >> "$recommendations"
 jq -e '.tools.caveman.configured == true' <<< "$agent_compat" >/dev/null || echo "linux/pz ai setup caveman" >> "$recommendations"
 jq -e '.ready == true' <<< "$admin_bridge" >/dev/null || echo "linux/pz ai setup admin" >> "$recommendations"
-jq -e '.tools.headroom.configured == true' <<< "$agent_compat" >/dev/null || echo "linux/pz ai setup headroom" >> "$recommendations"
+# Experimental Headroom is opt-in; its absence is not a broken base stack.
 jq -e '.tools.aiContextFrugality.configured == true' <<< "$agent_compat" >/dev/null || echo "linux/pz ai setup frugality" >> "$recommendations"
 jq -e '.opencode.available == true' <<< "$clis" >/dev/null || echo "linux/pz ai setup opencode" >> "$recommendations"
 jq -e '.claude.available == true' <<< "$clis" >/dev/null || echo "linux/pz ai setup claude" >> "$recommendations"

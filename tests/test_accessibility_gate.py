@@ -27,7 +27,7 @@ from linux.ui_native.a11y import (
     contrast_report, relative_luminance,
 )
 from linux.ui_native.catalog import CATEGORIES, DASHBOARD
-from linux.ui_native.tokens import DARK, LIGHT
+from linux.ui_native.tokens import DARK, LIGHT, THEMES
 
 ROOT = Path(__file__).resolve().parents[1]
 INTERACTIVE = (QAbstractButton, QComboBox, QLineEdit)
@@ -78,7 +78,7 @@ def test_luminance_and_ratio_match_the_wcag_reference():
     assert contrast_ratio("#FFF", "#000000") == contrast_ratio("#ffffff", "#000")
 
 
-@pytest.mark.parametrize("theme_name,tokens", [("dark", DARK), ("light", LIGHT)])
+@pytest.mark.parametrize("theme_name,tokens", [(key, value[1]) for key, value in THEMES.items()])
 def test_every_readable_pair_meets_wcag_aa(theme_name, tokens):
     failures = contrast_failures(tokens)
     assert not failures, "\n".join(
@@ -87,7 +87,7 @@ def test_every_readable_pair_meets_wcag_aa(theme_name, tokens):
     )
 
 
-@pytest.mark.parametrize("tokens", [DARK, LIGHT], ids=["dark", "light"])
+@pytest.mark.parametrize("tokens", [value[1] for value in THEMES.values()], ids=list(THEMES))
 def test_focus_ring_is_perceivable_on_every_surface(tokens):
     """O anel de foco é o que diz onde o teclado está — 3:1 em toda superfície."""
     focus_pairs = [entry for entry in contrast_report(tokens) if entry[0].startswith("foco")]
@@ -308,3 +308,20 @@ def test_no_horizontal_overflow_at_150_and_200_percent(window, qapp, scale, widt
         restored.setPointSizeF(original)
         qapp.setFont(restored)
         qapp.processEvents()
+
+
+def test_theme_menu_lists_every_theme_and_applies_choice(window, qapp, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    QSettings.setPath(QSettings.NativeFormat, QSettings.UserScope, str(tmp_path))
+    menu = window.theme_button.menu()
+    labels = [action.text() for action in menu.actions() if not action.isSeparator()]
+    assert labels[0] == "Seguir o sistema"
+    assert len(labels) == 1 + len(THEMES)
+    emitted = []
+    window.theme_changed.connect(emitted.append)
+    window._theme_actions["pcengine"].trigger()
+    assert emitted == ["pcengine"]
+    assert window.theme_id == "pcengine" and window.dark_theme is False
+    window._theme_actions["ps2"].trigger()
+    assert window.dark_theme is True and window._theme_actions["ps2"].isChecked()

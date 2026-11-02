@@ -12,7 +12,24 @@ export XDG_CONFIG_HOME="$TMP_ROOT/config"
 export PZ_SCC_CONFIG_DIR="$TMP_ROOT/scc"
 export PZ_CONTROLLER_SYSFS_ROOT="$TMP_ROOT/sysfs"
 export PZ_CONTROLLER_REVERT_SECONDS=0
-mkdir -p "$HOME" "$PZ_CONTROLLER_SYSFS_ROOT"
+export PZ_INPUT_PROC_ROOT="$TMP_ROOT/proc"
+export XDG_RUNTIME_DIR="$TMP_ROOT/run"
+mkdir -p "$HOME" "$PZ_CONTROLLER_SYSFS_ROOT" "$PZ_INPUT_PROC_ROOT" "$XDG_RUNTIME_DIR" "$TMP_ROOT/bin"
+export PATH="$TMP_ROOT/bin:$PATH"
+# HOME cannot redirect systemctl --user. Stub every control surface before
+# exercising start/confirm/timers, including the timer's OSD notification.
+cat > "$TMP_ROOT/bin/systemctl" <<'EOF'
+#!/bin/sh
+case "$*" in
+    *is-active*|*is-enabled*|*start*) exit 3 ;;
+esac
+exit 0
+EOF
+printf '#!/bin/sh\nexit 1\n' > "$TMP_ROOT/bin/pgrep"
+for command in qdbus6 qdbus gdbus notify-send kdialog; do
+    printf '#!/bin/sh\nexit 0\n' > "$TMP_ROOT/bin/$command"
+done
+chmod +x "$TMP_ROOT/bin/"*
 
 SCRIPT="$REPO_ROOT/linux/steamdeck/controller-desktop.sh"
 PROFILE="$REPO_ROOT/linux/steamdeck/profiles/PhaseZero-Desktop.sccprofile"
@@ -149,10 +166,9 @@ echo "=== a unit systemd é a que faz o mapa sobreviver ao login ==="
 # lizard mode. Foi assim que "instalado mas não funciona" aconteceu.
 export PZ_SYSTEMD_USER_DIR="$TMP_ROOT/systemd"
 
-# O scc-daemon exige o subcomando posicional no fim. Sem ele a unit entra em
-# laço de reinício e o start ainda dizia "perfil desktop ativo".
-grep -q 'ExecStart=.*PROFILE_DEST start' "$SCRIPT" ||
-    { echo "FAIL: a unit precisa terminar em 'start' ou o daemon recusa os argumentos" >&2; exit 45; }
+# The unit must supervise ownership; raw daemon start bypasses it at login.
+grep -q 'ExecStart=.*controller-desktop.sh.*supervise' "$SCRIPT" ||
+    { echo "FAIL: a unit precisa passar pelo supervisor de ownership" >&2; exit 45; }
 # PartOf e WantedBy precisam nomear o mesmo alvo. Com PartOf=graphical-session
 # e WantedBy=default.target o pareamento é de mão única: uma sessão que
 # reinicia por segundos derruba o mapa e nunca o traz de volta. Medido num Deck

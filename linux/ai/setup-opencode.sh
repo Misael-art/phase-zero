@@ -70,10 +70,25 @@ opencode_desktop_version() {
     version_of "$(pacman -Q opencode-desktop-bin 2>/dev/null)"
 }
 
+# opencode-desktop ships its own CLI build of the exact same version; npm may
+# not carry that version at all (desktop 2.x vs npm 1.x), so it is the
+# preferred lockstep source.
+desktop_bundled_cli() {
+    local version="${1:-}" cli
+    [ -n "$version" ] || return 1
+    cli="${XDG_CONFIG_HOME:-$HOME/.config}/ai.opencode.desktop/cli/$version/opencode-cli"
+    [ -x "$cli" ] || return 1
+    [ "$(version_of "$("$cli" --version 2>/dev/null || true)")" = "$version" ] || return 1
+    printf '%s\n' "$cli"
+}
+
 cli_is_managed() {
-    local cp; cp="$(opencode_cli_path)"
+    local cp real; cp="$(opencode_cli_path)"
     [ -n "$cp" ] || return 1
-    [ "$(readlink -f "$cp" 2>/dev/null)" = "$(readlink -f "$NPM_PREFIX/bin/opencode" 2>/dev/null)" ]
+    real="$(readlink -f "$cp" 2>/dev/null)"
+    [ "$real" = "$(readlink -f "$NPM_PREFIX/bin/opencode" 2>/dev/null)" ] && return 0
+    case "$real" in "${XDG_CONFIG_HOME:-$HOME/.config}"/ai.opencode.desktop/cli/*/opencode-cli) return 0 ;; esac
+    return 1
 }
 
 resolve_cli_target() {
@@ -138,6 +153,15 @@ align_cli_to() {
 
     if [ "${PZ_DRY_RUN:-0}" = "1" ]; then
         pz_info "dry-run: would pin opencode CLI to $target via npm and link into $LOCAL_BIN"
+        return 0
+    fi
+
+    local bundled
+    if bundled="$(desktop_bundled_cli "$target")"; then
+        backup_opencode_db
+        link_managed_bin opencode "$bundled"
+        hash -r 2>/dev/null || true
+        pz_info "opencode CLI now $target from opencode-desktop's bundled CLI (exact lockstep)"
         return 0
     fi
 
@@ -238,6 +262,7 @@ opencode_version_status() {
         --argjson hook "$([ -f "$SYNC_HOOK_FILE" ] && echo true || echo false)" \
         --argjson creds "$(opencode_has_credentials && echo true || echo false)" \
         --argjson usable "$(opencode_has_usable_model && echo true || echo false)" \
+        --argjson loads "$(opencode_config_loads && echo true || echo false)" \
         --argjson localProvider "$([ -f "$OPENCODE_CONFIG" ] && jq -e '.provider.ollama.models | length > 0' "$OPENCODE_CONFIG" >/dev/null 2>&1 && echo true || echo false)" \
         '{
             tool: "opencode-version",
@@ -249,6 +274,7 @@ opencode_version_status() {
             inSync: $inSync,
             autoSyncHook: $hook,
             model: {hasCredentials: $creds, localProvider: $localProvider, usable: $usable},
+            configLoads: $loads,
             db: {path: $db, present: $dbPresent}
         }'
 }
@@ -492,7 +518,16 @@ opencode_config_model() {
 
 # opencode has a usable model if it has cloud credentials, a local provider, or a
 # non-local default model already set (e.g. a keyless Zen free model).
+# OpenCode rejects the whole config on a dangling {file:} reference, so no
+# model is usable until the config loads.
+opencode_config_loads() {
+    [ -f "$OPENCODE_CONFIG" ] || return 0
+    python3 "$PZ_ROOT/linux/ai/opencode_9router_manager.py" status 2>/dev/null |
+        jq -e '.configuration.health.loads' >/dev/null 2>&1
+}
+
 opencode_has_usable_model() {
+    opencode_config_loads || return 1
     opencode_has_credentials && return 0
     [ -f "$OPENCODE_CONFIG" ] && jq -e '.provider.ollama.models | length > 0' "$OPENCODE_CONFIG" >/dev/null 2>&1 && return 0
     local m; m="$(opencode_config_model)"
@@ -621,10 +656,21 @@ case "${1:-setup}" in
     setup)
         pz_check_deps npm jq
         setup_templates
+        # A provider pointing at a removed router (9Router is optional) must
+        # not keep OpenCode from starting.
+        python3 "$PZ_ROOT/linux/ai/opencode_9router_manager.py" heal >/dev/null ||
+            pz_warn "OpenCode config heal failed; run: pz ai opencode heal"
+        # One OpenCode per host: quarantine leftover side installs (reversible)
+        # and stop if a copy remains that only its package manager can remove.
+        python3 "$PZ_ROOT/linux/audit/duplicates.py" gate opencode --resolve || exit 1
         # Orchestrated CLI install: when a desktop is present, pin the CLI to
         # its exact version so the shared DB never skews; otherwise install/keep
         # a working CLI.
         opencode_sync
+        # Desktop upgrades through pacman re-pin the CLI automatically.
+        if { pacman -Qq opencode-desktop-bin || pacman -Qq opencode-desktop; } >/dev/null 2>&1 && [ ! -f "$SYNC_HOOK_FILE" ]; then
+            install_sync_hook || pz_warn "OpenCode sync hook not installed; run: pz ai opencode install-hook"
+        fi
         ensure_clipboard_stack
         write_deck_launcher
         bash "$PZ_ROOT/linux/ai/mcp-manager.sh" sync opencode >/dev/null || pz_warn "OpenCode MCP sync failed"

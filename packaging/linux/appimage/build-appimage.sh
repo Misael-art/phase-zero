@@ -84,6 +84,9 @@ mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib/phasezero" \
     "$APPDIR/usr/share/metainfo"
 
 cp -a "$SOURCE/linux" "$SOURCE/profiles" "$SOURCE/assets" "$SOURCE/version.json" "$APPDIR/usr/lib/phasezero/"
+install -d "$APPDIR/usr/lib/phasezero/packaging"
+cp -a "$SOURCE/packaging/deepseek-harness" "$APPDIR/usr/lib/phasezero/packaging/"
+cp -a "$SOURCE/packaging/ai-memory" "$APPDIR/usr/lib/phasezero/packaging/"
 find "$APPDIR/usr/lib/phasezero" -type d -name __pycache__ -exec rm -rf {} +
 cp "$SOURCE/packaging/linux/appimage/AppRun" "$APPDIR/AppRun"
 cp "$SOURCE/packaging/linux/io.phasezero.ControlCenter.desktop" \

@@ -1,0 +1,3 @@
+# X-PhaseZero-Managed=touchscreen-recovery
+# Installed only on verified Valve Jupiter. Never matches any USB device.
+ACTION=="add", SUBSYSTEM=="platform", KERNEL=="AMDI0010:01", ATTR{power/control}="on"

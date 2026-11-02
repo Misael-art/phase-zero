@@ -213,7 +213,7 @@ def test_registry_has_all_manifest_products_and_unknown_is_not_absent(qapp):
     try:
         page = window.registry.page_for("Aplicativos")
         assert page.__class__.__name__ == "ProductRegistryPage"
-        assert len(page.products) == 103
+        assert len(page.products) == 104
         assert page._product_by_id["app.ollama"]["canonicalActionId"] == "ai.ollama"
         window.open_product("app.ollama", "server.llm")
         assert not page.instances

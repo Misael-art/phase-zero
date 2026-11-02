@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Antes — capturas atuais</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width: 1440px; height: 1024px; box-sizing: border-box; padding: 32px; background: #0E0F12; color: #E6E8EE; font-family: Inter, sans-serif; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+<figure style="margin: 0; display: flex; flex-direction: column; gap: 8px">
+<img src="/_blob/a18abfc293e7eaa2b4609ee0d06d0ee4" alt="Aplicativos atual, tema escuro" style="width: 100%; border-radius: 8px; border: 1px solid #2A2D36">
+<figcaption style="font-size: 14px; color: #B0B5C3">Aplicativos: duas buscas, botões-largos sem logo, ID técnico como descrição, “Comparar” desabilitado com peso de ação.</figcaption>
+</figure>
+<figure style="margin: 0; display: flex; flex-direction: column; gap: 8px">
+<img src="/_blob/b0437a719fa7239ae4f43c147c30c1e8" alt="Contas e conexões atual, tema claro" style="width: 100%; border-radius: 8px; border: 1px solid #2A2D36">
+<figcaption style="font-size: 14px; color: #B0B5C3">Contas: 13 botões com peso parecido; conta, canal e estado misturados; “current” em inglês.</figcaption>
+</figure>
+<figure style="margin: 0; display: flex; flex-direction: column; gap: 8px">
+<img src="/_blob/2063f899d93f5eeb6dc3028b99a80610" alt="Desenvolvimento atual, tema escuro" style="width: 100%; border-radius: 8px; border: 1px solid #2A2D36">
+<figcaption style="font-size: 14px; color: #B0B5C3">Desenvolvimento: três CTAs equivalentes; sequência preparar → validar → abrir não aparece.</figcaption>
+</figure>
+<div style="display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 22px; padding: 8px">
+<h2 style="margin: 0; font-size: 22px; font-weight: 600">Problemas transversais</h2>
+<p style="margin: 0">Ícones de navegação renderizam como quadrados pretos (VIS-001: tokens {accent}/{muted} não substituídos nos 25 SVGs).</p>
+<p style="margin: 0">Texto base 13 px e secundário 11 px; texto “muted” sobre superfície 2,67:1 no escuro.</p>
+<p style="margin: 0">Botão desabilitado e secundário quase idênticos; “Cancelar” visível sem operação em andamento.</p>
+<p style="margin: 0; color: #B0B5C3; font-size: 13px">Capturas Qt offscreen 1440×1024, fixture com estados desconhecidos (rodada 1, 2026-11-02).</p>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1024}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

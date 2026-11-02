@@ -1006,7 +1006,7 @@ class ParameterDialog(QDialog):
                 field.setEchoMode(QLineEdit.Password)
                 field.setPlaceholderText(parameter.placeholder)
                 if not getattr(self, "_secret_note_added", False):
-                    note = QLabel(
+                    note = QLabel("Nova chave será guardada na carteira segura do PhaseZero e usada somente pelo Harness selecionado." if action.id == "ai.deepseek-harness-start" else
                         "Vai direto para o comando por entrada segura: não aparece em logs, "
                         "na linha de comando nem fica guardada na Central."
                     )
@@ -1017,7 +1017,7 @@ class ParameterDialog(QDialog):
             else:
                 field = QLineEdit()
                 field.setPlaceholderText(parameter.placeholder)
-                if parameter.kind in {"file", "path"}:
+                if parameter.kind in {"file", "path", "save-file"}:
                     row = QWidget()
                     row_layout = QHBoxLayout(row)
                     row_layout.setContentsMargins(0, 0, 0, 0)
@@ -1046,6 +1046,8 @@ class ParameterDialog(QDialog):
     def _browse(self, kind: str, target: QLineEdit) -> None:
         if kind == "file":
             value, _ = QFileDialog.getOpenFileName(self, "Selecionar arquivo")
+        elif kind == "save-file":
+            value, _ = QFileDialog.getSaveFileName(self, "Guardar arquivo de recuperação", "phasezero-memory-recovery.gpg", "OpenPGP (*.gpg)")
         else:
             value = QFileDialog.getExistingDirectory(self, "Selecionar pasta")
         if value:

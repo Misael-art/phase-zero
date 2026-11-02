@@ -122,7 +122,9 @@ o que era seu volta a ser seu, em vez de simplesmente sumir.
 
 ## Instalar
 
-Sempre pela [página de Releases](https://github.com/Misael-art/PhaseZero/releases/latest). Cada versão traz **7 artefactos** + `SHA256SUMS-<versão>`.
+Vai contribuir em máquina nova? Use [bootstrap e handoff de desenvolvimento](docs/handoff/clean-host-development-20261024.md). Esse caminho prepara ferramentas de código/teste sem instalar serviços ou VMs do produto. [Auditoria do estado atual](docs/audits/status-20261024/README.md) registra o que ainda falta homologar.
+
+Canal **stable**: [última release estável](https://github.com/Misael-art/PhaseZero/releases/latest). Canal **beta**: escolher explicitamente uma pré-release na [lista de Releases](https://github.com/Misael-art/PhaseZero/releases); `/latest` não seleciona betas. Cada versão traz **7 artefactos** + `SHA256SUMS-<versão>`.
 
 ### 1. Baixar e conferir o checksum
 
@@ -227,6 +229,54 @@ Launchers e layout `~/Emulation`. BIOS, keys, ROMs: **só importação local** d
 
 Roteamento e proxies no Control Center. Segredos no cofre gerido; stdout JSON sem valores crus. 9Router **recusa** subir se `HOSTNAME`/`PORT` estiverem vazios (não volta a bind `0.0.0.0:3000`).
 
+**DeepSeek Harness oficial (Experimental):** IA & Dev oferece instalação, escolha de
+conta/API, pasta e porta, abertura Web, parada e diagnóstico. Modo avançado reúne
+prévia, atualização por versão fixada e remoção com dados preservados. Contas e
+conexões leva à mesma ficha. Node fica no runtime privado; instalar não inicia o
+agente. Login, cota e isolamento exigem validação própria. Não usa DeepSeek Proxy
+nem habilita fallback para API paga. [Operação e limites](packaging/deepseek-harness/README.md).
+
+Conectar já sugere pasta do projeto, com opção **Trocar pasta**. **Entrar com
+DeepSeek** usa OAuth oficial no navegador; **Usar chave API** permite selecionar
+chave DeepSeek da carteira PhaseZero ou guardar nova chave no cofre do sistema.
+Uso/cobrança exige confirmação. Chave selecionada segue apenas para o processo
+API correspondente, sem aparecer em argumentos ou logs; removê-la da carteira
+interrompe esse runtime gerenciado. Validade, saldo e cota continuam separados.
+
+**Dashboard IA & Dev:** agentes/ferramentas instalados, serviços ativos, memória,
+MCPs/rotas, perfis de eficiência e Harness aparecem em resumo visual; lista
+expansível mostra componentes individuais. Franquias e assinaturas ficam logo
+abaixo. Falha de leitura aparece como desconhecida, sem inventar estado saudável.
+
+**Codex Web já habilitado por opt-in:** **Atualizar app** mantém login e
+preferências, migra runtime e hook juntos e retoma uma configuração incompleta
+com o pacote local verificado. **Preparar ou reparar** usa a mesma recuperação.
+Feche somente o Codex do perfil Web antes de reiniciar a integração. Estado
+pronto exige rota ativa e bridge respondendo; teste com mensagem continua explícito.
+
+Em **Contas Codex → Web**, padrão automático habilita **Pro/Pro Lite** e desabilita
+demais planos, plano desconhecido ou assinatura observada vencida. Preferência pode
+ser ajustada por conta. Janela e ícone Web recebem cor exclusiva, distinta dos
+perfis nativos. Abrir Web exige modo com ferramentas e validação de túnel/conector;
+**Verificar conexão** separa conexão apta de execução real comprovada. Permissões
+do host e login de cada conta continuam necessários.
+
+
+Para instalar o Harness no host, use **IA & Dev → DeepSeek Harness → Instalar**
+ou `pz ai deepseek-harness install --json`. A instalação é separada de iniciar;
+para conferir, execute `pz ai deepseek-harness doctor --json`. Versões fixadas:
+DSH `0.2.1-rc.2` e Node `24.22.0`. Arquivos Node/npm para Linux x64 somam
+171.671.463 bytes (~164 MiB), antes de eventuais downloads dos hooks nativos.
+Neste workspace, downloads acima de 70 MB precisam ser iniciados manualmente
+pelo operador. [Parâmetros, origens e validação](packaging/deepseek-harness/README.md#installation-budget-and-operating-parameters).
+
+**Memória dos agentes:** IA & Dev reúne instalar/reparar, projetos compartilhados,
+dispositivos cadastrados, GitHub privado, sincronização manual/automática e
+restauração verificada. Conhecimento circula entre hosts; backup completo mantém
+histórico por equipamento. Conteúdo remoto sai criptografado; chave fica no cofre
+do sistema. Exporte recuperação antes de depender de outro host.
+[Configuração, recuperação e evidências](docs/roadmaps/ai-memory-portability-v1.md).
+
 ---
 
 ## Limites
@@ -285,3 +335,5 @@ Tags históricas **não** se movem. Confira sempre o `SHA256SUMS` da versão que
 ## Licença e âmbito
 
 PhaseZero não substitui o instalador do Windows nem o umbrelOS. Não distribui ISOs, ROMs, BIOS nem chaves de consola. Contribuição de apps Homelab: PR no catálogo do repositório, não loja comunitária.
+
+Perfis de eficiência por agente/projeto, memória permanente e medição sem inferência paga: [contrato e operação](docs/roadmaps/ai-token-economy-v1.md).

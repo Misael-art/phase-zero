@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Prancha do sistema visual</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.pz{font-family:Inter,"Noto Sans","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.pz *{box-sizing:border-box}
+.pz button{font-family:inherit}
+.ic{flex:none;display:block}
+.h{margin:0 0 16px;font-size:13px;font-weight:600;letter-spacing:.06em;color:#B3B3B3;text-transform:uppercase}
+.sw{display:flex;flex-direction:column;gap:6px;font-size:12px}
+.sw b{display:block;height:56px;border-radius:8px;border:1px solid #333333}
+.mono{font-family:"JetBrains Mono",monospace;color:#B3B3B3}
+.btn{height:40px;padding:0 16px;border-radius:8px;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;border:1px solid #333333;background:#262626;color:#F2F2F2;white-space:nowrap}
+.btn.pri{background:#245CFF;border-color:#245CFF;color:#fff}
+.btn.ghost{background:transparent;border-color:transparent;color:#7FA2FF}
+.btn.dan{background:transparent;border-color:#FF9696;color:#FF9696}
+.btn.dis{background:transparent;border:1px dashed #333333;color:#B3B3B3}
+.btn.foc{outline:3px solid #7FA2FF;outline-offset:2px}
+.badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap}
+.tile{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:12px;color:#B3B3B3;text-align:center}
+.tile span:first-child{width:48px;height:48px;border-radius:10px;background:#1C1C1C;border:1px solid #333333;display:flex;align-items:center;justify-content:center;color:#F2F2F2}
+.inp{height:40px;display:flex;align-items:center;padding:0 12px;border-radius:8px;background:#1C1C1C;border:1px solid #333333;font-size:15px;color:#F2F2F2}
+.card{background:#1C1C1C;border:1px solid #333333;border-radius:12px;padding:20px}
+</style>
+</helmet>
+<div class="pz" style="width: 1440px; height: 1500px; box-sizing: border-box; padding: 48px; background: #0A0A0A; color: #F2F2F2; display: flex; flex-direction: column; gap: 40px; overflow: hidden">
+
+<div style="display: flex; align-items: baseline; gap: 16px">
+<h1 style="margin: 0; font-size: 32px; font-weight: 600">PhaseZero · Temas retrô (SNES · PS2)</h1>
+<span style="font-size: 15px; color: #B3B3B3">Sistema visual proposto · v0 para aprovação · base Fluent 2, adaptado ao Qt/WPF</span>
+</div>
+
+<section>
+<h2 class="h">Cor · escuro (padrão) — contraste sobre surface #1C1C1C</h2>
+<div style="display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 12px">
+<sc-for list="{{dark}}" as="c" hint-placeholder-count="10">
+<div class="sw"><b style="background: {{c.hex}}"></b><strong style="font-size: 13px">{{c.n}}</strong><span class="mono">{{c.hex}}</span><span style="color: #B3B3B3">{{c.r}}</span></div>
+</sc-for>
+</div>
+<h2 class="h" style="margin-top: 24px">Cor · claro — contraste sobre surface #FFFFFF</h2>
+<div style="display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 12px">
+<sc-for list="{{light}}" as="c" hint-placeholder-count="10">
+<div class="sw"><b style="background: {{c.hex}}"></b><strong style="font-size: 13px">{{c.n}}</strong><span class="mono">{{c.hex}}</span><span style="color: #B3B3B3">{{c.r}}</span></div>
+</sc-for>
+</div>
+</section>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px">
+<section>
+<h2 class="h">Tipografia · Inter / Noto Sans (Linux) · Segoe UI (Windows)</h2>
+<div style="display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; align-items: baseline; gap: 16px"><span class="mono" style="width: 150px; font-size: 12px">display 32/40 600</span><span style="font-size: 32px; line-height: 40px; font-weight: 600">Central de Controle</span></div>
+<div style="display: flex; align-items: baseline; gap: 16px"><span class="mono" style="width: 150px; font-size: 12px">title 28/36 600</span><span style="font-size: 28px; line-height: 36px; font-weight: 600">Aplicativos</span></div>
+<div style="display: flex; align-items: baseline; gap: 16px"><span class="mono" style="width: 150px; font-size: 12px">heading 18/24 600</span><span style="font-size: 18px; font-weight: 600">Contas Codex</span></div>
+<div style="display: flex; align-items: baseline; gap: 16px"><span class="mono" style="width: 150px; font-size: 12px">body 15/22 400</span><span style="font-size: 15px; line-height: 22px">Roteia pedidos de modelos de IA entre provedores.</span></div>
+<div style="display: flex; align-items: baseline; gap: 16px"><span class="mono" style="width: 150px; font-size: 12px">label 14/20 500–600</span><span style="font-size: 14px; font-weight: 600">Revisar e reparar</span></div>
+<div style="display: flex; align-items: baseline; gap: 16px"><span class="mono" style="width: 150px; font-size: 12px">secondary 13/18 400</span><span style="font-size: 13px; color: #B3B3B3">Você verá a prévia antes de aplicar.</span></div>
+<div style="display: flex; align-items: baseline; gap: 16px"><span class="mono" style="width: 150px; font-size: 12px">meta 12/16 600</span><span style="font-size: 12px; font-weight: 600; letter-spacing: .04em; color: #B3B3B3">PLATAFORMAS</span></div>
+<div style="display: flex; align-items: baseline; gap: 16px"><span class="mono" style="width: 150px; font-size: 12px">mono 13/20</span><span class="mono" style="font-size: 13px; color: #F2F2F2">linux/pz dev validate --json</span></div>
+</div>
+</section>
+<section>
+<h2 class="h">Espaço · raio · elevação</h2>
+<div style="display: flex; align-items: flex-end; gap: 16px">
+<sc-for list="{{space}}" as="s" hint-placeholder-count="8">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; color: #B3B3B3"><span style="display: block; width: {{s.px}}; height: {{s.px}}; background: #245CFF; border-radius: 2px"></span>{{s.v}}</div>
+</sc-for>
+</div>
+<div style="display: flex; gap: 16px; margin-top: 24px; font-size: 13px; color: #B3B3B3">
+<div style="flex: 1; height: 64px; border: 1px solid #333333; border-radius: 6px; display: flex; align-items: center; justify-content: center">6 · badge</div>
+<div style="flex: 1; height: 64px; border: 1px solid #333333; border-radius: 8px; display: flex; align-items: center; justify-content: center">8 · controle</div>
+<div style="flex: 1; height: 64px; border: 1px solid #333333; border-radius: 12px; display: flex; align-items: center; justify-content: center">12 · cartão</div>
+<div style="flex: 1; height: 64px; border: 1px solid #333333; border-radius: 12px; background: #1C1C1C; box-shadow: 0 8px 24px rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center">diálogo/menu</div>
+</div>
+<p style="margin: 16px 0 0; font-size: 14px; line-height: 21px; color: #B3B3B3">Superfícies separam por cor e borda 1 px; sombra só em camada flutuante (menu, diálogo, toast). Sem gradiente, blur ou transparência.</p>
+</section>
+</div>
+
+<section>
+<h2 class="h">Ícones · Lucide (ISC) · grade 24 · traço 1,75 · tamanhos 16/20/24 · rótulo sempre visível na navegação</h2>
+<div style="display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 16px">
+<sc-for list="{{icons}}" as="i" hint-placeholder-count="28">
+<div class="tile"><span><svg class="ic" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{i.d}}"></path></svg></span><span>{{i.n}}</span></div>
+</sc-for>
+</div>
+</section>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px">
+<section>
+<h2 class="h">Ações · uma primária por contexto</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center">
+<button class="btn pri">Primária</button>
+<button class="btn">Secundária</button>
+<button class="btn ghost">Terciária</button>
+<button class="btn dan">Destrutiva</button>
+<button class="btn pri foc">Foco teclado</button>
+<button class="btn dis" disabled>Indisponível</button>
+</div>
+<p style="margin: 12px 0 0; font-size: 13px; color: #B3B3B3">Indisponível: borda tracejada + texto do motivo ao lado ou abaixo. Nunca só cinza.</p>
+<h2 class="h" style="margin-top: 28px">Campos</h2>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 14px">
+<label style="display: flex; flex-direction: column; gap: 6px">Padrão<span class="inp" style="color: #B3B3B3">Filtrar aplicativos</span></label>
+<label style="display: flex; flex-direction: column; gap: 6px">Foco<span class="inp" style="outline: 3px solid #7FA2FF; outline-offset: 1px">Web JavaScript</span></label>
+<label style="display: flex; flex-direction: column; gap: 6px">Erro<span class="inp" style="border-color: #FF9696">porta 80a</span><span style="font-size: 13px; color: #FF9696">Use só números.</span></label>
+</div>
+</section>
+<section>
+<h2 class="h">Estado · rótulo + símbolo + cor (nunca só cor)</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 10px">
+<span class="badge" style="background: #262626; color: #B3B3B3"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"></path></svg>Não verificado</span>
+<span class="badge" style="background: #1D3329; color: #77D6A3"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M8 12l3 3 5-6"></path></svg>Instalado</span>
+<span class="badge" style="background: #1F2A40; color: #8FB8FF"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"></path></svg>Precisa conectar</span>
+<span class="badge" style="background: #1D3329; color: #77D6A3"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg>Operando</span>
+<span class="badge" style="background: #3A2F1A; color: #F4C26A"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20zM12 9v5M12 17h.01"></path></svg>Atenção</span>
+<span class="badge" style="background: #3A2024; color: #FF9696"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M15 9l-6 6M9 9l6 6"></path></svg>Falhou</span>
+</div>
+<h2 class="h" style="margin-top: 28px">Carregando · vazio · toast</h2>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+<div class="card" style="padding: 16px; display: flex; flex-direction: column; gap: 10px" aria-label="Carregando"><span style="display: block; height: 14px; width: 70%; border-radius: 4px; background: #262626"></span><span style="display: block; height: 12px; width: 90%; border-radius: 4px; background: #262626"></span><span style="display: block; height: 12px; width: 50%; border-radius: 4px; background: #262626"></span><span style="font-size: 12px; color: #B3B3B3">Verificando… · sem shimmer se movimento reduzido</span></div>
+<div class="card" style="padding: 16px; font-size: 14px; display: flex; flex-direction: column; gap: 8px"><strong>Nenhum app encontrado</strong><span style="color: #B3B3B3; font-size: 13px">Nada corresponde a “zzz”.</span><button class="btn ghost" style="height: 32px; padding: 0; align-self: flex-start">Limpar filtro</button></div>
+<div style="padding: 14px 16px; border-radius: 12px; background: #262626; border: 1px solid #333333; box-shadow: 0 8px 24px rgba(0,0,0,.45); font-size: 14px; display: flex; gap: 10px; align-self: flex-start" role="status"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#77D6A3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M8 12l3 3 5-6"></path></svg><span>Tema aplicado.<br><span style="color: #7FA2FF; font-weight: 600">Desfazer</span></span></div>
+</div>
+</section>
+</div>
+
+<section>
+<h2 class="h">Logos de terceiros e badges de loja</h2>
+<div style="display: flex; gap: 24px; align-items: center; font-size: 14px; line-height: 21px; color: #B3B3B3">
+<div style="display: flex; gap: 12px"><span style="width: 48px; height: 48px; border-radius: 10px; border: 1px dashed #333333; display: flex; align-items: center; justify-content: center; font-size: 11px">logo</span><span style="width: 48px; height: 48px; border-radius: 10px; border: 1px dashed #333333; display: flex; align-items: center; justify-content: center; font-size: 11px">logo</span></div>
+<p style="margin: 0; max-width: 1100px">Slot 40/64 px, logo original centralizado em 75% da área, cores e proporção intactas, sem contorno ou recolor. Sem logo local → monograma neutro (2 letras). Badges de App Store, Google Play, Microsoft Store ou Steam não aparecem: PhaseZero não é distribuído por esses canais. Steam Deck aparece só como nome de dispositivo em texto.</p>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var d = [['bg','#0A0A0A','fundo'],['surface','#1C1C1C','base'],['surface-2','#262626','controle'],['line','#333333','borda'],['text','#F2F2F2','14,8:1'],['text-2','#B3B3B3','7,9:1'],['accent','#245CFF','texto branco 5,0:1'],['accent-text','#7FA2FF','6,9:1 · foco'],['success','#77D6A3','9,2:1'],['warning','#F4C26A','9,9:1']];
+    var l = [['bg','#E6E3E5','fundo'],['surface','#FFFFFF','base'],['surface-2','#D6D2D4','controle'],['line','#B2B4B2','borda'],['text','#1E1F21','15,7:1'],['text-2','#54585A','5,8:1'],['accent','#4F43AE','texto branco 6,4:1'],['success','#1C7341','6,4:1'],['warning','#7A5200','6,3:1'],['error','#B72D43','6,1:1']];
+    var m = function (a) { return a.map(function (c) { return { n: c[0], hex: c[1], r: c[2] }; }); };
+    var I = [
+      ['Início','M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z'],
+      ['Visão geral','M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z'],
+      ['Perfis','M12 2 2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5'],
+      ['Linux*','M3 4h18v16H3zM7 9l3 3-3 3M13 15h4'],
+      ['Steam Deck','M6 11h4M8 9v4M15 12h.01M18 10h.01M17.3 5H6.7a4 4 0 0 0-4 3.6l-.7 6.5A3 3 0 0 0 5 18.4c1 0 1.9-.5 2.4-1.3L9 15h6l1.6 2.1c.5.8 1.4 1.3 2.4 1.3a3 3 0 0 0 3-3.3l-.7-6.5A4 4 0 0 0 17.3 5z'],
+      ['Windows VM','M3 4h18v12H3zM8 20h8M12 16v4'],
+      ['Waydroid','M7 2h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM11 18h2'],
+      ['Servidor','M3 3h18v7H3zM3 14h18v7H3zM7 6.5h.01M7 17.5h.01'],
+      ['Homelab','M3 10.5 12 3l9 7.5V21H3zM9 15.5a4 4 0 0 1 6 0M12 18.5h.01'],
+      ['Emulação','M4 4h4v16H4zM10 4h4v16h-4zM16.5 4.5l3.8 1-3.9 14.5-3.8-1z'],
+      ['Boot Direto','M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5'],
+      ['Flatpak','M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8'],
+      ['Recursos','M4 4h7v4a2 2 0 1 0 4 0V4h5v16H4z'],
+      ['Ajustes','M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4'],
+      ['Desenvolv.','M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM10 11l-2 2 2 2M14 11l2 2-2 2'],
+      ['Contas','M11 9a4 4 0 1 0 8 0 4 4 0 1 0-8 0M12.2 11.8 3 21M6 18l2 2M8.5 15.5l2 2'],
+      ['IA & Dev','M5 8h14v12H5zM12 4v4M9 13h.01M15 13h.01M9 17h6'],
+      ['Proxies IA','M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5'],
+      ['Roteamento','M10 3h4v4h-4zM3 17h4v4H3zM17 17h4v4h-4zM12 7v5M5 17v-5h14v5'],
+      ['Aplicativos','M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z'],
+      ['Temas','M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2s.9-2 2-2h2a3 3 0 0 0 3-3c0-6-4-11-9-11zM7.5 11h.01M10 7h.01M15 7h.01'],
+      ['Resultados','M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2'],
+      ['Desktop','M3 4h18v16H3zM3 9h18M7 6.5h.01M10 6.5h.01'],
+      ['CLI','M4 17l6-6-6-6M12 19h8'],
+      ['Web','M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18'],
+      ['Buscar','M4 11a7 7 0 1 0 14 0 7 7 0 1 0-14 0M21 21l-4.3-4.3'],
+      ['Atualizar','M20 11a8 8 0 0 0-14.9-4L3 9M3 4v5h5M4 13a8 8 0 0 0 14.9 4L21 15M21 20v-5h-5'],
+      ['Restaurar ctrl.','M6 11h4M8 9v4M17.3 5H6.7a4 4 0 0 0-4 3.6l-.7 6.5A3 3 0 0 0 5 18.4c1 0 1.9-.5 2.4-1.3L9 15h3M16 14l-2 2 2 2M14 16h6']
+    ];
+    var S = [4,8,12,16,24,32,40,48];
+    return {
+      dark: m(d), light: m(l),
+      icons: I.map(function (i) { return { n: i[0], d: i[1] }; }),
+      space: S.map(function (v) { return { v: v, px: v + 'px' }; })
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -196,12 +196,27 @@ QScrollArea, QScrollArea > QWidget > QWidget {
 #chatgptWebState[state="success"] { color: {{success}}; }
 #chatgptWebState[state="warning"] { color: {{warning}}; }
 #chatgptWebState[state="error"] { color: {{error}}; }
+#chatgptWebState[state="info"] { color: {{info}}; }
 #settingsCard, #chatgptWebCard, #healthGroup, #healthMetric {
     background: {{surface}};
     border: 1px solid {{border_subtle}};
     border-radius: {{radius_lg}}px;
 }
 #settingValue { color: {{text}}; font-weight: 650; }
+#aiOverviewTile {
+    background: {{surface_alt}};
+    border: 1px solid {{border_subtle}};
+    border-radius: {{radius_lg}}px;
+}
+#harnessConnection QLineEdit {
+    color: {{text}};
+    background: {{surface}};
+    border: 1px solid {{border_subtle}};
+    border-radius: {{radius_md}}px;
+    min-height: 30px;
+    padding: 6px 8px;
+}
+#harnessConnection QLineEdit:focus { border-color: {{accent}}; }
 #healthMetricValue { color: {{text}}; font-size: {{text_2xl}}px; font-weight: 800; }
 #healthMetricValue[state="success"] { color: {{success}}; }
 #healthMetricValue[state="warning"] { color: {{warning}}; }

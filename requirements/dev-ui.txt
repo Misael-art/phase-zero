@@ -1,0 +1,3 @@
+-r dev-core.txt
+# Match CI: 6.12.0 was observed to segfault during interpreter shutdown.
+PySide6==6.11.1

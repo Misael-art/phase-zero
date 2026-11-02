@@ -13,12 +13,13 @@ from PySide6.QtWidgets import (
 
 from linux.ai.account_adapters import adapt_account_sources
 from linux.ai.account_contract import Account, Connection, Evidence, public_account, redacted_summary
-from linux.ai.credential_vault import CredentialEntry, CredentialVault, CredentialVaultError
+from linux.ai.credential_vault import CredentialEntry, CredentialVault, CredentialVaultError, credential_vault_path
 from linux.ai.grants import CONSENT_RECORD_ADAPTERS, GrantError, GrantLedger
 from linux.ai.secret_store import SecretStoreUnavailable
 
 from ..a11y_events import announce_accessible
 from ..command_runner import CommandRunner
+from ..codex_profiles_panel import CodexProfilesPanel
 from ..models import ActionSpec
 from ..preferences import UiPreferences
 from ..widgets import SectionHeader
@@ -45,6 +46,7 @@ class AccountChannel:
     requirements: str
     login_method: str
     maturity: str
+    destination: str = ""
 
 
 ACCOUNT_CHANNELS = (
@@ -67,6 +69,20 @@ ACCOUNT_CHANNELS = (
         "Configuração local apenas; validade de sessão e cota não verificadas aqui.",
     ),
     AccountChannel(
+        "deepseek-harness-account", "DeepSeek Harness · conta",
+        "Rota de conta do Harness, mantida em DSH_HOME próprio.",
+        "Entrar com DeepSeek abre autorização OAuth oficial no navegador, com callback local do Harness.",
+        "Experimental. Sessão, perfil, saldo e cota ficam desconhecidos até observação do upstream.",
+        destination="IA & Dev",
+    ),
+    AccountChannel(
+        "deepseek-harness-api", "DeepSeek Harness · chave API",
+        "Rota API separada com DSH_HOME próprio.",
+        "Selecione chave DeepSeek da carteira PhaseZero ou guarde uma nova ao conectar. Segredo segue apenas para o processo API escolhido.",
+        "Experimental. Presença da chave não prova validade, cota nem saldo; nenhum probe de inferência automático.",
+        destination="IA & Dev",
+    ),
+    AccountChannel(
         "9router-provider", "Provedores no 9Router",
         "Registro de provedor já existente na configuração do 9Router.",
         "Cadastro e autenticação geridos pelo dashboard do 9Router.",
@@ -77,6 +93,8 @@ ACCOUNT_CHANNELS = (
 
 class AccountChannelsDialog(QDialog):
     """Explain known account channels without starting provider login flows."""
+
+    destination_requested = Signal(str, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -122,6 +140,14 @@ class AccountChannelsDialog(QDialog):
                 line.setObjectName(f"accountChannel_{key}")
                 line.setWordWrap(True)
                 details.addWidget(line)
+            if channel.destination:
+                open_app = QPushButton("Abrir DeepSeek Harness")
+                open_app.setObjectName("openHarnessFromAccounts")
+                open_app.setAccessibleName(f"Abrir gerenciador de {channel.name}")
+                open_app.clicked.connect(
+                    lambda _checked=False, target=channel.destination: self._open_destination(target)
+                )
+                details.addWidget(open_app)
             cards.addWidget(card)
         cards.addStretch()
         scroll.setWidget(content)
@@ -130,6 +156,10 @@ class AccountChannelsDialog(QDialog):
         close.setObjectName("closeAccountChannels")
         close.clicked.connect(self.accept)
         layout.addWidget(close, 0, Qt.AlignRight)
+
+    def _open_destination(self, category: str) -> None:
+        self.accept()
+        self.destination_requested.emit(category, "deepseek-harness")
 
 
 class AddApiCredentialDialog(QDialog):
@@ -240,18 +270,7 @@ def _credential_vault_path(
     local_app_data: str | None = None,
     xdg_data_home: str | None = None,
 ) -> Path:
-    current_platform = os.name if platform is None else platform
-    if current_platform == "nt":
-        app_data = local_app_data if local_app_data is not None else os.environ.get("LOCALAPPDATA", "")
-        if not app_data:
-            raise OSError("Windows local application data path is unavailable")
-        return Path(app_data) / "PhaseZero" / "ai-accounts" / "credentials.dpapi"
-    data_home = Path(
-        xdg_data_home
-        if xdg_data_home is not None
-        else os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
-    )
-    return data_home / "phasezero" / "ai-accounts" / "credentials.json"
+    return credential_vault_path(platform=platform, local_app_data=local_app_data, xdg_data_home=xdg_data_home)
 
 
 class AccountsPage(BasePage):
@@ -324,6 +343,17 @@ class AccountsPage(BasePage):
         add_connection.setObjectName("addAccountConnection")
         add_connection.clicked.connect(self._show_channel_catalog)
         layout.addWidget(add_connection)
+        self._privacy_toggle = QCheckBox("Ocultar identidade das contas")
+        self._privacy_toggle.setObjectName("hideAccountIdentity")
+        self._privacy_toggle.setAccessibleName("Ocultar identidade das contas nesta tela")
+        self._privacy_toggle.setChecked(self.preferences.hide_account_identity)
+        self._privacy_toggle.toggled.connect(self._set_identity_hidden)
+        layout.addWidget(self._privacy_toggle)
+        self.codex_profiles = CodexProfilesPanel(
+            self.runner, hidden=self.preferences.hide_account_identity, parent=self,
+        )
+        self.codex_profiles.action_requested.connect(self.action_requested.emit)
+        layout.addWidget(self.codex_profiles)
         credential_heading = QLabel("Chaves de API")
         credential_heading.setObjectName("accountCredentialsHeading")
         layout.addWidget(credential_heading)
@@ -349,12 +379,6 @@ class AccountsPage(BasePage):
         self._credentials_layout.setSpacing(6)
         layout.addWidget(credentials)
         self._render_credentials()
-        self._privacy_toggle = QCheckBox("Ocultar identidade das contas")
-        self._privacy_toggle.setObjectName("hideAccountIdentity")
-        self._privacy_toggle.setAccessibleName("Ocultar identidade das contas nesta tela")
-        self._privacy_toggle.setChecked(self.preferences.hide_account_identity)
-        self._privacy_toggle.toggled.connect(self._set_identity_hidden)
-        layout.addWidget(self._privacy_toggle)
         cards = QWidget()
         self._cards_layout = QVBoxLayout(cards)
         self._cards_layout.setContentsMargins(0, 0, 0, 0)
@@ -371,7 +395,12 @@ class AccountsPage(BasePage):
         self.status_loader.status_failed.connect(self._source_failed)
 
     def _show_channel_catalog(self) -> None:
-        AccountChannelsDialog(self).exec()
+        dialog = AccountChannelsDialog(self)
+        dialog.destination_requested.connect(self.request_category)
+        dialog.exec()
+
+    def consume_action_values(self, action: ActionSpec) -> dict[str, str]:
+        return self.codex_profiles.consume_action_values(action)
 
     def _show_add_api_credential(self) -> None:
         if self.credential_vault is None or self._credential_busy:
@@ -534,6 +563,8 @@ class AccountsPage(BasePage):
         self.preferences.set_hide_account_identity(hidden)
         self._render_cards()
         self._render_credentials()
+        if hasattr(self, "codex_profiles"):
+            self.codex_profiles.set_hidden(hidden)
 
     def refresh_accounts(self) -> None:
         self._generation += 1

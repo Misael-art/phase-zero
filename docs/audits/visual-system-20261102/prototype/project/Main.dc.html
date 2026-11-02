@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Aplicativos — proposta</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#B39AF5}a:hover{color:#D2C3FA}
+.pz{font-family:Inter,"Noto Sans","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.pz *{box-sizing:border-box}
+.pz button{font-family:inherit;cursor:pointer}
+.ic{flex:none;display:block}
+.nav-item{display:flex;align-items:center;gap:12px;height:36px;padding:0 12px;border-radius:8px;border:0;background:transparent;color:var(--sec);font-size:14px;font-weight:500;width:100%;text-align:left}
+.nav-item.on{background:var(--sel);color:var(--text)}
+.nav-item.on .ic{color:var(--acc-t)}
+.sec-label{font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--sec);padding:16px 12px 6px;margin:0}
+.btn{height:40px;padding:0 16px;border-radius:8px;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ctl);background:var(--s2);color:var(--text)}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:var(--on-acc)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--acc-t)}
+.btn[disabled]{background:transparent;border:1px dashed var(--line);color:var(--sec);cursor:not-allowed}
+.chip{height:32px;padding:0 12px;border-radius:16px;border:1px solid var(--ctl);background:transparent;color:var(--sec);font-size:13px;font-weight:500}
+.chip.on{background:var(--sel);border-color:var(--acc-t);color:var(--text)}
+.row{display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:10px;border:1px solid transparent;background:transparent;width:100%;text-align:left;color:var(--text)}
+.row.on{background:var(--sel);border-color:var(--acc-t)}
+.badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap}
+.b-neu{background:var(--s2);color:var(--sec)}
+.b-ok{background:var(--ok-bg);color:var(--ok)}
+.b-warn{background:var(--warn-bg);color:var(--warn)}
+.logo{flex:none;display:flex;align-items:center;justify-content:center;border-radius:10px;background:var(--s2);color:var(--sec);font-weight:700;border:1px dashed var(--line)}
+.fact{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:1px solid var(--line);font-size:14px}
+.fact span:first-child{color:var(--sec)}
+</style>
+</helmet>
+<div class="pz" style="width: 1440px; height: 1024px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); {{vars}}">
+
+<header style="height: 56px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line)">
+<div style="width: 32px; height: 32px; border-radius: 8px; background: var(--acc); color: var(--on-acc); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; letter-spacing: -.02em">PZ</div>
+<div style="display: flex; flex-direction: column; line-height: 1.2">
+<span style="font-size: 15px; font-weight: 600">PhaseZero</span>
+<span style="font-size: 12px; color: var(--sec)">Central de Controle · v1.22.12 beta</span>
+</div>
+<label style="margin-left: 72px; flex: 0 1 480px; height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 8px; background: var(--s1); border: 1px solid var(--ctl); color: var(--sec); font-size: 14px">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.search}}"></path></svg>
+<input aria-label="Buscar em todo o PhaseZero" placeholder="Buscar ação, perfil ou módulo" style="flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--text); font: inherit">
+<kbd style="font-family: inherit; font-size: 12px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line)">Ctrl K</kbd>
+</label>
+<div style="margin-left: auto; display: flex; align-items: center; gap: 16px; font-size: 14px; color: var(--sec)">
+<label style="display: flex; align-items: center; gap: 8px">Modo avançado
+<span role="switch" aria-checked="false" style="width: 36px; height: 20px; border-radius: 10px; background: var(--s2); border: 1px solid var(--line); position: relative; display: inline-block"><span style="position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 7px; background: var(--sec)"></span></span>
+</label>
+<button class="btn" aria-haspopup="listbox" aria-label="Tema de cores: {{th.name}}" style="height: 32px; padding: 0 10px; font-size: 13px; gap: 8px"><span style="display: flex"><sc-for list="{{th.sw}}" as="c" hint-placeholder-count="4"><span style="width: 10px; height: 16px; background: {{c}}; border: 1px solid var(--line)"></span></sc-for></span>{{th.name}} ▾</button>
+<button class="btn" style="height: 32px; padding: 0 10px; font-size: 13px">PT-BR</button>
+<div style="display: flex; gap: 4px" aria-hidden="true">
+<span style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center">—</span>
+<span style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center">▢</span>
+<span style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center">✕</span>
+</div>
+</div>
+</header>
+
+<div style="flex: 1; display: flex; min-height: 0">
+<nav aria-label="Navegação principal" style="width: 248px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); padding: 4px 12px 0">
+<div style="flex: 1; overflow: hidden">
+<sc-for list="{{nav}}" as="g" hint-placeholder-count="5">
+<p class="sec-label">{{g.label}}</p>
+<sc-for list="{{g.items}}" as="it" hint-placeholder-count="4">
+<button class="{{it.cls}}"><svg class="ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.d}}"></path></svg>{{it.name}}</button>
+</sc-for>
+</sc-for>
+</div>
+<div style="height: 44px; flex: none; display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--sec); padding: 0 4px">
+<svg class="ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="{{ic.unk}}"></path></svg>Host local · não verificado
+</div>
+</nav>
+
+<main style="flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 24px 32px 0">
+<div style="font-size: 13px; color: var(--sec)">PhaseZero › Desktop › Aplicativos</div>
+<div style="display: flex; align-items: flex-end; gap: 16px; margin-top: 8px">
+<div style="flex: 1">
+<h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 600; letter-spacing: -.01em">Aplicativos</h1>
+<p style="margin: 4px 0 0; font-size: 15px; color: var(--sec)">Web apps, jogos e programas do desktop. Escolha um app para ver estado e próxima ação.</p>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--sec)">
+<span class="badge b-neu"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="{{ic.unk}}"></path></svg>Saúde não verificada</span>
+<button class="btn"><svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.refresh}}"></path></svg>Verificar estado</button>
+</div>
+</div>
+
+<div style="flex: 1; min-height: 0; display: flex; gap: 24px; margin-top: 24px">
+<section aria-label="Lista de aplicativos" style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+<div style="display: flex; gap: 12px; align-items: center">
+<label style="flex: 1; height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 8px; background: var(--s1); border: 1px solid var(--ctl); color: var(--sec); font-size: 14px">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="{{ic.filter}}"></path></svg>
+<input aria-label="Filtrar aplicativos" placeholder="Filtrar aplicativos por nome ou recurso" style="flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--text); font: inherit">
+</label>
+<button class="btn" disabled title="Marque dois apps para comparar">Comparar 0/2</button>
+</div>
+<div role="group" aria-label="Filtro por estado" style="display: flex; gap: 8px; margin-top: 12px">
+<button class="chip on" aria-pressed="true">Todos</button>
+<button class="chip">Instalados</button>
+<button class="chip">Precisam de atenção</button>
+<button class="chip">Não verificados</button>
+</div>
+<div style="flex: 1; min-height: 0; overflow: hidden; margin-top: 12px; display: flex; flex-direction: column; gap: 4px">
+<sc-for list="{{apps}}" as="a" hint-placeholder-count="8">
+<button class="{{a.cls}}">
+<span class="logo" style="width: 40px; height: 40px; font-size: 14px">{{a.mono}}</span>
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 15px; font-weight: 600">{{a.name}}</span>
+<span style="font-size: 14px; color: var(--sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{a.desc}}</span>
+</span>
+<span class="{{a.bcls}}"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{a.bic}}"></path></svg>{{a.state}}</span>
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true" style="color: var(--sec)"><path d="{{ic.chev}}"></path></svg>
+</button>
+</sc-for>
+</div>
+</section>
+
+<aside aria-label="Detalhe do aplicativo" style="width: 420px; flex: none; align-self: flex-start; background: var(--s1); border: 1px solid var(--line); border-radius: 12px; padding: 24px">
+<div style="display: flex; gap: 16px; align-items: center">
+<span class="logo" style="width: 64px; height: 64px; border-radius: 14px; font-size: 20px">9R</span>
+<div>
+<h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 600">9Router</h2>
+<p style="margin: 2px 0 0; font-size: 14px; color: var(--sec)">Ferramenta de IA · app.9router</p>
+</div>
+</div>
+<p style="margin: 16px 0 0; font-size: 15px; line-height: 22px">Roteia pedidos de modelos de IA entre provedores configurados. Usa credenciais já validadas em Contas e conexões.</p>
+<div style="margin-top: 20px">
+<div class="fact"><span>Instalação</span><span class="badge b-warn"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.warn}}"></path></svg>Precisa de atenção</span></div>
+<div class="fact"><span>Serviço</span><span class="badge b-neu"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="{{ic.unk}}"></path></svg>Não verificado</span></div>
+<div class="fact"><span>Origem</span><span>npm · versão fixada no catálogo</span></div>
+<div class="fact"><span>Última verificação</span><span>—</span></div>
+</div>
+<div style="margin-top: 16px; padding: 12px; border-radius: 8px; background: var(--warn-bg); color: var(--text); font-size: 14px; line-height: 20px; display: flex; gap: 10px">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--warn)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.warn}}"></path></svg>
+<span>Pacote encontrado, mas o comando não respondeu. Reinstale ou veja os detalhes técnicos.</span>
+</div>
+<div style="display: flex; gap: 8px; margin-top: 20px">
+<button class="btn pri" style="flex: 1; justify-content: center">Revisar e reparar</button>
+<button class="btn">Detalhes técnicos</button>
+</div>
+<p style="margin: 12px 0 0; font-size: 13px; color: var(--sec)">Você verá a prévia antes de aplicar qualquer mudança.</p>
+</aside>
+</div>
+
+<footer style="height: 44px; flex: none; display: flex; align-items: center; gap: 16px; border-top: 1px solid var(--line); margin: 0 -32px; padding: 0 32px; font-size: 13px; color: var(--sec)">
+<span style="display: flex; align-items: center; gap: 8px"><span style="width: 8px; height: 8px; border-radius: 4px; background: var(--ok)"></span>Pronto</span>
+<span>Nenhuma operação em andamento</span>
+<span style="margin-left: auto">Nenhuma falha pendente</span>
+</footer>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"direction":{"editor":"enum","options":["snes", "sfc", "megadrive", "mastersystem", "pcengine", "turbografx", "nes", "ps2"],"default":"snes"},"$preview":{"width":1440,"height":1024}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var T = {
+      snes: {"bg":"#E6E3E5","s1":"#F4F2F3","s2":"#D6D2D4","sel":"#DDDDF3","line":"#B2B4B2","ctl":"#707372","text":"#1E1F21","sec":"#54585A","acc":"#4F43AE","acc-t":"#4F43AE","on-acc":"#FFFFFF","ok-bg":"#DCEFE3","warn-bg":"#F6E7C4","ok":"#1C7341","warn":"#7A5200"},
+      sfc: {"bg":"#E2E1DC","s1":"#F1F0EC","s2":"#C8C7C2","sel":"#DCE3F8","line":"#AEADA8","ctl":"#7A7A7A","text":"#1F1F1F","sec":"#535353","acc":"#3B63D4","acc-t":"#375DC7","on-acc":"#FFFFFF","ok-bg":"#DDEFD9","warn-bg":"#FBF1C4","ok":"#29702B","warn":"#7A6200"},
+      megadrive: {"bg":"#0D0D0D","s1":"#1A1A1A","s2":"#262626","sel":"#3A1517","line":"#383838","ctl":"#6E6E6E","text":"#F2F2F2","sec":"#B5B5B5","acc":"#D61F26","acc-t":"#FF6B70","on-acc":"#FFFFFF","ok-bg":"#1D3329","warn-bg":"#3A2F1A","ok":"#77D6A3","warn":"#F4C26A"},
+      mastersystem: {"bg":"#0F0F0F","s1":"#1B1B1B","s2":"#2A2A2A","sel":"#3A1618","line":"#3A3A3A","ctl":"#707070","text":"#EAEAEA","sec":"#B3B3B3","acc":"#D62027","acc-t":"#FF6E72","on-acc":"#FFFFFF","ok-bg":"#1D3329","warn-bg":"#3A2F1A","ok":"#77D6A3","warn":"#F4C26A"},
+      pcengine: {"bg":"#F2F2EE","s1":"#FFFFFC","s2":"#D8D8D4","sel":"#FBE3DA","line":"#C4C4BF","ctl":"#858580","text":"#1E1E1E","sec":"#5E5E5E","acc":"#D63A2E","acc-t":"#B8291F","on-acc":"#FFFFFF","ok-bg":"#DCEFE3","warn-bg":"#F6E7C4","ok":"#1D7844","warn":"#7A5200"},
+      turbografx: {"bg":"#111111","s1":"#202020","s2":"#2C2C2C","sel":"#3B2015","line":"#4A4A4A","ctl":"#767676","text":"#F2F2F2","sec":"#B8B8B8","acc":"#F05A28","acc-t":"#F16131","on-acc":"#111111","ok-bg":"#1D3329","warn-bg":"#3A2F1A","ok":"#77D6A3","warn":"#F4C26A"},
+      nes: {"bg":"#D6D6D6","s1":"#E8E8E8","s2":"#C6C6C6","sel":"#F3D0D3","line":"#A8A8A8","ctl":"#6B6B6B","text":"#1F1F1F","sec":"#4F4F4F","acc":"#E60012","acc-t":"#B5000E","on-acc":"#FFFFFF","ok-bg":"#DCEFE3","warn-bg":"#F6E7C4","ok":"#1A693B","warn":"#7A5200"},
+      ps2: {"bg":"#0A0A0A","s1":"#1C1C1C","s2":"#262626","sel":"#13204A","line":"#333333","ctl":"#6C6C6C","text":"#F2F2F2","sec":"#B3B3B3","acc":"#245CFF","acc-t":"#7FA2FF","on-acc":"#FFFFFF","ok-bg":"#1D3329","warn-bg":"#3A2F1A","ok":"#77D6A3","warn":"#F4C26A"}
+    };
+    var N = {"snes": "SNES", "sfc": "Super Famicom", "megadrive": "Mega Drive", "mastersystem": "Master System III", "pcengine": "PC Engine", "turbografx": "TurboGrafx-16", "nes": "NES", "ps2": "PlayStation 2"};
+    var t = T[this.props.direction] || T.snes;
+    var vars = Object.keys(t).map(function (k) { return '--' + k + ': ' + t[k]; }).join('; ');
+    var I = {
+      home:'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+      dash:'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',
+      linux:'M3 4h18v16H3zM7 9l3 3-3 3M13 15h4',
+      layers:'M12 2 2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
+      pad:'M6 11h4M8 9v4M15 12h.01M18 10h.01M17.3 5H6.7a4 4 0 0 0-4 3.6l-.7 6.5A3 3 0 0 0 5 18.4c1 0 1.9-.5 2.4-1.3L9 15h6l1.6 2.1c.5.8 1.4 1.3 2.4 1.3a3 3 0 0 0 3-3.3l-.7-6.5A4 4 0 0 0 17.3 5z',
+      monitor:'M3 4h18v12H3zM8 20h8M12 16v4',
+      phone:'M7 2h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM11 18h2',
+      server:'M3 3h18v7H3zM3 14h18v7H3zM7 6.5h.01M7 17.5h.01',
+      homelab:'M3 10.5 12 3l9 7.5V21H3zM9 15.5a4 4 0 0 1 6 0M12 18.5h.01',
+      lib:'M4 4h4v16H4zM10 4h4v16h-4zM16.5 4.5l3.8 1-3.9 14.5-3.8-1z',
+      reboot:'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5',
+      pkg:'M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8',
+      ext:'M4 4h7v4a2 2 0 1 0 4 0V4h5v16H4z',
+      sliders:'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
+      code:'M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM10 11l-2 2 2 2M14 11l2 2-2 2',
+      key:'M11 9a4 4 0 1 0 8 0 4 4 0 1 0-8 0M12.2 11.8 3 21M6 18l2 2M8.5 15.5l2 2',
+      bot:'M5 8h14v12H5zM12 4v4M9 13h.01M15 13h.01M9 17h6',
+      plug:'M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5',
+      route:'M10 3h4v4h-4zM3 17h4v4H3zM17 17h4v4h-4zM12 7v5M5 17v-5h14v5',
+      grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
+      palette:'M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2s.9-2 2-2h2a3 3 0 0 0 3-3c0-6-4-11-9-11zM7.5 11h.01M10 7h.01M15 7h.01',
+      hist:'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
+      search:'M4 11a7 7 0 1 0 14 0 7 7 0 1 0-14 0M21 21l-4.3-4.3',
+      filter:'M3 5h18l-7 8v6l-4 2v-8z',
+      unk:'M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4',
+      ok:'M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M8 12l3 3 5-6',
+      warn:'M12 3 2 20h20zM12 9v5M12 17h.01',
+      refresh:'M20 11a8 8 0 0 0-14.9-4L3 9M3 4v5h5M4 13a8 8 0 0 0 14.9 4L21 15M21 20v-5h-5',
+      chev:'M9 6l6 6-6 6'
+    };
+    var active = 'Aplicativos';
+    var G = [
+      ['Ações rápidas', [['Início','home'],['Visão geral','dash'],['Linux','linux'],['Perfis','layers']]],
+      ['Plataformas', [['Steam Deck','pad'],['Windows VM','monitor'],['Waydroid','phone'],['Servidor','server'],['Homelab','homelab'],['Emulação','lib']]],
+      ['Sistema', [['Boot Direto','reboot'],['Flatpak','pkg'],['Recursos','ext'],['Ajustes','sliders']]],
+      ['Desktop', [['Aplicativos','grid'],['Temas','palette']]],
+      ['Desenvolvimento e IA', [['Desenvolvimento','code'],['Contas e conexões','key'],['IA & Dev','bot']]]
+    ];
+    var nav = G.map(function (g) { return { label: g[0], items: g[1].map(function (i) { return { name: i[0], d: I[i[1]], cls: 'nav-item' + (i[0] === active ? ' on' : '') }; }) }; });
+    var st = {
+      unk: ['Não verificado', 'badge b-neu', I.unk],
+      ok: ['Instalado', 'badge b-ok', I.ok],
+      warn: ['Precisa de atenção', 'badge b-warn', I.warn]
+    };
+    var A = [
+      ['.NET SDK','.N','SDK e runtime para projetos .NET','ok'],
+      ['9Router','9R','Roteia pedidos de modelos de IA entre provedores','warn'],
+      ['ai-memory','AM','Memória persistente para agentes de código','ok'],
+      ['Ananicy Cpp','AC','Ajusta prioridade de processos automaticamente','unk'],
+      ['AppArmor','AA','Confinamento de aplicativos por perfil de segurança','unk'],
+      ['Audacity','Au','Editor e gravador de áudio','unk'],
+      ['Discord','Di','Web app · comunidade e chamadas','ok'],
+      ['Dropbox','Db','Web app · armazenamento em nuvem','unk'],
+      ['Gmail','Gm','Web app · e-mail Google','ok'],
+      ['Google Docs','GD','Web app · documentos Google','unk']
+    ];
+    var apps = A.map(function (a) { var s = st[a[3]]; return { name: a[0], mono: a[1], desc: a[2], state: s[0], bcls: s[1], bic: s[2], cls: 'row' + (a[0] === '9Router' ? ' on' : '') }; });
+    var th = { name: N[this.props.direction] || N.snes, sw: [t.bg, t.s2, t.acc, t.text] };
+    return { th: th, vars: vars, ic: I, nav: nav, apps: apps };
+  }
+}
+</script>
+</body>
+</html>

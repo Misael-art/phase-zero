@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-11-02",
+  "reviewAfterDays": 30,
+  "headroomVersion": "0.32.1",
+  "defaultProfile": "basic",
+  "profiles": {
+    "basic": {"label": "Padrão · essencial", "experimental": false},
+    "economy": {"label": "Econômico · contexto enxuto", "experimental": false}
+  },
+  "agents": {
+    "codex": {"label": "Codex", "command": "codex", "rules": "AGENTS.md", "memoryClient": "codex"},
+    "claude-code": {"label": "Claude Code", "command": "claude", "rules": "CLAUDE.md", "memoryClient": "claude-code"},
+    "opencode": {"label": "OpenCode", "command": "opencode", "rules": "AGENTS.md", "memoryClient": "opencode"},
+    "gemini": {"label": "Gemini CLI", "command": "gemini", "rules": "GEMINI.md", "memoryClient": "gemini"},
+    "cursor": {"label": "Cursor", "command": "cursor", "rules": ".cursor/rules/phasezero-economy.mdc", "memoryClient": "cursor"},
+    "windsurf": {"label": "Windsurf", "command": "windsurf", "rules": ".windsurf/rules/phasezero-economy.md", "memoryClient": "windsurf"},
+    "copilot": {"label": "GitHub Copilot", "command": "copilot", "rules": ".github/copilot-instructions.md", "memoryClient": "copilot"},
+    "cline": {"label": "Cline", "command": "cline", "rules": ".clinerules/phasezero-economy.md", "memoryClient": "cline"},
+    "kimi-code": {"label": "Kimi Code", "command": "kimi", "rules": "AGENTS.md", "memoryClient": "kimi-code"},
+    "grok-build": {"label": "Grok Build", "command": "grok", "rules": "AGENTS.md", "memoryClient": "grok"},
+    "zcode": {"label": "ZCode", "command": "zcode", "rules": "AGENTS.md", "memoryClient": "zcode"},
+    "hermes": {"label": "Hermes", "command": "hermes", "rules": "AGENTS.md", "memoryClient": "hermes"},
+    "deepseek-harness": {"label": "DeepSeek Harness", "command": "dsh", "rules": "AGENTS.md", "memoryClient": "deepseek-harness"}
+  },
+  "components": [
+    {"id": "ai-memory", "decision": "required", "source": "https://github.com/akitaonrails/ai-memory", "reason": "Continuidade compartilhada; consulta seletiva e captura conforme integração do cliente."},
+    {"id": "rtk", "decision": "basic", "source": "https://github.com/rtk-ai/rtk", "reason": "Filtragem de saída de comandos suportados; proxy não filtra e porcentagem não mede fatura."},
+    {"id": "native-context", "decision": "basic", "source": "https://learn.chatgpt.com/docs/build-skills", "reason": "Skills sob demanda, busca direcionada e recursos nativos do cliente."},
+    {"id": "headroom", "decision": "experimental", "source": "https://github.com/headroomlabs-ai/headroom", "reason": "Versão fixada; rotas, autenticação, memória própria e wrappers exigem homologação."},
+    {"id": "caveman", "decision": "optional-style", "source": "https://github.com/JuliusBrussee/caveman", "reason": "Preservar regras atuais; concisão nunca reduz clareza, testes ou aceite."},
+    {"id": "serena", "decision": "candidate", "source": "https://github.com/oraios/serena", "reason": "Avaliar navegação por símbolos em bases grandes, sem memória concorrente."},
+    {"id": "ponytail", "decision": "workspace-only", "source": "assets/agent-skills/ponytail-architecture-runtime.md", "reason": "Arquitetura apenas em workspace detectado; não é compressor global."},
+    {"id": "graphify", "decision": "not-integrated", "reason": "Placeholder não comprova integração nem ganho."}
+  ]
+}

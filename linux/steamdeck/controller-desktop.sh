@@ -62,9 +62,26 @@ controller_present() {
 # Steam Input claims the same device and expects to own it. Two mappers on one
 # controller produce doubled input, not a merged map, so the desktop profile
 # stays out of the way whenever Steam or a gamescope session is up.
+# A frontend (RetroFE) that swapped Steam's Desktop profile for a gamepad
+# profile owns the controller until its session ends and it restores the
+# Desktop profile; a second mapper meanwhile would fight that restore.
+RETROFE_SESSION_FILE="${PZ_RETROFE_SESSION_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/retrofe/input-session/steam-desktop-session.json}"
+
 conflicting_session() {
+    # A leftover file after reboot is not a live owner. Validate boot/start
+    # identity through the same backend used by input restoration.
+    local lease
+    if ! lease="$(PZ_RETROFE_STATE_DIR="$(dirname "$RETROFE_SESSION_FILE")" python3 "$DIR/desktop_session.py" lease)"; then
+        printf 'retrofe-session-unreadable\n'; return 0
+    fi
+    if jq -e '.active' <<<"$lease" >/dev/null; then
+        printf 'retrofe-game-session\n'; return 0
+    fi
+    if jq -e '.externalGameActive' <<<"$lease" >/dev/null; then
+        printf 'game-session\n'; return 0
+    fi
     pgrep -x steam >/dev/null 2>&1 && { printf 'steam\n'; return 0; }
-    pgrep -f steamwebhelper >/dev/null 2>&1 && { printf 'steam\n'; return 0; }
+    pgrep -x steamwebhelper >/dev/null 2>&1 && { printf 'steam\n'; return 0; }
     pgrep -x gamescope >/dev/null 2>&1 && { printf 'gamescope\n'; return 0; }
     return 1
 }
@@ -117,13 +134,45 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=$(scc_daemon_bin) --foreground $PROFILE_DEST start
+ExecStart=/bin/bash "$DIR/controller-desktop.sh" supervise
 Restart=always
 RestartSec=3
 
 [Install]
 WantedBy=graphical-session.target
 EOF
+}
+
+# The login unit must check ownership too. A check only in `start` is bypassed
+# by systemd on reboot, and cannot yield when Steam appears later.
+cmd_supervise() {
+    local child="" bin
+    bin="$(scc_daemon_bin)"
+    [ -n "$bin" ] && [ -f "$PROFILE_DEST" ] || return 1
+    stop_owned_mapper() {
+        if [ -n "${child:-}" ]; then
+            kill "$child" 2>/dev/null || true
+            wait "$child" 2>/dev/null || true
+            child=""
+        fi
+    }
+    trap 'stop_owned_mapper; exit 0' TERM INT HUP
+    trap stop_owned_mapper EXIT
+    while true; do
+        if conflicting_session >/dev/null || ! controller_present; then
+            stop_owned_mapper
+        elif [ -z "$child" ]; then
+            "$bin" --foreground "$PROFILE_DEST" start &
+            child=$!
+        elif ! kill -0 "$child" 2>/dev/null; then
+            # Expose a mapper crash to systemd/NRestarts instead of hiding a
+            # broken child behind a healthy-looking supervisor.
+            wait "$child" 2>/dev/null || true
+            child=""
+            return 1
+        fi
+        sleep 1
+    done
 }
 
 # The switcher only makes sense while the map runs: BindsTo stops it with the
@@ -515,6 +564,7 @@ case "${1:-status}" in
     confirm|keep)        cmd_confirm ;;
     stop|disable)        cmd_stop ;;
     status)              cmd_status ;;
+    supervise)           cmd_supervise ;;
     dry-run)             PZ_DRY_RUN=1 cmd_start ;;
     persist-on)          cmd_persist_on ;;
     persist-off)         cmd_persist_off ;;

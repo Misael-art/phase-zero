@@ -69,3 +69,40 @@ def test_shortcut_symlink_cannot_overwrite_another_file(tmp_path, monkeypatch):
     with patch.object(repairs.Path, "home", return_value=tmp_path), patch.object(repairs.shutil, "which", return_value=None), pytest.raises(RuntimeError, match="symlink preservado"):
         repairs.install_shortcuts()
     assert victim.read_text() == "X-PhaseZero-Managed=true\nkeep"
+
+
+def test_microphone_prefers_ucm_profile_that_enables_internal_mic(tmp_path, monkeypatch):
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    pactl = binary / "pactl"
+    pactl.write_text('''#!/bin/sh
+case "$*" in
+  "-f json list cards") echo '[{"name":"alsa_card.acp5x","active_profile":"pro-audio","profiles":{"pro-audio":{"sources":1,"available":true,"priority":1},"HiFi (Mic, Speaker)":{"sources":1,"available":true,"priority":8300}}}]' ;;
+  "list short sources") echo alsa_input.internal ;;
+  "info") echo 'Default Source: mic-biglinux' ;;
+  *) printf '%s\\n' "$*" >> "$AUDIO_CALLS" ;;
+esac
+''')
+    pactl.chmod(0o755)
+    monkeypatch.setenv("PATH", str(binary) + ":/usr/bin:/bin")
+    monkeypatch.setenv("PZ_REPAIR_NONINTERACTIVE", "1")
+    monkeypatch.setenv("AUDIO_CALLS", str(tmp_path / "calls"))
+    result = subprocess.run(["bash", str(ROOT / "linux/repairs/reparo-microfone.sh")], text=True, capture_output=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "calls").read_text().strip() == 'set-card-profile alsa_card.acp5x HiFi (Mic, Speaker)'
+
+
+def test_touch_repair_help_never_invokes_admin_bridge(tmp_path, monkeypatch):
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    for name in ("phasezero-admin", "bigsudo"):
+        target = binary / name
+        target.write_text('#!/bin/sh\necho unexpected-admin >> "$ADMIN_CALLS"\nexit 77\n')
+        target.chmod(0o755)
+    monkeypatch.setenv("PATH", str(binary) + ":/usr/bin:/bin")
+    marker = tmp_path / "admin-calls"
+    monkeypatch.setenv("ADMIN_CALLS", str(marker))
+    result = subprocess.run(["bash", str(ROOT / "linux/repairs/reparo-entrada.sh"), "--help"], text=True, capture_output=True)
+    assert result.returncode == 0
+    assert "usage:" in result.stdout
+    assert not marker.exists()

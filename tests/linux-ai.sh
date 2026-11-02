@@ -34,6 +34,16 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$PZ_LOCAL_BIN/opencode"
+# A host Hermes launcher may provision uv even for --version. Keep this status
+# fixture offline and prevent descendants from writing during its cleanup.
+cat > "$PZ_LOCAL_BIN/hermes" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+    --version) printf 'hermes fixture-version\n' ;;
+    *) printf 'hermes: test stub only supports --version\n' >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$PZ_LOCAL_BIN/hermes"
 # ensure PZ_LOCAL_BIN is on PATH before any setup script runs
 export PATH="$PZ_LOCAL_BIN:$PATH"
 
@@ -119,7 +129,7 @@ PZ_DRY_RUN=1 PZ_OLLAMA_URL="http://127.0.0.1:1" "$REPO_ROOT/linux/ai/setup-openc
 "$REPO_ROOT/linux/pz" ai opencode version-status | jq -e '.tool == "opencode-version"' >/dev/null
 
 "$REPO_ROOT/linux/ai/setup-memory.sh" dry-run \
-    | jq -e '.tool == "ai-memory" and .version == "1.31.1" and (.sha256 | length) == 64 and (.planned | index("install verified native release") != null)' >/dev/null
+    | jq -e '.tool == "ai-memory" and .version == "3.3.1" and (.sha256 | length) == 64 and (.planned | index("install verified native release") != null)' >/dev/null
 "$REPO_ROOT/linux/ai/setup-usagebar.sh" dry-run | jq -e '.tool == "ai-usagebar"' >/dev/null
 "$REPO_ROOT/linux/ai/setup-hermes.sh" dry-run | jq -e '.tool == "hermes"' >/dev/null
 "$REPO_ROOT/linux/ai/setup-openclaw.sh" dry-run | jq -e '.tool == "openclaw" and .usageBlocked == true and .planned == []' >/dev/null

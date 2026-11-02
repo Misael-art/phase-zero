@@ -17,8 +17,9 @@ STATUS = {
     "launcher": {"active": True}, "route": {"active": True}, "daemonListening": True,
     "signedIn": True, "liveCodexRouteTouched": False, "upstreamMode": "browser-only",
     "autostart": {"state": "enabled"},
-    "eligibility": {"blockers": ["o plano Plus não oferece MCP de desenvolvedor (a OpenAI "
-                                 "libera em Pro, só leitura, e em Business, Enterprise e Edu)"]},
+    "eligibility": {"blockers": ["o plano Plus não oferece MCP de desenvolvedor confirmado "
+                                 "nesta integração; confira as permissões atuais da conta "
+                                 "e do workspace"]},
 }
 
 
@@ -27,7 +28,14 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def build_page(monkeypatch, tmp_path, opted_in: bool):
+def build_page(monkeypatch, tmp_path, opted_in: bool, plan="Pro"):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for key, folder in (("XDG_DATA_HOME", "data"), ("XDG_CONFIG_HOME", "config"),
+                        ("XDG_STATE_HOME", "state"), ("XDG_CACHE_HOME", "cache")):
+        monkeypatch.setenv(key, str(tmp_path / folder))
+        monkeypatch.delenv("PZ_CODEX_ACCOUNTS_" + key, raising=False)
     root = tmp_path / "chatgpt-web"
     root.mkdir()
     state = {"schemaVersion": 1}
@@ -35,6 +43,7 @@ def build_page(monkeypatch, tmp_path, opted_in: bool):
         state["optIn"] = {"at": "2026-10-12T00:00:00Z"}
     (root / "state.json").write_text(json.dumps(state))
     monkeypatch.setenv("PZ_CHATGPT_WEB_ROOT", str(root))
+    monkeypatch.setattr("linux.ai.quota_meter.subscription_claims", lambda _: {"plan": plan})
     catalog = build_catalog(ROOT)
     actions = [action for action in catalog if action.category == "IA & Dev"]
     page = AiDevPage(ROOT, CommandRunner(ROOT), actions, by_id={a.id: a for a in catalog})
@@ -75,7 +84,10 @@ def test_bridge_card_offers_the_everyday_commands_once_opted_in(qapp, monkeypatc
         "chatgptWebOpen": ("ai", "chatgpt-web", "desktop"),
         "chatgptWebSetup": ("ai", "chatgpt-web", "setup", "--login-wait", "0"),
         "chatgptWebTools": ("ai", "chatgpt-web", "tools", "status"),
+        "chatgptWebToolsOn": ("ai", "chatgpt-web", "tools", "enable"),
+        "chatgptWebToolsOff": ("ai", "chatgpt-web", "tools", "disable"),
         "chatgptWebSmoke": ("ai", "chatgpt-web", "smoke"),
+        "chatgptWebUpdate": ("ai", "chatgpt-web", "update"),
         "chatgptWebDisable": ("ai", "chatgpt-web", "disable"),
     }
     assert set(buttons) == set(expected)
@@ -86,12 +98,15 @@ def test_bridge_card_offers_the_everyday_commands_once_opted_in(qapp, monkeypatc
     by_name = {name: requested[index] for index, name in enumerate(expected)}
     assert by_name["chatgptWebOpen"].mutable is False
     assert by_name["chatgptWebTools"].mutable is False
-    for name in ("chatgptWebSetup", "chatgptWebSmoke", "chatgptWebDisable"):
+    for name in ("chatgptWebSetup", "chatgptWebSmoke", "chatgptWebDisable", "chatgptWebUpdate",
+                 "chatgptWebToolsOn", "chatgptWebToolsOff"):
         action = by_name[name]
         assert action.mutable is True and action.impact
         assert action.preview_args == ("ai", "chatgpt-web", "status")
     assert "1 mensagem" in buttons["chatgptWebSmoke"].text()
+    assert buttons["chatgptWebTools"].text() == "Ver requisitos"
     assert "~/.codex" in by_name["chatgptWebDisable"].impact
+    assert len({action.id for action in requested}) == len(requested)
 
 
 def test_bridge_card_reports_state_and_why_tools_are_blocked(qapp, monkeypatch, tmp_path):
@@ -108,11 +123,39 @@ def test_bridge_card_reports_state_and_why_tools_are_blocked(qapp, monkeypatch, 
     assert "bloqueado" in tools.text() and "Plus" in tools.text()
     assert buttons_of(card)["chatgptWebOpen"].isEnabled()
 
+    full_without_access = {**STATUS, "upstreamMode": "full"}
+    page._on_status_ready("private.chatgpt-web.status", "", full_without_access)
+    assert "bloqueada" in tools.text() and "Plus" in tools.text()
+    assert "ferramentas em verificação" in state.text()
+
+    full_without_proof = {**STATUS, "upstreamMode": "full",
+                          "eligibility": {"blockers": []},
+                          "toolsGate": {"next": {"id": "full-runtime",
+                                                 "detail": "Full 6.1.8 exige rede no turno"}}}
+    page._on_status_ready("private.chatgpt-web.status", "", full_without_proof)
+    assert "bloqueado" in tools.text() and "rede no turno" in tools.text()
+
+    pro_unverified = {**STATUS, "eligibility": {"blockers": [],
+                                               "planMcpCapability": "write-unverified"},
+                      "toolsGate": {"next": {"id": "full-runtime",
+                                             "detail": "Full exige turno MCP real",
+                                             "action": "Teste o runtime Full."}}}
+    page._on_status_ready("private.chatgpt-web.status", "", pro_unverified)
+    account = next(label for label in card.findChildren(QLabel)
+                   if label.property("bridgeRole") == "account")
+    next_step = next(label for label in card.findChildren(QLabel)
+                     if label.property("bridgeRole") == "next")
+    assert "Conta Pro" in account.text() and "ainda não verificadas" in account.text()
+    assert "Full exige turno MCP real" in tools.text()
+    assert "Teste o runtime Full" in next_step.text()
+    assert buttons_of(card)["chatgptWebSetup"].text() == "Reparar"
+
     stopped = {**STATUS, "stage": "launcher-configured", "launcher": {"active": False},
                "route": {"active": False}, "daemonListening": False}
     page._on_status_ready("private.chatgpt-web.status", "", stopped)
     assert "Ligar ou reparar" in state.text() and state.property("state") == "warning"
     assert not buttons_of(card)["chatgptWebOpen"].isEnabled()
+    assert buttons_of(card)["chatgptWebSetup"].text() == "Preparar ou reparar"
 
     touched = {**STATUS, "liveCodexRouteTouched": True}
     page._on_status_ready("private.chatgpt-web.status", "", touched)
@@ -120,6 +163,7 @@ def test_bridge_card_reports_state_and_why_tools_are_blocked(qapp, monkeypatch, 
 
     page._on_status_failed("private.chatgpt-web.status", "timed out")
     assert "Atualizar" in state.text() and state.property("state") == "warning"
+    assert not next_step.text() and not account.text()
 
 
 def test_bridge_card_follows_the_running_lock(qapp, monkeypatch, tmp_path):
@@ -129,3 +173,13 @@ def test_bridge_card_follows_the_running_lock(qapp, monkeypatch, tmp_path):
 
     page.block_while_running(True)
     assert not any(button.isEnabled() for button in card.findChildren(QPushButton))
+
+
+def test_non_pro_web_default_keeps_stop_and_diagnostics_available(qapp, monkeypatch, tmp_path):
+    page, _ = build_page(monkeypatch, tmp_path, opted_in=True, plan="Plus")
+    page._on_status_ready("private.chatgpt-web.status", "", STATUS)
+    buttons = buttons_of(card_of(page))
+    for key in ("chatgptWebOpen", "chatgptWebSetup", "chatgptWebToolsOn", "chatgptWebSmoke", "chatgptWebUpdate"):
+        assert not buttons[key].isEnabled()
+    assert buttons["chatgptWebDisable"].isEnabled()
+    assert buttons["chatgptWebTools"].isEnabled()

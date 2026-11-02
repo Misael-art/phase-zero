@@ -36,6 +36,11 @@ Conflict rules:
 
 ## Active roadmaps
 
+- Contributor on clean host: read `docs/handoff/clean-host-development-20261024.md`
+  before preparing a new development machine. Use `tools/dev-bootstrap.sh` on
+  Arch family or `tools/dev-bootstrap.ps1` on Windows. The contributor wrapper
+  installs tooling only; product services, VMs and host boot remain separate.
+
 - Homelab v1.15.1 remediation: read
   `docs/roadmaps/homelab-v1.15.1-remediation.md` before any Homelab, server,
   AI-appliance, release, or host-package work. Treat its anti-pollution rules,
@@ -181,6 +186,13 @@ This block is maintained by ai-memory. Re-run
 `ai-memory install-instructions --target AGENTS.md` to refresh.
 <!-- ai-memory:end -->
 
+## Padrão de conexão de IA e carteira de chaves
+
+- Oferecer autenticação oficial pelo navegador/OAuth quando suportada pelo provedor; reutilizar o fluxo upstream, sem importar cookies de outras aplicações.
+- Conexão API deve permitir selecionar chave da carteira PhaseZero ou cadastrar chave nova no mesmo fluxo. Nova chave vai ao cofre nativo do sistema pela `CredentialVault`; metadados guardam somente referência opaca. Nunca criar carteira ou arquivo de segredo concorrente.
+- Seleção exige consumidor explícito e consentimento de uso/cobrança. Segredo não entra em argv, plano, log ou documentação. Remoção da chave deve encerrar seu uso gerenciado; presença da chave não comprova validade, sessão, cota ou saldo. Gates de grants dos proxies permanecem obrigatórios.
+- Sugerir pasta pelo contexto/projeto existente, permitindo trocar antes de confirmar; nunca usar caminho pessoal fixo ou assumir diretório de instalação como workspace.
+
 ## Local test temporary storage
 
 Before local pytest or artifact-heavy test runs, ensure `TMPDIR` and
@@ -189,3 +201,55 @@ Before local pytest or artifact-heavy test runs, ensure `TMPDIR` and
 Do not sweep `/run/user`, terminate agents, or reset desktop services to recover
 space. Use the on-demand terminal repair: archive only inactive, verified test
 fixtures with backup; preserve live locks, ambiguous locks and current fixtures.
+
+## Steam Deck desktop input safety
+
+- Physical USB keyboard/mouse and touchscreen remain available during every
+  controller mode. Never grab, disable, unbind or reset them to switch a game
+  profile. Touchscreen recovery targets FTS I2C only, never Valve HID or USB.
+- Temporary controller ownership requires live PID, start ticks and boot ID;
+  retain emulator children until the last consumer exits. File existence alone
+  never proves ownership. Desktop mapper yields to Steam/game owners at login
+  and while running, not only during manual start.
+- `pz steamdeck input` owns PhaseZero desktop preference recovery. RetroFE uses
+  the registered backend and its existing Steam/KDE guardians. Do not create a
+  second audio policy or discard original preferences after failed recovery.
+- Preserve intentional desktop mute/volume changes; restore the pre-game/login
+  baseline on transitions. Virtual keyboard opens automatically only from the
+  touchscreen, never mouse/trackpad/USB input; explicit shortcuts remain usable.
+  Retry late touchscreen enumeration without input grabs.
+- Help/status never request elevation. Before opening an admin dialog, ensure
+  an input path is usable; do not repeatedly prompt an operator unable to type.
+  Mock/CI success does not certify physical USB, touch, speech or cold boot.
+
+## Coleção Projects: continuidade e organização
+
+- Política comum: [../AGENTS.md](../AGENTS.md), especialmente autonomia, testes, GitHub e recursos (§§5–10); raiz/branch em [registro central](../.workspace/projects.json). A orientação atual de raiz única substitui recomendações históricas de criar worktrees/clones por tarefa; os contratos técnicos e gates deste projeto permanecem obrigatórios. Em outro host, preserve este mesmo método em um único checkout registrado, sem recriar caminhos antigos.
+- Antes de implementar, leia `docs/handoff/clean-host-development-20261024.md`, a auditoria de status e o roadmap da frente afetada, identifique causa, owner, dependências e aceite. Procure a solução oficial existente e integre nela; não introduza soluções concorrentes, aliases ambíguos ou refatorações fora do pedido. Neste host, a única raiz é `/home/misael/Projects/PhaseZero`.
+- Execute o lote até implementar, testar, revisar e preservar a continuidade. Resolva decisões reversíveis pelo contexto; não pare em planos nem peça confirmação para editar/testar o que já está autorizado. Comunique descobertas, bloqueios e entrega, sem narrar cada comando ou pequeno avanço.
+- Antes de operações pesadas, confira espaço do destino, RAM e carga; estime saídas e retenção. Reutilize ferramentas/ambientes compatíveis, limite jobs e encerre somente processos temporários próprios. Não mate trabalhos alheios, limpe caches compartilhados ou apague evidência para obter um gate verde.
+- Use o wrapper `tools/dev-bootstrap.sh` e o ambiente já provisionado, sem instalar o produto, serviços ou VMs para testar código por conveniência. TMPDIR/pytest ficam em disco persistente próprio, fora de `/run/user`; preserve exportações HOME/XDG separadas. Não crie outro banco, gateway, gerenciador de contas ou fluxo paralelo.
+- Faça os checks pertinentes a toda alteração; para documentos, revise diff, referências e coerência. Para código, cubra comportamento/regressão e execute os gates aplicáveis, sem desativá-los. Execute checks e o fluxo afetado no host disponível, isolando efeitos. Fixtures e CI não homologam login, cotas, provedores, Homelab, boot ou Windows VM. Gates físicos continuam sujeitos ao ambiente e escopo autorizados. `.mimosa`, `uber-defesa-privada`, Ai-memory, credenciais e estado compartilhado permanecem protegidos; não publicar nem limpar pelo nome PhaseZero.
+- Reutilize a autenticação válida e os helpers existentes. Nunca peça senha/token no chat, copie sessões ou grave credenciais em código/log. Se faltar acesso indispensável, solicite uma única ação pelo fluxo oficial, preserve o estado e avance no trabalho independente; não repita permissões já concedidas.
+- Confira remoto, PRs e checks do SHA antes do lote e ao publicar; reutilize o PR da mesma branch/objetivo. Revise arquivos explícitos, segredos e tamanho, faça commit/push do incremento autorizado e confirme o SHA remoto. Sem stage global de resgates, push forçado, merge de pesquisas ou publicação de dados privados. Não faça polling contínuo de CI.
+- PR cabe ao incremento revisável; release somente a marco elegível com versão/artefatos/notas e gates completos, dentro da autorização de publicação vigente. Não gerar release por manutenção destas regras. Preserve limites de merge/deploy e falhas preexistentes; acesso autenticado não amplia autorização.
+- Fontes e receitas ficam no Git; bancos, ROMs, assets privados, SDKs, builds, caches e pacotes de resgate seguem owner/destino próprios e recuperação verificável. `.gitignore` não é backup. Novo arquivo acima de 10 MiB exige revisão; downloads acima de 70 MB são manuais, inclusive o pacote dividido, com origem/tamanho/hash/destino preparados.
+- Ao fechar, mantenha apenas os gerados necessários e atualize o handoff existente com SHA, testes no host, limites de validação, bloqueio e próximo passo. Não declare produto pronto quando faltar evidência do alvo real, nem deixe um único exemplar de trabalho útil sem proteção identificada.
+
+<!-- BEGIN PHASEZERO TOKEN ECONOMY codex -->
+Token profile for Codex only: basic. Other clients keep their own profile.
+Preserve user/project instructions, account, model, permissions and all acceptance checks.
+ai-memory stays connected in every profile. Search relevant memory before non-trivial work; retrieve a few relevant pages, never the entire store. Record durable learnings; lifecycle owns routine capture.
+If memory fails or resolves another project, report degraded state and use native ai-memory from this project directory. Never invent recall or create a second memory store.
+Use rg/scoped reads and existing native skills/tool discovery on demand. Preserve lockfiles and diagnostics.
+When RTK is available, use supported filtered commands for human-readable output. rtk proxy does not filter. Use raw output for machine contracts, exact diffs and missing diagnostics.
+<!-- END PHASEZERO TOKEN ECONOMY codex -->
+
+<!-- BEGIN PHASEZERO TOKEN ECONOMY opencode -->
+Token profile for OpenCode only: basic. Other clients keep their own profile.
+Preserve user/project instructions, account, model, permissions and all acceptance checks.
+ai-memory stays connected in every profile. Search relevant memory before non-trivial work; retrieve a few relevant pages, never the entire store. Record durable learnings; lifecycle owns routine capture.
+If memory fails or resolves another project, report degraded state and use native ai-memory from this project directory. Never invent recall or create a second memory store.
+Use rg/scoped reads and existing native skills/tool discovery on demand. Preserve lockfiles and diagnostics.
+When RTK is available, use supported filtered commands for human-readable output. rtk proxy does not filter. Use raw output for machine contracts, exact diffs and missing diagnostics.
+<!-- END PHASEZERO TOKEN ECONOMY opencode -->

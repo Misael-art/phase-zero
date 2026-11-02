@@ -976,6 +976,56 @@ else
     check AI_IDE "AI-capable IDE/editor available" WARN "install VS Code/Cursor/Windsurf/Zed/Neovim"
 fi
 
+# $XDG_RUNTIME_DIR is a small RAM-backed tmpfs. When something fills it the
+# user systemd manager can no longer create transient units, so every app
+# launched from the menu fails with "Unit app-...service not found".
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -d "$runtime_dir" ]; then
+    runtime_use="$(df --output=pcent "$runtime_dir" 2>/dev/null | tail -1 | tr -dc '0-9' || true)"
+    # Skip mount points (e.g. the document portal FUSE): they use no tmpfs space.
+    runtime_top="$( { for entry in "$runtime_dir"/* "$runtime_dir"/.[!.]*; do
+            [ -e "$entry" ] && ! mountpoint -q "$entry" && du -xsh "$entry" 2>/dev/null
+        done || true; } | sort -h | tail -1 | tr '\t' ' ' || true)"
+    if [ "${runtime_use:-0}" -ge 95 ] 2>/dev/null; then
+        check RUN01 "Runtime dir has free space" FAIL \
+            "${runtime_dir} ${runtime_use}% cheio — apps não abrem pelo menu; maior: ${runtime_top:-?}"
+    elif [ "${runtime_use:-0}" -ge 80 ] 2>/dev/null; then
+        check RUN01 "Runtime dir has free space" WARN "${runtime_dir} ${runtime_use}% cheio; maior: ${runtime_top:-?}"
+    else
+        check RUN01 "Runtime dir has free space" PASS "${runtime_use:-?}% usado"
+    fi
+fi
+
+# A game frontend swaps the Deck to a gamepad profile and suspends KDE
+# shortcuts; if that outlives the game the desktop has no trackpad mouse,
+# keyboard or button shortcuts.
+input_state="$(run bash "$PZ_ROOT/linux/steamdeck/input-restore.sh" status 2>/dev/null || true)"
+case "$(jq -r '.mode // empty' <<< "$input_state" 2>/dev/null)" in
+    stuck) check INPUT01 "Desktop controls restored after games" FAIL \
+        "controle preso no modo jogo — rode: linux/pz steamdeck input restore (ou toque em Restaurar controles)" ;;
+    game) check INPUT01 "Desktop controls restored after games" INFO "jogo ativo; perfil de controle esperado" ;;
+    desktop) check INPUT01 "Desktop controls restored after games" PASS "trackpad, teclado e atalhos no modo Desktop" ;;
+esac
+
+# One install per app: duplicates drift apart in version and leave the user
+# guessing which copy runs. Unacknowledged ones are a conflict to resolve.
+dup_status="$(run python3 "$PZ_ROOT/linux/audit/duplicates.py" scan --json 2>/dev/null || true)"
+dup_blocking="$(jq -r '.blocking // [] | join(", ")' <<< "$dup_status" 2>/dev/null || true)"
+dup_broken="$(jq -r '.brokenShims // [] | map(.path) | join(", ")' <<< "$dup_status" 2>/dev/null || true)"
+if [ -n "$dup_blocking" ]; then
+    check DUP01 "No duplicate app installs" WARN \
+        "duplicado: ${dup_blocking} — veja: linux/pz host duplicates scan"
+else
+    check DUP01 "No duplicate app installs" PASS "nenhuma duplicidade não aceita"
+fi
+if [ -n "$dup_broken" ]; then
+    check DUP02 "Launchers point to installed apps" WARN "lançador quebrado: ${dup_broken}"
+fi
+oc_health="$(run python3 "$PZ_ROOT/linux/ai/opencode_9router_manager.py" status 2>/dev/null || true)"
+if jq -e '.configuration.present and (.configuration.health.loads | not)' <<< "$oc_health" >/dev/null 2>&1; then
+    check OC01 "OpenCode config loads" FAIL "provider quebrado impede o OpenCode de abrir — rode: linux/pz ai opencode heal"
+fi
+
 # Optional dependencies degrade a service without breaking the product, so
 # absence is reported rather than treated as a fault. The distinction that
 # matters to the user is whether PhaseZero can install it here: on a

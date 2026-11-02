@@ -8514,19 +8514,8 @@ function Install-BootstrapAiMemoryComponent {
     if ([string]$result.status -eq 'blocked') {
         throw ([string]$result.message)
     }
-    # configure = task de servidor loopback + wiring MCP/hooks por agente detectado (idempotente).
-    $configure = Set-BootstrapAiMemoryConfig -InstallRoot $root -ProjectRoot $project
-    Write-Log ("ai-memory configure: {0} {1}" -f [string]$configure.status, [string]$configure.message)
-    # SDCard sync (ja acionado dentro de Set-BootstrapAiMemoryConfig; log extra aqui)
-    if ($configure.Contains('sdSync') -and $configure['sdSync']) {
-        $sync = $configure['sdSync']
-        if ($sync.sdCardFound) {
-            Write-Log ("ai-memory sd-sync: direcao={0} synced={1}" -f $sync.direction, $sync.synced) 'INFO'
-        }
-    }
-    if ($configure.Contains('syncTask') -and $configure['syncTask']) {
-        Write-Log ("ai-memory sync-task: {0}" -f [string]$configure['syncTask']['status']) 'INFO'
-    }
+    # Canonical lifecycle already configures service and detected agents.
+
 }
 
 function Install-BootstrapAionUiComponent {
@@ -11457,7 +11446,7 @@ function Get-BootstrapAppTuningCatalog {
         [ordered]@{ id = 'openwebui-dev-session'; category = 'local-ai-containers'; displayName = 'Open WebUI sob demanda'; description = 'Open WebUI fica em Desktop/Dev e nao inicia junto ao console.'; targetApps = @('open webui','openwebui'); probePaths = @(); requiresAdmin = $false; defaultMode = 'recommended'; profiles = @('dev','desktop'); actions = @('session','audit'); rollback = @('manual') }
         [ordered]@{ id = 'llamacpp-mtp-template'; category = 'dev-ai'; displayName = 'llama.cpp MTP diagnostic'; description = 'Template de diagnostico para llama.cpp server com MTP/speculative decoding sem baixar modelo.'; targetApps = @('llama.cpp','llamacpp','llama-server'); probePaths = @('$env:USERPROFILE\.llama.cpp\llama-server.exe','$env:LOCALAPPDATA\llama.cpp\llama-server.exe'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('diagnostic','manual-action','audit'); rollback = @('manual'); riskTier = 'experimental'; rollbackScope = 'manual'; safetyNotes = @('Nao baixa modelos', 'Nao altera servidor automaticamente', 'Use somente com modelo/binario que suportam MTP'); installComponents = @('llamacpp-server') }
         [ordered]@{ id = 'agent-config-claude-rtk-template'; category = 'agent-config'; displayName = 'Claude/RTK agent config template'; description = 'Template local para documentar uso de RTK, Claude e providers BYOK sem gravar chaves.'; targetApps = @('claude code','rtk','codex','opencode'); probePaths = @('$env:USERPROFILE\.claude\settings.json','$env:USERPROFILE\.codex\config.toml'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','audit'); rollback = @('manual'); riskTier = 'manual'; rollbackScope = 'file-template'; safetyNotes = @('Nao grava segredos', 'Template manual', 'Revisar antes de aplicar'); installComponents = @('bootstrap-secrets','agent-skills') }
-        [ordered]@{ id = 'headroom-agent-context-compression'; category = 'agent-config'; displayName = 'Headroom agent context compression'; description = 'Gera helper local para Headroom em Claude Code, Codex, Aider, Cursor, Copilot, Gemini, OpenClaw, n8n e MCP sem gravar chaves.'; targetApps = @('headroom','claude code','codex','aider','cursor','copilot','gemini','openclaw','n8n','mcp','opencode'); probePaths = @('$env:USERPROFILE\.local\bin\headroom.exe','$env:APPDATA\Python\Scripts\headroom.exe','.codex\context-packs\headroom-agent-integration.md'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','wrapper-template','audit'); rollback = @('backup-file','manual'); riskTier = 'manual'; rollbackScope = 'file-template'; safetyNotes = @('Nao grava segredos', 'Nao executa wrap automaticamente', 'OpenCode fica proxy/manual ate wrapper upstream maduro'); requiresInteractiveLogin = $false; installComponents = @('headroom-ai') }
+        [ordered]@{ id = 'headroom-agent-context-compression'; category = 'agent-config'; displayName = 'Headroom agent context compression'; description = 'Gera helper local para Headroom em Claude Code, Codex, Aider, Cursor, Copilot, Gemini, OpenClaw, n8n e MCP sem gravar chaves.'; targetApps = @('headroom','claude code','codex','aider','cursor','copilot','gemini','openclaw','n8n','mcp','opencode'); probePaths = @('$env:USERPROFILE\.local\bin\headroom.exe','$env:APPDATA\Python\Scripts\headroom.exe','.codex\context-packs\headroom-agent-integration.md'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','wrapper-template','audit'); rollback = @('backup-file','manual'); riskTier = 'manual'; rollbackScope = 'file-template'; safetyNotes = @('Nao grava segredos', 'Nao executa wrap automaticamente', 'Wrappers gerenciados exigem homologacao de rota, conta e memoria'); requiresInteractiveLogin = $false; installComponents = @('headroom-ai') }
         [ordered]@{ id = 'ai-context-frugality-pack'; category = 'agent-config'; displayName = 'AI context frugality pack'; description = 'Gera regras seguras de higiene de contexto, .aiderignore conservador e skeleton map local para CLIs/IDEs de IA.'; targetApps = @('codex','claude code','aider','headroom','cursor','windsurf','zed','opencode'); probePaths = @('AGENTS.md','.aiderignore','.codex\context-packs\ai-context-frugality.md','.codex\ai-context\repo-skeleton.json'); alwaysAvailable = $true; requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('config-template','skeleton-map','audit'); rollback = @('backup-file','manual'); riskTier = 'conservative'; rollbackScope = 'backup-file'; safetyNotes = @('Nao grava segredos', 'Nao executa reset de sessao', 'Nao ignora lockfiles', 'Skeleton sem corpos de funcao'); requiresInteractiveLogin = $false; installComponents = @() }
         [ordered]@{ id = 'knowledge-vault-obsidian-template'; category = 'knowledge-vault'; displayName = 'Obsidian transcript vault template'; description = 'Template manual de vault Obsidian para transcricoes tecnicas e memoria de projeto.'; targetApps = @('obsidian'); probePaths = @('$env:LOCALAPPDATA\Programs\Obsidian\Obsidian.exe','$env:USERPROFILE\Documents\Obsidian'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev','desktop'); actions = @('config-template','audit'); rollback = @('file-template'); riskTier = 'manual'; rollbackScope = 'manual'; safetyNotes = @('Nao cria sync remoto', 'Nao instala plugins automaticamente', 'Vault fica sob controle do usuario'); installComponents = @('obsidian') }
         [ordered]@{ id = 'n8n-youtube-workflow-template'; category = 'workflow-automation'; displayName = 'n8n YouTube transcript workflow template'; description = 'Template manual para fluxo n8n de coleta/transcricao, sem credenciais ou execucao automatica.'; targetApps = @('n8n','youtube'); probePaths = @('$env:APPDATA\npm\n8n.cmd','$env:APPDATA\npm\n8n.ps1'); requiresAdmin = $false; defaultMode = 'opt-in'; profiles = @('dev'); actions = @('workflow-template','manual-action','audit'); rollback = @('file-template','manual'); riskTier = 'manual'; rollbackScope = 'manual'; safetyNotes = @('Requer login/API keys do usuario', 'Nao agenda jobs automaticamente', 'Validar fontes e direitos antes de baixar audio'); requiresInteractiveLogin = $true; installComponents = @('n8n') }
@@ -16108,7 +16097,7 @@ function Get-BootstrapComponentCatalog {
     $catalog['goose'] = New-BootstrapComponentDefinition -Name 'goose' -Description 'goose CLI.' -DependsOn @('git-core') -Kind 'goose'
     $catalog['repo-gemini-cli'] = New-BootstrapComponentDefinition -Name 'repo-gemini-cli' -Description 'Clone do repositório gemini-cli.' -DependsOn @('git-core') -Kind 'repo-clone' -Data @{ RepoUrl = 'https://github.com/heartyguy/gemini-cli'; TargetName = 'gemini-cli' }
     $catalog['n8n'] = New-BootstrapComponentDefinition -Name 'n8n' -Description 'n8n global via npm.' -DependsOn @('node-core') -Kind 'npm' -Data @{ Package = 'n8n'; DisplayName = 'n8n'; CommandNames = @('n8n') }
-    $catalog['headroom-ai'] = New-BootstrapComponentDefinition -Name 'headroom-ai' -Description 'Headroom AI context compressor via uv tool.' -DependsOn @('python-core', 'rustup') -Kind 'uvtool' -Data @{ Package = 'headroom-ai[proxy]'; CommandName = 'headroom'; DisplayName = 'Headroom AI (headroom-ai[proxy])'; VersionArgs = @('version'); Stage = 'payload'; Provisioning = 'uvtool'; ValueReason = 'Wrapper/proxy local para compressao de contexto em agentes CLI e OpenAI-compatible.'; ProbePaths = @("$env:USERPROFILE\.local\bin\headroom.exe", "$env:APPDATA\Python\Scripts\headroom.exe"); riskLevel = 'experimental'; officialSource = 'https://pypi.org/project/headroom-ai/'; manualReason = 'Windows pode precisar compilar dependencias Rust quando wheel pronta nao existir; wrappers ficam opt-in.'; requiresGpu = $false; requiresInteractiveLogin = $false } -EstimatedSizeGB 0.5 -RequiresNetwork $true
+    $catalog['headroom-ai'] = New-BootstrapComponentDefinition -Name 'headroom-ai' -Description 'Headroom AI context compressor via uv tool.' -DependsOn @('python-core', 'rustup') -Kind 'uvtool' -Data @{ Package = ('headroom-ai[proxy]==' + [string](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'assets/agent-skills/token-economy.json') -Raw | ConvertFrom-Json).headroomVersion); CommandName = 'headroom'; DisplayName = 'Headroom AI (headroom-ai[proxy])'; VersionArgs = @('--version'); Stage = 'payload'; Provisioning = 'uvtool'; ValueReason = 'Wrapper/proxy local para compressao de contexto em agentes CLI e OpenAI-compatible.'; ProbePaths = @("$env:USERPROFILE\.local\bin\headroom.exe", "$env:APPDATA\Python\Scripts\headroom.exe"); riskLevel = 'experimental'; officialSource = 'https://pypi.org/project/headroom-ai/'; manualReason = 'Windows pode precisar compilar dependencias Rust quando wheel pronta nao existir; wrappers ficam opt-in.'; requiresGpu = $false; requiresInteractiveLogin = $false } -EstimatedSizeGB 0.5 -RequiresNetwork $true
     $catalog['autohotkey'] = New-BootstrapComponentDefinition -Name 'autohotkey' -Description 'AutoHotkey.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'AutoHotkey.AutoHotkey'; DisplayName = 'AutoHotkey'; ProbePaths = @("$env:ProgramFiles\AutoHotkey\AutoHotkey64.exe", "${env:ProgramFiles(x86)}\AutoHotkey\AutoHotkey.exe") }
     $catalog['blender'] = New-BootstrapComponentDefinition -Name 'blender' -Description 'Blender LTS.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'BlenderFoundation.Blender.LTS.4.5'; DisplayName = 'Blender LTS 4.5'; ProbePaths = @("$env:ProgramFiles\Blender Foundation\Blender LTS\blender.exe", "$env:ProgramFiles\Blender Foundation\Blender 4.5\blender.exe") }
     $catalog['ffmpeg'] = New-BootstrapComponentDefinition -Name 'ffmpeg' -Description 'FFmpeg.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'Gyan.FFmpeg'; DisplayName = 'FFmpeg'; ProbePaths = @("${env:LOCALAPPDATA}\Programs\ffmpeg\bin\ffmpeg.exe", "$env:ProgramFiles\ffmpeg\bin\ffmpeg.exe", "$env:ProgramData\chocolatey\bin\ffmpeg.exe") }
@@ -16268,7 +16257,7 @@ function Get-BootstrapProfileCatalog {
     $catalog['server-llm-hermes'] = New-BootstrapProfileDefinition -Name 'server-llm-hermes' -Description 'LLM local + Hermes remoto, com Windows enxugado para menor RAM.' -Items @('ollama', 'hermes-remote', 'os-slim-server')
     $catalog['server-llm-homelab'] = New-BootstrapProfileDefinition -Name 'server-llm-homelab' -Description 'LLM local + servidor caseiro, com Windows enxugado para menor RAM.' -Items @('ollama', 'homelab-stack', 'tailscale', 'os-slim-server')
     $catalog['server-llm-homelab-hermes'] = New-BootstrapProfileDefinition -Name 'server-llm-homelab-hermes' -Description 'Tudo: LLM local + servidor caseiro + Hermes remoto, com Windows enxugado.' -Items @('ollama', 'homelab-stack', 'tailscale', 'hermes-remote', 'os-slim-server')
-    $catalog['ai'] = New-BootstrapProfileDefinition -Name 'ai' -Description 'Desktops, CLIs e proxies locais de IA.' -Items @('claude-desktop', 'claude-code', 'cursor', 'windsurf', 'warp', 'trae', 'opencode-desktop', 'vscode', 'vscode-insiders', 'antigravity', 'autoclaw', 'perplexity', 'codex-installer', 'ollama', 'cherry-studio', 'lm-studio', 'pinokio', 'zed', 'opencode', 'gemini-cli', 'kilo-cli', 'bonsai-cli', 'grok-cli', 'qwen-code', 'copilot-cli', 'codex-cli', 'openclaude-cli', 'mimo-code', 'hermes', 'kimiproxy', 'qwenproxy', 'deepsproxy', 'mimo-ai-proxy', 'antigravity-openai-adapter', 'dockernativemanager', 'ai-proxy-suite', 'ai-usagebar', 'ai-memory', 'aionui', 'headroom-ai', 'promptfoo', 'bootstrap-secrets', 'bootstrap-mcps', 'vscode-extensions', 'claude-config', 'claude-plugins', 'agent-skills', 'agent-compat-runtime', 'aider', 'goose', 'repo-gemini-cli', 'supermaven-vscode')
+    $catalog['ai'] = New-BootstrapProfileDefinition -Name 'ai' -Description 'Desktops, CLIs e proxies locais de IA.' -Items @('claude-desktop', 'claude-code', 'cursor', 'windsurf', 'warp', 'trae', 'opencode-desktop', 'vscode', 'vscode-insiders', 'antigravity', 'autoclaw', 'perplexity', 'codex-installer', 'ollama', 'cherry-studio', 'lm-studio', 'pinokio', 'zed', 'opencode', 'gemini-cli', 'kilo-cli', 'bonsai-cli', 'grok-cli', 'qwen-code', 'copilot-cli', 'codex-cli', 'openclaude-cli', 'mimo-code', 'hermes', 'kimiproxy', 'qwenproxy', 'deepsproxy', 'mimo-ai-proxy', 'antigravity-openai-adapter', 'dockernativemanager', 'ai-proxy-suite', 'ai-usagebar', 'ai-memory', 'aionui', 'promptfoo', 'bootstrap-secrets', 'bootstrap-mcps', 'vscode-extensions', 'claude-config', 'claude-plugins', 'agent-skills', 'agent-compat-runtime', 'aider', 'goose', 'repo-gemini-cli', 'supermaven-vscode')
     $catalog['dev-ai'] = New-BootstrapProfileDefinition -Name 'dev-ai' -Description 'Alias explicito para pilha de IA pesada; opt-in.' -Items @('ai')
     $catalog['automation'] = New-BootstrapProfileDefinition -Name 'automation' -Description 'Automação local.' -Items @('n8n')
     $catalog['security'] = New-BootstrapProfileDefinition -Name 'security' -Description 'Gestores de senha e nuvem.' -Items @('1password', 'proton-drive', 'proton-pass')
@@ -18119,15 +18108,17 @@ function Get-BootstrapAiToolCatalog {
         GitHubRepo     = 'akitaonrails/ai-memory'
         PackageName    = ''
         InstallSupport = 'native-release'
-        ReleaseTag     = 'v1.1.0'
+        ReleaseTag     = ''
         ServerUrl      = 'http://127.0.0.1:49374'
         ProbePaths     = @('%LOCALAPPDATA%\PhaseZero\ai-tools\ai-memory\ai-memory.exe', '%LOCALAPPDATA%\PhaseZero\ai-tools\bin\ai-memory.exe', '%USERPROFILE%\.cargo\bin\ai-memory.exe', '%LOCALAPPDATA%\ai-memory\ai-memory.exe')
-        ReleaseAssets  = [ordered]@{
-            windows = [ordered]@{ Name = 'ai-memory-windows-x86_64.zip'; Sha256 = '7465f9958c0549d8733446bb4fb5538d18a2d7414c0a6069ce0561ba1f81ac95' }
-            x86_64  = [ordered]@{ Name = 'ai-memory-linux-x86_64.tar.gz'; Sha256 = '76c8195b273dbdecd028d1bee9b3474a297bbf74511487b2ca766e10d63b233e' }
-            aarch64 = [ordered]@{ Name = 'ai-memory-linux-aarch64.tar.gz'; Sha256 = 'f4f7b9d6e80582de111c3c5fcb4e568e2ae158c620dd469b0236bf79a2b77a0d' }
-        }
+        ReleaseAssets  = [ordered]@{}
         Notes          = 'Memoria de longo prazo Rust para handoff de contexto entre agentes (Claude Code, Codex, OpenCode). Servidor HTTP loopback 127.0.0.1:49374 + MCP + hooks de ciclo de vida. Windows usa zip nativo verificado por sha256; fallback cargo install na tag oficial. Beta: servidor opt-in.'
+    }
+    $memoryPins = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'packaging/ai-memory/pins.json') -Raw | ConvertFrom-Json
+    $catalog['ai-memory']['ReleaseTag'] = 'v' + [string]$memoryPins.version
+    foreach ($mapping in @(@('windows','windows-x86_64'), @('x86_64','linux-x86_64'), @('aarch64','linux-aarch64'))) {
+        $assetPin = $memoryPins.assets.($mapping[1])
+        $catalog['ai-memory']['ReleaseAssets'][$mapping[0]] = @{ Name = [string]$assetPin.name; Sha256 = [string]$assetPin.sha256 }
     }
     $catalog['ai-proxy-suite'] = [ordered]@{
         ToolName       = 'ai-proxy-suite'
@@ -21940,9 +21931,9 @@ function Invoke-BootstrapAiMemoryWiring {
                 $runArgs = @($verb, $flag, $agent, '--apply', '--server-url', $serverUrl) + $hooksDirArg
                 $result = Invoke-BootstrapAiNativeCommand -Exe $ExePath -Args $runArgs -TimeoutMs 60000
                 $status = if ([int]$result['exitCode'] -eq 0) { 'applied' } else { 'failed' }
-                $applied.Add([ordered]@{ agent = $agent; command = ("{0} {1} {2}" -f $verb, $flag, $agent); status = $status; detail = (Get-BootstrapCleanNativeText -Text (([string]$result['stderr']) + ' ' + ([string]$result['stdout'])) -MaxLength 300) }) | Out-Null
+                $applied.Add([ordered]@{ agent = $agent; command = ("{0} {1} {2}" -f $verb, $flag, $agent); status = $status; detail = ("native wiring exit={0}" -f [int]$result['exitCode']) }) | Out-Null
             } catch {
-                $applied.Add([ordered]@{ agent = $agent; command = ("{0} {1} {2}" -f $verb, $flag, $agent); status = 'failed'; detail = (Get-BootstrapCleanNativeText -Text $_.Exception.Message -MaxLength 300) }) | Out-Null
+                $applied.Add([ordered]@{ agent = $agent; command = ("{0} {1} {2}" -f $verb, $flag, $agent); status = 'failed'; detail = 'native wiring command failed' }) | Out-Null
             }
         }
     }
@@ -21955,25 +21946,22 @@ function Ensure-BootstrapAiMemoryServerTask {
         [switch]$DryRun,
         [switch]$Visible
     )
-    # Registra task de logon que sobe o servidor loopback ai-memory serve.
-    # Por padrao roda em segundo plano (sem janela de console) via launcher VBS;
-    # use -Visible para manter o console visivel (debug).
     $taskName = 'BootstrapTools-AiMemoryServer'
     $serverUrl = Get-BootstrapAiMemoryServerUrl
     $bind = '127.0.0.1:49374'
     if ($serverUrl -match '://([^/]+)') { $bind = $matches[1] }
-
+    $dataDir = Get-BootstrapAiMemoryDataDir
+    $nativeCommand = ('"{0}" --data-dir "{1}" serve --transport http --enable-api --bind {2}' -f $ExePath, $dataDir, $bind)
     $hidden = -not $Visible
     $vbsPath = ''
     if ($hidden) {
         $launcherDir = Split-Path -Parent $ExePath
         $vbsPath = Join-Path $launcherDir 'ai-memory-serve-hidden.vbs'
-        # WScript.Shell.Run com window style 0 = oculto; False = nao espera.
-        $vbsBody = 'CreateObject("WScript.Shell").Run """' + $ExePath + '"" serve --transport http --bind ' + $bind + '", 0, False'
-        $wscriptExe = Join-Path $env:SystemRoot 'System32\wscript.exe'
+        $vbsBody = 'CreateObject("WScript.Shell").Run "' + $nativeCommand.Replace('"', '""') + '", 0, False'
+        $wscriptExe = Join-Path $env:SystemRoot 'System32/wscript.exe'
         $taskCommand = ('"{0}" "{1}"' -f $wscriptExe, $vbsPath)
     } else {
-        $taskCommand = ('"{0}" serve --transport http --bind {1}' -f $ExePath, $bind)
+        $taskCommand = $nativeCommand
     }
 
     if ($DryRun) {
@@ -22039,15 +22027,12 @@ function Install-BootstrapAiMemory {
     }
 
     if (Test-BootstrapHostIsWindows) {
-        try {
-            return (Install-BootstrapAiMemoryViaRelease -CatalogEntry $CatalogEntry -InstallRoot $root -ProjectRoot $ProjectRoot)
-        } catch {
-            $reason = Get-BootstrapCleanNativeText -Text $_.Exception.Message
-            return (Install-BootstrapAiMemoryViaCargo -CatalogEntry $CatalogEntry -InstallRoot $root -ProjectRoot $ProjectRoot -BlockedReason $reason)
-        }
+        if ($root -ne (Get-BootstrapAiInstallRoot -InstallRoot '')) { throw 'Custom memory install root requires explicit migration; installation preserved.' }
+        $null = Invoke-BootstrapAiMemoryPortability -Arguments @('install', '--json')
+        $exe = Get-BootstrapAiMemoryExePath -InstallRoot $root
+        return (New-BootstrapAiToolResult -ToolName 'ai-memory' -Action 'install' -Status 'installed' -InstallRoot $root -CommandPath $exe -Version $tag -Message 'Managed memory lifecycle completed.')
     }
-
-    return (Install-BootstrapAiMemoryViaCargo -CatalogEntry $CatalogEntry -InstallRoot $root -ProjectRoot $ProjectRoot)
+    throw 'Use linux/pz ai memory install on Linux.'
 }
 
 function Install-BootstrapAiMemoryViaRelease {
@@ -22152,10 +22137,16 @@ function Set-BootstrapAiMemoryConfig {
     param(
         [string]$InstallRoot = '',
         [string]$ProjectRoot = '',
-        [switch]$DryRun
+        [switch]$DryRun,
+        [switch]$ManagedLifecycle
     )
     # configure = registra servidor (task de logon) + wiring MCP/hooks por agente detectado.
     $root = Get-BootstrapAiInstallRoot -InstallRoot $InstallRoot
+    if (-not $DryRun -and -not $ManagedLifecycle) {
+        if ($root -ne (Get-BootstrapAiInstallRoot -InstallRoot '')) { throw 'Custom memory install root requires explicit migration; installation preserved.' }
+        $null = Invoke-BootstrapAiMemoryPortability -Arguments @('repair', '--json')
+        return (New-BootstrapAiToolResult -ToolName 'ai-memory' -Action 'configure' -Status 'configured' -InstallRoot $root -Message 'Managed memory repair completed.')
+    }
     $exePath = Get-BootstrapAiMemoryExePath -InstallRoot $root
     $agents = Get-BootstrapAiMemoryDetectedAgents
     if ([string]::IsNullOrWhiteSpace($exePath)) {
@@ -22168,6 +22159,9 @@ function Set-BootstrapAiMemoryConfig {
 
     $task = Ensure-BootstrapAiMemoryServerTask -ExePath $exePath -DryRun:$DryRun
     $wiring = Invoke-BootstrapAiMemoryWiring -ExePath $exePath -Agents $agents -DryRun:$DryRun
+    if (-not $DryRun -and @($wiring | Where-Object { $_.status -eq 'failed' }).Count -gt 0) {
+        throw 'Memory agent wiring failed; use repair after checking the installed agents.'
+    }
     $status = if ($DryRun) { 'planned' } else { 'configured' }
     $message = if (@($agents).Count -gt 0) {
         ("Servidor loopback {0}; MCP/hooks aplicados para: {1}." -f [string]$task['status'], (($agents -join ', ')))
@@ -22179,10 +22173,9 @@ function Set-BootstrapAiMemoryConfig {
     $result['agents'] = @($agents)
     $result['wiring'] = @($wiring)
 
-    # Sync com SDCard + registra task agendada (criada sempre para capturar SDCard futuro)
+    # Portability enrollment is explicit. Native setup never imports unknown media.
     if (-not $DryRun) {
-        $syncResult = Sync-BootstrapAiMemoryWithSdCard -DryRun:$DryRun
-        $result['sdSync'] = $syncResult
+        $result['sdSync'] = @{ status = 'not-configured'; synced = $false }
         $taskResult = Ensure-BootstrapAiMemorySyncTask -DryRun:$DryRun
         $result['syncTask'] = $taskResult
     } else {
@@ -22225,447 +22218,32 @@ function Uninstall-BootstrapAiMemory {
     return (New-BootstrapAiToolResult -ToolName 'ai-memory' -Action 'uninstall' -Status 'removed' -InstallRoot $root -ProjectRoot $ProjectRoot -Message 'ai-memory gerenciado e task removidos; dados de memoria do usuario preservados.' -Docs 'https://github.com/akitaonrails/ai-memory')
 }
 
-function Find-BootstrapAiMemorySdCard {
-    # Varre drives removiveis (DriveType=2) procurando pasta "Ai-memory" na raiz.
-    # Retorna path completo ou $null.
-    try {
-        $drives = Get-CimInstance -ClassName Win32_LogicalDisk -ErrorAction SilentlyContinue |
-            Where-Object { $_.DriveType -eq 2 }
-        foreach ($drive in $drives) {
-            $candidate = Join-Path $drive.DeviceID 'Ai-memory'
-            if (Test-Path -LiteralPath $candidate) {
-                Write-Log "ai-memory: SDCard encontrado em $candidate" 'INFO'
-                return $candidate
-            }
-        }
-    } catch {
-        Write-Log ("ai-memory: Find-BootstrapAiMemorySdCard WMI falhou ({0})" -f $_.Exception.Message) 'WARN'
-    }
-    # Fallback: drive literal F:\Ai-memory
-    $fallback = 'F:\Ai-memory'
-    if (Test-Path -LiteralPath $fallback) {
-        Write-Log "ai-memory: SDCard fallback em $fallback" 'INFO'
-        return $fallback
-    }
-    Write-Log 'ai-memory: Nenhum SDCard com pasta Ai-memory encontrado.' 'INFO'
-    return $null
-}
-
-function Export-BootstrapAiMemoryToSdCard {
-    <#
-    .SYNOPSIS
-        Exporta dados locais do ai-memory (wiki/raw/db/config) para SDCard.
-    .DESCRIPTION
-        wiki/ usa git push para bare repo no SDCard.
-        raw/ e db/ usam robocopy /MIR.
-        config.toml copiado direto.
-    #>
-    param(
-        [Parameter(Mandatory = $true)][string]$SdCardPath,
-        [Parameter(Mandatory = $true)][string]$DataDir,
-        [switch]$DryRun
-    )
-    Write-Log "ai-memory: Exportando dados para SDCard $SdCardPath" 'INFO'
-
-    $results = New-Object System.Collections.Generic.List[object]
-
-    # Cria estrutura no SDCard
-    if (-not $DryRun) {
-        $null = New-Item -Path $SdCardPath -ItemType Directory -Force
-        $null = New-Item -Path (Join-Path $SdCardPath 'raw') -ItemType Directory -Force
-        $null = New-Item -Path (Join-Path $SdCardPath 'db') -ItemType Directory -Force
-    }
-
-    # wiki/ - git push para bare repo no SDCard
-    $wikiLocal = Join-Path $DataDir 'wiki'
-    $wikiBareSd = Join-Path $SdCardPath 'wiki.git'
-    if (Test-Path -LiteralPath $wikiLocal) {
-        # Inicializa bare repo no SDCard se necessario
-        if (-not (Test-Path -LiteralPath $wikiBareSd)) {
-            if (-not $DryRun) {
-                $null = New-Item -Path $wikiBareSd -ItemType Directory -Force
-                $initResult = Invoke-BootstrapAiNativeCommand -Exe 'git' -Args @('init', '--bare', $wikiBareSd) -TimeoutMs 30000
-                if ([int]$initResult['exitCode'] -ne 0) {
-                    $results.Add([ordered]@{ component = 'wiki.git'; status = 'failed'; detail = "git init --bare exit $($initResult.exitCode)" })
-                    Write-Log "ai-memory: wiki.git init --bare falhou (exit $($initResult.exitCode))" 'WARN'
-                }
-            }
-        }
-        if (-not $DryRun) {
-            $pushResult = Invoke-BootstrapAiNativeCommand -Exe 'git' -Args @('-C', $wikiLocal, 'push', $wikiBareSd, 'HEAD:main') -TimeoutMs 60000
-            if ([int]$pushResult['exitCode'] -ne 0) {
-                $results.Add([ordered]@{ component = 'wiki'; status = 'failed'; detail = "git push exit $($pushResult.exitCode)" })
-                Write-Log "ai-memory: git push wiki falhou (exit $($pushResult.exitCode))" 'WARN'
-            } else {
-                $results.Add([ordered]@{ component = 'wiki'; status = 'exported'; detail = 'git push ok' })
-                Write-Log 'ai-memory: wiki exportado via git push' 'INFO'
-            }
-        } else {
-            $results.Add([ordered]@{ component = 'wiki'; status = 'planned'; detail = 'git push to bare repo' })
-        }
-    }
-
-    # raw/ - robocopy /MIR
-    $rawLocal = Join-Path $DataDir 'raw'
-    $rawSd = Join-Path $SdCardPath 'raw'
-    if (Test-Path -LiteralPath $rawLocal) {
-        if (-not $DryRun) {
-            $rcArgs = @($rawLocal, $rawSd, '/MIR', '/R:3', '/W:5', '/NP', '/NDL', '/NJH', '/NJS')
-            $rcResult = Invoke-BootstrapAiNativeCommand -Exe 'robocopy' -Args $rcArgs -TimeoutMs 120000
-            $rcExit = [int]$rcResult['exitCode']
-            if ($rcExit -ge 8) {
-                $results.Add([ordered]@{ component = 'raw'; status = 'failed'; detail = "robocopy exit $rcExit" })
-                Write-Log "ai-memory: robocopy raw falhou (exit $rcExit)" 'WARN'
-            } else {
-                $results.Add([ordered]@{ component = 'raw'; status = 'exported'; detail = "robocopy exit $rcExit" })
-                Write-Log "ai-memory: raw exportado (robocopy exit $rcExit)" 'INFO'
-            }
-        } else {
-            $results.Add([ordered]@{ component = 'raw'; status = 'planned'; detail = 'robocopy /MIR' })
-        }
-    }
-
-    # db/ - robocopy /MIR
-    $dbLocal = Join-Path $DataDir 'db'
-    $dbSd = Join-Path $SdCardPath 'db'
-    if (Test-Path -LiteralPath $dbLocal) {
-        if (-not $DryRun) {
-            $rcArgs = @($dbLocal, $dbSd, '/MIR', '/R:3', '/W:5', '/NP', '/NDL', '/NJH', '/NJS')
-            $rcResult = Invoke-BootstrapAiNativeCommand -Exe 'robocopy' -Args $rcArgs -TimeoutMs 120000
-            $rcExit = [int]$rcResult['exitCode']
-            if ($rcExit -ge 8) {
-                $results.Add([ordered]@{ component = 'db'; status = 'failed'; detail = "robocopy exit $rcExit" })
-                Write-Log "ai-memory: robocopy db falhou (exit $rcExit)" 'WARN'
-            } else {
-                $results.Add([ordered]@{ component = 'db'; status = 'exported'; detail = "robocopy exit $rcExit" })
-                Write-Log "ai-memory: db exportado (robocopy exit $rcExit)" 'INFO'
-            }
-        } else {
-            $results.Add([ordered]@{ component = 'db'; status = 'planned'; detail = 'robocopy /MIR' })
-        }
-    }
-
-    # config.toml
-    $configLocal = Join-Path $DataDir 'config.toml'
-    $configSd = Join-Path $SdCardPath 'config.toml'
-    if (Test-Path -LiteralPath $configLocal) {
-        if (-not $DryRun) {
-            Copy-Item -LiteralPath $configLocal -Destination $configSd -Force -ErrorAction SilentlyContinue
-            $results.Add([ordered]@{ component = 'config.toml'; status = 'exported'; detail = '' })
-        } else {
-            $results.Add([ordered]@{ component = 'config.toml'; status = 'planned'; detail = 'Copy-Item' })
-        }
-    }
-
-    return @($results.ToArray())
-}
-
-function Import-BootstrapAiMemoryFromSdCard {
-    <#
-    .SYNOPSIS
-        Importa dados do SDCard para o diretorio local do ai-memory.
-    .DESCRIPTION
-        wiki/ usa git pull (ou git clone se local vazio).
-        raw/ e db/ usam robocopy /MIR /XO (exclude older = newest-wins).
-        config.toml copiado apenas se local nao existe.
-    #>
-    param(
-        [Parameter(Mandatory = $true)][string]$SdCardPath,
-        [Parameter(Mandatory = $true)][string]$DataDir,
-        [switch]$DryRun
-    )
-    Write-Log "ai-memory: Importando dados do SDCard $SdCardPath" 'INFO'
-
-    $results = New-Object System.Collections.Generic.List[object]
-
-    if (-not $DryRun) {
-        $null = New-Item -Path $DataDir -ItemType Directory -Force
-    }
-
-    # wiki/ - git pull ou git clone
-    $wikiLocal = Join-Path $DataDir 'wiki'
-    $wikiBareSd = Join-Path $SdCardPath 'wiki.git'
-    if (Test-Path -LiteralPath $wikiBareSd) {
-        if (Test-Path -LiteralPath $wikiLocal) {
-            # git pull via remote sd-card
-            if (-not $DryRun) {
-                # Verifica se remote sd-card ja existe
-                $remoteCheck = Invoke-BootstrapAiNativeCommand -Exe 'git' -Args @('-C', $wikiLocal, 'remote', 'get-url', 'sd-card') -TimeoutMs 10000
-                if ([int]$remoteCheck['exitCode'] -ne 0) {
-                    Invoke-BootstrapAiNativeCommand -Exe 'git' -Args @('-C', $wikiLocal, 'remote', 'add', 'sd-card', $wikiBareSd) -TimeoutMs 10000 | Out-Null
-                }
-                $pullResult = Invoke-BootstrapAiNativeCommand -Exe 'git' -Args @('-C', $wikiLocal, 'pull', 'sd-card', 'main') -TimeoutMs 60000
-                if ([int]$pullResult['exitCode'] -ne 0) {
-                    $results.Add([ordered]@{ component = 'wiki'; status = 'failed'; detail = "git pull exit $($pullResult.exitCode)" })
-                    Write-Log "ai-memory: git pull wiki falhou (exit $($pullResult.exitCode))" 'WARN'
-                } else {
-                    $results.Add([ordered]@{ component = 'wiki'; status = 'imported'; detail = 'git pull ok' })
-                    Write-Log 'ai-memory: wiki importado via git pull' 'INFO'
-                }
-            } else {
-                $results.Add([ordered]@{ component = 'wiki'; status = 'planned'; detail = 'git pull from bare repo' })
-            }
-        } else {
-            # git clone
-            if (-not $DryRun) {
-                $cloneResult = Invoke-BootstrapAiNativeCommand -Exe 'git' -Args @('clone', $wikiBareSd, $wikiLocal) -TimeoutMs 60000
-                if ([int]$cloneResult['exitCode'] -ne 0) {
-                    $results.Add([ordered]@{ component = 'wiki'; status = 'failed'; detail = "git clone exit $($cloneResult.exitCode)" })
-                    Write-Log "ai-memory: git clone wiki falhou (exit $($cloneResult.exitCode))" 'WARN'
-                } else {
-                    $results.Add([ordered]@{ component = 'wiki'; status = 'imported'; detail = 'git clone ok' })
-                    Write-Log 'ai-memory: wiki clonado do SDCard' 'INFO'
-                }
-            } else {
-                $results.Add([ordered]@{ component = 'wiki'; status = 'planned'; detail = 'git clone from bare repo' })
-            }
-        }
-    }
-
-    # raw/ - robocopy /MIR /XO (newest-wins)
-    $rawSd = Join-Path $SdCardPath 'raw'
-    $rawLocal = Join-Path $DataDir 'raw'
-    if (Test-Path -LiteralPath $rawSd) {
-        if (-not $DryRun) {
-            $null = New-Item -Path $rawLocal -ItemType Directory -Force
-            $rcArgs = @($rawSd, $rawLocal, '/MIR', '/XO', '/R:3', '/W:5', '/NP', '/NDL', '/NJH', '/NJS')
-            $rcResult = Invoke-BootstrapAiNativeCommand -Exe 'robocopy' -Args $rcArgs -TimeoutMs 120000
-            $rcExit = [int]$rcResult['exitCode']
-            if ($rcExit -ge 8) {
-                $results.Add([ordered]@{ component = 'raw'; status = 'failed'; detail = "robocopy exit $rcExit" })
-                Write-Log "ai-memory: robocopy raw import falhou (exit $rcExit)" 'WARN'
-            } else {
-                $results.Add([ordered]@{ component = 'raw'; status = 'imported'; detail = "robocopy exit $rcExit" })
-                Write-Log "ai-memory: raw importado (robocopy exit $rcExit)" 'INFO'
-            }
-        } else {
-            $results.Add([ordered]@{ component = 'raw'; status = 'planned'; detail = 'robocopy /MIR /XO' })
-        }
-    }
-
-    # db/ - robocopy /MIR /XO
-    $dbSd = Join-Path $SdCardPath 'db'
-    $dbLocal = Join-Path $DataDir 'db'
-    if (Test-Path -LiteralPath $dbSd) {
-        if (-not $DryRun) {
-            $null = New-Item -Path $dbLocal -ItemType Directory -Force
-            $rcArgs = @($dbSd, $dbLocal, '/MIR', '/XO', '/R:3', '/W:5', '/NP', '/NDL', '/NJH', '/NJS')
-            $rcResult = Invoke-BootstrapAiNativeCommand -Exe 'robocopy' -Args $rcArgs -TimeoutMs 120000
-            $rcExit = [int]$rcResult['exitCode']
-            if ($rcExit -ge 8) {
-                $results.Add([ordered]@{ component = 'db'; status = 'failed'; detail = "robocopy exit $rcExit" })
-                Write-Log "ai-memory: robocopy db import falhou (exit $rcExit)" 'WARN'
-            } else {
-                $results.Add([ordered]@{ component = 'db'; status = 'imported'; detail = "robocopy exit $rcExit" })
-                Write-Log "ai-memory: db importado (robocopy exit $rcExit)" 'INFO'
-            }
-        } else {
-            $results.Add([ordered]@{ component = 'db'; status = 'planned'; detail = 'robocopy /MIR /XO' })
-        }
-    }
-
-    # config.toml (apenas se local nao existe)
-    $configSd = Join-Path $SdCardPath 'config.toml'
-    $configLocal = Join-Path $DataDir 'config.toml'
-    $sdCardHasConfig = Test-Path -LiteralPath $configSd
-    $localHasConfig = Test-Path -LiteralPath $configLocal
-    if ($sdCardHasConfig -and (-not $localHasConfig)) {
-        if (-not $DryRun) {
-            Copy-Item -LiteralPath $configSd -Destination $configLocal -Force -ErrorAction SilentlyContinue
-            $results.Add([ordered]@{ component = 'config.toml'; status = 'imported'; detail = '' })
-        } else {
-            $results.Add([ordered]@{ component = 'config.toml'; status = 'planned'; detail = 'Copy-Item if missing' })
-        }
-    }
-
-    return ([object[]]$results.ToArray())
+function Invoke-BootstrapAiMemoryPortability {
+    param([string[]]$Arguments = @('status'))
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $python) { $python = Get-Command python3 -ErrorAction SilentlyContinue }
+    if (-not $python) { throw 'ai-memory portability requires Python 3.11+, GnuPG and the OS credential vault.' }
+    $manager = Join-Path $PSScriptRoot 'linux/ai/memory_manager.py'
+    $output = & $python.Source $manager @Arguments
+    if ($LASTEXITCODE -ne 0) { throw 'ai-memory portability failed; use pz ai memory status for target details.' }
+    return (($output -join "`n") | ConvertFrom-Json)
 }
 
 function Sync-BootstrapAiMemoryWithSdCard {
-    <#
-    .SYNOPSIS
-        Orquestrador de sync bidirecional ai-memory entre host e SDCard.
-    .DESCRIPTION
-        Fluxo:
-        1. Find-BootstrapAiMemorySdCard
-        2. Decide direcao (export/import/bidirectional/none)
-        3. Executa Export/Import conforme estado
-        4. Escreve .phasezero-sync.json no SDCard
-    #>
-    param(
-        [string]$InstallRoot = '',
-        [switch]$DryRun
-    )
-    $root = Get-BootstrapAiInstallRoot -InstallRoot $InstallRoot
-
-    # 1. Encontra SDCard
-    $sdCardPath = Find-BootstrapAiMemorySdCard
-    if (-not $sdCardPath) {
-        return [ordered]@{
-            schemaVersion = 1
-            sdCardFound  = $false
-            sdCardPath   = ''
-            dataDir      = ''
-            direction    = 'none'
-            results      = @()
-            synced       = $false
-        }
-    }
-
-    # 2. Data dir local
-    $dataDir = Get-BootstrapAiMemoryDataDir
-    $localExists = Test-Path -LiteralPath $dataDir
-    $sdCardHasData = (Test-Path -LiteralPath (Join-Path $sdCardPath 'wiki.git')) -or
-                     (Test-Path -LiteralPath (Join-Path $sdCardPath 'raw')) -or
-                     (Test-Path -LiteralPath (Join-Path $sdCardPath 'db'))
-
-    # 3. Decide direcao
-    if (-not $localExists -and -not $sdCardHasData) {
-        Write-Log 'ai-memory: Sync pulado - ambos local e SDCard vazios.' 'INFO'
-        return [ordered]@{
-            schemaVersion = 1
-            sdCardFound  = $true
-            sdCardPath   = $sdCardPath
-            dataDir      = $dataDir
-            direction    = 'none'
-            results      = @()
-            synced       = $false
-        }
-    }
-
-    if (-not $localExists -and $sdCardHasData) {
-        Write-Log 'ai-memory: Sync direcao=import (SDCard tem dados, local vazio)' 'INFO'
-        $results = Import-BootstrapAiMemoryFromSdCard -SdCardPath $sdCardPath -DataDir $dataDir -DryRun:$DryRun
-        $direction = 'import'
-    } elseif ($localExists -and -not $sdCardHasData) {
-        Write-Log 'ai-memory: Sync direcao=export (local tem dados, SDCard vazio)' 'INFO'
-        $results = Export-BootstrapAiMemoryToSdCard -SdCardPath $sdCardPath -DataDir $dataDir -DryRun:$DryRun
-        $direction = 'export'
-    } else {
-        Write-Log 'ai-memory: Sync direcao=bidirectional (ambos tem dados, newest-wins)' 'INFO'
-        $exportResults = New-Object System.Collections.Generic.List[object]
-        $exportTemp = Export-BootstrapAiMemoryToSdCard -SdCardPath $sdCardPath -DataDir $dataDir -DryRun:$DryRun
-        if ($exportTemp) { foreach ($item in $exportTemp) { $exportResults.Add($item) | Out-Null } }
-        $importResults = New-Object System.Collections.Generic.List[object]
-        $importTemp = Import-BootstrapAiMemoryFromSdCard -SdCardPath $sdCardPath -DataDir $dataDir -DryRun:$DryRun
-        if ($importTemp) { foreach ($item in $importTemp) { $importResults.Add($item) | Out-Null } }
-        $combined = New-Object System.Collections.Generic.List[object]
-        foreach ($item in $exportResults) { $combined.Add($item) | Out-Null }
-        foreach ($item in $importResults) { $combined.Add($item) | Out-Null }
-        $results = @($combined.ToArray())
-        $direction = 'bidirectional'
-    }
-
-    # 4. Escreve manifest .phasezero-sync.json
-    $anyFailed = (@($results | Where-Object { $_ -and $_.status -eq 'failed' }).Count) -gt 0
-    $synced = (-not $anyFailed) -and (@($results).Count -gt 0)
-
-    if (-not $DryRun -and $synced) {
-        $hostname = if (-not [string]::IsNullOrWhiteSpace($env:COMPUTERNAME)) { $env:COMPUTERNAME } else { 'unknown' }
-        $manifest = [ordered]@{
-            lastSync   = (Get-Date).ToString('o')
-            sourceHost = $hostname
-            sourceUser = $env:USERNAME
-            direction  = $direction
-            components = @($results)
-        }
-        $manifestPath = Join-Path $sdCardPath '.phasezero-sync.json'
-        $manifestJson = ConvertTo-Json -InputObject $manifest -Depth 5
-        Write-BootstrapAtomicText -Path $manifestPath -Content $manifestJson
-    }
-
-    return [ordered]@{
-        schemaVersion = 1
-        sdCardFound  = $true
-        sdCardPath   = $sdCardPath
-        dataDir      = $dataDir
-        direction    = $direction
-        results      = @($results)
-        synced       = $synced
-    }
+    param([switch]$DryRun)
+    if ($DryRun) { return @{ status = 'planned'; synced = $false; reason = 'Explicitly enrolled volumes only; encrypted snapshots and conditional knowledge writes.' } }
+    $result = Invoke-BootstrapAiMemoryPortability -Arguments @('sync', '--json')
+    return @{ status = [string]$result.state; synced = [bool]$result.ok; targets = @($result.targets) }
 }
 
 function Ensure-BootstrapAiMemorySyncTask {
-    <#
-    .SYNOPSIS
-        Cria scheduled task para sync automatico do ai-memory com SDCard.
-    .DESCRIPTION
-        Triggers: logon + diario 12pm.
-        Executa launcher .ps1 que dot-source bootstrap-tools.ps1 e chama Sync-BootstrapAiMemoryWithSdCard.
-    #>
-    param(
-        [string]$BootstrapScriptPath = '',
-        [switch]$DryRun
-    )
-    $taskName = 'BootstrapTools-AiMemorySync'
-
-    if ([string]::IsNullOrWhiteSpace($BootstrapScriptPath)) {
-        $BootstrapScriptPath = $PSCommandPath
-    }
-
-    $aiRoot = Get-BootstrapAiInstallRoot -InstallRoot ''
-    $launcherDir = Get-BootstrapAiMemoryInstallDir -InstallRoot $aiRoot
-    $launcherPath = Join-Path $launcherDir 'ai-memory-sync-launcher.ps1'
-
-    $launcherContent = @"
-# ai-memory SDCard sync launcher - gerado por PhaseZero BootstrapTools
-# Nao edite manualmente; reexecute a instalacao para recriar.
-param()
-`$ErrorActionPreference = 'Stop'
-`$logPath = Join-Path '$launcherDir' 'ai-memory-sync-launcher.log'
-try {
-    . '$BootstrapScriptPath'
-    `$result = Sync-BootstrapAiMemoryWithSdCard
-    if (`$result.synced) {
-        "OK direcao=`$(`$result.direction) sdCard=`$(`$result.sdCardPath)" | Out-File -LiteralPath `$logPath -Encoding utf8 -Force
-    } else {
-        "SKIP razao=sdCardFound=`$(`$result.sdCardFound)" | Out-File -LiteralPath `$logPath -Encoding utf8 -Force
-    }
-} catch {
-    "ERROR `$_" | Out-File -LiteralPath `$logPath -Encoding utf8 -Force
-    exit 1
-}
-exit 0
-"@
-
-    if ($DryRun) {
-        return [ordered]@{
-            status   = 'planned'
-            task     = $taskName
-            launcher = $launcherPath
-            script   = $BootstrapScriptPath
-        }
-    }
-
-    try {
-        Write-BootstrapAtomicText -Path $launcherPath -Content $launcherContent
-    } catch {
-        return [ordered]@{ status = 'failed'; task = $taskName; reason = "launcher-write: $($_.Exception.Message)" }
-    }
-
-    if (Get-Command -Name Register-ScheduledTask -ErrorAction SilentlyContinue) {
-        try {
-            $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-            if ($existing) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue }
-
-            $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$launcherPath`""
-            $triggers = @(
-                (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)
-                (New-ScheduledTaskTrigger -Daily -At 12pm)
-            )
-            $principal = New-ScheduledTaskPrincipal -UserId ("{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME) -LogonType Interactive -RunLevel Limited
-            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::FromHours(1))
-            $settings.Hidden = $true
-            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Description 'Sincroniza ai-memory com SDCard (wiki/raw/db) no logon e diariamente.' -ErrorAction Stop | Out-Null
-            Write-Log "ai-memory: Sync task '$taskName' registrada (logon + diario 12pm)" 'INFO'
-            return [ordered]@{ status = 'registered'; task = $taskName; method = 'register-scheduledtask' }
-        } catch {
-            Write-Log ("ai-memory: Register-ScheduledTask sync falhou ({0})" -f $_.Exception.Message) 'WARN'
-            return [ordered]@{ status = 'failed'; task = $taskName; reason = $_.Exception.Message; method = 'register-scheduledtask' }
-        }
-    }
-
-    return [ordered]@{ status = 'skipped'; task = $taskName; reason = 'Register-ScheduledTask cmdlet nao disponivel' }
+    param([string]$BootstrapScriptPath = '', [switch]$DryRun)
+    # Legacy installation no longer opts a user into automatic media writes.
+    # Enrollment + pz ai memory automatic explicitly enable the canonical worker.
+    if ($DryRun) { return @{ status = 'planned'; task = 'PhaseZero-AiMemorySync' } }
+    $legacy = Get-ScheduledTask -TaskName 'BootstrapTools-AiMemorySync' -ErrorAction SilentlyContinue
+    if ($legacy) { Unregister-ScheduledTask -TaskName 'BootstrapTools-AiMemorySync' -Confirm:$false -ErrorAction Stop }
+    return @{ status = 'not-configured'; task = 'PhaseZero-AiMemorySync'; reason = 'Enroll destinations and enable automation in Memory.' }
 }
 
 function Uninstall-BootstrapAiNpmTool {
@@ -27204,8 +26782,7 @@ function Get-BootstrapCavemanTargetCatalog {
             displayName = 'Cursor'
             runtime = 'npx'
             commands = @(
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'cursor', '--copy')),
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'alchaincyf/huashu-design', '-a', 'cursor', '--copy'))
+                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'cursor', '--copy'))
             )
             fallbackCommands = @()
         }
@@ -27213,8 +26790,7 @@ function Get-BootstrapCavemanTargetCatalog {
             displayName = 'Windsurf'
             runtime = 'npx'
             commands = @(
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'windsurf', '--copy')),
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'alchaincyf/huashu-design', '-a', 'windsurf', '--copy'))
+                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'windsurf', '--copy'))
             )
             fallbackCommands = @()
         }
@@ -27222,8 +26798,7 @@ function Get-BootstrapCavemanTargetCatalog {
             displayName = 'Cline'
             runtime = 'npx'
             commands = @(
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'cline', '--copy')),
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'alchaincyf/huashu-design', '-a', 'cline', '--copy'))
+                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'cline', '--copy'))
             )
             fallbackCommands = @()
         }
@@ -27231,8 +26806,7 @@ function Get-BootstrapCavemanTargetCatalog {
             displayName = 'GitHub Copilot'
             runtime = 'npx'
             commands = @(
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'github-copilot', '--copy')),
-                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'alchaincyf/huashu-design', '-a', 'github-copilot', '--copy'))
+                (New-BootstrapNativeCommandSpec -Exe 'npx' -Args @('-y', 'skills', 'add', 'JuliusBrussee/caveman', '-a', 'github-copilot', '--copy'))
             )
             fallbackCommands = @()
         }
@@ -29457,14 +29031,14 @@ function Ensure-BootstrapHeadroomAgentIntegration {
         '- Package source: PyPI headroom-ai[proxy]',
         '',
         'Supported wrappers:',
-        '- Claude Code: `headroom wrap claude --memory`',
-        '- Codex CLI: `headroom wrap codex --memory`',
+        '- Claude Code: managed wrapping blocked pending route/auth/memory homologation; ai-memory remains the continuity owner.',
+        '- Codex CLI: managed wrapping blocked pending route/auth/memory homologation; do not add Headroom --memory.',
         '- Aider: `headroom wrap aider`',
         '- Cursor: `headroom wrap cursor`',
         '- GitHub Copilot CLI: `headroom wrap copilot`',
-        '- Gemini CLI: `headroom wrap gemini`',
+        '- Gemini CLI: wrapper unavailable in tested Headroom 0.32.1; do not advertise it as supported.',
         '- OpenClaw: blocked until each request can enforce an explicit account grant (exit 69).',
-        '- OpenCode: manual proxy only; no stable Headroom wrapper is confirmed upstream yet.',
+        '- OpenCode: upstream wrapper exists; PhaseZero use remains blocked pending route/auth/memory homologation.',
         '',
         'Proxy and automation:',
         '- n8n: run `headroom proxy --port 8787` and point OpenAI-compatible nodes to the local proxy after adding your own credentials in n8n.',
@@ -29516,7 +29090,7 @@ function Invoke-Headroom {
 
 switch ($Action) {
     'status' {
-        Invoke-Headroom -Args @('version')
+        Invoke-Headroom -Args @('--version')
         foreach ($name in @('claude','codex','aider','cursor','copilot','gemini','openclaw','opencode','n8n')) {
             $path = Resolve-PhaseZeroCommand -Name $name
             if ([string]::IsNullOrWhiteSpace($path)) {
@@ -29527,12 +29101,12 @@ switch ($Action) {
         }
     }
     'proxy' { Invoke-Headroom -Args @('proxy','--port','8787') }
-    'wrap-claude' { Invoke-Headroom -Args @('wrap','claude','--memory') }
-    'wrap-codex' { Invoke-Headroom -Args @('wrap','codex','--memory') }
+    'wrap-claude' { Write-Output '{"ok":false,"state":"blocked","reason":"experimental-route-auth-and-memory-homologation-required"}'; exit 69 }
+    'wrap-codex' { Write-Output '{"ok":false,"state":"blocked","reason":"experimental-route-auth-and-memory-homologation-required"}'; exit 69 }
     'wrap-aider' { Invoke-Headroom -Args @('wrap','aider') }
     'wrap-cursor' { Invoke-Headroom -Args @('wrap','cursor') }
     'wrap-copilot' { Invoke-Headroom -Args @('wrap','copilot') }
-    'wrap-gemini' { Invoke-Headroom -Args @('wrap','gemini') }
+    'wrap-gemini' { Write-Output '{"ok":false,"state":"unsupported","reason":"gemini-wrapper-not-supported-by-tested-headroom"}'; exit 69 }
     'wrap-openclaw' {
         Write-Output '{"blocked":true,"usageBlocked":true,"reason":"connection-grant-not-enforceable"}'
         [Console]::Error.WriteLine('OpenClaw blocked: account grants are not bound to each request.')
@@ -34276,24 +33850,20 @@ function New-BootstrapAiMemoryDoctorReport {
         }
     }
 
-    # Status sync SDCard
+    # Compatibility fields now reflect the canonical enrolled-device owner.
     $sdCardFound = $false
     $sdCardPath = ''
     $lastSync = ''
+    $portability = $null
     try {
-        $found = Find-BootstrapAiMemorySdCard
-        if ($found) {
-            $sdCardFound = $true
-            $sdCardPath = $found
-            $manifestPath = Join-Path $found '.phasezero-sync.json'
-            if (Test-Path -LiteralPath $manifestPath) {
-                try {
-                    $syncManifest = Microsoft.PowerShell.Management\Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                    $lastSync = [string]$syncManifest.lastSync
-                } catch { }
-            }
+        $portability = Invoke-BootstrapAiMemoryPortability -Arguments @('status', '--json')
+        $online = @($portability.devices | Where-Object { $_.online -eq $true })
+        $sdCardFound = $online.Count -gt 0
+        if ($sdCardFound) { $sdCardPath = [string]$online[0].label }
+        if ($portability.sync.PSObject.Properties.Name -contains 'completedAt') {
+            $lastSync = [string]$portability.sync.completedAt
         }
-    } catch { }
+    } catch { Write-Verbose 'Memory portability status unavailable; no device inferred.' }
 
     return [ordered]@{
         schemaVersion  = 1
@@ -34309,7 +33879,8 @@ function New-BootstrapAiMemoryDoctorReport {
         sdCardFound    = $sdCardFound
         sdCardPath     = [string]$sdCardPath
         lastSync       = [string]$lastSync
-        notes          = 'Beta: servidor loopback opt-in; handoff entre Claude Code/Codex/OpenCode. SDCard sync automatico.'
+        portability    = $portability
+        notes          = 'Portability requires enrolled destinations; encrypted backup and conflict-safe knowledge synchronization.'
     }
 }
 

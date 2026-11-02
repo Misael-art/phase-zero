@@ -1,5 +1,5 @@
 pkgname=phasezero-control-center
-pkgver=1.22.11
+pkgver=1.22.14
 pkgrel=1
 pkgdesc='PhaseZero native Linux control center'
 arch=('any')
@@ -15,6 +15,10 @@ package() {
   cd "PhaseZero-${pkgver}"
   install -d "$pkgdir/usr/lib/phasezero" "$pkgdir/usr/bin"
   cp -a linux profiles assets version.json "$pkgdir/usr/lib/phasezero/"
+  install -d "$pkgdir/usr/lib/phasezero/packaging/deepseek-harness"
+  install -d "$pkgdir/usr/lib/phasezero/packaging/ai-memory"
+  cp -a packaging/deepseek-harness/. "$pkgdir/usr/lib/phasezero/packaging/deepseek-harness/"
+  cp -a packaging/ai-memory/. "$pkgdir/usr/lib/phasezero/packaging/ai-memory/"
   install -Dm755 packaging/linux/phasezero-control-center \
     "$pkgdir/usr/bin/phasezero-control-center"
   # PZ-AUD-001: the SSH bridge and docs call `pz`; ship it on PATH.

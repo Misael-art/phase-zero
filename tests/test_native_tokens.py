@@ -95,3 +95,18 @@ def test_type_scales_with_desktop_font_and_floor_is_readable():
     assert f"font-size: {DARK.text_base}px" in base
     assert f"font-size: {round(DARK.text_base * 1.5)}px" in big
     assert re.findall(r"#[0-9a-f]{6}", base) == re.findall(r"#[0-9a-f]{6}", big)
+
+
+def test_retro_themes_render_and_meet_core_contrast():
+    from linux.ui_native.tokens import THEMES, tokens_for
+
+    assert set(THEMES) >= {"snes", "sfc", "megadrive", "mastersystem", "pcengine", "turbografx", "nes", "ps2"}
+    for theme_id, (label, tokens) in THEMES.items():
+        assert label
+        assert tokens_for(theme_id) is tokens
+        qss = render_qss(tokens)
+        assert "{{" not in qss
+        assert _contrast(tokens.text, tokens.bg) >= 4.5
+        assert _contrast(tokens.text_dim, tokens.bg) >= 4.5
+        assert _contrast(tokens.on_accent, tokens.accent) >= 4.5
+    assert tokens_for("desconhecido") is DARK

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Read-only OpenCode diagnostics; managed 9Router use fails closed without grant binding."""
+"""OpenCode diagnostics and self-heal; 9Router is an optional provider and its
+managed use fails closed without grant binding."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +82,21 @@ def parse_jsonc(text: str) -> dict[str, Any]:
     return value
 
 
+FILE_REF = re.compile(r"\{file:([^}]+)\}")
+ROUTER_PORTS = (":20128",)
+
+
+def file_refs(value: Any) -> list[str]:
+    """Every {file:...} path referenced anywhere in an OpenCode config value."""
+    if isinstance(value, dict):
+        return [ref for item in value.values() for ref in file_refs(item)]
+    if isinstance(value, list):
+        return [ref for item in value for ref in file_refs(item)]
+    if isinstance(value, str):
+        return [match.strip() for match in FILE_REF.findall(value)]
+    return []
+
+
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     merged = dict(base)
     for key, value in override.items():
@@ -103,6 +120,12 @@ class OpenCodeManager:
         )
         self.router_key = self.xdg_config / "phasezero/ai-proxies/9router.key"
         self.router_settings = self.xdg_config / "phasezero/9router/settings.json"
+        self.router_bin = Path(
+            os.environ.get(
+                "PZ_9ROUTER_BIN",
+                self.xdg_data / "phasezero/ai-proxies/9router/bin/9router",
+            )
+        )
         self.data_root = Path(
             os.environ.get("PZ_OPENCODE_ROUTE_ROOT", self.xdg_data / "opencode-route-installer")
         )
@@ -213,6 +236,111 @@ class OpenCodeManager:
             pass
         return "9router/Default"
 
+    def _ref_path(self, ref: str) -> Path:
+        path = Path(ref).expanduser()
+        return path if path.is_absolute() else self.config_dir / path
+
+    def _broken_providers(self, value: dict[str, Any]) -> dict[str, list[str]]:
+        """Providers OpenCode cannot load or reach: dangling {file:} refs, or a
+        9Router route while 9Router is not installed. 9Router is optional, so a
+        missing router must never take the rest of OpenCode down with it."""
+        providers = value.get("provider")
+        if not isinstance(providers, dict):
+            return {}
+        router_installed = self.router_bin.exists()
+        broken: dict[str, list[str]] = {}
+        for name, provider in providers.items():
+            reasons = [
+                f"missing-file:{ref}" for ref in file_refs(provider) if not self._ref_path(ref).is_file()
+            ]
+            options = provider.get("options", {}) if isinstance(provider, dict) else {}
+            base_url = str(options.get("baseURL", "")) if isinstance(options, dict) else ""
+            if not router_installed and any(port in base_url for port in ROUTER_PORTS):
+                reasons.append("9router-not-installed")
+            if reasons:
+                broken[name] = reasons
+        return broken
+
+    @staticmethod
+    def _model_refs_to(value: dict[str, Any], providers: set[str]) -> list[tuple[str, ...]]:
+        def dead(model: Any) -> bool:
+            return isinstance(model, str) and model.split("/", 1)[0] in providers
+
+        refs = [(key,) for key in ("model", "small_model") if dead(value.get(key))]
+        for section in ("agent", "mode"):
+            entries = value.get(section)
+            if isinstance(entries, dict):
+                refs += [
+                    (section, name, "model")
+                    for name, entry in entries.items()
+                    if isinstance(entry, dict) and dead(entry.get("model"))
+                ]
+        return refs
+
+    def config_health(self, value: dict[str, Any] | None = None, error: str | None = None) -> dict[str, Any]:
+        if value is None and error is None:
+            try:
+                value = self._read_config(self.config)
+            except RuntimeError as exc:
+                value, error = {}, str(exc)
+        value = value or {}
+        dangling = sorted(
+            {ref for ref in file_refs(value) if not self._ref_path(ref).is_file()}
+        )
+        broken = self._broken_providers(value)
+        return {
+            # OpenCode rejects the whole config on any dangling {file:} ref.
+            "loads": error is None and not dangling,
+            "danglingFileRefs": dangling,
+            "brokenProviders": broken,
+            "routerInstalled": self.router_bin.exists(),
+            "healable": bool(broken),
+        }
+
+    def heal(self, dry_run: bool = False) -> dict[str, Any]:
+        """Drop providers that keep OpenCode from starting; never configures 9Router."""
+        value = self._read_config(self.config)
+        broken = self._broken_providers(value)
+        removed = sorted(broken)
+        model_refs = self._model_refs_to(value, set(broken))
+        model_reset = bool(model_refs)
+        result: dict[str, Any] = {
+            "schemaVersion": SCHEMA_VERSION,
+            "ok": True,
+            "dryRun": dry_run,
+            "path": str(self.config),
+            "removedProviders": removed,
+            "reasons": broken,
+            "modelReset": model_reset,
+            "resetModels": [".".join(path) for path in model_refs],
+            "backup": None,
+            "secretsRedacted": True,
+        }
+        if not removed or dry_run:
+            result["changed"] = False
+            return result
+        backup = self.config.with_name(
+            f"{self.config.name}.pz-heal-{time.strftime('%Y%m%d-%H%M%S')}.bak"
+        )
+        backup.write_bytes(self.config.read_bytes())
+        os.chmod(backup, 0o600)
+        for name in removed:
+            value["provider"].pop(name, None)
+        # Unset (not rewrite) models that pointed at a removed provider so
+        # OpenCode falls back to its own default instead of a dead route.
+        for path in model_refs:
+            holder: Any = value
+            for key in path[:-1]:
+                holder = holder[key]
+            holder.pop(path[-1], None)
+        tmp = self.config.with_name(f".{self.config.name}.pz-heal.tmp")
+        tmp.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+        os.chmod(tmp, stat.S_IMODE(self.config.stat().st_mode))
+        os.replace(tmp, self.config)
+        result.update(changed=True, backup=str(backup), health=self.config_health())
+        result["ok"] = result["health"]["loads"]
+        return result
+
     def status(self) -> dict[str, Any]:
         cli = self._cli_info()
         desktop = self._desktop_version()
@@ -252,7 +380,9 @@ class OpenCodeManager:
                 "routerCombos": self._combo_names(),
                 "catalogInSync": self._catalog_in_sync(value),
                 "embeddedSecret": bool(api_key_ref and not str(api_key_ref).startswith("{file:")),
+                "health": self.config_health(value, config_error),
             },
+            "routerOptional": True,
             "credential": {
                 "path": str(self.router_key),
                 "present": self.router_key.is_file(),
@@ -360,7 +490,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pz ai opencode")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("status")
-    install = sub.add_parser("install", aliases=["configure", "repair"])
+    heal = sub.add_parser("heal", aliases=["repair"])
+    heal.add_argument("--dry-run", action="store_true")
+    install = sub.add_parser("install", aliases=["configure"])
     install.add_argument("--dry-run", action="store_true")
     install.add_argument("--yes", action="store_true")
     verify = sub.add_parser("verify")
@@ -384,7 +516,9 @@ def main(argv: list[str] | None = None) -> int:
         command = args.command or "status"
         if command == "status":
             result = manager.status()
-        elif command in {"install", "configure", "repair"}:
+        elif command in {"heal", "repair"}:
+            result = manager.heal(args.dry_run)
+        elif command in {"install", "configure"}:
             result = manager.install(args.dry_run, args.yes)
         elif command == "verify":
             result = manager.verify(args.live)

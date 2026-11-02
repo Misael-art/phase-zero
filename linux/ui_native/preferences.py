@@ -22,7 +22,11 @@ class UiPreferences(QObject):
         return self._settings.value("interface/advancedMode", False, type=bool)
 
     # LUX-021: tema persistido; "system" segue o esquema de cor do desktop.
-    THEMES = ("system", "dark", "light")
+    # Temas retrô (tokens.THEMES) são escolhas explícitas, como dark/light.
+    THEMES = (
+        "system", "dark", "light",
+        "snes", "sfc", "megadrive", "mastersystem", "pcengine", "turbografx", "nes", "ps2",
+    )
 
     @property
     def theme(self) -> str:
@@ -56,8 +60,8 @@ class UiPreferences(QObject):
 
 
 def resolve_theme(preference: str) -> str:
-    """``dark``/``light`` for a stored preference (``system`` asks Qt)."""
-    if preference in {"dark", "light"}:
+    """Theme id for a stored preference (``system`` asks Qt for dark/light)."""
+    if preference in UiPreferences.THEMES and preference != "system":
         return preference
     try:
         from PySide6.QtCore import Qt

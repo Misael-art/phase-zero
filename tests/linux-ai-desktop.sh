@@ -73,3 +73,49 @@ grep -q 'setup-desktop-apps.sh' "$ROOT/profiles/dev-ai.json" || fail "dev-ai pro
 grep -q 'install-qwen' "$ROOT/linux/ai/setup-desktop-apps.sh" || fail "Qwen setup integration"
 
 echo "PASS: linux AI desktop manager"
+
+# All update/help tests use a private systemctl stub, never the host bus.
+mkdir -p "$TMP/stubs"
+cat > "$TMP/stubs/systemctl" <<'EOF'
+#!/usr/bin/env bash
+case "${TIMER_CASE:-disabled}:$*" in
+    fail:*) exit 1 ;;
+    disable-fail:*disable*) exit 1 ;;
+esac
+if [[ "$*" == *--value* ]]; then
+    [[ "${TIMER_CASE:-}" == missing ]] && echo not-found || echo loaded
+elif [[ "$*" == *show* ]]; then
+    if [[ "${TIMER_CASE:-}" == missing ]]; then
+        printf 'LoadState=not-found\nActiveState=inactive\nUnitFileState=\n'
+    elif [[ "${TIMER_CASE:-}" == still-active ]]; then
+        printf 'LoadState=loaded\nActiveState=active\nUnitFileState=disabled\n'
+    else
+        printf 'LoadState=loaded\nActiveState=inactive\nUnitFileState=disabled\n'
+    fi
+fi
+EOF
+chmod +x "$TMP/stubs/systemctl"
+for scenario in disabled missing; do
+    for repeat in 1 2; do
+        PATH="$TMP/stubs:$PATH" TIMER_CASE="$scenario" HOME="$TMP/home" \
+        XDG_CONFIG_HOME="$TMP/config" XDG_DATA_HOME="$TMP/data" XDG_STATE_HOME="$TMP/state" \
+        XDG_CACHE_HOME="$TMP/cache" "$SCRIPT" disable-updates >/dev/null || fail "disable $scenario $repeat"
+    done
+done
+for scenario in fail disable-fail still-active; do
+    if PATH="$TMP/stubs:$PATH" TIMER_CASE="$scenario" HOME="$TMP/home" \
+       XDG_CONFIG_HOME="$TMP/config" XDG_DATA_HOME="$TMP/data" XDG_STATE_HOME="$TMP/state" \
+       XDG_CACHE_HOME="$TMP/cache" "$SCRIPT" disable-updates >"$TMP/output" 2>&1; then
+        fail "false disable success: $scenario"
+    fi
+    ! grep -q 'automatic updates disabled' "$TMP/output" || fail "false success message"
+done
+for flag in help --help -h; do
+    PATH="$TMP/stubs:$PATH" TIMER_CASE=fail HOME="$TMP/help-home" \
+    XDG_CONFIG_HOME="$TMP/help-config" XDG_DATA_HOME="$TMP/help-data" \
+    XDG_STATE_HOME="$TMP/help-state" XDG_CACHE_HOME="$TMP/help-cache" \
+    "$ROOT/linux/pz" ai "$flag" >"$TMP/help" || fail "AI help $flag"
+    grep -q 'pz ai quota' "$TMP/help" || fail "quota missing in AI help"
+    [[ ! -e "$TMP/help-home" && ! -e "$TMP/help-data" && ! -e "$TMP/help-state" ]] || fail "help mutates state"
+done
+echo 'PASS: update state confirmation and AI help'

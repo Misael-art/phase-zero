@@ -148,6 +148,19 @@ remove_bin_wrappers() {
     shopt -u nullglob
 }
 
+# --- configs de apps que apontavam para o 9Router removido ----------------
+# O OpenCode recusa o config inteiro se um {file:} sumir; sem isso, remover o
+# 9Router (opcional) derruba o OpenCode junto.
+heal_dependent_configs() {
+    printf '\n== configs dependentes do 9Router ==\n'
+    if [ "$APPLY" = 1 ]; then
+        python3 "$PZ_ROOT/linux/ai/opencode_9router_manager.py" heal >/dev/null 2>&1 ||
+            printf 'aviso: falha ao reparar OpenCode; rode: pz ai opencode heal\n'
+    else
+        printf 'reparar providers quebrados do OpenCode (pz ai opencode heal)\n'
+    fi
+}
+
 # --- launchers .desktop gerenciados ---------------------------------------
 remove_desktop_launchers() {
     printf '\n== launchers .desktop PhaseZero ==\n'
@@ -241,6 +254,7 @@ main() {
     remove_user_units
     remove_managed_dirs
     remove_bin_wrappers
+    heal_dependent_configs
     remove_desktop_launchers
     remove_managed_marked_files
     [ "$WITH_EMULATORS" = 1 ] && remove_emulators

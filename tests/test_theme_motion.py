@@ -30,6 +30,13 @@ def test_theme_defaults_to_system_and_persists(qapp, settings_dir):
         prefs.set_theme("rosa")
 
 
+def test_retro_theme_persists_and_resolves_as_itself(qapp, settings_dir):
+    prefs = UiPreferences()
+    prefs.set_theme("megadrive")
+    assert UiPreferences().theme == "megadrive"
+    assert resolve_theme("megadrive") == "megadrive"
+
+
 def test_reduced_motion_from_env_and_kdeglobals(tmp_path, monkeypatch):
     monkeypatch.setenv("PZ_REDUCE_MOTION", "1")
     assert reduced_motion() is True

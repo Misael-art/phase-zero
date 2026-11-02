@@ -189,6 +189,100 @@ def _with_impact(action: ActionSpec) -> ActionSpec:
     return replace(action, impact=impact, preview_kind_override=kind)
 
 
+def _memory_actions() -> list[ActionSpec]:
+    status = ("ai", "memory", "status", "--json")
+    result = []
+    for name, title, description, arguments, parameters, mutable in (
+        ("portability-status", "Atualizar estado da memória", "Serviço, destinos e último backup verificado.", ("status",), (), False),
+        ("repair", "Reparar memória", "Repara serviço e integrações; preserva memória e destinos.", ("repair",), (), True),
+        ("sync", "Sincronizar agora", "Compartilha conhecimento cadastrado e atualiza backups vencidos.", ("sync",), (), True),
+        ("backup", "Criar backup completo", "Snapshot criptografado por host nos destinos cadastrados.", ("backup",), (), True),
+        ("scope-add", "Adicionar projeto", "Compartilha famílias de conhecimento; histórico completo continua no backup por host.",
+         ("scope-add", "--project", "{project}", "--workspace", "{workspace}", "--repo-path", "{repoPath}", "--families", "{families}", "--identity", "{identity}"),
+         (_p("project", "Nome do projeto no ai-memory"), _p("workspace", "Workspace", placeholder="default"),
+          _p("repoPath", "Pasta do projeto", "path"), _p("families", "Famílias compartilhadas", placeholder="concepts,decisions,gotchas,notes"),
+          _p("identity", "ID compartilhado de outro host (opcional)", required=False, placeholder="Sem remoto Git, copie ID retornado no primeiro host")), True),
+        ("device-add", "Cadastrar dispositivo", "Vincula volume montado; dados existentes são preservados.",
+         ("device-add", "--path", "{path}"), (_p("path", "Raiz do dispositivo montado", "path"),), True),
+        ("device-remove", "Desvincular dispositivo", "Interrompe uso automático; preserva arquivos no dispositivo.",
+         ("device-remove", "--id", "{id}"), (_p("id", "Dispositivo cadastrado"),), True),
+        ("scope-remove", "Parar compartilhamento do projeto", "Preserva conhecimento local e backups; remove somente vínculo de compartilhamento.",
+         ("scope-remove", "--id", "{id}"), (_p("id", "Projeto cadastrado"),), True),
+        ("github", "Conectar repositório privado", "Reutiliza login GitHub CLI; exige repositório dedicado privado.",
+         ("github", "--repository", "{repository}"), (_p("repository", "Repositório GitHub", placeholder="usuario/memoria-privada"),), True),
+        ("github-login", "Entrar no GitHub", "Abre autenticação oficial em terminal privado; códigos e tokens ficam fora do painel.",
+         ("github-login",), (), True),
+        ("github-open-backups", "Backups no GitHub", "Abre lista de snapshots privados para download manual e recuperação verificada.",
+         ("github-open-backups",), (), False),
+        ("github-create", "Criar repositório privado", "Cria destino dedicado privado e vincula conjunto de memória.",
+         ("github", "--repository", "{repository}", "--create"), (_p("repository", "Novo repositório GitHub", placeholder="usuario/memoria-privada"),), True),
+        ("github-remove", "Desvincular GitHub", "Preserva repositório e backups remotos; interrompe sincronização deste host.",
+         ("github-remove",), (), True),
+        ("settings", "Frequência e retenção", "Define frequência de conhecimento, backup completo e quantidade de snapshots por host.",
+         ("settings", "--interval", "{interval}", "--backup-hours", "{hours}", "--keep", "{keep}"),
+         (_p("interval", "Conhecimento: intervalo em minutos", "choice", choices=("15", "30", "60")),
+          _p("hours", "Backup completo: intervalo em horas", "choice", choices=("24", "12", "48")),
+          _p("keep", "Snapshots preservados por host", "choice", choices=("7", "14", "30"))), True),
+        ("automatic-on", "Ligar sincronização automática", "Conhecimento a cada 15 minutos; backup diário; detecção de mídia cadastrada.",
+         ("automatic", "--enabled", "yes"), (), True),
+        ("automatic-off", "Pausar sincronização automática", "Pausa agendamento e detector; mantém memória e backups.",
+         ("automatic", "--enabled", "no"), (), True),
+        ("verify", "Verificar backup", "Confere descriptografia, inventário e hashes sem restaurar.",
+         ("verify", "--path", "{path}"), (_p("path", "Backup automático criptografado", "file"),), False),
+        ("restore", "Restaurar backup", "Revisa origem, faz pré-backup e coordena serviço. Configuração local é preservada.",
+         ("restore", "--path", "{path}", "--confirm", "RESTORE", "--expected-sha256", "{expectedSha256}"), (_p("path", "Backup automático criptografado", "file"),), True),
+        ("key-export", "Guardar chave de recuperação", "Exporta chave protegida por senha para cadastrar outro host ou recuperar cofre.",
+         ("key-export", "--path", "{path}", "--passphrase-stdin"),
+         (_p("path", "Novo arquivo de recuperação (.gpg)", "save-file"), _p("passphrase", "Senha de recuperação", "secret", placeholder="mínimo 12 caracteres")), True),
+        ("key-import", "Cadastrar este host pela chave", "Importe antes de cadastrar projetos e destinos. Identidade deste host permanece própria.",
+         ("key-import", "--path", "{path}", "--passphrase-stdin"),
+         (_p("path", "Chave de recuperação (.gpg)", "file"), _p("passphrase", "Senha de recuperação", "secret")), True),
+        ("resolve", "Resolver conflito de conhecimento", "Resolve somente conflito selecionado; mantém cópia criptografada da versão recebida.",
+         ("resolve", "--id", "{id}", "--prefer", "{prefer}"), (_p("id", "ID do conflito"), _p("prefer", "Versão a preservar: server = local, repo = recebida", "choice", choices=("server", "repo"))), True),
+    ):
+        preview = (("ai", "memory", "restore-plan", "--path", "{path}") if name == "restore" else
+                   ("ai", "memory", "conflict-plan", "--id", "{id}") if name == "resolve" else status)
+        result.append(replace(_a("ai.memory-" + name, "IA & Dev", title, description,
+                         ("ai", "memory", *arguments, "--json"), "document-save" if name == "backup" else "view-refresh",
+                         mutable=mutable, preview=preview if mutable else None, parameters=parameters,
+                         stdin_parameter="passphrase" if name.startswith("key-") else "",
+                         status_args=status,
+                         risk="high" if name in {"restore", "resolve"} else "normal",
+                         group="Memória", visibility="advanced"), timeout_s=2700 if mutable else 120,
+                         preview_bindings=(("expectedSha256", "sha256"),) if name == "restore" else (),
+                         impact=description if name == "resolve" else ""))
+    return result
+
+
+def _economy_actions(root: Path) -> list[ActionSpec]:
+    policy = json.loads((root / "assets/agent-skills/token-economy.json").read_text())
+    parameters = (_p("project", "Pasta do projeto", "path"),
+                  _p("agent", "Agente", "choice", choices=tuple(policy["agents"])))
+    result = []
+    for name, title in (("apply", "Aplicar perfil de eficiência"), ("reset", "Restaurar eficiência padrão"),
+                        ("measure", "Comparar saída local do RTK"), ("record", "Importar uso para comparação A/B"),
+                        ("review", "Revisão de componentes de eficiência")):
+        args = ("ai", "token-economy", name, "--project", "{project}", "--agent", "{agent}")
+        fields = parameters
+        if name == "apply":
+            args += ("--profile", "{profile}")
+            fields += (_p("profile", "Perfil", "choice", choices=("basic", "economy")),)
+        if name == "record":
+            args += ("--path", "{path}")
+            fields += (_p("path", "Metadados de uso (.json)", "file"),)
+        preview = ("ai", "token-economy", "plan", "--project", "{project}", "--agent", "{agent}",
+                   "--profile", "{profile}" if name == "apply" else "basic", "--json")
+        if name in {"measure", "record"}:
+            preview = ("ai", "token-economy", "status", "--project", "{project}", "--json")
+        result.append(_a("ai.tokens-" + name, "IA & Dev", title,
+                         "Regras aditivas e evidências; preserva ai-memory, conta, modelo e permissões.",
+                         (*args, "--json"), "view-statistics", mutable=name != "review",
+                         preview=preview if name != "review" else None, parameters=fields,
+                         status_args=("ai", "token-economy", "status", "--json"),
+                         group="Eficiência", visibility="advanced"))
+    return result
+
+
 def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSpec]:
     actions: list[ActionSpec] = [
         _a("system.doctor", "Visão geral", "Diagnóstico completo", "Audita host, boot, jogos, IA e integrações.", ("doctor",), "dialog-information", badge="Seguro"),
@@ -611,6 +705,8 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
         ]
     )
 
+    actions.extend(_memory_actions())
+    actions.extend(_economy_actions(root))
     ai_rows = [
         ("status", "Status IA", "Stack local e agentes.", ("ai", "status"), None),
         ("doctor", "Diagnóstico dos conectores", "Audita as integrações MCP — o que liga os agentes a ferramentas e memória.", ("ai", "doctor"), None),
@@ -618,13 +714,14 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
         ("desktop", "Reparar apps desktop", "Claude/Codex e atualizadores.", ("ai", "desktop", "repair"), ("ai", "desktop", "status")),
         ("compat", "Preparar agentes de IA", "Instala regras de comportamento, acelerador de comandos e memória nos agentes suportados.", ("ai", "compat", "setup"), ("ai", "compat", "status")),
         ("admin", "Admin bridge", "Instala phasezero-admin/bigsudo.", ("ai", "setup", "admin"), ("ai", "admin", "status")),
-        ("opencode-status", "OpenCode + 9Router", "Audita versões, configuração canônica, segredo por arquivo e listener loopback.", ("ai", "opencode", "status"), None),
-        ("opencode-install", "Configurar OpenCode + 9Router", "Mescla configuração e aplica provider local com rollback.", ("ai", "opencode", "install", "--yes"), ("ai", "opencode", "install", "--dry-run")),
-        ("opencode-verify", "Verificar OpenCode + 9Router", "Confere configuração local; execução gerenciada aguarda vínculo de conta por requisição.", ("ai", "opencode", "verify"), None),
+        ("opencode-status", "OpenCode", "Audita versões, configuração e o provider opcional 9Router.", ("ai", "opencode", "status"), None),
+        ("opencode-heal", "Reparar configuração do OpenCode", "Remove providers quebrados (ex.: 9Router desinstalado) que impedem o OpenCode de abrir; guarda backup.", ("ai", "opencode", "heal"), ("ai", "opencode", "heal", "--dry-run")),
+        ("opencode-install", "Ligar provider opcional 9Router no OpenCode", "Opcional, nunca padrão: mescla o provider 9Router com rollback.", ("ai", "opencode", "install", "--yes"), ("ai", "opencode", "install", "--dry-run")),
+        ("opencode-verify", "Verificar provider opcional 9Router", "Confere configuração local; execução gerenciada aguarda vínculo de conta por requisição.", ("ai", "opencode", "verify"), None),
         ("opencode", "Alinhar versão OpenCode", "Alinha CLI e desktop.", ("ai", "opencode", "sync"), ("ai", "opencode", "version-status")),
         ("opencode-free", "Modelo free OpenCode", "Corrige 'Interrompido' com modelo free (deepseek-flash).", ("ai", "opencode", "free-model"), ("ai", "opencode", "status")),
         ("omo", "Instalar OMO", "Plugin oh-my-openagent.", ("ai", "omo", "setup"), ("ai", "omo", "status")),
-        ("memory", "Instalar ai-memory", "Memória persistente de agentes.", ("ai", "setup", "memory"), ("ai", "status")),
+        ("memory", "Instalar ai-memory", "Instala memória e sincronizador oficial; preserva dados antes de migrar.", ("ai", "memory", "install"), ("ai", "memory", "plan")),
         ("ollama", "Instalar Ollama", "Runtime local de modelos.", ("ai", "setup", "ollama"), ("ai", "status")),
         ("webui", "Uso bloqueado — Open WebUI", "Não instala nem inicia um cliente que pode usar credenciais sem grant por requisição.", ("ai", "setup", "webui"), ("ai", "webui", "status")),
         ("webui-status", "Status Open WebUI", "Container e resposta HTTP local, sem alterar o serviço.", ("ai", "webui", "status"), None),
@@ -748,6 +845,66 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
             badge="Upload com consentimento",
         )
     )
+
+    # Official DeepSeek Harness is its own experimental app, not the legacy
+    # browser proxy and not a DeepSeek model selection.
+    actions.extend([
+        _a("ai.deepseek-harness-status", "IA & Dev", "Status DeepSeek Harness",
+           "Estado local do app oficial Harness, separado do DeepSeek Proxy e de modelos.",
+           ("ai", "deepseek-harness", "status", "--json"), "system-search",
+           badge="Experimental", visibility="standard"),
+        _a("ai.deepseek-harness-plan", "IA & Dev", "Planejar DeepSeek Harness",
+           "Read-only: versões fixadas, arquitetura e espaço disponível.",
+           ("ai", "deepseek-harness", "plan", "--json"), "document-preview",
+           badge="Experimental", visibility="advanced"),
+        _a("ai.deepseek-harness-install", "IA & Dev", "Instalar DeepSeek Harness",
+           "Prepara Node e Harness no diretório gerenciado do usuário; não inicia o runtime.",
+           ("ai", "deepseek-harness", "install", "--json"), "system-software-install",
+           mutable=True, preview=("ai", "deepseek-harness", "plan", "--json"),
+           status_args=("ai", "deepseek-harness", "status", "--json"), badge="Experimental"),
+        _a("ai.deepseek-harness-update", "IA & Dev", "Atualizar DeepSeek Harness",
+           "Aplica apenas pins revisados; mantém runtime anterior até ativação concluída.",
+           ("ai", "deepseek-harness", "update", "--json"), "system-software-update",
+           mutable=True, preview=("ai", "deepseek-harness", "status", "--json"), badge="Experimental", visibility="advanced"),
+        _a("ai.deepseek-harness-start", "IA & Dev", "Conectar e abrir Harness",
+           "Escolhe rota conta/API e pasta. Inicia apenas após confirmação; não envia inferência.",
+           ("ai", "deepseek-harness", "start", "--workspace", "{workspace}", "--auth-route", "{authRoute}", "--port", "{port}",
+            "--key-source", "{keySource}", "--credential-id", "{credentialId}", "--nickname", "{nickname}", "--connect", "--json"),
+           "media-playback-start", mutable=True,
+           preview=("ai", "deepseek-harness", "start-plan", "--workspace", "{workspace}", "--auth-route", "{authRoute}", "--port", "{port}",
+                    "--key-source", "{keySource}", "--credential-id", "{credentialId}", "--nickname", "{nickname}", "--json"),
+           status_args=("ai", "deepseek-harness", "status", "--json"),
+           parameters=(_p("workspace", "Pasta de trabalho", "path"),
+                       _p("authRoute", "Rota de autenticação (conta / API)", "choice", choices=("account", "api")),
+                       _p("port", "Porta local", "choice", choices=("3080", "3081", "3082", "custom")),
+                       _p("keySource", "Origem da chave", "choice", choices=("web", "wallet", "new")),
+                       _p("credentialId", "Chave da carteira", required=False),
+                       _p("nickname", "Nome da nova chave", required=False),
+                       _p("apiKey", "Nova chave API", "secret", required=False)),
+           stdin_parameter="apiKey",
+           badge="Experimental", visibility="standard"),
+        _a("ai.deepseek-harness-open", "IA & Dev", "Abrir Web UI autenticada",
+           "Abre a URL de lançamento uma vez; token permanece em memória e não entra nos logs.",
+           ("ai", "deepseek-harness", "open", "--json"), "internet-web-browser",
+           badge="Experimental", visibility="standard"),
+        _a("ai.deepseek-harness-login", "IA & Dev", "Entrar com DeepSeek · OAuth",
+           "Abre autorização no site oficial DeepSeek pelo fluxo OAuth/PKCE do Harness. Não envia inferência.",
+           ("ai", "deepseek-harness", "login", "--json"), "internet-web-browser", mutable=True,
+           preview=("ai", "deepseek-harness", "status", "--json"),
+           status_args=("ai", "deepseek-harness", "status", "--json"), badge="Experimental"),
+        _a("ai.deepseek-harness-stop", "IA & Dev", "Parar DeepSeek Harness",
+           "Encerra apenas o processo supervisor e o filho que este iniciou.",
+           ("ai", "deepseek-harness", "stop", "--json"), "media-playback-stop",
+           mutable=True, preview=("ai", "deepseek-harness", "status", "--json"), badge="Experimental", visibility="standard"),
+        _a("ai.deepseek-harness-doctor", "IA & Dev", "Diagnosticar DeepSeek Harness",
+           "Read-only: runtime, pasta, porta, sandbox, credenciais e gates desconhecidos.",
+           ("ai", "deepseek-harness", "doctor", "--json"), "tools-report-bug",
+           badge="Experimental", visibility="advanced"),
+        _a("ai.deepseek-harness-uninstall", "IA & Dev", "Remover DeepSeek Harness",
+           "Remove somente runtime e estado PhaseZero; preserva DSH_HOME e pastas escolhidas.",
+           ("ai", "deepseek-harness", "uninstall", "--json"), "edit-delete",
+           mutable=True, preview=("ai", "deepseek-harness", "status", "--json"), badge="Experimental", visibility="advanced"),
+    ])
 
     # Proxy health/auth can be inspected, but inference stays disabled until
     # account grants are enforced by each request and fallback is rejected.
@@ -1010,9 +1167,16 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
 
             _a("ai.desktop.status", "IA & Dev", "Status apps IA", "Audita Claude/Qwen/Codex desktop.", ("ai", "desktop", "status"), "applications-development", visibility="advanced"),
             _a("ai.desktop.claude", "IA & Dev", "Instalar Claude Desktop", "Instala app oficial para usuário.", ("ai", "desktop", "install-claude"), "system-software-install", mutable=True, preview=("ai", "desktop", "status"), visibility="advanced"),
+            _a("ai.desktop.claude.update", "IA & Dev", "Atualizar Claude Desktop", "Confere assinatura do repositório oficial Anthropic e instala a versão nova lado a lado; o app aberto segue até reabrir.", ("ai", "desktop", "update-claude"), "system-software-update", mutable=True, preview=("ai", "desktop", "check-claude"), visibility="advanced"),
+            _a("ai.desktop.claude.check", "IA & Dev", "Verificar atualização Claude Desktop", "Compara versão instalada com o repositório assinado; não altera nada.", ("ai", "desktop", "check-claude"), "system-search", badge="JSON", visibility="advanced"),
+            _a("ai.quota.status", "IA & Dev", "Franquia restante (Codex/Claude/Grok)", "Mostra % restante e data/hora de renovação de cada conta; leitura local e endpoint de uso da Anthropic.", ("ai", "quota", "status", "--json"), "utilities-system-monitor", badge="JSON", visibility="advanced"),
+            _a("ai.quota.install", "IA & Dev", "Medidores de franquia na bandeja", "Liga ícones coloridos por conta na bandeja do sistema, com % restante e renovação; inicia no login.", ("ai", "quota", "install"), "view-statistics", mutable=True, preview=("ai", "quota", "status", "--json"), visibility="advanced"),
+            _a("ai.quota.remove", "IA & Dev", "Desligar medidores de franquia", "Remove o início automático dos medidores na bandeja.", ("ai", "quota", "remove"), "edit-undo", mutable=True, preview=("ai", "quota", "status", "--json"), visibility="advanced"),
+            _a("ai.desktop.updates.on", "IA & Dev", "Ligar atualização automática dos apps IA", "Instala o timer de usuário que atualiza a cada 12h só os apps desktop já instalados, com assinatura conferida.", ("ai", "desktop", "install-services"), "system-software-update", mutable=True, preview=("ai", "desktop", "status"), visibility="advanced"),
+            _a("ai.desktop.updates.off", "IA & Dev", "Desligar atualização automática dos apps IA", "Desliga o timer de atualização; os apps instalados não mudam.", ("ai", "desktop", "disable-updates"), "edit-undo", mutable=True, preview=("ai", "desktop", "status"), visibility="advanced"),
             _a("ai.desktop.qwen", "IA & Dev", "Instalar Qwen Code Desktop", "Instala AppImage oficial verificada para usuário.", ("ai", "desktop", "install-qwen"), "system-software-install", mutable=True, preview=("ai", "desktop", "status"), visibility="advanced"),
             _a("ai.desktop.codex", "IA & Dev", "Reparar Codex Desktop", "Repara atualização local falha.", ("ai", "desktop", "repair-codex"), "tools-check-spelling", mutable=True, preview=("ai", "desktop", "status"), visibility="advanced"),
-            _a("ai.token-economy", "IA & Dev", "Economia de tokens", "Audita contexto e runtime de agentes.", ("ai", "token-economy", "status"), "utilities-system-monitor", visibility="advanced"),
+            _a("ai.token-economy", "IA & Dev", "Eficiência e memória dos agentes", "Perfis por projeto, vínculo da memória e evidências sem inferência paga.", ("ai", "token-economy", "status", "--json"), "utilities-system-monitor"),
             _a("ai.admin.status", "IA & Dev", "Status admin bridge", "Audita elevação PhaseZero.", ("ai", "admin", "status"), "security-high", visibility="advanced"),
             _a("ai.omo.status", "IA & Dev", "Status OMO", "Audita oh-my-openagent.", ("ai", "omo", "status"), "applications-development", visibility="advanced"),
             _a("ai.omo.doctor", "IA & Dev", "Diagnóstico OMO", "Diagnostica plugin OpenCode.", ("ai", "omo", "doctor"), "system-search", visibility="advanced"),

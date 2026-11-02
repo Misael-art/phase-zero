@@ -159,6 +159,12 @@ Usage:
   pz ai menu                   Open friendly terminal AI manager
   pz ai desktop status         Check Claude/Qwen/Codex desktop apps and updater
   pz ai desktop install-claude Install official Claude Desktop for current user
+  pz ai quota status          Remaining plan quota and renewal (Codex/Claude/Grok)
+  pz ai quota install         Start quota meters in the system tray at login
+  pz ai quota remove          Stop tray meters and remove managed autostart
+  pz ai quota set-renewal grok --day N  Configure estimated renewal (not observed quota)
+  pz ai desktop check-claude   Check signed repo for a newer Claude Desktop (no changes)
+  pz ai desktop update-claude  Update Claude Desktop when newer
   pz ai desktop install-qwen   Install official Qwen Code Desktop AppImage
   pz ai desktop repair-codex   Repair failed Codex Desktop local update
   pz ai desktop repair         Repair desktop apps and automatic updates
@@ -173,16 +179,20 @@ Usage:
   pz ai init --status [<dir>]  Check project rules vs current sources
   pz ai init --list            List registered projects
   pz ai init --undo [<dir>]    Remove managed blocks/files from a project
-  pz ai token-economy status   Alias for compat status and context-frugality audit
+  pz ai token-economy <action> Token profiles, native instructions and measured evidence
+  pz ai token-economy apply --project <dir> --agent <id> --profile basic|economy
+  pz ai token-economy measure --project <dir> --agent <id>  Local output only; no paid calls
   pz ai admin status           Check phasezero-admin/bigsudo escalation bridge
   pz ai policy <action>        AI policy broker (status|set <mode>|check <action>|list)
   pz ai ollama [--pull <m>]    Ollama install/config; model pulls broker-gated
   pz ai omo <action>           oh-my-openagent OpenCode plugin (setup|doctor|status|enable|disable|uninstall)
   pz ai opencode status        Audit CLI/Desktop, canonical config and 9Router route
-  pz ai opencode install       Blocked until 9Router can enforce account-bound grants
+  pz ai opencode heal          Drop providers that keep OpenCode from starting (backup kept)
+  pz ai opencode install       Optional 9Router provider; blocked until account-bound grants
   pz ai opencode verify        Read-only config check; live inference blocked without grant binding
   pz ai opencode run --route=9router -- <args>  Blocked until account-bound grants are enforceable
   pz ai opencode rollback <manifest> Restore an OpenCode route transaction
+  pz ai deepseek-harness <action>  Official Harness (plan|status|install|update|start|open|login|stop|doctor|uninstall)
   pz ai setup <tool>           Setup AI tool (codex|ollama|webui|claude|desktop|opencode|omo|openclaw|memory|admin|rtk|caveman|headroom|compat|ides|ide-apps|usagebar|codexbar|all)
   pz ai drift [status|sync [--dry-run]]  Compare installed runtime copies with the repo (exit 2 on drift)
   pz ai codexbar <action>      CodexBar CLI + optional KodexBar plasmoid (status|setup|health|auth|watchdog|plasmoid|plasmoid-remove|repair)
@@ -211,6 +221,7 @@ Usage:
   pz ai backup create          Exporta ai-memory e acessos em pacote AES-256
   pz ai backup verify          Valida senha, paths e SHA-256 sem restaurar
   pz ai backup restore --plan  Prévia obrigatória da restauração e rollback
+  pz ai memory <action>        Memória: status|install|repair|sync|backup|scope-add|device-add|github|automatic|key-export|key-import|verify|restore-plan|restore
   pz ai 9router status         Router health and redacted providers; clients stay blocked
   pz ai 9router install        Install loopback service; consumer use still requires grants
   pz ai 9router dashboard      Blocked until per-request connection grants are enforceable
@@ -241,6 +252,7 @@ Usage:
   pz ai workspaces doctor      Unified Hermes/Odysseus/9Router readiness audit
   pz ai workspaces plan        Safe read-only deployment plan and blockers
   pz ai auth status            Redacted registry for AI accounts and sessions
+  pz ai codex-profiles list     Codex accounts: isolated Desktop, CLI and Web profiles
   pz ai operations status      Persistent Control Center operation summary
   pz ai operations resume-info Safe retry metadata for interrupted operations
   pz doctor                    Run full system diagnostics
@@ -281,6 +293,9 @@ Usage:
   pz host backups migrate      Move legacy .bak files into the central store
   pz host backups list         List centralized backups
   pz host prune [--keep N]     Prune old backups and rotated logs
+  pz host duplicates scan      Find apps installed more than once (conflict by default)
+  pz host duplicates resolve <app> [--keep PATH]  Quarantine extra copies (reversible)
+  pz host duplicates allow <app> --reason TEXT    Accept a duplicate consciously
   pz host wipe                 Preview the ledger-driven host wipe
   pz host wipe --apply --confirm PHASEZERO-WIPE   Remove the recorded footprint
   pz ui                        Open native Linux control center
@@ -353,7 +368,7 @@ cmd_flatpak() {
 
 cmd_steamdeck() {
     local action="${1:-}" target="${2:-}"
-    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|terminal-keyboard|panel|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
+    [ -z "$action" ] && { pz_error "usage: pz steamdeck (handheld|docked-tv|docked-monitor|watch|keyboard|cursor|terminal-keyboard|input|panel|console|dev|hotkeys|watcher|privileged|boot|plugins|controller)"; return 1; }
     source "$PZ_ROOT/linux/steamdeck/common.sh"
     source "$PZ_ROOT/linux/steamdeck/input-actions.sh"
     case "$action" in
@@ -373,6 +388,9 @@ cmd_steamdeck() {
             ;;
         cursor|pointer)
             bash "$PZ_ROOT/linux/steamdeck/cursor-diagnose.sh" "${target:-snapshot}" "${3:-}"
+            ;;
+        input|controls|controles)
+            bash "$PZ_ROOT/linux/steamdeck/input-restore.sh" "${target:-status}" "${@:3}"
             ;;
         terminal-keyboard)
             bash "$PZ_ROOT/linux/steamdeck/terminal-keyboard.sh" "${target:-watch}"
@@ -574,6 +592,11 @@ cmd_ai() {
     local sub="${1:-}" target="${2:-}"
     [ -z "$sub" ] && { pz_error "usage: pz ai (status|setup|init|omo|compat|token-economy|secrets|mcp|policy|ollama|webui) ..."; return 1; }
     case "$sub" in
+        help|-h|--help)
+            printf 'PhaseZero AI — help (read-only)\n\n'
+            usage | sed -n '/^  *pz ai /p'
+            printf '\nUse pz ai desktop help or pz ai quota --help for options.\n'
+            ;;
         policy)
             shift
             bash "$PZ_ROOT/linux/server/ai-policy-broker.sh" "${@:-status}"
@@ -603,7 +626,7 @@ cmd_ai() {
             case "${1:-status}" in
                 sync|align) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" sync ;;
                 version-status|version) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" version-status ;;
-                status|install|configure|repair|verify|run|rollback)
+                status|heal|install|configure|repair|verify|run|rollback)
                     python3 "$PZ_ROOT/linux/ai/opencode_9router_manager.py" "$@"
                     ;;
                 local-model|ollama) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" local-model ;;
@@ -611,8 +634,13 @@ cmd_ai() {
                 install-hook) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" install-hook ;;
                 remove-hook) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" remove-hook ;;
                 setup) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" setup ;;
-                *) pz_error "usage: pz ai opencode (status|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup)"; return 1 ;;
+                *) pz_error "usage: pz ai opencode (status|heal|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup)"; return 1 ;;
             esac
+            ;;
+        deepseek-harness|dsh)
+            shift
+            PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+                python3 "$PZ_ROOT/linux/ai/deepseek_harness_manager.py" "${@:-status}"
             ;;
         doctor)
             local mcp_doctor codexbar_health codexbar_status
@@ -642,7 +670,15 @@ cmd_ai() {
             shift
             bash "$PZ_ROOT/linux/ai/desktop-apps.sh" "${@:-status}"
             ;;
-        compat|agent-compat|tools|token-economy|tokens)
+        quota|franquia)
+            shift
+            python3 "$PZ_ROOT/linux/ai/quota_meter.py" "${@:-status}"
+            ;;
+        token-economy|tokens)
+            shift
+            python3 "$PZ_ROOT/linux/ai/token_economy.py" "${@:-status}"
+            ;;
+        compat|agent-compat|tools)
             shift
             bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" "${@:-status}"
             ;;
@@ -662,6 +698,10 @@ cmd_ai() {
             shift
             bash "$PZ_ROOT/linux/ai/backup-manager.sh" "${@:-plan}"
             ;;
+        memory|ai-memory)
+            shift
+            python3 "$PZ_ROOT/linux/ai/memory_manager.py" "${@:-status}"
+            ;;
         9router|router9|smart-router)
             shift
             bash "$PZ_ROOT/linux/ai/9router-manager.sh" "${@:-status}"
@@ -669,6 +709,10 @@ cmd_ai() {
         routing|ai-router|task-router)
             shift
             python3 "$PZ_ROOT/linux/ai/routing_manager.py" "$@"
+            ;;
+        codex-profiles)
+            shift
+            python3 "$PZ_ROOT/linux/ai/codex_profiles.py" "${@:-list}"
             ;;
         chatgpt-web)
             # Experimental and opt-in (PXA-010): kept out of help and catalog on purpose.
@@ -747,7 +791,7 @@ cmd_ai() {
                 omo|openagent|oh-my-openagent) bash "$PZ_ROOT/linux/ai/setup-omo.sh" setup ;;
                 hermes)   bash "$PZ_ROOT/linux/ai/setup-hermes.sh" ;;
                 openclaw) bash "$PZ_ROOT/linux/ai/setup-openclaw.sh" ;;
-                memory|ai-memory) bash "$PZ_ROOT/linux/ai/setup-memory.sh" setup ;;
+                memory|ai-memory) python3 "$PZ_ROOT/linux/ai/memory_manager.py" install ;;
                 admin|admin-bridge|bigsudo) bash "$PZ_ROOT/linux/ai/setup-admin-bridge.sh" setup ;;
                 rtk)      bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" install-rtk ;;
                 caveman|caverman) bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" rules ;;
@@ -790,7 +834,7 @@ cmd_ai() {
                         pz_warn "OpenClaw omitted: per-request account grants are unavailable; other setup steps continue"
                         setup_blocked=69
                     fi
-                    bash "$PZ_ROOT/linux/ai/setup-memory.sh" setup
+                    python3 "$PZ_ROOT/linux/ai/memory_manager.py" install
                     bash "$PZ_ROOT/linux/ai/setup-admin-bridge.sh" setup
                     bash "$PZ_ROOT/linux/ai/setup-agent-compat.sh" setup
                     bash "$PZ_ROOT/linux/ai/setup-usagebar.sh" setup

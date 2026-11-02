@@ -31,8 +31,11 @@ bash "$ROOT/packaging/linux/export-source.sh" "$SOURCE_TMP"
 STAGE="$(mktemp -d "$INSTALL_BASE/.stage.XXXXXX")"
 install -d "$STAGE/packaging/linux"
 cp -a "$SOURCE_TMP/linux" "$SOURCE_TMP/profiles" "$SOURCE_TMP/assets" "$SOURCE_TMP/version.json" "$STAGE/"
+cp -a "$SOURCE_TMP/packaging/deepseek-harness" "$STAGE/packaging/"
+cp -a "$SOURCE_TMP/packaging/ai-memory" "$STAGE/packaging/"
 install -m 0755 "$SOURCE_TMP/packaging/linux/phasezero-control-center" \
     "$STAGE/packaging/linux/phasezero-control-center"
+install -m 0755 "$SOURCE_TMP/packaging/linux/pz" "$STAGE/packaging/linux/pz"
 find "$STAGE" -type d -name __pycache__ -prune -exec rm -rf -- {} +
 rm -rf -- "$SOURCE_TMP"
 SOURCE_TMP=""
@@ -68,12 +71,18 @@ install -m644 "$ROOT/packaging/linux/io.phasezero.ControlCenter.svg" \
     "$ICON_DIR/io.phasezero.ControlCenter.svg"
 
 prune_install_tree() {
-    local base="$1" keep="$2" protected="${3:-}" index path
-    local -a entries=()
+    local base="$1" keep="$2" protected="${3:-}" index path entry
+    local pattern="${4:-^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$}"
+    local -a entries=() candidates=()
     [ -d "$base" ] || return 0
-    mapfile -d '' entries < <(
+    mapfile -d '' candidates < <(
         find "$base" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\0' | sort -zrn
     )
+    for entry in "${candidates[@]}"; do
+        path="${entry#* }"
+        [[ "${path##*/}" =~ $pattern ]] || continue
+        entries+=("$entry")
+    done
     for ((index = keep; index < ${#entries[@]}; index++)); do
         path="${entries[$index]#* }"
         [ -n "$protected" ] && [ "$(readlink -f "$path")" = "$protected" ] && continue
@@ -83,7 +92,8 @@ prune_install_tree() {
     done
 }
 prune_install_tree "$INSTALL_BASE/releases" 3 "$(readlink -f "$CURRENT_LINK")"
-prune_install_tree "$INSTALL_BASE/backups" 3
+prune_install_tree "$INSTALL_BASE/backups" 3 "" \
+    '^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?\.[0-9]{14}\.[0-9]+$'
 
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true

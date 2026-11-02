@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 from linux.ai import chatgpt_web_bridge as bridge_module
+
+PINNED = bridge_module.PIN["version"]
 from linux.ai.chatgpt_web_bridge import (
     APPROVAL_LINE,
     DEFAULT_PORT,
@@ -22,9 +24,32 @@ from linux.ai.chatgpt_web_bridge import (
     UNIT_NAME,
     Bridge,
     BridgeError,
+    Runner,
 )
 
 ACKS = {"experimental", "unofficial", "unsigned", "same-user-boundary", "no-quota-promise"}
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="logind é Linux")
+def test_other_users_uses_uid_and_falls_back_to_logind_session_files(tmp_path, monkeypatch):
+    runner = Runner()
+    own_uid = os.getuid()
+    monkeypatch.setattr(runner, "run", lambda *args, **kwargs:
+                        (0, f"{own_uid} nome-irrelevante yes active\n", ""))
+    monkeypatch.setenv("LOGNAME", "another-user")
+    assert runner.other_users() == []
+
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    (sessions / "1").write_text(f"UID={own_uid}\nSTATE=active\n")
+    monkeypatch.setattr(runner, "session_dir", sessions)
+    monkeypatch.setattr(runner, "run", lambda *args, **kwargs: (1, "", "bus unavailable"))
+    assert runner.other_users() == []
+
+    (sessions / "2").write_text(f"UID={own_uid + 1}\nSTATE=active\n")
+    assert runner.other_users() not in ([], ["unknown"])
+    (sessions / "2").write_text("STATE=active\n")
+    assert runner.other_users() == ["unknown"]
 
 
 class FakeRunner:
@@ -49,6 +74,10 @@ class FakeRunner:
         self.ldd_out = ""
         self.unpack_binary = True
         self.codex_reply: str | None = None
+        self.tunnel = True
+        self.tunnels: list[dict] = []
+        self.connector = {"ok": True, "connector": "Codex Native2", "permission": "full_access",
+                          "detail": "conector ativo e ligado ao túnel"}
 
     def run(self, args, *, env=None, timeout=30, input_text=None):
         self.calls.append(list(args))
@@ -110,6 +139,21 @@ class FakeRunner:
     def codex_processes(self, codex_home):
         return list(self.codex_pids)
 
+    def tunnel_ready(self, profile):
+        return self.tunnel
+
+    def tunnel_clients(self, binary):
+        return list(self.tunnels)
+
+    def stop_launcher_scopes(self, owners):
+        stopped = sorted({f"app-codex-web-gpt-launcher-{item['scopePid']}.scope"
+                          for item in self.tunnels if item["scopePid"]})
+        self.tunnels = []
+        return stopped
+
+    def connector_status(self, devtools_file, tunnel_id):
+        return dict(self.connector)
+
 
 def upstream_args(call: list[str]) -> list[str]:
     cli = [index for index, arg in enumerate(call) if arg.endswith("/codex-chatgpt-web")]
@@ -149,7 +193,7 @@ def host(tmp_path):
 def configure(bridge: Bridge, runner: FakeRunner, route_active: bool) -> None:
     """A browser-only install as upstream leaves it."""
     paths = bridge.paths
-    cli = paths.core_home / "versions/6.1.8-linux-x64/bin/codex-chatgpt-web"
+    cli = paths.core_home / f"versions/{PINNED}-linux-x64/bin/codex-chatgpt-web"
     cli.parent.mkdir(parents=True)
     cli.write_text("#!/bin/sh\n")
     (paths.core_home / "config.json").write_text(json.dumps(
@@ -231,7 +275,7 @@ def test_unit_seals_live_codex_home_and_autostart_directory(host):
 def test_diff_accepts_interrupt_hook_only_for_the_managed_runtime(host):
     bridge, _, _ = host
     core = bridge.paths.core_home
-    managed = (f"command = \"'{core}/versions/6.1.8-linux-x64/bin/codex-chatgpt-web' "
+    managed = (f"command = \"'{core}/versions/{PINNED}-linux-x64/bin/codex-chatgpt-web' "
                f"'--home' '{core}' 'hook' 'interrupt'\"")
     foreign = "command = \"'/usr/bin/evil' '--home' '/tmp' 'hook' 'interrupt'\""
     after = OWNED_CONFIG + "\n".join([
@@ -244,6 +288,53 @@ def test_diff_accepts_interrupt_hook_only_for_the_managed_runtime(host):
     rejected = bridge.classify_diff(OWNED_CONFIG, after.replace(managed, foreign))
     assert rejected["unexpected"] == ["+" + foreign]
     assert bridge.classify_diff(OWNED_CONFIG, OWNED_CONFIG + 'model_provider = "x"\n')["unexpected"]
+
+
+def test_route_accepts_current_upstream_bun_hook_without_trusting_other_commands(host):
+    bridge, _, _ = host
+    version = bridge.paths.core_home / f"versions/{PINNED}-linux-x64"
+    core = bridge.paths.core_home
+    managed = (f"command = \"'{version}/runtime/bun' '{version}/app/cli.js' "
+               f"'--home' '{core}' 'hook' 'interrupt'\"")
+    text = (OWNED_CONFIG + "\n[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\n"
+            "type = \"command\"\n" + managed + "\ntimeout = 3\n")
+
+    assert bridge.classify_diff(OWNED_CONFIG, text)["unexpected"] == []
+    assert bridge.policy_violations(text) == []
+
+    for changed in (managed.replace("/app/cli.js", "/app/other.js"),
+                    managed.replace("/runtime/bun", "/runtime/other"),
+                    managed.replace(f"{PINNED}-linux-x64", "0.0.1-linux-x64"),
+                    managed.replace("'hook' 'interrupt'", "'hook' 'restart'")):
+        hostile = text.replace(managed, changed)
+        assert bridge.classify_diff(OWNED_CONFIG, hostile)["unexpected"] == ["+" + changed]
+        assert bridge.policy_violations(hostile) == ["hook fora do runtime gerenciado"]
+
+
+def test_browser_only_ignores_inert_auto_approve_flag_but_full_mode_refuses(host):
+    bridge, runner, _ = host
+    configure(bridge, runner, route_active=True)
+    runner.unit_active = True
+    config_path = bridge.paths.core_home / "config.json"
+    config = json.loads(config_path.read_text())
+    config["autoApproveToolCalls"] = True
+    config_path.write_text(json.dumps(config))
+
+    bridge.require_ready(bridge.load_state())
+
+    broker = bridge.paths.core_home / "runtime/turn-broker.sock"
+    broker.parent.mkdir(parents=True)
+    broker.touch()
+    with pytest.raises(BridgeError) as unexpected:
+        bridge.require_ready(bridge.load_state())
+    assert unexpected.value.code == "unexpected-broker"
+    broker.unlink()
+
+    config["mode"] = "full"
+    config_path.write_text(json.dumps(config))
+    with pytest.raises(BridgeError) as error:
+        bridge.require_ready(bridge.load_state())
+    assert error.value.code == "auto-approve"
 
 
 def test_legacy_approval_policy_is_migrated_in_config_and_baseline(host):
@@ -310,7 +401,8 @@ def test_setup_relinks_a_configured_route_without_rerunning_upstream_setup(host)
     result = bridge.setup(lambda step, detail: seen.append(step))
 
     assert result["ready"] is True and result["stage"] == "web-model"
-    assert seen == ["isolamento", "pacote", "launcher", "login", "modelo web", "bridge"]
+    assert seen == ["isolamento", "pacote", "atalhos", "launcher", "login", "modelo web",
+                    "sandbox", "bridge"]
     calls = upstream_calls(runner)
     assert "route connect" in calls
     assert not any(call.startswith("setup") for call in calls)
@@ -420,7 +512,7 @@ url = "http://127.0.0.1:49374/mcp"
 [[hooks.Interrupt]]
 [[hooks.Interrupt.hooks]]
 type = "command"
-command = "'{core}/versions/6.1.8-linux-x64/bin/codex-chatgpt-web' '--home' '{core}' 'hook' 'interrupt'"
+command = "'{core}/versions/{PINNED}-linux-x64/bin/codex-chatgpt-web' '--home' '{core}' 'hook' 'interrupt'"
 """
     assert bridge.policy_violations(desktop_written) == []
 
@@ -455,8 +547,18 @@ def test_login_autostart_is_opt_in_and_never_starts_the_upstream_launcher_direct
     assert "autostart run" not in entry  # Exec is the stable wrapper, not the worktree
     assert bridge.paths.autostart_wrapper.is_file()
     assert bridge.paths.autostart_target.is_file()
+    assert bridge.paths.autostart_target.read_text().splitlines()[1] == str(
+        bridge.paths.manager_script)
+    assert bridge.paths.autostart_target.read_text().splitlines()[0] == str(
+        bridge.managed_python())
+    assert bridge.paths.manager_script.is_file()
     assert "codex-web-gpt-launcher" not in entry
     assert bridge.isolation()["upstreamAutostartEntry"] is None
+
+    bridge.paths.autostart_target.write_text(
+        f"{sys.executable}\n{bridge.paths.home / 'deleted-worktree' / 'bridge.py'}\n")
+    assert bridge.autostart_status()["state"] == "inconsistent"
+    assert bridge.autostart_enable(True)["state"] == "enabled"
 
     bridge.paths.managed_autostart.write_text(
         entry.replace("chatgpt-web-autostart.sh", "dev.codexwebgpt.launcher.desktop"))
@@ -469,6 +571,23 @@ def test_login_autostart_is_opt_in_and_never_starts_the_upstream_launcher_direct
     assert not bridge.paths.managed_autostart.exists()
     assert not bridge.paths.autostart_wrapper.exists()
     assert not bridge.paths.autostart_target.exists()
+
+
+def test_repair_restores_a_deleted_login_entry_but_never_a_tampered_one(host):
+    bridge, _, _ = host
+    bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
+                                    "unpacked": "verified"}
+    assert bridge.restore_autostart() is False  # no recorded opt-in: nothing to restore
+    assert bridge.autostart_enable(True)["state"] == "enabled"
+
+    bridge.paths.managed_autostart.unlink()
+    assert bridge.autostart_status()["state"] == "inconsistent"
+    assert bridge.repair()["loginEntryRestored"] is True
+    assert bridge.autostart_status()["state"] == "enabled"
+
+    bridge.paths.managed_autostart.write_text("[Desktop Entry]\nExec=/tmp/other\n")
+    assert bridge.repair()["loginEntryRestored"] is False
+    assert bridge.autostart_status()["state"] == "inconsistent"
 
 
 def _run_wrapper(wrapper: Path, home: Path) -> subprocess.CompletedProcess:
@@ -891,7 +1010,7 @@ def ready_host(host, monkeypatch, mode: str = "browser-only"):
 
 
 def tools_gate_met(bridge: Bridge) -> None:
-    bridge.record_eligibility("pro", "yes", "use", "yes")
+    bridge.record_eligibility("business", "yes", "use", "yes")
     bridge._secret_store = FakeVault()
     bridge.key_store("runtime-key-material", 30)
 
@@ -927,26 +1046,6 @@ def test_tools_window_stays_closed_until_the_gate_is_met(host, monkeypatch):
     assert critical is True and "com ferramentas" in title
     assert "ainda não pode abrir" in body and "eligibility --plan" in body
     assert runner.spawned == []
-
-
-def test_tools_window_opens_on_the_dedicated_profile_once_the_gate_is_met(host, monkeypatch):
-    bridge, runner, home = ready_host(host, monkeypatch, mode="full")
-    tools_gate_met(bridge)
-
-    result = bridge.desktop("tools")
-
-    args, env = runner.spawned[0]
-    assert args == ["/usr/bin/codex-desktop", "--new-instance"]
-    assert env["CODEX_HOME"] == str(bridge.paths.codex_home) != str(home / ".codex")
-    assert result["mode"] == "tools" and result["sandbox"] == "read-only"
-    body = runner.notifications[-1][1]
-    assert "aprovação" in body and "somente leitura" in body
-
-    # The browser-only shortcut must not quietly become a tools window.
-    with pytest.raises(BridgeError) as error:
-        bridge.desktop("web")
-    assert error.value.code == "full-mode"
-    assert len(runner.spawned) == 1
 
 
 @pytest.mark.parametrize("line", ['approval_policy = "never"',
@@ -991,6 +1090,11 @@ def test_shortcuts_land_in_menu_and_localised_desktop_on_a_stable_path(host, mon
     status = bridge.shortcuts_install()
 
     assert status["state"] == "installed"
+    target = bridge.paths.open_target.read_text()
+    assert str(bridge.paths.manager_script) in target
+    assert str(Path(bridge_module.__file__).resolve()) not in target
+    assert bridge.paths.manager_secret_store.is_file()
+    assert bridge.paths.manager_windows_secret_store.is_file()
     menu = home / ".local/share/applications"
     desk = home / "Área de trabalho"
     names = {"phasezero-chatgpt-web.desktop": "web", "phasezero-chatgpt-web-tools.desktop": "tools"}
@@ -1007,6 +1111,13 @@ def test_shortcuts_land_in_menu_and_localised_desktop_on_a_stable_path(host, mon
     assert native.read_text() == "[Desktop Entry]\nExec=/usr/bin/codex-desktop %u\n"
     assert sorted(item.name for item in live.iterdir()) == ["config.toml"]
     assert (live / "config.toml").read_text() == 'model = "gpt-6-sol"\n'
+
+    # A stale worktree target must not be reported as a working shortcut.
+    bridge.paths.open_target.write_text(
+        f"{sys.executable}\n{home / 'deleted-worktree' / 'bridge.py'}\n")
+    assert bridge.shortcuts_status()["state"] == "inconsistent"
+    bridge.shortcuts_install()
+    assert bridge.shortcuts_status()["state"] == "installed"
 
     (desk / "phasezero-chatgpt-web.desktop").write_text("[Desktop Entry]\nExec=/bin/true\n")
     assert bridge.shortcuts_status()["state"] == "inconsistent"
@@ -1208,10 +1319,10 @@ def test_tools_steps_explain_an_ineligible_plan_and_the_single_next_step(host, m
     assert status["ready"] is False and status["webModelStillWorks"] is True
     step = status["next"]
     assert step["id"] == "plan" and step["ok"] is False
-    assert "Plus" in step["detail"] and "Pro" in step["detail"] and "Business" in step["detail"]
-    assert "help.openai.com" in step["action"]
+    assert "Plus" in step["detail"] and "não confirmada" in step["detail"]
+    assert "developers.openai.com" in step["action"]
     # Later steps are listed but never offered before the plan is resolved.
-    assert [item["id"] for item in status["steps"]][:3] == ["eligibility", "plan", "developer-mode"]
+    assert [item["id"] for item in status["steps"]][:3] == ["eligibility", "plan", "plan-full"]
 
     bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
                                     "unpacked": "verified"}
@@ -1221,44 +1332,9 @@ def test_tools_steps_explain_an_ineligible_plan_and_the_single_next_step(host, m
     assert error.value.code == "tools-not-ready"
     title, body, critical = runner.notifications[-1]
     assert "com ferramentas" in title and critical is True
-    assert "Plus" in body and "Business" in body
+    assert "Plus" in body and "permissão MCP" in body
     assert "ChatGPT Web no Codex" in body  # the browser-only shortcut still works
     assert runner.spawned == []
-
-
-def test_tools_steps_walk_to_ready_one_action_at_a_time(host, monkeypatch):
-    bridge, runner, _ = ready_host(host, monkeypatch)
-    bridge.record_eligibility("pro", "yes", "use", "yes")
-    assert bridge.tools_steps()["next"]["id"] == "runtime-key"
-    assert "tunnel key store" in bridge.tools_steps()["next"]["action"]
-
-    bridge._secret_store = FakeVault()
-    bridge.key_store("runtime-key-material", 30)
-    step = bridge.tools_steps()["next"]
-    assert step["id"] == "launcher-mode" and "tunnel key stage" in step["action"]
-
-    config = bridge.paths.core_home / "config.json"
-    config.write_text(json.dumps({**json.loads(config.read_text()), "mode": "full",
-                                  "autoApproveToolCalls": True}))
-    assert bridge.tools_steps()["next"]["id"] == "auto-approve"
-
-    config.write_text(json.dumps({**json.loads(config.read_text()),
-                                  "autoApproveToolCalls": False}))
-    done = bridge.tools_steps()
-    assert done["ready"] is True and done["next"] is None
-    assert "runtime-key-material" not in json.dumps(done)
-
-
-DESKTOP_REWRITTEN = (
-    'sandbox_mode = "read-only"\n'
-    f'{APPROVAL_LINE}\n'
-    f'openai_base_url = "http://127.0.0.1:{DEFAULT_PORT}/v1"\n'
-    'experimental_realtime_webrtc_call_base_url = "https://chatgpt.com/backend-api/codex"\n'
-    '\n[features]\nmulti_agent = true\n')
-
-
-REFUSAL = ("codex-chatgpt-web: Codex interrupt lifecycle hook changed after setup; "
-           "refusing to overwrite it.")
 
 
 def test_disable_resets_the_dedicated_profile_when_upstream_refuses_a_rewritten_config(host):
@@ -1333,3 +1409,598 @@ def test_setup_after_a_reset_restarts_the_launcher_before_configuring_again(host
 
     assert order == ["restart", "upstream-setup"]
     assert result["ready"] is True and result["stage"] == "web-model"
+
+
+def test_launcher_classification_survives_wiped_environment_and_rewritten_argv():
+    # 6.1.14 wipes /proc/<pid>/environ and child argv: only the tree and mounts remain.
+    tree = {100: {"parent": 1, "marked": False, "sealed": True},
+            101: {"parent": 100, "marked": False, "sealed": True},   # zygote
+            102: {"parent": 101, "marked": False, "sealed": True},   # renderer
+            200: {"parent": 1, "marked": False, "sealed": False},    # started outside the unit
+            300: {"parent": 1, "marked": True, "sealed": True}}      # older launcher, env intact
+    result = bridge_module.classify_launchers(tree, unit_pid=100)
+    assert result == [{"pid": 100, "managed": True}, {"pid": 200, "managed": False},
+                      {"pid": 300, "managed": True}]
+    unsealed = {100: {"parent": 1, "marked": False, "sealed": False}}
+    assert bridge_module.classify_launchers(unsealed, unit_pid=100) == [
+        {"pid": 100, "managed": False}]
+
+
+DESKTOP_REWRITTEN = (
+    'sandbox_mode = "read-only"\n'
+    f'{APPROVAL_LINE}\n'
+    f'openai_base_url = "http://127.0.0.1:{DEFAULT_PORT}/v1"\n'
+    'experimental_realtime_webrtc_call_base_url = "https://chatgpt.com/backend-api/codex"\n'
+    '\n[features]\nmulti_agent = true\n')
+
+
+REFUSAL = ("codex-chatgpt-web: Codex interrupt lifecycle hook changed after setup; "
+           "refusing to overwrite it.")
+
+
+def test_runtime_older_than_6_1_10_keeps_tools_blocked(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch, mode="full")
+    tools_gate_met(bridge)
+    monkeypatch.setitem(bridge_module.PIN, "version", "6.1.8")
+
+    with pytest.raises(BridgeError) as error:
+        bridge.desktop("tools")
+    assert error.value.code == "tools-not-ready"
+    assert "contexto confiável" in str(error.value) and "workspace-write" in str(error.value)
+    assert runner.spawned == []
+    with pytest.raises(BridgeError) as error:
+        bridge.tools_enable("tunnel_" + "a" * 32)
+    assert error.value.code == "tools-not-ready"
+    assert bridge.tools_steps()["next"]["id"] == "full-runtime"
+
+    # The browser-only shortcut must not quietly become a tools window.
+    with pytest.raises(BridgeError) as error:
+        bridge.desktop("web")
+    assert error.value.code == "full-mode"
+
+
+def test_tools_steps_walk_to_enable_tunnel_and_connector(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch)
+    bridge.record_eligibility("pro", "yes", "use", "yes")
+    pro_plan = next(item for item in bridge.tools_steps()["steps"] if item["id"] == "plan-full")
+    assert pro_plan["ok"] is True
+    assert bridge.tools_steps()["next"]["id"] == "runtime-key"
+    assert "tunnel key store" in bridge.tools_steps()["next"]["action"]
+
+    bridge._secret_store = FakeVault()
+    bridge.key_store("runtime-key-material", 30)
+    runtime = next(item for item in bridge.tools_steps()["steps"] if item["id"] == "full-runtime")
+    assert runtime["ok"] is True
+    step = bridge.tools_steps()["next"]
+    assert step["id"] == "launcher-mode" and step["action"].endswith("tools enable")
+
+    runner.other_users = lambda: ["another-user"]
+    assert bridge.tools_steps()["next"]["id"] == "single-user"
+    runner.other_users = lambda: []
+
+    config = bridge.paths.core_home / "config.json"
+    config.write_text(json.dumps({**json.loads(config.read_text()), "mode": "full",
+                                  "autoApproveToolCalls": True,
+                                  "tunnel": {"tunnelId": "tunnel_" + "d" * 32}}))
+    assert bridge.tools_steps()["next"]["id"] == "auto-approve"
+    config.write_text(json.dumps({**json.loads(config.read_text()),
+                                  "autoApproveToolCalls": False}))
+    runner.tunnel = False
+    assert bridge.tools_steps()["next"]["id"] == "tunnel"
+    runner.tunnel = True
+    runner.connector = {"ok": False, "detail": "nenhum conector ChatGPT ligado a este túnel"}
+    blocked = bridge.tools_steps()["next"]
+    assert blocked["id"] == "connector" and "nenhum conector" in blocked["detail"]
+    runner.connector = FakeRunner().connector
+    done = bridge.tools_steps()
+    assert done["ready"] is True and done["next"] is None
+    assert "runtime-key-material" not in json.dumps(done)
+
+
+def test_tools_check_trusts_tunnel_health_over_upstream_doctor(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch, mode="full")
+    tools_gate_met(bridge)
+    stopped = {"ok": False, "checks": [
+        {"id": "proxy", "status": "ok"},
+        {"id": "tunnel-runtime", "status": "error", "message": "Tunnel runtime is not ready"},
+        {"id": "connector", "status": "warning"}]}
+    runner.upstream["doctor --json"] = (1, json.dumps(stopped), "")
+    state = bridge.load_state()
+    state["tunnelId"] = "tunnel_" + "b" * 32
+    bridge.save_state(state)
+
+    assert bridge.tools_check()["ready"] is True
+
+    runner.tunnel = False
+    assert "túnel não respondeu pronto" in bridge.tools_check()["blockers"]
+    runner.tunnel = True
+    runner.connector = {"ok": False, "detail": "launcher sem sessão ChatGPT"}
+    assert any("conector" in item for item in bridge.tools_check()["blockers"])
+    runner.connector = FakeRunner().connector
+    stopped["checks"][0]["status"] = "error"
+    runner.upstream["doctor --json"] = (1, json.dumps(stopped), "")
+    assert any("doctor" in item for item in bridge.tools_check()["blockers"])
+
+
+def test_tools_enable_switches_to_full_and_rolls_back_on_failure(host, monkeypatch):
+    bridge, runner, home = ready_host(host, monkeypatch)
+    tools_gate_met(bridge)
+    bridge.paths.runtime = home / "run" / "pz-chatgpt-web"
+    (bridge.paths.launcher_data / bridge_module.SESSION_COOKIE_DB).parent.mkdir(parents=True)
+    monkeypatch.setattr(bridge, "session_present", lambda profile: True)
+    monkeypatch.setattr(bridge, "restart_launcher", lambda: None)
+    config = bridge.paths.core_home / "config.json"
+    browser_only = config.read_text()
+    tunnel = "tunnel_" + "c" * 32
+    seen: list[list[str]] = []
+
+    def reconfigure(args):
+        seen.append(args)
+        staged = Path(args[args.index("--runtime-key-file") + 1])
+        assert staged.read_text() == "runtime-key-material"
+        config.write_text(json.dumps({**json.loads(browser_only), "mode": "full",
+                                      "tunnel": {"tunnelId": tunnel}}))
+        return 0, "Setup complete: full", ""
+
+    monkeypatch.setattr(bridge, "_reconfigure_upstream", reconfigure)
+    with pytest.raises(BridgeError) as error:
+        bridge.tools_enable("not-a-tunnel")
+    assert error.value.code == "usage"
+
+    result = bridge.tools_enable(tunnel)
+    assert result["enabled"] and result["changed"] and result["sandbox"] == "read-only"
+    assert seen[0][:3] == ["--full", "--tunnel-id", tunnel]
+    assert not (bridge.paths.runtime / "runtime-key").exists()  # wiped after setup
+    assert bridge.load_state()["tunnelId"] == tunnel
+    assert bridge.tools_enable()["changed"] is False  # idempotent, tunnel remembered
+
+    config.write_text(browser_only)
+    runner.connector = {"ok": False, "detail": "nenhum conector ChatGPT ligado a este túnel"}
+    with pytest.raises(BridgeError) as error:
+        bridge.tools_enable()
+    assert error.value.code == "tools-enable-failed" and "modo Web restaurado" in str(error.value)
+    assert json.loads(config.read_text())["mode"] == "browser-only"
+    assert not (bridge.paths.runtime / "runtime-key").exists()
+
+
+def test_setup_keeps_an_enabled_tools_mode(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch, mode="full")
+    monkeypatch.setattr(bridge, "configure_web_model",
+                        lambda: pytest.fail("setup must not reconfigure a Full launcher"))
+    calls = []
+    monkeypatch.setattr(bridge, "isolation", lambda: {"ok": True})
+    monkeypatch.setattr(bridge, "fetch", lambda: {"downloaded": False})
+    monkeypatch.setattr(bridge, "launcher_active", lambda: True)
+    monkeypatch.setattr(bridge, "descriptor_ready", lambda: True)
+    monkeypatch.setattr(bridge, "session_present", lambda profile: True)
+    monkeypatch.setattr(bridge, "route_enable", lambda: calls.append("route") or {})
+    result = bridge.setup()
+    assert result["ready"] is True
+
+
+
+def test_tunnel_left_outside_the_running_full_launcher_breaks_isolation(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch, mode="full")
+    runner.launchers = [{"pid": 500, "managed": True}]
+    runner.tunnels = [{"pid": 900, "scopePid": 500}]
+    assert bridge.orphan_tunnels() == [] and bridge.isolation()["ok"] is True
+
+    # A launcher restart leaves the previous scope's tunnel-client behind.
+    runner.tunnels.append({"pid": 901, "scopePid": 400})
+    assert bridge.isolation()["orphanTunnels"] == [901]
+    stopped = []
+    real_run = runner.run
+
+    def run(args, **kwargs):
+        if args[:3] == ["systemctl", "--user", "stop"] and args[3].endswith(".scope"):
+            stopped.append(args[3])
+            runner.tunnels = [item for item in runner.tunnels if item["scopePid"] != 400]
+        return real_run(args, **kwargs)
+
+    runner.run = run
+    assert bridge.repair()["stoppedTunnels"] == [901]
+    assert stopped == ["app-codex-web-gpt-launcher-400.scope"]
+
+    # Back in Web-only mode no tunnel-client may stay online at all.
+    config = bridge.paths.core_home / "config.json"
+    config.write_text(json.dumps({**json.loads(config.read_text()), "mode": "browser-only"}))
+    assert bridge.orphan_tunnels() == [900]
+
+
+def test_sandbox_inherits_the_normal_codex_by_default_and_can_be_isolated(host, monkeypatch):
+    bridge, runner, home = ready_host(host, monkeypatch)
+    live = bridge.paths.live_codex_home
+    live.mkdir(parents=True, exist_ok=True)
+    (live / "config.toml").write_text(
+        'sandbox_mode = "workspace-write"\napproval_policy = "on-failure"\n'
+        '[sandbox_workspace_write]\nnetwork_access = true\nwritable_roots = ["/srv/x"]\n')
+
+    profile = bridge.sandbox_status(applied=True)
+    assert profile["profile"] == "inherit" and profile["applied"] is True
+    text = bridge.paths.codex_config.read_text()
+    assert 'sandbox_mode = "workspace-write"' in text
+    assert 'approval_policy = "on-failure"' in text and "network_access = true" in text
+    assert bridge.policy_violations(text) == []
+    assert bridge.route_verify()["ok"] is True
+    command, _ = bridge.codex_command(["exec", "oi"])
+    assert command[1:5] == ["--sandbox", "workspace-write", "--ask-for-approval", "on-failure"]
+    smoke, _ = bridge.codex_command(["exec", "oi"], isolated=True)
+    assert smoke[1:3] == ["--sandbox", "read-only"]
+    assert bridge.live_route_touched() is False  # ~/.codex was only read
+
+    isolated = bridge.sandbox_set("isolated")
+    assert isolated["sandbox"] == "read-only" and isolated["applied"] is True
+    text = bridge.paths.codex_config.read_text()
+    assert 'sandbox_mode = "read-only"' in text and "sandbox_workspace_write" not in text
+    assert bridge.policy_violations(text) == []
+    # Something else widening the dedicated profile is still caught.
+    assert bridge.policy_violations(text.replace('"read-only"', '"danger-full-access"'))
+
+
+def test_shortcuts_come_back_unless_the_user_removed_them(host, monkeypatch):
+    bridge, runner, home = ready_host(host, monkeypatch)
+    bridge.package_state = lambda: {"state": "verified", "path": "x", "sha256": "x",
+                                    "unpacked": "verified"}
+    assert bridge.restore_shortcuts() is True  # installed by default
+    entries = [path for path, _ in bridge.shortcut_files(False)]
+    for path in entries:
+        path.unlink()
+    assert bridge.shortcuts_status()["state"] == "inconsistent"
+    assert bridge.repair()["shortcutsRestored"] is True
+    assert bridge.shortcuts_status()["state"] == "installed"
+
+    entries[0].write_text("[Desktop Entry]\nExec=/tmp/other\n")
+    assert bridge.restore_shortcuts() is False  # someone else's file stays
+
+    bridge.shortcuts_remove_by_user()
+    assert bridge.restore_shortcuts() is False
+    assert bridge.shortcuts_install(desktop_copy=False)["state"] == "installed"
+    assert "shortcutsRemoved" not in bridge.load_state()
+
+
+def elf_payload() -> bytes:
+    header = bytearray(64)
+    header[:4] = b"\x7fELF"
+    header[4], header[5] = 2, 1
+    struct.pack_into("<Q", header, 0x28, 1024)
+    struct.pack_into("<HH", header, 0x3A, 64, 10)
+    return bytes(header)
+
+
+def serve_release(runner: FakeRunner, version: str, payload: bytes,
+                  checksum: str | None = None) -> str:
+    name = f"codex-web-gpt-{version}-linux-x64.AppImage"
+    sha = bridge_module.sha256_bytes(payload)
+    release = {"tag_name": f"v{version}", "target_commitish": "main", "assets": [
+        {"name": name, "size": len(payload), "digest": f"sha256:{sha}"},
+        {"name": "checksums.txt", "browser_download_url": "https://example.invalid/sums"}]}
+    pages = {"releases/latest": json.dumps(release),
+             "sums": f"{checksum or sha}  {name}\n"}
+    runner.fetch_text = lambda url, limit=0: next(v for k, v in pages.items() if url.endswith(k))
+    return name
+
+
+def test_update_reports_current_when_pin_is_newest(host):
+    bridge, runner, _ = host
+    serve_release(runner, PINNED, elf_payload())
+    assert bridge.update_check()["available"] is False
+    assert bridge.update() == {"update": "current", "version": PINNED}
+    assert not bridge.paths.pin_file.exists()
+
+
+def test_update_downloads_verifies_and_switches_pin(host, monkeypatch):
+    bridge, runner, _ = host
+    clean_preflight(monkeypatch, bridge)
+    payload = elf_payload()
+    name = serve_release(runner, "9.0.0", payload)
+    runner.download_bytes = payload
+    try:
+        assert bridge.update_check() == {"current": PINNED, "latest": "9.0.0", "available": True}
+        result = bridge.update()
+        assert result["update"] == "applied" and result["to"] == "9.0.0"
+        assert runner.downloads[-1].endswith(f"/v9.0.0/{name}")
+        assert bridge.paths.packages.name == "9.0.0"
+        assert (bridge.paths.app / bridge_module.LAUNCHER_BINARY).is_file()
+        # A fresh process keeps the approved version.
+        again = Bridge(env=bridge.env, runner=runner)
+        assert bridge_module.PIN["version"] == "9.0.0"
+        assert again.package_state()["state"] == "verified"
+    finally:
+        bridge.paths.pin_file.unlink(missing_ok=True)
+        bridge_module.load_pin(bridge.paths.pin_root)
+    assert bridge_module.PIN == bridge_module.AUDITED_PIN
+
+
+def test_update_refuses_checksum_mismatch_and_keeps_old_pin(host, monkeypatch):
+    bridge, runner, _ = host
+    clean_preflight(monkeypatch, bridge)
+    serve_release(runner, "9.0.0", elf_payload(), checksum="0" * 64)
+    with pytest.raises(BridgeError) as error:
+        bridge.update()
+    assert error.value.code == "update-unverifiable"
+    assert not bridge.paths.pin_file.exists() and bridge_module.PIN["version"] == PINNED
+
+
+def test_update_rolls_back_pin_when_download_fails(host, monkeypatch):
+    bridge, runner, _ = host
+    clean_preflight(monkeypatch, bridge)
+    serve_release(runner, "9.0.0", elf_payload())
+    runner.download_bytes = b"tampered"
+    with pytest.raises(BridgeError):
+        bridge.update()
+    assert not bridge.paths.pin_file.exists() and bridge_module.PIN["version"] == PINNED
+    assert bridge.paths.packages.name == PINNED
+
+
+def prepare_stale_runtime(bridge, monkeypatch):
+    """Small verified bundle and an inactive, coherent upstream v10 integration."""
+    old = bridge.paths.core_home / "versions/6.0.0-linux-x64"
+    command = [str(old / "runtime/bun"), str(old / "app/cli.js")]
+    rendered = " ".join("'" + x.replace("'", "'\"'\"'") + "'" for x in
+                        [*command, "--home", str(bridge.paths.core_home.resolve()), "hook", "interrupt"])
+    payload = {"event_name": "interrupt", "hooks": [
+        {"async": False, "command": rendered, "timeout": 3, "type": "command"}]}
+    digest = "sha256:" + bridge_module.sha256_bytes(json.dumps(
+        payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode())
+    hook = {"command": rendered, "groupIndex": 0,
+            "stateKey": str(bridge.paths.codex_config.resolve()) + ":interrupt:0:0",
+            "trustedHash": digest,
+            "fragment": f"command = {json.dumps(rendered, ensure_ascii=False)}\ntrusted_hash = {json.dumps(digest)}\n"}
+    journal = {"version": 10, "active": False, "configPath": str(bridge.paths.codex_config.resolve()),
+               "interruptHook": hook, "previous": {"model_provider": {"present": False}},
+               "installed": {"openai_base_url": "http://127.0.0.1:17841"}}
+    config = {"mode": "full", "runtimeCommand": command, "releaseVersion": "6.0.0",
+              "autoApproveToolCalls": False, "subagentProtocol": "compatibility-v1",
+              "customSetting": {"preserve": True}}
+    for path, value in zip(bridge._integration_files(), (config, journal, journal)):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value))
+    bridge.paths.codex_home.mkdir(parents=True, exist_ok=True)
+    bridge.paths.codex_config.write_text(OWNED_CONFIG + '\n[desktop]\nfontSize = 16\n')
+    files = []
+    target = bridge.paths.core_home / "versions" / f"{PINNED}-linux-x64"
+    for relative in ("runtime/bun", "app/cli.js", "bin/codex-chatgpt-web"):
+        path = target / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(relative.encode())
+        files.append({"path": relative, "size": path.stat().st_size,
+                      "sha256": bridge_module.sha256_file(path)})
+    bundle = bridge.paths.app / "resources/runtime"
+    bundle.mkdir(parents=True, exist_ok=True)
+    (bundle / "manifest.json").write_text(json.dumps(
+        {"schemaVersion": 2, "appVersion": PINNED, "platform": "linux", "arch": "x64", "files": files}))
+    monkeypatch.setattr(bridge, "package_state", lambda: {"state": "verified", "unpacked": "verified"})
+    return target
+
+
+def test_runtime_migration_preserves_full_mode_user_config_and_baseline(host, monkeypatch):
+    bridge, _, _ = host
+    prepare_stale_runtime(bridge, monkeypatch)
+    before = bridge.paths.codex_config.read_bytes()
+    old = bridge.upstream_config()
+    assert bridge.runtime_migration_needed()
+    assert bridge.migrate_runtime() == {"runtime": "migrated", "from": "6.0.0", "to": PINNED}
+    assert bridge.paths.codex_config.read_bytes() == before
+    current = bridge.upstream_config()
+    for key in old.keys() - {"runtimeCommand", "releaseVersion"}:
+        assert current[key] == old[key]
+    primary, recovery = bridge._integration_files()[1:]
+    assert primary.read_bytes() == recovery.read_bytes()
+    hook = json.loads(primary.read_text())["interruptHook"]
+    assert "6.0.0" not in hook["command"] and PINNED in hook["command"]
+    assert hook["trustedHash"] in hook["fragment"]
+    assert bridge.migrate_runtime() == {"runtime": "current"}
+
+
+def test_runtime_migration_prepares_missing_runtime_from_verified_bundle(host, monkeypatch):
+    bridge, _, _ = host
+    target = prepare_stale_runtime(bridge, monkeypatch)
+    bundle = bridge.paths.app / "resources/runtime"
+    for relative in ("runtime/bun", "app/cli.js", "bin/codex-chatgpt-web"):
+        source = bundle / relative
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes((target / relative).read_bytes())
+    bridge_module.shutil.rmtree(target)
+    assert bridge.migrate_runtime()["runtime"] == "migrated"
+    assert (target / "runtime/bun").read_bytes() == b"runtime/bun"
+    assert not list(target.parent.glob(".prepare-runtime-*"))
+
+
+def test_launch_migrates_before_new_launcher_can_upgrade_the_same_journals(host, monkeypatch):
+    bridge, runner, _ = host
+    target = prepare_stale_runtime(bridge, monkeypatch)
+    clean_preflight(monkeypatch, bridge)
+    (bridge.paths.app / bridge_module.LAUNCHER_BINARY).parent.mkdir(parents=True, exist_ok=True)
+    (bridge.paths.app / bridge_module.LAUNCHER_BINARY).write_text("fixture")
+    bridge.seed_codex_home()
+    state = bridge.load_state()
+    bridge.snapshot_baseline(state)
+    bridge.save_state(state)
+    runner.upstream["route status"] = (0, json.dumps({"installed": True, "active": False}), "")
+    original_run = runner.run
+    def run(args, **kwargs):
+        if args[0] == "systemd-run" and "--wait" not in args:
+            assert bridge.upstream_config()["releaseVersion"] == PINNED
+            assert not bridge.runtime_migration_needed()
+            runner.unit_active = True
+        return original_run(args, **kwargs)
+    monkeypatch.setattr(runner, "run", run)
+    assert bridge.launch()["launcher"] == "started"
+    assert bridge.load_state()["updatePending"]["to"] == PINNED
+
+
+@pytest.mark.parametrize("conflict", ["divergent", "foreign-hook", "active", "tampered", "outside-manifest"])
+def test_runtime_migration_refuses_unknown_or_tampered_integration(host, monkeypatch, conflict):
+    bridge, _, _ = host
+    target = prepare_stale_runtime(bridge, monkeypatch)
+    primary, recovery = bridge._integration_files()[1:]
+    journal = json.loads(primary.read_text())
+    if conflict == "divergent":
+        journal["previous"] = {"different": True}
+        primary.write_text(json.dumps(journal))
+    elif conflict in {"foreign-hook", "active"}:
+        if conflict == "foreign-hook":
+            journal["interruptHook"]["command"] = "unrelated-tool"
+        else:
+            journal["active"] = True
+        primary.write_text(json.dumps(journal))
+        recovery.write_bytes(primary.read_bytes())
+    elif conflict == "tampered":
+        (target / "app/cli.js").write_text("unexpected")
+    else:
+        manifest = bridge.paths.app / "resources/runtime/manifest.json"
+        data = json.loads(manifest.read_text())
+        data["files"][0]["path"] = "../runtime/bun"
+        manifest.write_text(json.dumps(data))
+    before = [p.read_bytes() for p in bridge._integration_files()]
+    with pytest.raises(BridgeError):
+        bridge.migrate_runtime()
+    assert [p.read_bytes() for p in bridge._integration_files()] == before
+
+
+def test_runtime_migration_rolls_back_both_journals_after_write_failure(host, monkeypatch):
+    bridge, _, _ = host
+    prepare_stale_runtime(bridge, monkeypatch)
+    files = bridge._integration_files()
+    before = [p.read_bytes() for p in files]
+    real_write = bridge_module.atomic_write
+    failed = False
+    def fail_once(path, data):
+        nonlocal failed
+        if path == files[2] and not failed:
+            failed = True
+            raise OSError("disk write interrupted")
+        real_write(path, data)
+    monkeypatch.setattr(bridge_module, "atomic_write", fail_once)
+    with pytest.raises(BridgeError, match="integração anterior restaurada"):
+        bridge.migrate_runtime()
+    assert [p.read_bytes() for p in files] == before
+    receipt = json.loads((bridge.paths.journal / "runtime-migration.json").read_text())
+    assert receipt["status"] == "rolled-back"
+    assert bridge.migrate_runtime()["runtime"] == "migrated"
+
+
+def test_runtime_migration_recovers_interrupted_transaction_without_guessing(host, monkeypatch):
+    bridge, _, _ = host
+    prepare_stale_runtime(bridge, monkeypatch)
+    files = bridge._integration_files()
+    before = [p.read_bytes() for p in files]
+    bridge.migrate_runtime()
+    receipt = bridge.paths.journal / "runtime-migration.json"
+    record = json.loads(receipt.read_text())
+    record["status"] = "pending"  # simulated crash before the commit marker
+    receipt.write_text(json.dumps(record))
+    files[0].write_bytes(before[0])  # interrupted at an arbitrary file boundary
+    assert bridge.recover_runtime_migration()
+    assert [p.read_bytes() for p in files] == before
+
+
+def test_update_resumes_stale_runtime_without_network_or_downloading(host, monkeypatch):
+    bridge, _, _ = host
+    prepare_stale_runtime(bridge, monkeypatch)
+    monkeypatch.setattr(bridge, "latest_release", lambda: pytest.fail("retry must use the cached release"))
+    def setup(*args, **kwargs):
+        bridge.migrate_runtime()
+        return {"ready": True}
+    monkeypatch.setattr(bridge, "setup", setup)
+    result = bridge.update()
+    assert result["update"] == "recovered" and result["setup"]["ready"]
+    assert not bridge.runtime_migration_needed()
+
+
+def test_update_records_setup_failure_and_retry_finishes_same_release(host, monkeypatch):
+    bridge, runner, _ = host
+    clean_preflight(monkeypatch, bridge)
+    serve_release(runner, "9.0.0", elf_payload())
+    runner.download_bytes = elf_payload()
+    runner.unit_active = True
+    monkeypatch.setattr(bridge, "disable", lambda: setattr(runner, "unit_active", False))
+    def failure(*args, **kwargs):
+        raise BridgeError("temporary startup failure", "launcher-timeout")
+    monkeypatch.setattr(bridge, "setup", failure)
+    try:
+        with pytest.raises(BridgeError, match="clique Atualizar novamente|Clique Atualizar novamente"):
+            bridge.update()
+        assert bridge.load_state()["updatePending"]["to"] == "9.0.0"
+        downloads = len(runner.downloads)
+        monkeypatch.setattr(bridge, "latest_release", lambda: pytest.fail("no network on retry"))
+        monkeypatch.setattr(bridge, "setup", lambda *a, **k: {"ready": True})
+        assert bridge.update()["update"] == "recovered"
+        assert "updatePending" not in bridge.load_state()
+        assert len(runner.downloads) == downloads
+    finally:
+        bridge.paths.pin_file.unlink(missing_ok=True)
+        bridge_module.load_pin(bridge.paths.pin_root)
+
+
+@pytest.mark.parametrize("case", ["reused", "same-process", "unknown-identity", "other-profile", "changing-pid", "locked"])
+def test_tunnel_pid_recovery_preserves_other_aliases_and_never_signals(host, monkeypatch, case):
+    bridge, runner, home = host
+    configure(bridge, runner, route_active=False)
+    binary = bridge.paths.core_home / "bin/tunnel-client"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("fixture")
+    profile_dir = bridge.paths.core_home / "tunnel/profiles"
+    profile = profile_dir / "codex-chatgpt-web.yaml"
+    config = bridge.upstream_config()
+    config.update(mode="full", tunnel={"binaryPath": str(binary), "profileDir": str(profile_dir),
+                                      "profileName": "codex-chatgpt-web", "alias": "codex-chatgpt-web"})
+    bridge._integration_files()[0].write_text(json.dumps(config))
+    root = home / "native-tunnel-state"
+    (root / "locks").mkdir(parents=True)
+    lock = root / "locks/state.lock"
+    lock.touch()
+    record = {"alias": "codex-chatgpt-web", "mode": "process", "pid": 1234,
+              "pid_start_time": "111", "pid_executable": str(binary),
+              "config_path": str(profile), "profile_path": str(profile),
+              "tunnel_id": "fixture-tunnel", "custom": "preserve"}
+    if case == "unknown-identity":
+        record.pop("pid_start_time")
+    if case == "other-profile":
+        record["profile_path"] = "/another/profile.yaml"
+    entries = {"codex-chatgpt-web": record, "unrelated": {"pid": 1234, "mode": "process", "owner": "other"}}
+    registry = root / "processes.yaml"
+    registry.write_text(json.dumps(entries))
+    before = registry.read_bytes()
+    original_run = runner.run
+    def run(args, **kwargs):
+        if args[0] == str(binary):
+            return 0, json.dumps({"state_root": str(root)}), ""
+        return original_run(args, **kwargs)
+    monkeypatch.setattr(runner, "run", run)
+    ticks = iter(["222", "333"] if case == "changing-pid" else ["111", "111"] if case == "same-process" else ["222", "222"])
+    monkeypatch.setattr(runner, "process_start_ticks", lambda _: next(ticks), raising=False)
+    import fcntl
+    with lock.open("r+b") as stream:
+        if case == "locked":
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert bridge.repair_stale_tunnel_pid() is (case == "reused")
+    assert runner.terminated == []
+    after = json.loads(registry.read_text())
+    assert after["unrelated"] == entries["unrelated"]
+    if case == "reused":
+        assert after["codex-chatgpt-web"]["mode"] == "stopped"
+        assert after["codex-chatgpt-web"]["pid"] == 0
+        assert after["codex-chatgpt-web"]["custom"] == "preserve"
+        assert next(bridge.paths.journal.glob("tunnel-processes-*.json")).read_bytes() == before
+    else:
+        assert registry.read_bytes() == before
+
+
+def test_setup_never_reports_ready_when_route_stayed_inactive(host):
+    bridge, runner, _ = host
+    configure(bridge, runner, route_active=False)
+    runner.unit_active = runner.port_busy = True
+    runner.launchers = [{"pid": 99, "managed": True}]
+    bridge.paths.descriptor.parent.mkdir(parents=True)
+    bridge.paths.descriptor.write_text(json.dumps({"pid": 99}))
+    write_profile(bridge.paths.launcher_data, signed_in=True, auto_start=False)
+    bridge.package_state = lambda: {"state": "verified", "path": "fixture",
+                                    "sha256": "fixture", "unpacked": "verified"}
+    state = bridge.load_state()
+    state["updatePending"] = {"to": PINNED}
+    bridge.save_state(state)
+    with pytest.raises(BridgeError) as error:
+        bridge.setup(login_wait=0)
+    assert error.value.code == "route-inactive"
+    assert bridge.load_state()["updatePending"]["to"] == PINNED

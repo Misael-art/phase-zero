@@ -40,6 +40,7 @@ Actions:
   status                 Print Claude/Qwen/Codex desktop status JSON
   install-claude         Install/update official Claude Desktop for current user
   update-claude          Update Claude Desktop when newer
+  check-claude           Compare installed Claude Desktop with signed repo (JSON, no changes)
   launch-claude          Launch installed Claude Desktop
   test-claude            Run binary/linkage and live launch checks
   install-qwen           Install/update official Qwen Code Desktop AppImage
@@ -52,6 +53,7 @@ Actions:
   check-codex            Run guarded Codex update check
   install-services       Enable Codex guard and periodic desktop updates
   update                 Update Claude and check Codex
+  disable-updates        Stop the periodic desktop app update timer
   repair                 Repair desktop apps and services
 EOF
 }
@@ -77,7 +79,7 @@ download_atomic() {
     tmp="${target}.part.$$"
     mkdir -p "$(dirname "$target")"
     rm -f "$tmp"
-    curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 "$url" -o "$tmp"
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 "$url" -o "$tmp"
     mv -f "$tmp" "$target"
 }
 
@@ -312,16 +314,59 @@ installed_claude_version() {
     fi
 }
 
+claude_launcher_managed() {
+    [ -f "$LOCAL_BIN/claude-desktop" ] && [ ! -L "$LOCAL_BIN/claude-desktop" ] &&
+        grep -q "$CLAUDE_ROOT/current/app/claude-desktop" "$LOCAL_BIN/claude-desktop" 2>/dev/null
+}
+
+# A launcher installed by something else (e.g. an unofficial AppImage symlink)
+# is recorded before it is replaced, so it can be restored by hand.
+record_foreign_claude_launcher() {
+    local launcher="$LOCAL_BIN/claude-desktop" record="$CLAUDE_ROOT/replaced-launcher.json"
+    { [ -e "$launcher" ] || [ -L "$launcher" ]; } || return 0
+    claude_launcher_managed && return 0
+    [ -f "$record" ] && return 0
+    mkdir -p "$CLAUDE_ROOT"
+    jq -n --arg path "$launcher" --arg target "$(readlink -f "$launcher" 2>/dev/null || true)" \
+        --argjson symlink "$([ -L "$launcher" ] && echo true || echo false)" \
+        --arg at "$(date -Iseconds)" \
+        '{path:$path,symlink:$symlink,target:$target,replacedAt:$at,restore:"ln -sfn TARGET PATH"}' > "$record"
+    chmod 0600 "$record"
+    pz_warn "replacing non-PhaseZero Claude launcher ($launcher -> $(readlink -f "$launcher" 2>/dev/null || echo file)); recorded in $record, original file kept"
+}
+
+claude_running_pids() {
+    pgrep -f -- "$CLAUDE_ROOT/versions/[^ ]*/app/claude-desktop( |$)" 2>/dev/null || true
+}
+
+check_claude() {
+    pz_check_deps curl gpg gpgv jq sha256sum
+    local installed available=false
+    CLAUDE_CHECK_WORK="$(mktemp -d)"
+    trap 'rm -rf -- "${CLAUDE_CHECK_WORK:?}"' EXIT
+    read_claude_metadata "$CLAUDE_CHECK_WORK" >&2
+    installed="$(installed_claude_version || true)"
+    if [ -z "$installed" ] || [ "$(printf '%s\n%s\n' "$installed" "$CLAUDE_VERSION" | sort -V | tail -1)" != "$installed" ]; then
+        available=true
+    fi
+    jq -n --arg installed "$installed" --arg latest "$CLAUDE_VERSION" --argjson available "$available" \
+        --argjson running "$([ -n "$(claude_running_pids)" ] && echo true || echo false)" \
+        '{installed:$installed,latest:$latest,available:$available,running:$running,source:"official-anthropic-apt",signatureVerified:true}'
+}
+
 write_claude_launcher() {
     mkdir -p "$LOCAL_BIN"
+    record_foreign_claude_launcher
     pz_write_managed_file "$LOCAL_BIN/claude-desktop" <<EOF
 #!/usr/bin/env bash
+# PhaseZero managed: claude-desktop
 set -euo pipefail
 binary="$CLAUDE_ROOT/current/app/claude-desktop"
 if [ ! -x "\$binary" ]; then
     echo "Claude Desktop not installed. Run: $PZ_ROOT/linux/pz ai desktop install-claude" >&2
     exit 1
 fi
+export ELECTRON_OZONE_PLATFORM_HINT="\${ELECTRON_OZONE_PLATFORM_HINT:-auto}"
 exec "\$binary" "\$@"
 EOF
     chmod 0755 "$LOCAL_BIN/claude-desktop"
@@ -388,7 +433,8 @@ install_claude() {
     read_claude_metadata "$work"
     installed="$(installed_claude_version || true)"
     if [ "$installed" = "$CLAUDE_VERSION" ] &&
-        [ -x "$CLAUDE_ROOT/current/app/claude-desktop" ]; then
+        [ -x "$CLAUDE_ROOT/current/app/claude-desktop" ] &&
+        [ "$(jq -r '.sha256 // empty' "$CLAUDE_ROOT/current/manifest.json" 2>/dev/null || true)" = "$CLAUDE_SHA256" ]; then
         pz_info "Claude Desktop already current: $CLAUDE_VERSION"
         write_claude_launcher
         write_claude_desktop_entry
@@ -465,6 +511,12 @@ install_claude() {
     rm -rf "$work"
     trap - EXIT
     pz_info "Claude Desktop installed: $CLAUDE_VERSION"
+    if [ -n "$(claude_running_pids)" ]; then
+        pz_warn "Claude Desktop is still running the previous version; close and reopen it to use $CLAUDE_VERSION"
+        command -v notify-send >/dev/null 2>&1 &&
+            notify-send --app-name=PhaseZero "Claude Desktop atualizado" \
+                "Versão $CLAUDE_VERSION instalada. Feche e abra o Claude para usar." >/dev/null 2>&1 || true
+    fi
 }
 
 launch_claude() {
@@ -769,6 +821,7 @@ desktop_status() {
         --arg qwenConfigDir "$QWEN_CONFIG_DIR" \
         --argjson claudeInstalled "$([ -x "$CLAUDE_ROOT/current/app/claude-desktop" ] && echo true || echo false)" \
         --argjson claudeLauncherOk "$([ -x "$LOCAL_BIN/claude-desktop" ] && echo true || echo false)" \
+        --argjson claudeLauncherManaged "$(claude_launcher_managed && echo true || echo false)" \
         --argjson claudeDesktopEntryOk "$([ -f "$APPLICATIONS_DIR/claude-desktop.desktop" ] && echo true || echo false)" \
         --argjson qwenInstalled "$([ -x "$QWEN_ROOT/current/Qwen-Code-Desktop-x86_64.AppImage" ] && echo true || echo false)" \
         --argjson repairedReady "$repaired_ready" \
@@ -784,6 +837,7 @@ desktop_status() {
             binary: $claudeBinary,
             launcher: $claudeLauncher,
             launcherOk: $claudeLauncherOk,
+            launcherManaged: $claudeLauncherManaged,
             desktopEntry: $claudeDesktopEntry,
             desktopEntryOk: $claudeDesktopEntryOk,
             source: "official-anthropic-apt",
@@ -817,8 +871,14 @@ desktop_status() {
 }
 
 update_all() {
-    install_claude
-    install_qwen
+    # Timer updates only what is already installed; never installs new apps.
+    if [ -x "$CLAUDE_ROOT/current/app/claude-desktop" ]; then
+        # Separate process: `||` would disable errexit inside the function.
+        bash "${BASH_SOURCE[0]}" install-claude || pz_warn "Claude Desktop update failed"
+    fi
+    if [ -x "$QWEN_ROOT/current/Qwen-Code-Desktop-x86_64.AppImage" ]; then
+        bash "${BASH_SOURCE[0]}" install-qwen || pz_warn "Qwen Code Desktop update failed"
+    fi
     check_codex || pz_warn "Codex Desktop update check failed; run: $PZ_ROOT/linux/pz ai desktop repair-codex"
 }
 
@@ -832,6 +892,31 @@ repair_all() {
     install_services
 }
 
+disable_updates() {
+    local unit=phasezero-ai-desktop-update.timer state
+    # A failed bus/query is not evidence that the timer is absent.
+    state="$(systemctl --user show "$unit" --property=LoadState --value)" || {
+        pz_error "Cannot query update timer; check systemctl --user status $unit"
+        return 1
+    }
+    if [[ "$state" != not-found ]]; then
+        systemctl --user disable --now "$unit" || {
+            pz_error "Cannot disable update timer; check systemctl --user status $unit"
+            return 1
+        }
+    fi
+    state="$(systemctl --user show "$unit" --property=LoadState,ActiveState,UnitFileState)" || {
+        pz_error "Cannot confirm update timer state; retry disable-updates"
+        return 1
+    }
+    if ! grep -qx 'ActiveState=inactive' <<< "$state" ||
+       ! grep -Eq '^(UnitFileState=(disabled|masked)|LoadState=not-found)$' <<< "$state"; then
+        pz_error "Update timer is not confirmed inactive and disabled; check systemctl --user status $unit"
+        return 1
+    fi
+    pz_info "AI desktop automatic updates disabled (run install-services to enable)"
+}
+
 main() {
     local action="${1:-status}"
     case "$action" in
@@ -839,6 +924,7 @@ main() {
         install-claude|update-claude) install_claude ;;
         launch-claude) shift; launch_claude "$@" ;;
         test-claude) test_claude ;;
+        check-claude) check_claude ;;
         install-qwen|update-qwen) install_qwen ;;
         launch-qwen) shift; launch_qwen "$@" ;;
         codex-guard-once) codex_guard_once ;;
@@ -847,6 +933,8 @@ main() {
         install-codex-ready) install_codex_ready ;;
         check-codex) check_codex ;;
         install-services) install_services ;;
+        disable-updates)
+            disable_updates ;;
         update) update_all ;;
         repair) repair_all ;;
         help|-h|--help) usage ;;

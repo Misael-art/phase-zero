@@ -51,12 +51,17 @@ status() {
 case "${1:-status}" in
     status) status ;;
     proxy) shift; run_headroom proxy --port "${1:-8787}" "${@:2}" ;;
-    wrap-claude) shift; run_headroom wrap claude --memory "$@" ;;
-    wrap-codex) shift; run_headroom wrap codex --memory "$@" ;;
+    # PhaseZero managed inference remains behind its account/request gates.
+    # No wrapper may silently create a second memory system or bypass a gate.
+    wrap-claude|wrap-codex|wrap-opencode)
+        printf '%s\n' '{"ok":false,"state":"blocked","reason":"experimental-route-auth-and-memory-homologation-required"}'
+        exit 69 ;;
     wrap-aider) shift; run_headroom wrap aider "$@" ;;
     wrap-cursor) shift; run_headroom wrap cursor "$@" ;;
     wrap-copilot) shift; run_headroom wrap copilot "$@" ;;
-    wrap-gemini) shift; run_headroom wrap gemini "$@" ;;
+    wrap-gemini)
+        printf '%s\n' '{"ok":false,"state":"unsupported","reason":"gemini-wrapper-not-supported-by-tested-headroom"}'
+        exit 69 ;;
     wrap-openclaw) block_openclaw ;;
     mcp-install) shift; run_headroom mcp install "$@" ;;
     stats) shift; run_headroom stats "$@" ;;
