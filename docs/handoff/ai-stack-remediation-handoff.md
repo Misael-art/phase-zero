@@ -518,3 +518,64 @@ HMAIL executava outra tarefa: processo preservado; janela aberta continua
 pendente de recarga após tarefa terminar. Próximo passo: reabrir somente essa
 conta e conferir tema autenticado. Não certificar recarga ao vivo, login/cota
 ou Web autenticado por essa prova anônima. Sem merge/release.
+
+### Codex Web: atualização retomável e aplicação no host — 2026-11-02
+
+Branch/PR: `codex/clean-host-dev-bootstrap`, #129 (draft). Base de entrada
+`b39654af540d4cc8f3a7061dca09d112eeaad130`; correção do bridge
+`a8334412dcef9c4f6a0d09d50abaeecf1eb34c91`; fonte instalada inclui retenção
+segura do instalador em `8629e1ea`.
+
+Pedido: erro `route-enable-failed` após **Atualizar app**, launcher 6.1.14 →
+6.1.17. Owner: `linux/ai/chatgpt_web_bridge.py`, cartão privado IA & Dev e
+instalador oficial por usuário. Runtime e hook permaneciam na versão anterior;
+reativação guardada recusava essa mistura. Migração transacional de journals v10
+acontece antes do launcher novo e mantém configuração, login e modo Full.
+Atualização incompleta retoma com pacote local, sem novo download; divergência
+de baseline continua bloqueada. Detalhes no roadmap Apps/Dev/IA, seção PXA-010
+de 2026-11-02.
+
+Dependência descoberta no host: identidade antiga do túnel referia PID
+reutilizado por processo do desktop. `tunnel-client 0.0.16` recusava inspeção
+desse executável. Recuperação compara marcas de início do kernel sob lock
+upstream, preserva backup e altera só registro do perfil comprovadamente antigo;
+nenhum sinal ao processo atual. Conta, chave e túnel remoto permanecem intactos.
+
+Validação:
+
+- 143 testes de bridge, cartão e perfis/painel Codex; 13 de coesão da instalação.
+  `shellcheck -S warning`, `bash -n` do instalador e `git diff --check` passaram.
+  Ambiente do wrapper `tools/dev-bootstrap.sh doctor --profile ui`: pronto.
+- CLI 6.1.17 real, em perfil descartável sem sessão, conectou/desconectou/
+  reconectou com journals coerentes e restauração exata. Manifesto verificou
+  4.899 arquivos do runtime. Sem inferência/mensagem de teste.
+- Host retomou **Atualizar**: `update=recovered`, `ready=true`,
+  `stage=tools-experimental`; launcher ativo, runtime 6.1.17, rota ativa e
+  daemon em `127.0.0.1:17841`. Modo Full e login local presentes. SHA-256 do
+  config principal igual; modelo, sandbox, aprovação, Desktop, projetos,
+  plugins e MCPs preservados. PID reutilizado ficou intacto.
+- Instalador `packaging/linux/install-user.sh` aplicado de export Git imutável
+  `8629e1ea`, sem incluir WIP local. Runtime de usuário 1.22.12 atualizado e
+  snapshot estável dos atalhos conferido por SHA-256. Backup anterior:
+  `~/.local/share/phasezero/backups/1.22.12.20261102072658.3721797/`.
+- Antes de instalar, retenção foi corrigida para filtrar somente nomes de
+  release/backup próprios. Diretório de recuperação RetroFE existente teve
+  mesmo digest antes/depois; outros owners não entram nessa retenção.
+
+Evidência privada em `~/.cache/phasezero-dev/codex-web-update/`:
+`final-tests.log`, `packaging-tests.log`, `native-migration/receipt.json`,
+`host-repair-receipt.json`, `installed-health.json`,
+`installed-pz-route-verify.json`, `install-source.json`, `install-user.log`.
+Backups da integração e metadado de PID ficam no journal privado já existente.
+Export temporário de fonte é regenerável com `git archive 8629e1ea`; não é
+outro checkout nem destino de continuidade. Fontes oficiais ficam nesta única
+raiz e branch remota.
+
+Limites e próximo passo: teste pago e prova nova de escrita/MCP/cota não foram
+executados; sessão local não comprova validade remota. Reabrir painel PhaseZero
+carrega também texto atualizado da UI. SHA de entrada tinha 35 checks positivos,
+2 falhas (smoke DeepSeek Windows e temporização de skeleton da Overview) e
+2 skips; logs da entrada foram preservados. São falhas observadas antes deste
+incremento, sem reprodução em `main` nesta sessão. PR continua draft, sem
+merge/release; aguardar checks do incremento e tratar gates pendentes na frente
+correta antes de publicação.
