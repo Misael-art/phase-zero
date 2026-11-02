@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, QTimer, Qt, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence, QResizeEvent, QTextCursor
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QIcon, QKeySequence, QResizeEvent, QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -35,7 +35,8 @@ from .models import ActionSpec, OperationResult
 from .product_inventory import target_for
 from .provision_player import ProvisionPlayerWindow
 from .windows_install_dialog import WindowsInstallDialog
-from .preferences import UiPreferences
+from .preferences import UiPreferences, resolve_theme
+from .tokens import THEMES, is_light, tokens_for
 from .pages.registry import PageRegistry
 from .result_parser import restart_required, severity_for
 from .widgets import (
@@ -76,6 +77,7 @@ class MainWindow(QMainWindow):
         self._action_queue: list[ActionSpec] = []
         self.sidebar_buttons: dict[str, QPushButton] = {}
         self.dark_theme = True
+        self.theme_id = "dark"
         self._maximized = False
         self._start_failed = False
         self._search_cards: list[QWidget] = []
@@ -257,15 +259,16 @@ class MainWindow(QMainWindow):
         self.controls_layout.addWidget(self.mode_switch, 0, 2)
         self.theme_button = QPushButton()
         self.theme_button.setObjectName("iconButton")
-        self.theme_button.setToolTip("Alternar tema")
         self.theme_button.setMinimumHeight(25)
+        self.theme_button.setMinimumWidth(44)
         theme_icon = QIcon.fromTheme("weather-clear-night")
         if theme_icon.isNull():
             self.theme_button.setText("◐")
         else:
             self.theme_button.setIcon(theme_icon)
-        self.theme_button.clicked.connect(self.toggle_theme)
-        self.theme_button.setAccessibleName("Alternar tema claro ou escuro")
+        self.theme_button.setToolTip("Tema de cores")
+        self.theme_button.setMenu(self._build_theme_menu())
+        self.theme_button.setAccessibleName("Escolher tema de cores")
         self.controls_layout.addWidget(self.theme_button, 0, 3)
         self.controls_layout.setColumnStretch(0, 1)
         top.addLayout(self.controls_layout)
@@ -1150,12 +1153,38 @@ class MainWindow(QMainWindow):
             self.showMaximized()
             self._maximized = True
 
-    def toggle_theme(self) -> None:
-        self.dark_theme = not self.dark_theme
-        theme = "dark" if self.dark_theme else "light"
-        # LUX-021: a escolha explícita sobrevive ao reinício.
-        self.preferences.set_theme(theme)
+    def _build_theme_menu(self) -> QMenu:
+        menu = QMenu(self.theme_button)
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        self._theme_actions: dict[str, QAction] = {}
+        saved = self.preferences.theme
+        for theme_id, label in (("system", "Seguir o sistema"), *((key, value[0]) for key, value in THEMES.items())):
+            action = QAction(label, menu)
+            action.setCheckable(True)
+            action.setChecked(theme_id == saved)
+            action.triggered.connect(lambda _checked=False, value=theme_id: self.set_theme(value))
+            group.addAction(action)
+            menu.addAction(action)
+            self._theme_actions[theme_id] = action
+            if theme_id in {"system", "light"}:
+                menu.addSeparator()
+        return menu
+
+    def set_theme(self, preference: str) -> None:
+        """Persiste a escolha e aplica o tema resolvido."""
+        self.preferences.set_theme(preference)
+        theme = resolve_theme(preference)
+        self.theme_id = theme
+        self.dark_theme = not is_light(tokens_for(theme))
+        action = getattr(self, "_theme_actions", {}).get(preference)
+        if action is not None:
+            action.setChecked(True)
         self.theme_changed.emit(theme)
+
+    def toggle_theme(self) -> None:
+        # LUX-021: a escolha explícita sobrevive ao reinício.
+        self.set_theme("light" if self.dark_theme else "dark")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.runner.running:

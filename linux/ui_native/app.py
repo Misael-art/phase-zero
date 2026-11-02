@@ -14,14 +14,14 @@ if __package__ in {None, ""}:
     from linux.ui_native import __version__
     from linux.ui_native.boot_selector import BootSelectorWindow
     from linux.ui_native.main_window import MainWindow
-    from linux.ui_native.tokens import DARK, LIGHT, font_scale, render_qss
+    from linux.ui_native.tokens import font_scale, is_light, render_qss, tokens_for
     from linux.ui_native.platform import current_platform
     from linux.ui_native.preferences import UiPreferences, resolve_theme
 else:
     from . import __version__
     from .boot_selector import BootSelectorWindow
     from .main_window import MainWindow
-    from .tokens import DARK, LIGHT, font_scale, render_qss
+    from .tokens import font_scale, is_light, render_qss, tokens_for
     from .platform import current_platform
     from .preferences import UiPreferences, resolve_theme
 
@@ -38,7 +38,7 @@ def _init_icon_theme() -> None:
 
 
 def apply_theme(app: QApplication, theme: str) -> None:
-    tokens = LIGHT if theme == "light" else DARK
+    tokens = tokens_for(theme)
     app.setStyle("Fusion")
     app.setStyleSheet(render_qss(tokens, font_scale(app.font().pointSizeF())))
     palette = QPalette()
@@ -90,7 +90,8 @@ def main() -> int:
         window = BootSelectorWindow(ROOT, smoke_test=args.smoke_test)
     else:
         window = MainWindow(ROOT, initial_category=args.category)
-        window.dark_theme = theme == "dark"
+        window.dark_theme = not is_light(tokens_for(theme))
+        window.theme_id = theme
         window.theme_changed.connect(lambda theme: apply_theme(app, theme))
     window.show()
     if args.smoke_test:
