@@ -1128,9 +1128,12 @@ class AiDevPage(BasePage):
         if "claude" in labels:
             labels["claude"].setText("Instalado e visível no PATH" if claude else "Ainda não configurado neste host")
         mcp = parsed.get("mcp") if isinstance(parsed.get("mcp"), dict) else {}
-        mcp_ok = not bool(mcp.get("problems")) if "problems" in mcp else True
         if "mcp" in labels:
-            labels["mcp"].setText("Integrações seguras ok" if mcp_ok else "Há MCPs para reparar")
+            labels["mcp"].setText(
+                "Há MCPs para reparar" if mcp.get("problems") else
+                "Diagnóstico local sem pendências" if "problems" in mcp else
+                "Destinos listados; conexão ainda não verificada"
+            )
         compat = parsed.get("agentCompat") if isinstance(parsed.get("agentCompat"), dict) else {}
         compat_mode = str(compat.get("mode") or mode)
         if "compat" in labels:

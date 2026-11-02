@@ -76,6 +76,13 @@ def test_unhealthy_runtime_is_not_shown_as_stopped(page):
     assert not page._harness_buttons["start"].isEnabled()
 
 
+def test_mcp_config_inventory_does_not_claim_verified_connection(page):
+    page._on_status_ready("ai.status", "", {"mcp": {"definitions": [], "targets": {}}, "clis": {}})
+    assert "não verificada" in page._status_labels["mcp"].text()
+    page._on_status_ready("ai.status", "", {"mcp": {"problems": [{"id": "invalid-target"}]}, "clis": {}})
+    assert "reparar" in page._status_labels["mcp"].text()
+
+
 def test_start_form_and_preview_bind_route_workspace_and_custom_port(page):
     action = page.by_id["ai.deepseek-harness-start"]
     dialog = ParameterDialog(action)
