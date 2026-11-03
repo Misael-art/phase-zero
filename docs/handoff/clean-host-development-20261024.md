@@ -409,3 +409,39 @@ Próximo passo: operador selecionar direção 1/2/3 ou refinamento; próximo age
 parte do plano e dos owners existentes. Sem implementação, instalação, merge,
 deploy ou release por esta entrega. Commit documental exato pode ser localizado
 com `git log -1 -- docs/audits/visual-system-20261102`.
+
+## Coesão Codex CLI, daemon e Desktop — 2026-11-03
+
+Objetivo: sanar alerta de daemon Codex 0.162.1 diante do CLI 0.166.0 e completar
+o caminho de instalação de pacote Desktop já preparado. Owner: instalador oficial
+Codex para CLI/daemon; `codex-update-manager` para pacote Desktop; PhaseZero
+coordena estado, ação explícita e aviso. Branch canônica
+`codex/clean-host-dev-bootstrap`, PR #130, HEAD inicial
+`11abb817c0860cceb36a2350d3a2e255ef1ed6c9`, implementação `071d6528`.
+
+Código: `setup-codex.sh` consulta `codex app-server daemon version` e expõe
+versões instalada/em execução, divergência e próxima ação; atualização chama
+`codex update` e `codex app-server daemon update` e confere coesão. `pz ai codex`
+e `pz updates` expõem o mesmo contrato; inventário diário alerta divergência,
+estado desconhecido e pacote Desktop pronto. `desktop-apps.sh` usa o updater
+existente para `install-ready` ou repara candidato falho, impede instalação com
+app ativo e verifica versão no pacman. Tela IA & Dev mostra os dois estados e
+habilita ações só quando aplicáveis. Inventário de produto regenerado.
+
+Fixture no host `misael-jupiter` (BigLinux/Manjaro): 50 pytest focais, os
+contratos shell Codex/Desktop, ShellCheck, Bash syntax e diff check passaram.
+Casos negativos cobrem daemon antigo, pacote instalado não confirmado e app
+Desktop aberto. Host físico: `pz ai codex status` antes mostrou CLI 0.166.0,
+daemon gerenciado e ativo 0.162.1. `pz updates apply codex` via instalador oficial
+terminou com `status=updated`; depois, ambos os pacotes e processo ativo
+reportaram 0.166.0, `coherent=true`. Inventário completo de atualizações
+reportou `codexMismatch=false`, `codexDesktopReady=true`.
+
+Limite: Codex Desktop comunitário segue instalado em
+`2026.07.20.022256-1`; candidato local `2026.07.20.091033+3e5055c1`
+permanece `ready_to_install`. O próprio Desktop está aberto nesta sessão;
+updater exige saída do app antes de instalar. Nenhum download novo do Desktop,
+pacman, serviço alheio, credencial, merge ou release foi acionado. Após fechar
+o Desktop, executar `pz updates apply codex-desktop`, verificar
+`pacman -Q codex-desktop` e reabrir; depois rodar `pz updates check`. CI do SHA
+publicado e funcionamento visual após reabertura ainda exigem confirmação.
