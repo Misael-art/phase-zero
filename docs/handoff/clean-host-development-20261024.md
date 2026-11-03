@@ -478,6 +478,14 @@ ausência de fallback pago; G4 cinco participantes, 800×600/1280×800, escala,
 teclado, touch e leitor de tela. Mockups de `docs/audits/visual-system-20261102/`
 aguardam escolha do operador; nenhuma direção aplicada.
 
+| Gate/alvo | Aceite real necessário | Bloqueio atual | Recuperação/rollback |
+|---|---|---|---|
+| G2 Homelab, segundo host | Pacote instalado, seis perfis, recursos, serviço e status coerentes; backup com banco e anexos consistentes; restore verificado por dados e hashes | Segundo host/volume de teste e janela de restore não fornecidos | Plano de restore antes de aplicar; snapshot pré-restore e rollback automático do owner Homelab; preservar backup/manifesto |
+| G2 Windows limpo | Instalação, dependências, CLI/WPF, uso e remoção em snapshot Windows descartável | Ambiente Windows limpo não disponível nesta sessão | Reverter snapshot de sistema e comparar inventário/estado anterior |
+| WBR WinVM/boot direto | Armazenamento e RAM aptos; GRUB, guest, TPM/QGA, shutdown, monitor interno/dock, teclado touch e fallback ao desktop observados | Sem janela de boot/guest físico; histórico de erro Btrfs e margem de RAM exige preflight | Preservar VM/snapshot e entrada GRUB anterior; usar recuperação WBR, sem apagar disco/credenciais |
+| G3 IA/conta/custo | Conta e cota oficiais; consumidor→conexão→requisição fixa; revogação bloqueia antes de rede; zero fallback pago | Upstream 9Router sem vínculo comprovado e conta autorizada indisponível | Manter uso gerenciado bloqueado; revogar grant e desabilitar conexão pelo owner existente |
+| G4 UX/acessibilidade | Cinco participantes; 800×600/1280×800, escala, teclado, touch e leitor de tela em interface real | Participantes, alvo físico e direção visual pendentes | Voltar à versão/UI anterior e preferências preservadas; guardar evidência e mockups |
+
 Correção externa proposta, **não executada**: GitHub REST `PATCH
 /repos/Misael-art/phase-zero/releases/431700133` com corpo
 `{"prerelease":true,"make_latest":"false"}`. Antes da escrita, revalidar
