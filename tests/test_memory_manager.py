@@ -220,6 +220,31 @@ def test_no_automatic_work_when_paused(manager, monkeypatch):
     assert manager.sync(automatic=True)["state"] == "paused"
 
 
+def test_locked_vault_waits_without_network_or_false_sync_and_resumes(manager, monkeypatch):
+    manager.config["automatic"] = True
+    manager.config["github"] = {"repository": "owner/memory"}
+    previous = {"state": "current", "targets": [{"id": "github", "ok": True,
+                "lastSync": "2026-11-01T00:00:00Z", "lastBackup": {"verifiedAt": memory.now()}}]}
+    memory.write_json(manager.state / "last-run.json", previous)
+    reference = manager.config["keyRef"]
+    secret = manager.vault.lookup(reference)
+    manager.vault.values.pop(reference)
+    monkeypatch.setattr(manager, "github_pull", lambda *_a: pytest.fail("network before unlock"))
+    waiting = manager.sync(automatic=True)
+    assert waiting["state"] == "waiting-unlock"
+    assert waiting["synchronized"] is False
+    assert waiting["targets"][0]["lastSync"] == previous["targets"][0]["lastSync"]
+    assert waiting["targets"][0]["state"] == "waiting-unlock"
+    assert secret not in json.dumps(manager.status(), default=str)
+    assert memory.read_json(manager.state / "last-run.json", {})["state"] == "waiting-unlock"
+    manager.vault.store(reference, secret)
+    pulled = []
+    monkeypatch.setattr(manager, "github_pull", lambda *_a: pulled.append(True))
+    resumed = manager.sync(automatic=True)
+    assert resumed["state"] == "current"
+    assert pulled == [True]
+
+
 def test_github_backoff_avoids_automatic_retry_but_manual_sync_bypasses_it(manager, monkeypatch):
     manager.config.update(automatic=True, github={"repository": "owner/memory"})
     memory.write_json(manager.state / "last-run.json", {"targets": [{"id": "github", "ok": False,

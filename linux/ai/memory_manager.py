@@ -860,8 +860,22 @@ class Manager:
             raise MemoryError("configure-memory-key-first")
         if automatic and not self.config.get("automatic"):
             return {"ok": True, "state": "paused"}
-        result = {"schemaVersion": 1, "ok": True, "startedAt": now(), "targets": []}
         previous = read_json(self.state / "last-run.json", {})
+        # The system vault may be locked after login. Do not pull, write a
+        # running marker, or fail the timer for a condition the user can clear.
+        try:
+            self.password()
+        except MemoryError as error:
+            if not automatic or str(error) != "memory-key-unavailable-unlock-system-vault":
+                raise
+            waiting = {"schemaVersion": 1, "ok": True, "state": "waiting-unlock",
+                       "synchronized": False, "reason": str(error), "startedAt": now(),
+                       "completedAt": now(),
+                       "targets": [{**target, "ok": False, "state": "waiting-unlock"}
+                                   for target in previous.get("targets", [])]}
+            write_json(self.state / "last-run.json", waiting)
+            return waiting
+        result = {"schemaVersion": 1, "ok": True, "startedAt": now(), "targets": []}
         previous_targets = {r["id"]: r for r in previous.get("targets", [])}
         write_json(self.state / "last-run.json", {**previous, "state": "running", "startedAt": result["startedAt"]})
         with self.scratch() as temp:

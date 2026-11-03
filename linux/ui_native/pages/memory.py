@@ -152,6 +152,8 @@ class MemoryCard(QFrame):
         active = payload.get("service") == "active"
         automatic = "ligada" if payload.get("automatic") else "pausada"
         self.state.setText(f"{'Memória ativa' if active else 'Precisa de reparo' if installed else 'Memória não instalada'} · automação {automatic}")
+        if payload.get("sync", {}).get("state") == "waiting-unlock":
+            self.state.setText("Sincronização aguardando desbloqueio do cofre do sistema")
         if payload.get("operationRunning"):
             self.state.setText("Sincronização ou manutenção em andamento…")
         if payload.get("recoveryRequired"):
@@ -169,7 +171,8 @@ class MemoryCard(QFrame):
         for target in ([{"id": "github", "label": "GitHub privado"}] if payload.get("github") else []) + payload.get("devices", []):
             status = results.get(target["id"], {})
             backup = status.get("lastBackup") or {}
-            state = {"current": "em dia", "device-offline-or-ambiguous": "desconectado",
+            state = {"current": "em dia", "waiting-unlock": "desbloqueie cofre do sistema",
+                     "device-offline-or-ambiguous": "desconectado",
                      "retry-pending": "aguardando nova tentativa",
                      "knowledge-conflict-review-required": "conflito: revisão necessária",
                      "command-failed:gh:1": "verifique conexão e login GitHub",
