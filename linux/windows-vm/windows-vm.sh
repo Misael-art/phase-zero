@@ -464,8 +464,14 @@ default_ram_mb() {
     if [ "$ram" -lt "$floor" ]; then
         # Say it out loud rather than quietly handing the guest less than it
         # needs: at this point the VM and the host cannot both be comfortable.
-        pz_warn "host has ${avail} MiB available; sizing the VM at the ${floor} MiB Windows 11 minimum anyway"
-        pz_warn "close applications or use --ram to choose deliberately"
+        # Only actions that size a real guest warn; status/discover probes
+        # resolve this default on every UI poll and would flood pz.log.
+        case "${ACTION:-}" in
+            install|setup|launch|start|run|plan|dry-run)
+                pz_warn "host has ${avail} MiB available; sizing the VM at the ${floor} MiB Windows 11 minimum anyway"
+                pz_warn "close applications or use --ram to choose deliberately"
+                ;;
+        esac
         ram="$floor"
     fi
     echo "$ram"
