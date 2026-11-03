@@ -1126,6 +1126,19 @@ echo "  status budget wiring ok"
 if "$REPO_ROOT/linux/pz" server homelab profile set bogus >/dev/null 2>&1; then
     echo "FAIL: pz set accepted bogus profile"; exit 1
 fi
+for invalid in '"' 'bogus") != null or true #' 'assistant private' 'ação'; do
+    if "$REPO_ROOT/linux/pz" server homelab profile set "$invalid" >"$TMP/profile-invalid.out" 2>&1; then
+        echo "FAIL: pz set accepted invalid profile: $invalid"; exit 1
+    fi
+    grep -Fq "unknown homelab profile: $invalid" "$TMP/profile-invalid.out"
+    test "$(cat "$PZ_HOMELAB_STATE/profile.active")" = "assistant-private"
+done
+if PZ_HOMELAB_PROFILES_FILE="$TMP/missing-profiles.json" \
+    "$REPO_ROOT/linux/pz" server homelab profile set edge >"$TMP/profile-invalid.out" 2>&1; then
+    echo "FAIL: pz set accepted missing profile registry"; exit 1
+fi
+grep -Fq 'profile registry missing:' "$TMP/profile-invalid.out"
+test "$(cat "$PZ_HOMELAB_STATE/profile.active")" = "assistant-private"
 echo "  pz set validation ok"
 if PZ_DRY_RUN=1 PZ_HOMELAB_RAM_TOTAL_OVERRIDE=512 \
     "$REPO_ROOT/linux/pz" server homelab up --profile ai-studio >/dev/null 2>&1; then
@@ -1171,10 +1184,27 @@ echo "  resume after winvm end ok"
 echo "=== boot-prepare identity: marker absent is a no-op ==="
 "$REPO_ROOT/linux/server/homelab-boot-prepare.sh" 2>&1 | rg -q 'nothing to do'
 echo "  marker-absent ok"
+for target in '' root missing-user; do
+    if PZ_BOOT_MARKER=1 PZ_SERVER_USER="$target" \
+        PZ_HOMELAB_STATE="$TMP/boot-rejected-state" \
+        "$REPO_ROOT/linux/server/homelab-boot-prepare.sh" >"$TMP/boot-rejected.out" 2>&1; then
+        echo "FAIL: boot-prepare accepted invalid target user: $target"; exit 1
+    fi
+    test ! -e "$TMP/boot-rejected-state"
+done
+echo "  ambiguous or missing target rejected before state write"
 
 echo "=== boot-prepare bring-up as target user, no root/real-home writes ==="
 FB="$TMP/bootbin"
 mkdir -p "$FB"
+cat > "$FB/getent" <<'EOS'
+#!/usr/bin/env bash
+if [ "$1:$2" = passwd:testuser ]; then
+    printf 'testuser:x:1001:1001::%s:/bin/bash\n' "$HOME"
+else
+    /usr/bin/getent "$@"
+fi
+EOS
 cat > "$FB/systemctl" <<'EOS'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -1193,7 +1223,7 @@ for a in "$@"; do
 done
 exit 0
 EOS
-chmod +x "$FB/systemctl" "$FB/runuser"
+chmod +x "$FB/getent" "$FB/systemctl" "$FB/runuser"
 export RUNUSER_CAPTURE="$TMP/runuser.capture" RUNUSER_HOME_CAPTURE="$TMP/runuser.home" RUNUSER_XDG_CAPTURE="$TMP/runuser.xdg"
 rm -f "$RUNUSER_CAPTURE" "$RUNUSER_HOME_CAPTURE" "$RUNUSER_XDG_CAPTURE"
 BOOTSTATE="$TMP/boot-test-state"
@@ -1266,7 +1296,7 @@ EOS
 chmod +x "$HB/systemctl" "$HB/runuser" "$HB/timeout"
 export RUNUSER_CAPTURE="$TMP/runuser-hermes.capture"
 rm -f "$RUNUSER_CAPTURE"
-PATH="$HB:$PATH" PZ_BOOT_MARKER=1 PZ_SERVER_USER=testuser PZ_SERVER_HOMESERVER=0 \
+PATH="$HB:$FB:$PATH" PZ_BOOT_MARKER=1 PZ_SERVER_USER=testuser PZ_SERVER_HOMESERVER=0 \
     PZ_SERVER_HOMELAB=0 PZ_SERVER_LLM=0 PZ_SERVER_HERMES=1 \
     PZ_STATE_ROOT="$TMP/hermes-state-root" \
     PZ_HOMELAB_STATE="$TMP/hermes-test-state" \

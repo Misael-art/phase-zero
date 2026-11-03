@@ -18,8 +18,7 @@ fi
 # the hot-plug paths inside a sandbox instead of writing under /run/media.
 REMOVABLE_ROOT="${PZ_WINDOWS_VM_REMOVABLE_ROOT:-/run/media}"
 MEDIA_ROOT="${PZ_WINDOWS_VM_MEDIA_ROOT:-/media}"
-TARGET_USER="${PZ_TARGET_USER:-${SUDO_USER:-${USER:-misael}}}"
-[ "$TARGET_USER" = "root" ] && TARGET_USER="misael"
+TARGET_USER="$(pz_target_user)" || exit 2
 if [ "$EUID" -eq 0 ]; then
     target_home_root="$(getent passwd "$TARGET_USER" | cut -d: -f6 || true)"
     [ -n "$target_home_root" ] && export HOME="$target_home_root"
@@ -464,8 +463,14 @@ default_ram_mb() {
     if [ "$ram" -lt "$floor" ]; then
         # Say it out loud rather than quietly handing the guest less than it
         # needs: at this point the VM and the host cannot both be comfortable.
-        pz_warn "host has ${avail} MiB available; sizing the VM at the ${floor} MiB Windows 11 minimum anyway"
-        pz_warn "close applications or use --ram to choose deliberately"
+        # Only actions that size a real guest warn; status/discover probes
+        # resolve this default on every UI poll and would flood pz.log.
+        case "${ACTION:-}" in
+            install|setup|launch|start|run|plan|dry-run)
+                pz_warn "host has ${avail} MiB available; sizing the VM at the ${floor} MiB Windows 11 minimum anyway"
+                pz_warn "close applications or use --ram to choose deliberately"
+                ;;
+        esac
         ram="$floor"
     fi
     echo "$ram"

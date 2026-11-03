@@ -37,6 +37,7 @@ PHASEZERO_EFI_DIR="$ESP_DIR/EFI/PhaseZero"
 PHASEZERO_EFI="$PHASEZERO_EFI_DIR/grubx64.efi"
 FALLBACK_EFI="$ESP_DIR/EFI/boot/bootx64.efi"
 ISO_BOOT="$PZ_ROOT/linux/boot/iso-boot.sh"
+KDE_LOGIN="$PZ_ROOT/linux/boot/kde-autologin.sh"
 
 need_root() {
     [ "$EUID" -eq 0 ] && return 0
@@ -588,8 +589,11 @@ case "$ACTION" in
     iso|usb|removable|grubfm|catalog)
         exec bash "$ISO_BOOT" "$ACTION" "${@:2}"
         ;;
+    kde-login|kde-autologin)
+        exec bash "$KDE_LOGIN" "${@:2}"
+        ;;
     selector|visual-selector|gui) cmd_selector ;;
     menu|choices|select) cmd_menu ;;
     choose|next) shift || true; cmd_choose "$@" ;;
-    *) pz_error "usage: linux/pz boot (status|menu|selector|choose|iso|usb|grubfm|safe-menu|install-safe-menu|card|install-card|install-efi-fallback [--active] [--fallback]|emergency-shell)"; exit 1 ;;
+    *) pz_error "usage: linux/pz boot (status|menu|selector|choose|kde-login|iso|usb|grubfm|safe-menu|install-safe-menu|card|install-card|install-efi-fallback [--active] [--fallback]|emergency-shell)"; exit 1 ;;
 esac

@@ -2471,6 +2471,20 @@ class Bridge:
         self.save_state(state)
         return {"webModel": "configured", "diff": check["diff"], "backup": str(backup)}
 
+    def ensure_fresh_conversation_per_turn(self) -> bool:
+        """Upstream #956: retained chats fail model verification; force a new chat per turn."""
+        config = self.upstream_config()
+        if not config or config.get("experimentalFreshConversationPerTurn") is True:
+            return False
+        path = self.paths.core_home / "config.json"
+        private_dir(self.paths.journal)
+        before = path.read_bytes()
+        atomic_write(self.paths.journal / f"core-config-pre-fresh-{sha256_bytes(before)[:16]}.json",
+                     before)
+        config["experimentalFreshConversationPerTurn"] = True
+        atomic_write(path, (json.dumps(config, indent=2) + "\n").encode())
+        return True
+
     def restart_launcher(self) -> None:
         """The launcher only starts the Responses daemon at startup, once configured."""
         running = self.runner.codex_processes(self.paths.codex_home)
@@ -2570,6 +2584,13 @@ class Bridge:
         if not self.route_verify()["ok"]:
             raise BridgeError("configuração do perfil tem mudanças inesperadas; rode `route verify`",
                               "config-drift")
+        if self.ensure_fresh_conversation_per_turn():
+            if self.runner.port_in_use(self.paths.port) and not self.runner.codex_processes(
+                    self.paths.codex_home):
+                self.restart_launcher()
+            done("conversa nova", "cada turno abre chat novo no ChatGPT (contorna upstream #956"
+                 + ("" if not self.runner.codex_processes(self.paths.codex_home)
+                    else "; vale após fechar o Codex e clicar Atualizar") + ")")
         if not self.runner.port_in_use(self.paths.port):
             self.restart_launcher()
             self._wait(lambda: self.runner.port_in_use(self.paths.port), DAEMON_WAIT_SECONDS,
@@ -2598,10 +2619,13 @@ class Bridge:
         scratch = private_dir(self.paths.root / "smoke")
         reply_file = scratch / "last-message.txt"
         reply_file.unlink(missing_ok=True)
+        # Full mode reads native permissions from the rollout, so it cannot be ephemeral;
+        # writes stay confined to the private scratch directory.
+        full = (self.upstream_config() or {}).get("mode") == "full"
         command, env = self.codex_command(
-            ["exec", "--skip-git-repo-check", "--ephemeral", "-C", str(scratch), "-m", model,
-             "-o", str(reply_file), f"Responda somente com a palavra: {SMOKE_TOKEN}"],
-            isolated=True)
+            ["exec", "--skip-git-repo-check", *([] if full else ["--ephemeral"]), "-C", str(scratch),
+             "-m", model, "-o", str(reply_file), f"Responda somente com a palavra: {SMOKE_TOKEN}"],
+            isolated=True, network=full)
         code, out, err = self.runner.run(command, env=env, timeout=SMOKE_TIMEOUT_SECONDS,
                                          input_text="")
         try:
@@ -2613,7 +2637,7 @@ class Bridge:
         state["lastSmoke"] = {"at": iso(self.clock()), "ok": ok, "model": model}
         self.save_state(state)
         result: dict[str, Any] = {"ok": ok, "model": model, "reply": reply[-200:],
-                                  "sandbox": "read-only", "exitCode": code,
+                                  "sandbox": "workspace-write" if full else "read-only", "exitCode": code,
                                   "liveCodexRouteTouched": self.live_route_touched()}
         if not ok:
             result["detail"] = (err or out).strip()[-600:]
@@ -3802,8 +3826,8 @@ class Bridge:
                 "visibleModels": labels, "guidance": guidance,
                 "notified": notified, "liveCodexRouteTouched": self.live_route_touched()}
 
-    def codex_command(self, args: list[str],
-                      isolated: bool = False) -> tuple[list[str], dict[str, str]]:
+    def codex_command(self, args: list[str], isolated: bool = False,
+                      network: bool = False) -> tuple[list[str], dict[str, str]]:
         state = self.load_state()
         self.require_opt_in(state)
         for index, arg in enumerate(args):
@@ -3827,9 +3851,11 @@ class Bridge:
         chosen = any(arg.split("=", 1)[0] in {"-m", "--model"} for arg in args)
         model = [] if chosen else ["--model", self.default_model()]
         sandbox = self.sandbox_profile() if not isolated else {
-            "sandbox": "read-only", "approval": APPROVAL_POLICY}
+            "sandbox": "workspace-write" if network else "read-only", "approval": APPROVAL_POLICY}
+        # Full mode refuses turns whose trusted context does not state network access.
+        extra = ["-c", "sandbox_workspace_write.network_access=true"] if isolated and network else []
         return [codex, "--sandbox", sandbox["sandbox"], "--ask-for-approval", sandbox["approval"],
-                *model, *args], env
+                *extra, *model, *args], env
 
 
 def read_secret(stream: Any) -> str:

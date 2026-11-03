@@ -124,7 +124,7 @@ o que era seu volta a ser seu, em vez de simplesmente sumir.
 
 Vai contribuir em máquina nova? Use [bootstrap e handoff de desenvolvimento](docs/handoff/clean-host-development-20261024.md). Esse caminho prepara ferramentas de código/teste sem instalar serviços ou VMs do produto. [Auditoria do estado atual](docs/audits/status-20261024/README.md) registra o que ainda falta homologar.
 
-Canal **stable**: [última release estável](https://github.com/Misael-art/PhaseZero/releases/latest). Canal **beta**: escolher explicitamente uma pré-release na [lista de Releases](https://github.com/Misael-art/PhaseZero/releases); `/latest` não seleciona betas. Cada versão traz **7 artefactos** + `SHA256SUMS-<versão>`.
+Canal **stable**: [destino Latest](https://github.com/Misael-art/PhaseZero/releases/latest), reservado para releases estáveis verificadas. Canal **beta**: escolher explicitamente uma pré-release na [lista de Releases](https://github.com/Misael-art/PhaseZero/releases); `/latest` não seleciona betas quando a flag de pré-release está correta. A release `v1.22.14` está publicada incorretamente como estável e ocupa `/latest`; não trate esse destino como certificação de G2/G3/G4. Publicação stable futura exige despacho manual após aceite real, com `docs/releases/v<versão>-acceptance.json` versionado na tag: `version` igual à tag e `gates.G2/G3/G4` com `state: "verified"` e `evidence` apontando a arquivos `docs/` versionados. Cada versão traz **7 artefactos** + `SHA256SUMS-<versão>`.
 
 ### 1. Baixar e conferir o checksum
 
@@ -216,6 +216,12 @@ install-cli.bat           # CLI
 ### Steam Deck / handheld
 
 Perfil `steamdeck-linux`: Gamepad UI, atalhos, teclado virtual, watcher de dock. Avançado (Handheld Companion / GlosSI) é opt-in porque conflita com Steam Input.
+
+### Login automático no KDE do host
+
+No Control Center, **Boot Direto → Login do host → Entrar no KDE sem senha**. No CLI: `linux/pz boot kde-login plan enable`, `linux/pz boot kde-login enable` e `linux/pz boot kde-login status`. Para reverter: `linux/pz boot kde-login disable`. O ajuste escolhe a conta local invocadora e a sessão Wayland `plasma.desktop`; um shell root sem identidade confiável exige `--user USER`. Ativação e reversão exigem administração e passam a valer no próximo início do SDDM. Não reiniciam a sessão atual.
+
+A preferência KDE vale para o boot Linux normal. Entradas diretas Steam Deck, Windows VM e Waydroid mantêm suas configurações de sessão. Configurações SDDM posteriores que também definem login automático bloqueiam a ativação até resolver o conflito. `Relogin=true` reabre o KDE após sair; use bloqueio de tela para deixar a sessão protegida. Login automático não destranca KWallet nem substitui senha de administração.
 
 ### Windows dentro do Linux (VM)
 

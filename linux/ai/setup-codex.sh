@@ -43,17 +43,47 @@ link_managed_bin() {
 }
 
 status_json() {
-    local version path="" supported=false keep=false
+    local version path="" supported=false keep=false daemon='{"status":"unavailable"}'
+    local managed="" running="" mismatch=false coherent=null
     version="$(active_codex_version || true)"
     [ -n "$version" ] && path="$(command -v codex)"
     [ -n "$version" ] && version_at_least "$version" "$CODEX_MIN_VERSION" && supported=true
     keep_existing "$version" && keep=true
+    if [ -n "$version" ]; then
+        daemon="$(timeout 10 codex app-server daemon version 2>/dev/null || true)"
+        jq -e 'type == "object" and (.status | type == "string")' <<< "$daemon" >/dev/null 2>&1 || daemon='{"status":"unavailable"}'
+        managed="$(jq -r '.managedCodexVersion // empty' <<< "$daemon")"
+        running="$(jq -r '.appServerVersion // empty' <<< "$daemon")"
+        if [ -n "$managed" ] && [ "$managed" != "$version" ]; then mismatch=true; fi
+        if [ -n "$running" ] && [ "$running" != "$version" ]; then mismatch=true; fi
+        if [ -n "$managed" ] && { [ "$(jq -r '.status' <<< "$daemon")" != running ] || [ -n "$running" ]; }; then
+            coherent=true
+            [ "$mismatch" = true ] && coherent=false
+        fi
+    fi
     jq -cn --arg version "$version" --arg path "$path" --arg min "$CODEX_MIN_VERSION" \
         --arg pkg "@openai/codex@$CODEX_VERSION" --argjson supported "$supported" --argjson keep "$keep" \
+        --argjson daemon "$daemon" --argjson coherent "$coherent" --argjson mismatch "$mismatch" \
         '{tool:"codex",installed:($version != ""),version:$version,path:$path,minimumVersion:$min,
-          supported:$supported,
-          planned:(if $keep then ["keep existing codex"] else ["npm install -g " + $pkg, "link ~/.local/bin/codex"] end),
-          next:(if $supported then "" else "linux/pz ai setup codex" end)}'
+          supported:$supported,daemon:$daemon,coherent:$coherent,requiresAttention:$mismatch,
+          planned:(if $mismatch then ["codex update", "codex app-server daemon update"] elif $keep then ["keep existing codex"] else ["npm install -g " + $pkg, "link ~/.local/bin/codex"] end),
+          next:(if $mismatch then "linux/pz updates apply codex" elif $supported and $coherent == null then "linux/pz ai codex status" elif $supported then "" else "linux/pz ai setup codex" end)}'
+}
+
+update_codex() {
+    pz_check_deps codex jq
+    # Official installer owns both package roots. Its daemon command preserves
+    # daemon settings and reports whether the running process was replaced.
+    codex update
+    codex app-server daemon update
+    local status
+    status="$(status_json)"
+    jq -e '.coherent == true' <<< "$status" >/dev/null || {
+        pz_error "Codex CLI and background daemon remain out of sync"
+        printf '%s\n' "$status"
+        return 1
+    }
+    printf '%s\n' "$status"
 }
 
 setup() {
@@ -61,6 +91,9 @@ setup() {
     version="$(active_codex_version || true)"
     if keep_existing "$version"; then
         pz_info "Codex CLI $version already installed at $(command -v codex) (>= $CODEX_MIN_VERSION); leaving it alone"
+        if jq -e '.requiresAttention == true' <<< "$(status_json)" >/dev/null; then
+            pz_warn "Codex background service differs from CLI; run: $PZ_ROOT/linux/pz updates apply codex when active tasks can be interrupted"
+        fi
         return 0
     fi
     pz_check_deps npm
@@ -83,5 +116,6 @@ case "${1:-setup}" in
     setup|install) setup ;;
     status) status_json ;;
     dry-run|plan) status_json | jq -c '. + {dryRun:true}' ;;
-    *) echo "usage: setup-codex.sh (setup|status|dry-run)" >&2; exit 2 ;;
+    update) update_codex ;;
+    *) echo "usage: setup-codex.sh (setup|status|dry-run|update)" >&2; exit 2 ;;
 esac

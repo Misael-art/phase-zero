@@ -121,6 +121,13 @@ Adicionar IDs, nunca reutilizar. Estados: `pending`, `in_progress`, `verified`,
 
 ## Estado vivo
 
+2026-11-03 — PR #130, `106faa9`: `windows-vm.sh` resolve usuário por
+`PZ_TARGET_USER` ou UID de sudo/polkit inequívoco; root ambíguo falha antes de
+gravar estado. Boot helper exige `PZ_WINDOWS_VM_BOOT_USER` não root do ambiente
+gerenciado, sem autologin presumido; rejeição remove entrada gerenciada antiga.
+Suíte WinVM hermética passou. Runtime instalado 1.22.14 não foi substituído;
+guest, GRUB, TPM/QGA, tela, teclado touch e shutdown reais seguem abertos.
+
 2026-10-18 — WBR-009/010, `codex/winvm-integrity-sparse` sobre `bbee41c`:
 duas operações reais passaram em `qemu-img check` e presença de arquivos
 essenciais via appliance libguestfs somente leitura. Isso não prova boot,
@@ -152,6 +159,12 @@ o bloqueio de armazenamento registrado em agosto.
 | Remediação REV-009..013 | defeitos de contrato gráfico/runtime/dev registrados pela revisão de 2026-09-07; plano R3 e matriz da frente em `docs/roadmaps/rev-remediation-v1.md` (REV-009/010 herméticos antes de qualquer gate físico; REV-011/012/013 permanecem bloqueios de operador/hardware) | branch `codex/rev-remediation` sobre `9d6be9d`; ACHADOS.md em `codex/review-remediation-winvm-ux` | 2026-09-07 |
 
 ## Ledger de execução
+
+2026-11-03 — Codex, raiz única `codex/clean-host-dev-bootstrap`: `106faa9`
+remove fallback para `misael`/UID 1000. `bash tests/linux-windows-vm.sh`,
+ShellCheck e smoke de pacote descartável passaram. Nenhuma VM, GRUB ou boot
+real alterado. Próximo: CI do SHA final; depois validação física conforme
+matriz WBR, com armazenamento e margem de memória verificados pelo operador.
 
 2026-10-18 — Codex, worktree SSD
 `/home/misael/.cache/phasezero/worktrees/pz-winvm-integrity-sparse`:

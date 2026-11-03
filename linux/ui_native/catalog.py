@@ -673,6 +673,9 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
     actions.extend(
         [
             _a("boot.status", "Boot Direto", "Status boot", "Audita GRUB, ESP e entradas PhaseZero.", ("boot", "status"), "system-reboot"),
+            _a("boot.kde-login.status", "Boot Direto", "Login KDE: estado", "Mostra preferência de entrada automática no KDE deste host.", ("boot", "kde-login", "status"), "dialog-password", elevated=True, group="Login do host", visibility="standard", keywords=("kde", "plasma", "autologin", "senha")),
+            _a("boot.kde-login.enable", "Boot Direto", "Entrar no KDE sem senha", "Entra automaticamente no KDE ao iniciar e após sair da sessão. Bloqueio de tela e cofre continuam separados.", ("boot", "kde-login", "enable"), "system-log-out", mutable=True, preview=("boot", "kde-login", "plan", "enable"), elevated=True, group="Login do host", visibility="primary", keywords=("kde", "plasma", "autologin", "senha")),
+            _a("boot.kde-login.disable", "Boot Direto", "Exigir senha ao entrar no KDE", "Remove somente a preferência PhaseZero de login automático do host.", ("boot", "kde-login", "disable"), "dialog-password", mutable=True, preview=("boot", "kde-login", "plan", "disable"), elevated=True, group="Login do host", visibility="standard", keywords=("kde", "plasma", "autologin", "senha")),
             _a("boot.selector", "Boot Direto", "Seletor visual", "Escolhe próxima sessão antes do reboot.", ("boot", "selector"), "view-list-icons"),
             _a("boot.menu", "Boot Direto", "Abrir menu texto", "Lista escolhas de próxima sessão.", ("boot", "menu"), "view-list-icons"),
             _a("boot.safe-menu", "Boot Direto", "Instalar menu seguro", "Mantém GRUB visível com timeout.", ("boot", "install-safe-menu"), "security-high", mutable=True, preview=("boot", "safe-menu", "dry-run"), elevated=True, badge="Protegido"),
@@ -990,6 +993,24 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
             args, "system-search", badge="JSON", visibility="advanced",
             status_args=args,
         ))
+    actions.append(_a(
+        "ai.codex-status", "IA & Dev", "Status Codex CLI e serviço",
+        "Compara versões instaladas e em execução, sem alterar tarefas.",
+        ("ai", "codex", "status"), "system-search", badge="JSON",
+        status_args=("ai", "codex", "status"),
+    ))
+    actions.append(_a(
+        "ai.codex-update", "IA & Dev", "Alinhar Codex CLI e serviço",
+        "Atualiza Codex e seu serviço oficial. Reinício pode interromper tarefas ativas ou na fila.",
+        ("updates", "apply", "codex"), "software-update-available",
+        mutable=True, preview=("ai", "desktop", "status"),
+    ))
+    actions.append(_a(
+        "ai.desktop.codex.apply", "IA & Dev", "Atualizar Codex Desktop",
+        "Instala pacote já preparado pelo atualizador do Codex Desktop; repara candidato falho antes de instalar.",
+        ("updates", "apply", "codex-desktop"), "software-update-available",
+        mutable=True, preview=("ai", "desktop", "status"),
+    ))
     actions.append(
         _a(
             "ai.proxies-credentials-mimo",

@@ -6,6 +6,8 @@ As versões seguem a data de build em `version.json`.
 ## [Unreleased]
 
 ### Corrigido
+- **Codex Web: "ChatGPT model 6 could not be selected and verified".** Upstream v6.1.17 falha na verificação do modelo ao reutilizar conversa retida (miuuyy/codex-chatgpt-web#956). Preparar/Atualizar passa a ligar `experimentalFreshConversationPerTurn` (chat novo por turno), com backup da configuração no journal; launcher reinicia só sem Codex do perfil aberto.
+- **Log da VM Windows inundado.** Consulta de estado deixava de dimensionar uma VM real, mas gravava o aviso de RAM mínima a cada atualização da UI. Aviso agora só aparece em planejar, instalar ou iniciar.
 - **Retenção do instalador por usuário.** Limpeza automática considera somente releases e backups com nomenclatura de versão do instalador; pastas de recuperação de outros componentes ficam preservadas.
 - **Atualização do Codex Web GPT.** Migração transacional do runtime e hook evita misturar launcher novo com CLI antigo. Configuração incompleta pode ser retomada pelo mesmo botão com o pacote já verificado; journals divergentes continuam bloqueados, com backups preservados. Login, preferências e modo Full não são descartados.
 - **Túnel após reutilização de PID.** Recuperação reconhece registro antigo pelas marcas de início do kernel, sob lock nativo, e limpa somente identidade obsoleta do perfil gerenciado. Processo atual, outros aliases, chaves e túnel remoto permanecem preservados. Preparação só conclui com rota ativa e porta respondendo.

@@ -2164,6 +2164,41 @@
       "input_label": ""
     },
     {
+      "name": "boot.kde-login.status",
+      "label": "Login KDE: estado",
+      "command": "linux/pz boot kde-login status",
+      "mutable": false,
+      "require_plan": false,
+      "module": "Boot Direto",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "boot.kde-login.enable",
+      "label": "Entrar no KDE sem senha",
+      "command": "linux/pz boot kde-login enable",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Boot Direto",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz boot kde-login plan enable"
+    },
+    {
+      "name": "boot.kde-login.disable",
+      "label": "Exigir senha ao entrar no KDE",
+      "command": "linux/pz boot kde-login disable",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Boot Direto",
+      "elevated": true,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz boot kde-login plan disable"
+    },
+    {
       "name": "boot.selector",
       "label": "Seletor visual",
       "command": "linux/pz boot selector",
@@ -4073,6 +4108,41 @@
       "elevated": false,
       "input_kind": "",
       "input_label": ""
+    },
+    {
+      "name": "ai.codex-status",
+      "label": "Status Codex CLI e serviço",
+      "command": "linux/pz ai codex status",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.codex-update",
+      "label": "Alinhar Codex CLI e serviço",
+      "command": "linux/pz updates apply codex",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai desktop status"
+    },
+    {
+      "name": "ai.desktop.codex.apply",
+      "label": "Atualizar Codex Desktop",
+      "command": "linux/pz updates apply codex-desktop",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai desktop status"
     },
     {
       "name": "ai.proxies-credentials-mimo",

@@ -40,6 +40,46 @@ jq -e '
   .codexDesktop.repairedPackageReady == false
 ' <<< "$status" >/dev/null || fail "clean status schema"
 
+# A ready Desktop package must pass through the upstream installer and be
+# observed in the package database; no host package operation runs in fixture.
+mkdir -p "$TMP/codex-stubs"
+cat > "$TMP/codex-stubs/codex-update-manager" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+    status) echo '{"status":"ready_to_install","candidate_version":"2026.07.20.091033+3e5055c1"}' ;;
+    diagnose) printf '{"app":{"running":%s}}\n' "${CODEX_TEST_RUNNING:-false}" ;;
+    install-ready) echo install-ready >> "$CODEX_TEST_LOG" ;;
+    *) exit 2 ;;
+esac
+EOF
+cat > "$TMP/codex-stubs/pacman" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = -Q ] && [ "$2" = codex-desktop ]; then
+    printf 'codex-desktop %s\n' "$CODEX_TEST_INSTALLED"
+else
+    exit 2
+fi
+EOF
+chmod +x "$TMP/codex-stubs/codex-update-manager" "$TMP/codex-stubs/pacman"
+CODEX_TEST_LOG="$TMP/codex-install.log" \
+CODEX_TEST_INSTALLED='2026.07.20.091033+3e5055c1-1' \
+PATH="$TMP/codex-stubs:$PATH" \
+HOME="$TMP/home" XDG_STATE_HOME="$TMP/state" \
+"$SCRIPT" apply-codex >/dev/null || fail "ready Codex Desktop install"
+[ "$(cat "$TMP/codex-install.log")" = install-ready ] || fail "upstream install-ready not used"
+if CODEX_TEST_LOG="$TMP/codex-install.log" CODEX_TEST_RUNNING=true \
+    CODEX_TEST_INSTALLED='2026.07.20.091033+3e5055c1-1' \
+    PATH="$TMP/codex-stubs:$PATH" HOME="$TMP/home" XDG_STATE_HOME="$TMP/state" \
+    "$SCRIPT" apply-codex >/dev/null 2>&1; then
+    fail "running Codex Desktop update accepted"
+fi
+[ "$(wc -l < "$TMP/codex-install.log")" -eq 1 ] || fail "installer ran while Codex Desktop active"
+if CODEX_TEST_LOG="$TMP/codex-install.log" CODEX_TEST_INSTALLED='2026.07.20.022256-1' \
+    PATH="$TMP/codex-stubs:$PATH" HOME="$TMP/home" XDG_STATE_HOME="$TMP/state" \
+    "$SCRIPT" apply-codex >/dev/null 2>&1; then
+    fail "unconfirmed Codex Desktop install accepted"
+fi
+
 mkdir -p "$TMP/workspaces/candidate/builder/scripts" "$TMP/seed/assets" "$TMP/seed/record-replay-linux"
 printf 'png\n' > "$TMP/seed/assets/codex-linux.png"
 printf 'feature\n' > "$TMP/seed/record-replay-linux/README"

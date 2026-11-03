@@ -33,25 +33,29 @@ host_updates() {
 }
 
 check_all() (
-    local work payload update_count codex_failed
+    local work payload update_count codex_failed codex_ready codex_mismatch codex_unverified
     work="$(pz_tempfile -d)"; trap 'rm -rf "$work"' EXIT
     safe_json "$work/core.json" env PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" python3 -m linux.installation.update_cli check &
     safe_json "$work/install.json" env PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" python3 -m linux.installation status &
     safe_json "$work/9router.json" bash "$PZ_ROOT/linux/ai/9router-manager.sh" check-update &
     safe_json "$work/odysseus.json" bash "$PZ_ROOT/linux/ai/odysseus-manager.sh" check-update &
     safe_json "$work/desktop.json" bash "$PZ_ROOT/linux/ai/desktop-apps.sh" status &
+    safe_json "$work/codex.json" bash "$PZ_ROOT/linux/ai/setup-codex.sh" status &
     safe_json "$work/windows.json" bash "$PZ_ROOT/linux/windows-vm/container-frontends.sh" status &
     host_updates "$work/host.json" &
     wait
     payload="$(jq -n \
         --slurpfile core "$work/core.json" --slurpfile installation "$work/install.json" \
         --slurpfile router "$work/9router.json" --slurpfile odysseus "$work/odysseus.json" \
-        --slurpfile desktop "$work/desktop.json" --slurpfile windows "$work/windows.json" --slurpfile host "$work/host.json" \
-        '{schemaVersion:1,checkedAt:(now|todateiso8601),components:{phasezero:$core[0],installation:$installation[0],"9router":$router[0],odysseus:$odysseus[0],desktopApps:$desktop[0],windowsFrontends:$windows[0],host:$host[0]},policy:{automaticApply:false,userApps:"verified-explicit",host:"admin-full-upgrade-only",partialArchUpgrades:false}}')"
+        --slurpfile desktop "$work/desktop.json" --slurpfile codex "$work/codex.json" --slurpfile windows "$work/windows.json" --slurpfile host "$work/host.json" \
+        '{schemaVersion:1,checkedAt:(now|todateiso8601),components:{phasezero:$core[0],installation:$installation[0],"9router":$router[0],odysseus:$odysseus[0],desktopApps:$desktop[0],codex:$codex[0],windowsFrontends:$windows[0],host:$host[0]},policy:{automaticApply:false,userApps:"verified-explicit",host:"admin-full-upgrade-only",partialArchUpgrades:false}}')"
     update_count="$(jq '[.components.phasezero.updateAvailable,.components["9router"].updateAvailable,.components.odysseus.updateAvailable] | map(select(.==true)) | length' <<< "$payload")"
     codex_failed="$(jq -r '.components.desktopApps.codexDesktop.updateStatus == "failed"' <<< "$payload")"
-    jq --argjson count "$update_count" --argjson codexFailed "$codex_failed" \
-        '.summary={verifiedAppUpdates:$count,hostUpdates:(.components.host.pending // null),codexUpdateFailed:$codexFailed,requiresAttention:($count>0 or $codexFailed or ((.components.host.pending // 0)>0) or ((.components.installation.native.alteredFiles // 0)>0))}' <<< "$payload"
+    codex_ready="$(jq -r '.components.desktopApps.codexDesktop.updateStatus == "ready_to_install"' <<< "$payload")"
+    codex_mismatch="$(jq -r '.components.codex.requiresAttention == true' <<< "$payload")"
+    codex_unverified="$(jq -r '.components.codex.installed == true and .components.codex.coherent == null' <<< "$payload")"
+    jq --argjson count "$update_count" --argjson codexFailed "$codex_failed" --argjson codexReady "$codex_ready" --argjson codexMismatch "$codex_mismatch" --argjson codexUnverified "$codex_unverified" \
+        '.summary={verifiedAppUpdates:$count,hostUpdates:(.components.host.pending // null),codexUpdateFailed:$codexFailed,codexDesktopReady:$codexReady,codexMismatch:$codexMismatch,codexUnverified:$codexUnverified,requiresAttention:($count>0 or $codexFailed or $codexReady or $codexMismatch or $codexUnverified or ((.components.host.pending // 0)>0) or ((.components.installation.native.alteredFiles // 0)>0))}' <<< "$payload"
 )
 
 write_state() {
@@ -101,13 +105,14 @@ apply_one() {
     case "$target" in
         9router) bash "$PZ_ROOT/linux/ai/9router-manager.sh" update ;;
         odysseus) bash "$PZ_ROOT/linux/ai/odysseus-manager.sh" update ;;
+        codex) bash "$PZ_ROOT/linux/ai/setup-codex.sh" update ;;
         qwen-desktop) bash "$PZ_ROOT/linux/ai/desktop-apps.sh" install-qwen ;;
         claude-desktop) bash "$PZ_ROOT/linux/ai/desktop-apps.sh" install-claude ;;
-        codex-desktop) bash "$PZ_ROOT/linux/ai/desktop-apps.sh" repair-codex ;;
+        codex-desktop) bash "$PZ_ROOT/linux/ai/desktop-apps.sh" apply-codex ;;
         windows-frontends) bash "$PZ_ROOT/linux/windows-vm/container-frontends.sh" setup ;;
         phasezero) pz_error "use: pz self-update plan; then confirmed apply"; return 2 ;;
         host) pz_error "Arch host update remains explicit: phasezero-admin pacman -Syu"; return 2 ;;
-        *) pz_error "usage: pz updates apply (9router|odysseus|qwen-desktop|claude-desktop|codex-desktop|windows-frontends)"; return 2 ;;
+        *) pz_error "usage: pz updates apply (9router|odysseus|codex|qwen-desktop|claude-desktop|codex-desktop|windows-frontends)"; return 2 ;;
     esac
 }
 

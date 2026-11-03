@@ -57,6 +57,13 @@ test ! -e "$XDG_CONFIG_HOME/phasezero/ai-memory/portability.json"
 echo "== profiles --json contract =="
 "$PZ" server homelab profiles --json | jq -e \
   '.schemaVersion == 1 and (.profiles|length) == 6 and .default == "edge"' >/dev/null
+"$PZ" server homelab profile set edge >/dev/null
+test "$(cat "$PZ_HOMELAB_STATE/profile.active")" = edge
+if "$PZ" server homelab profile set 'bogus") != null or true #' >/dev/null 2>&1; then
+    echo "staged CLI accepted invalid Homelab profile" >&2
+    exit 1
+fi
+test "$(cat "$PZ_HOMELAB_STATE/profile.active")" = edge
 
 echo "== status --json fail-closed without daemon =="
 out="$("$PZ" server homelab status --json 2>/dev/null || true)"

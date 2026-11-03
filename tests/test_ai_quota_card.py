@@ -104,6 +104,57 @@ def test_desktop_card_switches_install_and_update(qapp, monkeypatch, tmp_path):
     assert "4.5000.0" in page.desktop_state.text() and page.desktop_state.property("state") == "warning"
 
 
+def test_codex_version_divergence_has_repair_action(qapp, monkeypatch, tmp_path):
+    page = build_page(monkeypatch, tmp_path)
+    requested = []
+    page.action_requested.connect(requested.append)
+    page._on_status_ready("ai.desktop.status", "", {
+        "codexCli": {"version": "0.166.0", "requiresAttention": True, "coherent": False,
+                     "daemon": {"appServerVersion": "0.162.1"}},
+        "claudeDesktop": {"installed": False},
+    })
+    assert "0.166.0" in page.codex_state.text() and "0.162.1" in page.codex_state.text()
+    assert page.codex_update.isEnabled()
+    page.codex_update.click()
+    assert requested[-1].id == "ai.codex-update"
+    page._on_status_ready("ai.desktop.status", "", {
+        "codexCli": {"version": "0.166.0", "requiresAttention": False, "coherent": True,
+                     "daemon": {"appServerVersion": "0.166.0"}},
+        "claudeDesktop": {"installed": False},
+    })
+    assert "alinhados" in page.codex_state.text() and not page.codex_update.isEnabled()
+
+
+def test_prepared_codex_desktop_update_has_install_action(qapp, monkeypatch, tmp_path):
+    page = build_page(monkeypatch, tmp_path)
+    requested = []
+    page.action_requested.connect(requested.append)
+    page._on_status_ready("ai.desktop.status", "", {
+        "codexDesktop": {"installedVersion": "2026.07.20.022256-1",
+                         "candidateVersion": "2026.07.20.091033+3e5055c1",
+                         "updateStatus": "ready_to_install"},
+        "claudeDesktop": {"installed": False},
+    })
+    assert "pronta" in page.codex_desktop_state.text()
+    assert page.codex_desktop_update.isEnabled()
+    page.codex_desktop_update.click()
+    assert requested[-1].id == "ai.desktop.codex.apply"
+    page._on_status_ready("ai.desktop.status", "", {
+        "codexDesktop": {"installedVersion": "2026.07.20.022256-1",
+                         "candidateVersion": "2026.07.20.091033+3e5055c1",
+                         "updateStatus": "ready_to_install", "appRunning": True},
+        "claudeDesktop": {"installed": False},
+    })
+    assert "feche o aplicativo" in page.codex_desktop_state.text()
+    assert not page.codex_desktop_update.isEnabled()
+    page._on_status_ready("ai.desktop.status", "", {
+        "codexDesktop": {"installedVersion": "2026.07.20.091033+3e5055c1-1",
+                         "updateStatus": "up_to_date"},
+        "claudeDesktop": {"installed": False},
+    })
+    assert not page.codex_desktop_update.isEnabled()
+
+
 def test_running_lock_disables_new_controls(qapp, monkeypatch, tmp_path):
     page = build_page(monkeypatch, tmp_path)
     page._on_status_ready("ai.desktop.status", "", {"claudeDesktop": {"installed": True, "version": "1"}})

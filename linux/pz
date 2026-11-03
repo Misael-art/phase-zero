@@ -63,6 +63,7 @@ Usage:
   pz boot menu                Show Linux-side boot selector
   pz boot selector            Open visual pre-reboot boot selector
   pz boot choose <choice>     Set one-shot boot: normal|steamos|windows|waydroid|emergency|iso:<id>|usb:<id>|grubfm
+  pz boot kde-login <action>  KDE login without password (status|enable|disable)
   pz boot iso <action>        Manage local ISO loopback entries
   pz boot usb <action>        Manage removable EFI entries by UUID
   pz boot grubfm <action>     Manage experimental local grubfm EFI payload
@@ -167,6 +168,8 @@ Usage:
   pz ai desktop update-claude  Update Claude Desktop when newer
   pz ai desktop install-qwen   Install official Qwen Code Desktop AppImage
   pz ai desktop repair-codex   Repair failed Codex Desktop local update
+  pz ai codex status           Compare Codex CLI and background service versions
+  pz ai codex update           Update both through official Codex installer; may interrupt tasks
   pz ai desktop repair         Repair desktop apps and automatic updates
   pz windows-vm apps status    Check WinBoat/WinPodX, Podman, KVM and FreeRDP
   pz windows-vm apps setup     Install and configure verified Windows frontends
@@ -287,7 +290,7 @@ Usage:
   pz self-update plan        Create verified user-update plan
   pz self-update apply       Apply confirmed source-bundle update
   pz updates check           Unified PhaseZero apps and host update inventory
-  pz updates apply <app>     Explicit verified user-app update
+  pz updates apply <app>     Explicit verified user-app update (codex updates CLI and daemon)
   pz updates install-service Enable daily check-only timer
   pz host status               Host hygiene: ledger, backups, footprint
   pz host backups migrate      Move legacy .bak files into the central store
@@ -555,10 +558,10 @@ cmd_server() {
                         list) bash "$PZ_ROOT/linux/server/homelab-governor.sh" list ;;
                         set)
                             [ "${3:-}" ] || { echo "usage: pz server homelab profile set <key>" >&2; exit 2; }
-                            if ! bash "$PZ_ROOT/linux/server/homelab-governor.sh" list 2>/dev/null | jq -e '[.profiles[].key] | index("'"$3"'") != null' >/dev/null; then
-                                echo "unknown homelab profile: $3" >&2
-                                exit 2
-                            fi
+                            # Keep profile validation in the appliance's canonical
+                            # registry validator. It passes user input as jq data.
+                            bash -c 'source "$1"; pz_homelab_profile_valid "$2"' _ \
+                                "$PZ_ROOT/linux/server/homelab-operations.sh" "$3" || exit 2
                             HL_STATE="${PZ_HOMELAB_STATE:-$PZ_STATE/homelab}"
                             mkdir -p "$HL_STATE"
                             printf '%s\n' "$3" > "$HL_STATE/profile.active"
@@ -713,6 +716,10 @@ cmd_ai() {
         codex-profiles)
             shift
             python3 "$PZ_ROOT/linux/ai/codex_profiles.py" "${@:-list}"
+            ;;
+        codex)
+            shift
+            bash "$PZ_ROOT/linux/ai/setup-codex.sh" "${@:-status}"
             ;;
         chatgpt-web)
             # Experimental and opt-in (PXA-010): kept out of help and catalog on purpose.

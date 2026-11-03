@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -213,7 +214,9 @@ def test_registry_has_all_manifest_products_and_unknown_is_not_absent(qapp):
     try:
         page = window.registry.page_for("Aplicativos")
         assert page.__class__.__name__ == "ProductRegistryPage"
-        assert len(page.products) == 104
+        saved = json.loads((ROOT / "linux/ui_native/product_inventory.json").read_text(encoding="utf-8"))
+        assert {row["appId"] for row in page.products} == {row["appId"] for row in saved["products"]}
+        assert len(page.products) == len(saved["products"])
         assert page._product_by_id["app.ollama"]["canonicalActionId"] == "ai.ollama"
         window.open_product("app.ollama", "server.llm")
         assert not page.instances

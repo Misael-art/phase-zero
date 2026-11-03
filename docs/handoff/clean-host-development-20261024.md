@@ -409,3 +409,96 @@ Próximo passo: operador selecionar direção 1/2/3 ou refinamento; próximo age
 parte do plano e dos owners existentes. Sem implementação, instalação, merge,
 deploy ou release por esta entrega. Commit documental exato pode ser localizado
 com `git log -1 -- docs/audits/visual-system-20261102`.
+
+## Coesão Codex CLI, daemon e Desktop — 2026-11-03
+
+Objetivo: sanar alerta de daemon Codex 0.162.1 diante do CLI 0.166.0 e completar
+o caminho de instalação de pacote Desktop já preparado. Owner: instalador oficial
+Codex para CLI/daemon; `codex-update-manager` para pacote Desktop; PhaseZero
+coordena estado, ação explícita e aviso. Branch canônica
+`codex/clean-host-dev-bootstrap`, PR #130, HEAD inicial
+`11abb817c0860cceb36a2350d3a2e255ef1ed6c9`, implementação `071d6528`.
+
+Código: `setup-codex.sh` consulta `codex app-server daemon version` e expõe
+versões instalada/em execução, divergência e próxima ação; atualização chama
+`codex update` e `codex app-server daemon update` e confere coesão. `pz ai codex`
+e `pz updates` expõem o mesmo contrato; inventário diário alerta divergência,
+estado desconhecido e pacote Desktop pronto. `desktop-apps.sh` usa o updater
+existente para `install-ready` ou repara candidato falho, impede instalação com
+app ativo e verifica versão no pacman. Tela IA & Dev mostra os dois estados e
+habilita ações só quando aplicáveis. Inventário de produto regenerado.
+
+Fixture no host `misael-jupiter` (BigLinux/Manjaro): 50 pytest focais, os
+contratos shell Codex/Desktop, ShellCheck, Bash syntax e diff check passaram.
+Casos negativos cobrem daemon antigo, pacote instalado não confirmado e app
+Desktop aberto. Host físico: `pz ai codex status` antes mostrou CLI 0.166.0,
+daemon gerenciado e ativo 0.162.1. `pz updates apply codex` via instalador oficial
+terminou com `status=updated`; depois, ambos os pacotes e processo ativo
+reportaram 0.166.0, `coherent=true`. Inventário completo de atualizações
+reportou `codexMismatch=false`, `codexDesktopReady=true`.
+
+Limite: Codex Desktop comunitário segue instalado em
+`2026.07.20.022256-1`; candidato local `2026.07.20.091033+3e5055c1`
+permanece `ready_to_install`. O próprio Desktop está aberto nesta sessão;
+updater exige saída do app antes de instalar. Nenhum download novo do Desktop,
+pacman, serviço alheio, credencial, merge ou release foi acionado. Após fechar
+o Desktop, executar `pz updates apply codex-desktop`, verificar
+`pacman -Q codex-desktop` e reabrir; depois rodar `pz updates check`. CI do SHA
+publicado e funcionamento visual após reabertura ainda exigem confirmação.
+
+## Remediação contínua — 2026-11-03
+
+Raiz única `codex/clean-host-dev-bootstrap`, PR #130. Baseline local/remoto
+`38385762`; runtime instalado: `~/.local/bin/pz` e
+`~/.local/bin/phasezero-control-center` resolvem para
+`~/.local/share/phasezero/releases/1.22.14`, versão beta; checkout declara
+1.22.15 stable. Tag `v1.22.15` apenas local. PR #129 integrado. Alterações
+alheias em `AGENTS.md`, acréscimo anterior neste handoff e
+`linux/repairs/reparo-touch-auto.sh` preservadas fora dos commits.
+
+| Frente | Owner/chamada efetiva | Commit | Evidência e limite |
+|---|---|---|---|
+| Homelab | `linux/pz` → `linux/server/homelab-operations.sh` → catálogo `assets/home-server/homelab-profiles.json`; estado `profile.active` | `c2ae3ca` | Expressão `jq` reproduzida antes; regressões de nomes e catálogo + suíte Homelab hermética verdes. Instalado 1.22.14 não contém correção. |
+| Boot Homelab | `install-homelab-boot.sh` grava `PZ_SERVER_USER`; `homelab-boot-prepare.sh` consome | `c2ae3ca`, `106faa9` | Sem fallback para conta pessoal/UID 1000; testes de identidade/estado. Boot e segundo host não homologados. |
+| WinVM | `linux/pz` → `windows-vm.sh`; ambiente gerenciado → `windows-vm-boot-prepare.sh` | `106faa9` | Suíte WinVM hermética verde; root ambíguo não grava boot. GRUB/guest/TPM/QGA/tela/shutdown físicos pendentes. |
+| Memória | `linux/ai/memory_manager.py` → timer existente; UI `linux/ui_native/pages/memory.py`; WPF `windows/ai/memory-ui.ps1` chama CLI | `557481b` | Host read-only: timer anterior `failed`, motivo `memory-key-unavailable-unlock-system-vault`, último backup verificado preservado. Fixture: `waiting-unlock`, sem rede/falsa sincronização; retomada após desbloqueio simulada. Runtime instalado ainda antigo. |
+| Release | `version.json` → `.github/workflows/release.yml` → `softprops/action-gh-release`; `/releases/latest` | `2534818` | v1.22.14 beta publicou `prerelease=false` e ocupa Latest; teste executa etapa real e exige flags explícitas. Stable requer CI verde, despacho manual, manifesto versionado e G2/G3/G4 verificados. Publicação 1.22.15 bloqueada pelos gates; tag não enviada. |
+| IA/contas | `linux/ai/credential_vault.py`, `grants.py`, `routing_manager.py`, adapters e UI; Windows `windows/pz.ps1`/WPF | base `38385762` | Grant por processo não prova consumidor→conexão→requisição. Uso gerenciado 9Router segue bloqueado; upstream documenta fallback de modelo. PXA-006/008/009 e G3 exigem conta/cota/inferência autorizadas. Nenhuma inferência executada. |
+
+Gates locais: Homelab shell, WinVM shell, smoke `packaging/install-root-smoke.sh`,
+113 pytest (1 skipped), 3 gates de grants, Bash syntax, ShellCheck com exclusões
+do CI e `git diff --check` passaram. Pacote foi montado apenas em raiz
+descartável; nenhum serviço/VM/boot real alterado. CI e Gitleaks devem ser
+conferidos no SHA final da PR; gitleaks local não está disponível.
+
+CI do SHA `e866ef3` identificou ShellCheck SC2031 em `linux/pz` e três
+regressões de coesão: `actions.json` sem três ações Codex do catálogo e teste
+de UI preso à contagem antiga de 104 produtos. `3f04a17` invoca o validador
+canônico em processo Bash isolado, regenera `linux/ui/actions.json` pelo
+gerador oficial e compara produtos da UI com o inventário versionado. No host:
+90 pytest de catálogo/UI/release, suíte Homelab, smoke do pacote descartável,
+ShellCheck do CLI e diff check verdes. CI/Gitleaks devem ser confirmados no SHA
+final; falhas anteriores não são aceite.
+
+Aceite externo ainda aberto: G2 Windows limpo e pacote instalado; segundo host
+Homelab com consistência banco/anexos e restore; guest WinVM com boot direto,
+TPM/QGA, shutdown, tela e fallback; G3 conta/modelo/cota/grant por requisição e
+ausência de fallback pago; G4 cinco participantes, 800×600/1280×800, escala,
+teclado, touch e leitor de tela. Mockups de `docs/audits/visual-system-20261102/`
+aguardam escolha do operador; nenhuma direção aplicada.
+
+| Gate/alvo | Aceite real necessário | Bloqueio atual | Recuperação/rollback |
+|---|---|---|---|
+| G2 Homelab, segundo host | Pacote instalado, seis perfis, recursos, serviço e status coerentes; backup com banco e anexos consistentes; restore verificado por dados e hashes | Segundo host/volume de teste e janela de restore não fornecidos | Plano de restore antes de aplicar; snapshot pré-restore e rollback automático do owner Homelab; preservar backup/manifesto |
+| G2 Windows limpo | Instalação, dependências, CLI/WPF, uso e remoção em snapshot Windows descartável | Ambiente Windows limpo não disponível nesta sessão | Reverter snapshot de sistema e comparar inventário/estado anterior |
+| WBR WinVM/boot direto | Armazenamento e RAM aptos; GRUB, guest, TPM/QGA, shutdown, monitor interno/dock, teclado touch e fallback ao desktop observados | Sem janela de boot/guest físico; histórico de erro Btrfs e margem de RAM exige preflight | Preservar VM/snapshot e entrada GRUB anterior; usar recuperação WBR, sem apagar disco/credenciais |
+| G3 IA/conta/custo | Conta e cota oficiais; consumidor→conexão→requisição fixa; revogação bloqueia antes de rede; zero fallback pago | Upstream 9Router sem vínculo comprovado e conta autorizada indisponível | Manter uso gerenciado bloqueado; revogar grant e desabilitar conexão pelo owner existente |
+| G4 UX/acessibilidade | Cinco participantes; 800×600/1280×800, escala, teclado, touch e leitor de tela em interface real | Participantes, alvo físico e direção visual pendentes | Voltar à versão/UI anterior e preferências preservadas; guardar evidência e mockups |
+
+Correção externa proposta, **não executada**: GitHub REST `PATCH
+/repos/Misael-art/phase-zero/releases/431700133` com corpo
+`{"prerelease":true,"make_latest":"false"}`. Antes da escrita, revalidar
+ID/tag/estado atual e obter autorização específica para editar a release já
+publicada. Não mover tags históricas. Próximo passo: conferir CI/Gitleaks do
+SHA final e, com ambientes/contas autorizados, executar gates físicos acima;
+somente então preparar manifesto de aceite de stable.

@@ -59,6 +59,17 @@ def test_failed_status_clears_readiness_and_backup_success_is_not_invented(page)
     assert not page.memory_card.buttons["sync"].isEnabled()
 
 
+def test_locked_vault_status_never_claims_sync_current(page):
+    page._on_status_ready(STATUS_ID, "", {"installed": True, "service": "active", "keyConfigured": True,
+        "automatic": True, "github": {"repository": "owner/private"},
+        "sync": {"state": "waiting-unlock", "synchronized": False,
+                 "targets": [{"id": "github", "state": "waiting-unlock",
+                              "lastBackup": {"verifiedAt": "2026-11-01"}}]}})
+    assert "aguardando desbloqueio" in page.memory_card.state.text()
+    assert "desbloqueie cofre" in page.memory_card.targets.text()
+    assert "2026-11-01" in page.memory_card.targets.text()
+
+
 def test_secret_parameters_never_reach_argv_and_restore_requires_plan(page):
     for name in ("key-export", "key-import"):
         action = page.by_id["ai.memory-" + name]

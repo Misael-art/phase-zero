@@ -2,7 +2,7 @@
 # windows-vm-boot-prepare.sh - detect DM, configure autologin for PhaseZero Windows VM boot
 set -euo pipefail
 
-TARGET_USER="${PZ_WINDOWS_VM_BOOT_USER:-misael}"
+TARGET_USER="${PZ_WINDOWS_VM_BOOT_USER:-}"
 CMDLINE="${PZ_BOOT_CMDLINE:-$(cat /proc/cmdline 2>/dev/null || true)}"
 SESSION="phasezero-windows-vm.desktop"
 RUNTIME_LAUNCHER="${PZ_WINDOWS_VM_RUNTIME_LAUNCHER:-/usr/local/lib/phasezero/windows-vm-runtime/linux/windows-vm/windows-vm.sh}"
@@ -330,6 +330,17 @@ remove_greetd_autologin() {
 }
 
 if printf '%s\n' "$CMDLINE" | grep -qw 'phasezero.windowsvm=1'; then
+    if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ] ||
+        [ -z "$TARGET_UID" ] || [ "$TARGET_UID" = "0" ] ||
+        [ -z "$TARGET_GID" ] || [ -z "$TARGET_HOME" ]; then
+        log "ERROR: Windows VM boot user missing or invalid; set PZ_WINDOWS_VM_BOOT_USER in the managed runtime environment"
+        remove_sddm_autologin
+        remove_gdm_autologin
+        remove_lightdm_autologin
+        remove_lxdm_autologin
+        remove_greetd_autologin
+        exit 2
+    fi
     current_dm="$(detect_display_manager)"
     log "detected display manager: $current_dm"
     # Prepare and validate everything before enabling automatic login. If the

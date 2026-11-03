@@ -16,6 +16,15 @@ on:
         required: false
         type: boolean
         default: false
+      stable_gates_accepted:
+        description: 'G2/G3/G4 physical and account evidence reviewed for this stable tag'
+        required: false
+        type: boolean
+        default: false
+      stable_gate_evidence:
+        description: 'docs/releases/v<version>-acceptance.json tracked in this tag'
+        required: false
+        type: string
 
 permissions:
   contents: write   # needed to create the GitHub Release
@@ -166,6 +175,11 @@ jobs:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
       - name: Read version and release channel
+        id: release_metadata
+        env:
+          STABLE_GATES_ACCEPTED: ${{ inputs.stable_gates_accepted }}
+          STABLE_GATE_EVIDENCE: ${{ inputs.stable_gate_evidence }}
+          ALLOW_RED_CI: ${{ inputs.allow_red_ci }}
         run: |
           set -euo pipefail
           version="$(jq -r '.version' version.json)"
@@ -174,6 +188,42 @@ jobs:
             stable|beta|nightly) ;;
             *) echo "unsupported release channel: $channel" >&2; exit 1 ;;
           esac
+          if [ "$channel" = "stable" ]; then
+            if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] || [ "$STABLE_GATES_ACCEPTED" != "true" ] || [ "$ALLOW_RED_CI" = "true" ]; then
+              echo "stable publication requires manual dispatch after G2/G3/G4 review" >&2
+              exit 1
+            fi
+            expected="docs/releases/v$version-acceptance.json"
+            if [ "$STABLE_GATE_EVIDENCE" != "$expected" ] || [ ! -f "$expected" ] ||
+                ! git ls-files --error-unmatch "$expected" >/dev/null 2>&1; then
+              echo "stable gate evidence missing in tag: $expected" >&2
+              exit 1
+            fi
+            if ! jq -e --arg v "$version" \
+                '.version == $v and [.gates.G2.state, .gates.G3.state, .gates.G4.state] == ["verified", "verified", "verified"]' \
+                "$expected" >/dev/null; then
+              echo "stable gate evidence must verify G2, G3 and G4 for v$version" >&2
+              exit 1
+            fi
+            for gate in G2 G3 G4; do
+              proof="$(jq -r --arg gate "$gate" '.gates[$gate].evidence // empty' "$expected")"
+              case "$proof" in
+                docs/*) ;;
+                *) echo "$gate evidence path missing" >&2; exit 1 ;;
+              esac
+              if [[ "$proof" == *..* ]] || [ ! -f "$proof" ] ||
+                  ! git ls-files --error-unmatch "$proof" >/dev/null 2>&1; then
+                echo "$gate evidence file missing in tag: $proof" >&2
+                exit 1
+              fi
+            done
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "make_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "CHANNEL=$channel" >> "$GITHUB_ENV"
 
@@ -212,8 +262,8 @@ jobs:
         with:
           tag_name: v${{ env.VERSION }}
           name: PhaseZero v${{ env.VERSION }} (${{ env.CHANNEL }})
-          prerelease: ${{ env.CHANNEL != 'stable' }}
-          make_latest: ${{ env.CHANNEL == 'stable' }}
+          prerelease: ${{ steps.release_metadata.outputs.prerelease }}
+          make_latest: ${{ steps.release_metadata.outputs.make_latest }}
           body_path: release-channel-notes.md
           generate_release_notes: true
           fail_on_unmatched_files: false

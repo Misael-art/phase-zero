@@ -85,6 +85,40 @@ pz_log() {
 pz_info() { pz_log INFO "$*"; }
 pz_warn() { pz_log WARN "$*"; }
 pz_error() { pz_log ERROR "$*"; }
+
+# Resolve the desktop owner without guessing a personal account or UID 1000.
+# Explicit PZ_TARGET_USER wins; root may otherwise use a single sudo/polkit UID.
+# Diagnostics are direct stderr so an ambiguous root invocation creates no state.
+pz_target_user() {
+    local effective_uid="${1:-$EUID}" candidate="${PZ_TARGET_USER:-}" sudo_uid="${SUDO_UID:-}" pkexec_uid="${PKEXEC_UID:-}" passwd_entry uid
+    if [ -z "$candidate" ]; then
+        if [ "$effective_uid" -eq 0 ]; then
+            if [ -n "$sudo_uid" ] && [ -n "$pkexec_uid" ] && [ "$sudo_uid" != "$pkexec_uid" ]; then
+                echo "target user ambiguous: set PZ_TARGET_USER explicitly" >&2
+                return 2
+            fi
+            uid="${sudo_uid:-$pkexec_uid}"
+            if ! [[ "$uid" =~ ^[0-9]+$ ]] || [ "$uid" -eq 0 ]; then
+                echo "target user unavailable under root: set PZ_TARGET_USER explicitly" >&2
+                return 2
+            fi
+            candidate="$uid"
+        else
+            candidate="$(id -un)"
+        fi
+    fi
+    passwd_entry="$(getent passwd "$candidate" 2>/dev/null || true)"
+    if [ -z "$passwd_entry" ]; then
+        echo "target user not found: $candidate" >&2
+        return 2
+    fi
+    IFS=: read -r candidate _ uid _ _ _ _ <<< "$passwd_entry"
+    if [ "$uid" -eq 0 ] || { [ "$effective_uid" -ne 0 ] && [ "$uid" -ne "$effective_uid" ]; }; then
+        echo "target user must be the invoking desktop user: $candidate" >&2
+        return 2
+    fi
+    printf '%s\n' "$candidate"
+}
 # DEBUG só vai para o arquivo de log: nunca polui stdout de envelopes JSON.
 # Também nunca CRIA o log — senão um dry-run puro passaria a sujar o host só
 # por ter emitido rastreio.
