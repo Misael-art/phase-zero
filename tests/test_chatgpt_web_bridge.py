@@ -1626,6 +1626,9 @@ def test_sandbox_inherits_the_normal_codex_by_default_and_can_be_isolated(host, 
     assert command[1:5] == ["--sandbox", "workspace-write", "--ask-for-approval", "on-failure"]
     smoke, _ = bridge.codex_command(["exec", "oi"], isolated=True)
     assert smoke[1:3] == ["--sandbox", "read-only"]
+    full, _ = bridge.codex_command(["exec", "oi"], isolated=True, network=True)
+    assert full[1:7] == ["--sandbox", "workspace-write", "--ask-for-approval", full[4],
+                         "-c", "sandbox_workspace_write.network_access=true"]
     assert bridge.live_route_touched() is False  # ~/.codex was only read
 
     isolated = bridge.sandbox_set("isolated")

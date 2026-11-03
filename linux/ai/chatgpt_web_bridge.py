@@ -2598,10 +2598,13 @@ class Bridge:
         scratch = private_dir(self.paths.root / "smoke")
         reply_file = scratch / "last-message.txt"
         reply_file.unlink(missing_ok=True)
+        # Full mode reads native permissions from the rollout, so it cannot be ephemeral;
+        # writes stay confined to the private scratch directory.
+        full = (self.upstream_config() or {}).get("mode") == "full"
         command, env = self.codex_command(
-            ["exec", "--skip-git-repo-check", "--ephemeral", "-C", str(scratch), "-m", model,
-             "-o", str(reply_file), f"Responda somente com a palavra: {SMOKE_TOKEN}"],
-            isolated=True)
+            ["exec", "--skip-git-repo-check", *([] if full else ["--ephemeral"]), "-C", str(scratch),
+             "-m", model, "-o", str(reply_file), f"Responda somente com a palavra: {SMOKE_TOKEN}"],
+            isolated=True, network=full)
         code, out, err = self.runner.run(command, env=env, timeout=SMOKE_TIMEOUT_SECONDS,
                                          input_text="")
         try:
@@ -2613,7 +2616,7 @@ class Bridge:
         state["lastSmoke"] = {"at": iso(self.clock()), "ok": ok, "model": model}
         self.save_state(state)
         result: dict[str, Any] = {"ok": ok, "model": model, "reply": reply[-200:],
-                                  "sandbox": "read-only", "exitCode": code,
+                                  "sandbox": "workspace-write" if full else "read-only", "exitCode": code,
                                   "liveCodexRouteTouched": self.live_route_touched()}
         if not ok:
             result["detail"] = (err or out).strip()[-600:]
@@ -3802,8 +3805,8 @@ class Bridge:
                 "visibleModels": labels, "guidance": guidance,
                 "notified": notified, "liveCodexRouteTouched": self.live_route_touched()}
 
-    def codex_command(self, args: list[str],
-                      isolated: bool = False) -> tuple[list[str], dict[str, str]]:
+    def codex_command(self, args: list[str], isolated: bool = False,
+                      network: bool = False) -> tuple[list[str], dict[str, str]]:
         state = self.load_state()
         self.require_opt_in(state)
         for index, arg in enumerate(args):
@@ -3827,9 +3830,11 @@ class Bridge:
         chosen = any(arg.split("=", 1)[0] in {"-m", "--model"} for arg in args)
         model = [] if chosen else ["--model", self.default_model()]
         sandbox = self.sandbox_profile() if not isolated else {
-            "sandbox": "read-only", "approval": APPROVAL_POLICY}
+            "sandbox": "workspace-write" if network else "read-only", "approval": APPROVAL_POLICY}
+        # Full mode refuses turns whose trusted context does not state network access.
+        extra = ["-c", "sandbox_workspace_write.network_access=true"] if isolated and network else []
         return [codex, "--sandbox", sandbox["sandbox"], "--ask-for-approval", sandbox["approval"],
-                *model, *args], env
+                *extra, *model, *args], env
 
 
 def read_secret(stream: Any) -> str:
