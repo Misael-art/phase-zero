@@ -471,6 +471,15 @@ do CI e `git diff --check` passaram. Pacote foi montado apenas em raiz
 descartável; nenhum serviço/VM/boot real alterado. CI e Gitleaks devem ser
 conferidos no SHA final da PR; gitleaks local não está disponível.
 
+CI do SHA `e866ef3` identificou ShellCheck SC2031 em `linux/pz` e três
+regressões de coesão: `actions.json` sem três ações Codex do catálogo e teste
+de UI preso à contagem antiga de 104 produtos. `3f04a17` invoca o validador
+canônico em processo Bash isolado, regenera `linux/ui/actions.json` pelo
+gerador oficial e compara produtos da UI com o inventário versionado. No host:
+90 pytest de catálogo/UI/release, suíte Homelab, smoke do pacote descartável,
+ShellCheck do CLI e diff check verdes. CI/Gitleaks devem ser confirmados no SHA
+final; falhas anteriores não são aceite.
+
 Aceite externo ainda aberto: G2 Windows limpo e pacote instalado; segundo host
 Homelab com consistência banco/anexos e restore; guest WinVM com boot direto,
 TPM/QGA, shutdown, tela e fallback; G3 conta/modelo/cota/grant por requisição e
