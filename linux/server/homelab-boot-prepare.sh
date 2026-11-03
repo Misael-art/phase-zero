@@ -49,11 +49,11 @@ log "runtime: $RUNTIME_ROOT"
 # --- Target user resolution --------------------------------------------------
 TARGET_USER="$PZ_SERVER_USER"
 if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
-    TARGET_USER="$(getent passwd 1000 2>/dev/null | cut -d: -f1 || true)"
+    log "PZ_SERVER_USER must name the non-root user configured by install-homelab-boot; aborting bring-up"
+    exit 1
 fi
-[ -n "$TARGET_USER" ] || { log "no PZ_SERVER_USER resolved; aborting bring-up"; exit 1; }
 TARGET_HOME="$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6 || true)"
-[ -n "$TARGET_HOME" ] || TARGET_HOME="/home/$TARGET_USER"
+[ -n "$TARGET_HOME" ] || { log "PZ_SERVER_USER not found: $TARGET_USER; aborting bring-up"; exit 1; }
 log "target user: $TARGET_USER (home $TARGET_HOME)"
 
 # State dir is the target user's, never the root user's. Explicit overrides win.

@@ -557,10 +557,10 @@ cmd_server() {
                         list) bash "$PZ_ROOT/linux/server/homelab-governor.sh" list ;;
                         set)
                             [ "${3:-}" ] || { echo "usage: pz server homelab profile set <key>" >&2; exit 2; }
-                            if ! bash "$PZ_ROOT/linux/server/homelab-governor.sh" list 2>/dev/null | jq -e '[.profiles[].key] | index("'"$3"'") != null' >/dev/null; then
-                                echo "unknown homelab profile: $3" >&2
-                                exit 2
-                            fi
+                            # Keep profile validation in the appliance's canonical
+                            # registry validator. It passes user input as jq data.
+                            ( source "$PZ_ROOT/linux/server/homelab-operations.sh"
+                              pz_homelab_profile_valid "$3" ) || exit 2
                             HL_STATE="${PZ_HOMELAB_STATE:-$PZ_STATE/homelab}"
                             mkdir -p "$HL_STATE"
                             printf '%s\n' "$3" > "$HL_STATE/profile.active"
