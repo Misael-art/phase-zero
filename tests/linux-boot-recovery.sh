@@ -89,6 +89,57 @@ assert_grep_absent "install-steamos-boot.sh contains video=.*rotate" -E 'video=.
 
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
+test_sddm="$tmp_root/sddm"
+test_sessions="$tmp_root/sessions"
+mkdir -p "$test_sddm" "$test_sessions"
+chmod 0700 "$test_sddm"
+printf '[Desktop Entry]\nExec=true\n' > "$test_sessions/plasma.desktop"
+plan="$(PZ_SDDM_CONF_DIR="$test_sddm" PZ_WAYLAND_SESSION_DIR="$test_sessions" \
+    "$REPO_ROOT/linux/pz" boot kde-login plan enable)"
+grep -qx "user: $(id -un)" <<< "$plan"
+grep -qx 'relogin: true' <<< "$plan"
+printf '[Autologin]\nUser=guest\nSession=phasezero-windows-vm.desktop\nRelogin=false\n' > "$test_sddm/91-phasezero-windows-vm.conf"
+PZ_SDDM_CONF_DIR="$test_sddm" PZ_WAYLAND_SESSION_DIR="$test_sessions" \
+    "$REPO_ROOT/linux/pz" boot kde-login enable >/dev/null
+[ "$(stat -c %a "$test_sddm")" = 700 ]
+grep -qx "User=$(id -un)" "$test_sddm/50-phasezero-kde-autologin.conf"
+grep -qx 'Session=plasma.desktop' "$test_sddm/50-phasezero-kde-autologin.conf"
+grep -qx 'Relogin=true' "$test_sddm/50-phasezero-kde-autologin.conf"
+grep -qx 'Session=phasezero-windows-vm.desktop' "$test_sddm/91-phasezero-windows-vm.conf"
+kde_login_status="$(PZ_SDDM_CONF_DIR="$test_sddm" "$REPO_ROOT/linux/pz" boot kde-login status)"
+grep -q 'kde_login: enabled' <<< "$kde_login_status"
+PZ_SDDM_CONF_DIR="$test_sddm" "$REPO_ROOT/linux/pz" boot kde-login disable >/dev/null
+[ ! -e "$test_sddm/50-phasezero-kde-autologin.conf" ]
+[ -e "$test_sddm/91-phasezero-windows-vm.conf" ]
+printf '[Autologin]\nUser=guest\n' > "$test_sddm/kde_settings.conf"
+if PZ_SDDM_CONF_DIR="$test_sddm" PZ_WAYLAND_SESSION_DIR="$test_sessions" \
+    "$REPO_ROOT/linux/pz" boot kde-login enable > "$tmp_root/override.out" 2>&1; then
+    echo 'later SDDM autologin override was accepted' >&2; exit 1
+fi
+grep -q 'overridden by' "$tmp_root/override.out"
+[ ! -e "$test_sddm/50-phasezero-kde-autologin.conf" ]
+rm "$test_sddm/kde_settings.conf"
+if PZ_TARGET_USER=root PZ_SDDM_CONF_DIR="$test_sddm" PZ_WAYLAND_SESSION_DIR="$test_sessions" \
+    "$REPO_ROOT/linux/pz" boot kde-login enable > "$tmp_root/identity.out" 2>&1; then
+    echo 'root account was accepted for KDE autologin' >&2; exit 1
+fi
+[ ! -e "$test_sddm/50-phasezero-kde-autologin.conf" ]
+printf 'unmanaged\n' > "$test_sddm/50-phasezero-kde-autologin.conf"
+if PZ_SDDM_CONF_DIR="$test_sddm" PZ_WAYLAND_SESSION_DIR="$test_sessions" \
+    "$REPO_ROOT/linux/pz" boot kde-login enable > "$tmp_root/conflict.out" 2>&1; then
+    echo 'unmanaged KDE login file was replaced' >&2; exit 1
+fi
+grep -qx unmanaged "$test_sddm/50-phasezero-kde-autologin.conf"
+if PZ_SDDM_CONF_DIR="$test_sddm" "$REPO_ROOT/linux/pz" boot kde-login disable > "$tmp_root/conflict.out" 2>&1; then
+    echo 'unmanaged KDE login file was removed' >&2; exit 1
+fi
+grep -qx unmanaged "$test_sddm/50-phasezero-kde-autologin.conf"
+rm "$test_sddm/50-phasezero-kde-autologin.conf"
+if PZ_SDDM_CONF_DIR="$test_sddm" PZ_WAYLAND_SESSION_DIR="$tmp_root/missing" \
+    "$REPO_ROOT/linux/pz" boot kde-login enable > "$tmp_root/missing.out" 2>&1; then
+    echo 'missing KDE session was accepted' >&2; exit 1
+fi
+[ ! -e "$test_sddm/50-phasezero-kde-autologin.conf" ]
 printf '%s\n' 'grub-probe: error: cannot find a GRUB drive for /dev/sdg1.  Check your device.map.' > "$tmp_root/os-prober-warning.log"
 if bash -c ". '$REPO_ROOT/linux/lib/common.sh'; pz_boot_grub_log_has_fatal_errors '$tmp_root/os-prober-warning.log'"; then
     echo "known os-prober hybrid-media warning was treated as fatal" >&2

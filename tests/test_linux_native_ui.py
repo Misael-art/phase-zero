@@ -169,6 +169,20 @@ def test_elevated_program_prefers_phasezero_admin(catalog):
     assert args[1:] == ["boot", "install-safe-menu"]
 
 
+def test_kde_host_login_actions_use_boot_owner_and_admin_bridge(catalog):
+    actions = {item.id: item for item in catalog}
+    enable = actions["boot.kde-login.enable"]
+    disable = actions["boot.kde-login.disable"]
+    assert enable.category == "Boot Direto"
+    assert enable.visibility == "primary"
+    assert enable.preview_args == ("boot", "kde-login", "plan", "enable")
+    assert disable.preview_args == ("boot", "kde-login", "plan", "disable")
+    with patch("linux.ui_native.platform.shutil.which", return_value="/usr/bin/phasezero-admin"):
+        program, args = build_program(ROOT, enable, preview=False)
+    assert program == "/usr/bin/phasezero-admin"
+    assert args[1:] == ["boot", "kde-login", "enable"]
+
+
 def test_boot_selector_uses_admin_bridge_without_shell():
     with patch("linux.ui_native.platform.shutil.which") as which:
         which.side_effect = lambda name: "/usr/bin/bigsudo" if name == "bigsudo" else None

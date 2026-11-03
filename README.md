@@ -217,6 +217,12 @@ install-cli.bat           # CLI
 
 Perfil `steamdeck-linux`: Gamepad UI, atalhos, teclado virtual, watcher de dock. Avançado (Handheld Companion / GlosSI) é opt-in porque conflita com Steam Input.
 
+### Login automático no KDE do host
+
+No Control Center, **Boot Direto → Login do host → Entrar no KDE sem senha**. No CLI: `linux/pz boot kde-login plan enable`, `linux/pz boot kde-login enable` e `linux/pz boot kde-login status`. Para reverter: `linux/pz boot kde-login disable`. O ajuste escolhe a conta local invocadora e a sessão Wayland `plasma.desktop`; um shell root sem identidade confiável exige `--user USER`. Ativação e reversão exigem administração e passam a valer no próximo início do SDDM. Não reiniciam a sessão atual.
+
+A preferência KDE vale para o boot Linux normal. Entradas diretas Steam Deck, Windows VM e Waydroid mantêm suas configurações de sessão. Configurações SDDM posteriores que também definem login automático bloqueiam a ativação até resolver o conflito. `Relogin=true` reabre o KDE após sair; use bloqueio de tela para deixar a sessão protegida. Login automático não destranca KWallet nem substitui senha de administração.
+
 ### Windows dentro do Linux (VM)
 
 `pz windows-vm`: ISO que **você** indica. Sem download de ISO/chave. QEMU/KVM, OVMF, TPM 2.0. Detecta domínio libvirt já instalado antes de criar disco.

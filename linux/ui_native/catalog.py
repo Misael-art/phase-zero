@@ -673,6 +673,9 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
     actions.extend(
         [
             _a("boot.status", "Boot Direto", "Status boot", "Audita GRUB, ESP e entradas PhaseZero.", ("boot", "status"), "system-reboot"),
+            _a("boot.kde-login.status", "Boot Direto", "Login KDE: estado", "Mostra preferência de entrada automática no KDE deste host.", ("boot", "kde-login", "status"), "dialog-password", elevated=True, group="Login do host", visibility="standard", keywords=("kde", "plasma", "autologin", "senha")),
+            _a("boot.kde-login.enable", "Boot Direto", "Entrar no KDE sem senha", "Entra automaticamente no KDE ao iniciar e após sair da sessão. Bloqueio de tela e cofre continuam separados.", ("boot", "kde-login", "enable"), "system-log-out", mutable=True, preview=("boot", "kde-login", "plan", "enable"), elevated=True, group="Login do host", visibility="primary", keywords=("kde", "plasma", "autologin", "senha")),
+            _a("boot.kde-login.disable", "Boot Direto", "Exigir senha ao entrar no KDE", "Remove somente a preferência PhaseZero de login automático do host.", ("boot", "kde-login", "disable"), "dialog-password", mutable=True, preview=("boot", "kde-login", "plan", "disable"), elevated=True, group="Login do host", visibility="standard", keywords=("kde", "plasma", "autologin", "senha")),
             _a("boot.selector", "Boot Direto", "Seletor visual", "Escolhe próxima sessão antes do reboot.", ("boot", "selector"), "view-list-icons"),
             _a("boot.menu", "Boot Direto", "Abrir menu texto", "Lista escolhas de próxima sessão.", ("boot", "menu"), "view-list-icons"),
             _a("boot.safe-menu", "Boot Direto", "Instalar menu seguro", "Mantém GRUB visível com timeout.", ("boot", "install-safe-menu"), "security-high", mutable=True, preview=("boot", "safe-menu", "dry-run"), elevated=True, badge="Protegido"),

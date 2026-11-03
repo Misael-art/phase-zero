@@ -63,6 +63,7 @@ Usage:
   pz boot menu                Show Linux-side boot selector
   pz boot selector            Open visual pre-reboot boot selector
   pz boot choose <choice>     Set one-shot boot: normal|steamos|windows|waydroid|emergency|iso:<id>|usb:<id>|grubfm
+  pz boot kde-login <action>  KDE login without password (status|enable|disable)
   pz boot iso <action>        Manage local ISO loopback entries
   pz boot usb <action>        Manage removable EFI entries by UUID
   pz boot grubfm <action>     Manage experimental local grubfm EFI payload
