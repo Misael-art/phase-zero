@@ -19,6 +19,27 @@ export XDG_RUNTIME_DIR="$TMP_ROOT/run"
 export PZ_WINDOWS_VM_SHARE_STATE_DIR="$TMP_ROOT/run/phasezero-windows-vm"
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR"
 
+echo "=== target identity: no personal fallback under root ==="
+identity_result="$(env -u PZ_TARGET_USER -u SUDO_UID -u PKEXEC_UID bash -c '
+    source "$1/linux/lib/common.sh"
+    pz_target_user 0
+' _ "$REPO_ROOT" 2>&1)" && { echo "FAIL: root without identity accepted"; exit 1; }
+grep -Fq 'set PZ_TARGET_USER explicitly' <<< "$identity_result"
+identity_result="$(PZ_TARGET_USER=nobody bash -c 'source "$1/linux/lib/common.sh"; pz_target_user 0' _ "$REPO_ROOT")"
+test "$identity_result" = nobody
+identity_result="$(env -u PZ_TARGET_USER SUDO_UID=65534 bash -c 'source "$1/linux/lib/common.sh"; pz_target_user 0' _ "$REPO_ROOT")"
+test "$identity_result" = nobody
+if env -u PZ_TARGET_USER SUDO_UID=65534 PKEXEC_UID=1001 \
+    bash -c 'source "$1/linux/lib/common.sh"; pz_target_user 0' _ "$REPO_ROOT" >/dev/null 2>&1; then
+    echo "FAIL: conflicting elevated identities accepted"; exit 1
+fi
+if PZ_TARGET_USER=nobody bash -c 'source "$1/linux/lib/common.sh"; pz_target_user 1001' _ "$REPO_ROOT" >/dev/null 2>&1; then
+    echo "FAIL: non-root caller selected another account"; exit 1
+fi
+if PZ_TARGET_USER=root bash -c 'source "$1/linux/lib/common.sh"; pz_target_user 0' _ "$REPO_ROOT" >/dev/null 2>&1; then
+    echo "FAIL: root accepted as desktop target"; exit 1
+fi
+
 # resolve_display_target reads /proc/cmdline and lets a boot token beat the
 # environment, which is correct in production and poison in a test: the whole
 # session suite then passes or fails according to which GRUB entry the machine
@@ -176,7 +197,7 @@ shares_plan_minimal="$(PZ_WINDOWS_VM_SHARE_POLICY=minimal "$REPO_ROOT/linux/pz" 
 grep -q 'share policy: minimal' <<< "$shares_plan_minimal"
 grep -q 'exchange/' <<< "$shares_plan_minimal"
 # shellcheck disable=SC2016 # 'SPICE WebDAV' is a literal informational line
-if grep -q 'PZHome\|home/' <<< "$(grep -v 'SPICE WebDAV' <<< "$shares_plan_minimal")"; then
+if grep -Eq 'PZHome|[[:space:]]home/' <<< "$(grep -v 'SPICE WebDAV' <<< "$shares_plan_minimal")"; then
     echo "minimal share plan must not expose PZHome/home" >&2
     exit 1
 fi
@@ -1079,7 +1100,29 @@ cat > "$dm_bin/powerprofilesctl" <<'EOF'
 # never abort SDDM autologin preparation under set -e.
 exit 2
 EOF
-chmod +x "$dm_bin/sddm" "$dm_bin/powerprofilesctl"
+cat > "$dm_bin/id" <<'EOF'
+#!/usr/bin/env bash
+case "$1:$2" in
+    -u:tester|-g:tester) echo 1001 ;;
+    *) /usr/bin/id "$@" ;;
+esac
+EOF
+cat > "$dm_bin/getent" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1:$2" = passwd:tester ]; then
+    printf 'tester:x:1001:1001::%s:/bin/bash\n' "$HOME"
+else
+    /usr/bin/getent "$@"
+fi
+EOF
+chmod +x "$dm_bin/sddm" "$dm_bin/powerprofilesctl" "$dm_bin/id" "$dm_bin/getent"
+if PZ_BOOT_CMDLINE='quiet phasezero.windowsvm=1' \
+    PATH="$dm_bin:$PATH" PZ_SDDM_CONF_DIR="$sddm_test_dir" \
+    PZ_WINDOWS_VM_SKIP_TUNING=1 PZ_WINDOWS_VM_SKIP_RUNTIME_PREP=1 \
+    "$REPO_ROOT/linux/windows-vm/windows-vm-boot-prepare.sh" >/dev/null 2>&1; then
+    echo "FAIL: boot helper accepted missing configured user"; exit 1
+fi
+test ! -e "$sddm_test_dir/91-phasezero-windows-vm.conf"
 PZ_BOOT_CMDLINE='quiet phasezero.windowsvm=1' \
 PATH="$dm_bin:$PATH" \
 PZ_SDDM_CONF_DIR="$sddm_test_dir" \

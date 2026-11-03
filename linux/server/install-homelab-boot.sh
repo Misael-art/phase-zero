@@ -38,8 +38,7 @@ case "$MODE_ACCESS" in
     *) pz_error "invalid access mode: $MODE_ACCESS"; exit 2 ;;
 esac
 
-TARGET_USER="${PZ_TARGET_USER:-${SUDO_USER:-${USER:-misael}}}"
-[ "$TARGET_USER" = "root" ] && TARGET_USER="$(getent passwd 1000 2>/dev/null | cut -d: -f1 || echo misael)"
+TARGET_USER="$(pz_target_user)" || exit 2
 
 # Installed runtime wins; the checkout is a development fallback only.
 if [ -x /usr/lib/phasezero/linux/pz ]; then
