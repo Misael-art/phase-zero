@@ -497,6 +497,15 @@ Adicionar IDs, nunca reutilizar ID para requisito diferente. Estados permitidos:
 
 ## Estado vivo
 
+2026-11-03 — PR #130, `c2ae3ca`/`106faa9`: CLI de perfil usa validador
+canônico `jq --arg`; expressão injetada, aspas, espaço, Unicode e catálogo
+ausente são rejeitados sem alterar `profile.active`. Boot Homelab exige
+`PZ_SERVER_USER` existente e não root; instalador resolve usuário via identidade
+explícita ou contexto elevado inequívoco, sem conta pessoal/UID 1000. Suíte
+Homelab hermética e smoke de pacote descartável verdes. Host instalado 1.22.14
+não recebeu incremento; segundo host, banco/anexos e restore físico seguem
+pendentes.
+
 2026-10-20 — Bonsai AISR-016 em PR #125: card com login e diagnóstico lado a
 lado, tentativa explícita não bloqueada por observação histórica do provedor,
 timeout com recuperação de credencial. Regressão local: 106 Python/Qt e 52 shell
@@ -600,6 +609,13 @@ sem evidência.
 | Fase 5 auditoria host limpo | PZ-AUD-028 verified em `codex/aud-fase5`; job arch-clean-host, gates de manifesto/exatidão, matriz de evidência | Arch descartável real (15 perfis, asset, entrypoints); CI estendido; sem mutação no host | 2026-09-07 |
 
 ## Ledger de execução
+
+2026-11-03 — Codex, raiz única `codex/clean-host-dev-bootstrap`, PR #130:
+`c2ae3ca` corrige validação de perfil e boot Homelab; `106faa9` remove
+fallback pessoal do instalador. `bash tests/linux-homelab.sh` passou com
+Docker/serviços simulados; `packaging/install-root-smoke.sh` passou em raiz
+descartável. Nenhum Docker ou boot real acionado. Próximo: CI do SHA final e
+aceite em segundo host com consistência banco/anexos e restauração verificada.
 
 2026-10-18 — Codex, `codex/winvm-integrity-sparse`: inventário honesto,
 verificação offline sem reparo, explicação de alocação dinâmica e UI temática.

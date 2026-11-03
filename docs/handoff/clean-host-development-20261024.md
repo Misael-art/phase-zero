@@ -445,3 +445,43 @@ pacman, serviço alheio, credencial, merge ou release foi acionado. Após fechar
 o Desktop, executar `pz updates apply codex-desktop`, verificar
 `pacman -Q codex-desktop` e reabrir; depois rodar `pz updates check`. CI do SHA
 publicado e funcionamento visual após reabertura ainda exigem confirmação.
+
+## Remediação contínua — 2026-11-03
+
+Raiz única `codex/clean-host-dev-bootstrap`, PR #130. Baseline local/remoto
+`38385762`; runtime instalado: `~/.local/bin/pz` e
+`~/.local/bin/phasezero-control-center` resolvem para
+`~/.local/share/phasezero/releases/1.22.14`, versão beta; checkout declara
+1.22.15 stable. Tag `v1.22.15` apenas local. PR #129 integrado. Alterações
+alheias em `AGENTS.md`, acréscimo anterior neste handoff e
+`linux/repairs/reparo-touch-auto.sh` preservadas fora dos commits.
+
+| Frente | Owner/chamada efetiva | Commit | Evidência e limite |
+|---|---|---|---|
+| Homelab | `linux/pz` → `linux/server/homelab-operations.sh` → catálogo `assets/home-server/homelab-profiles.json`; estado `profile.active` | `c2ae3ca` | Expressão `jq` reproduzida antes; regressões de nomes e catálogo + suíte Homelab hermética verdes. Instalado 1.22.14 não contém correção. |
+| Boot Homelab | `install-homelab-boot.sh` grava `PZ_SERVER_USER`; `homelab-boot-prepare.sh` consome | `c2ae3ca`, `106faa9` | Sem fallback para conta pessoal/UID 1000; testes de identidade/estado. Boot e segundo host não homologados. |
+| WinVM | `linux/pz` → `windows-vm.sh`; ambiente gerenciado → `windows-vm-boot-prepare.sh` | `106faa9` | Suíte WinVM hermética verde; root ambíguo não grava boot. GRUB/guest/TPM/QGA/tela/shutdown físicos pendentes. |
+| Memória | `linux/ai/memory_manager.py` → timer existente; UI `linux/ui_native/pages/memory.py`; WPF `windows/ai/memory-ui.ps1` chama CLI | `557481b` | Host read-only: timer anterior `failed`, motivo `memory-key-unavailable-unlock-system-vault`, último backup verificado preservado. Fixture: `waiting-unlock`, sem rede/falsa sincronização; retomada após desbloqueio simulada. Runtime instalado ainda antigo. |
+| Release | `version.json` → `.github/workflows/release.yml` → `softprops/action-gh-release`; `/releases/latest` | `2534818` | v1.22.14 beta publicou `prerelease=false` e ocupa Latest; teste executa etapa real e exige flags explícitas. Stable requer CI verde, despacho manual, manifesto versionado e G2/G3/G4 verificados. Publicação 1.22.15 bloqueada pelos gates; tag não enviada. |
+| IA/contas | `linux/ai/credential_vault.py`, `grants.py`, `routing_manager.py`, adapters e UI; Windows `windows/pz.ps1`/WPF | base `38385762` | Grant por processo não prova consumidor→conexão→requisição. Uso gerenciado 9Router segue bloqueado; upstream documenta fallback de modelo. PXA-006/008/009 e G3 exigem conta/cota/inferência autorizadas. Nenhuma inferência executada. |
+
+Gates locais: Homelab shell, WinVM shell, smoke `packaging/install-root-smoke.sh`,
+113 pytest (1 skipped), 3 gates de grants, Bash syntax, ShellCheck com exclusões
+do CI e `git diff --check` passaram. Pacote foi montado apenas em raiz
+descartável; nenhum serviço/VM/boot real alterado. CI e Gitleaks devem ser
+conferidos no SHA final da PR; gitleaks local não está disponível.
+
+Aceite externo ainda aberto: G2 Windows limpo e pacote instalado; segundo host
+Homelab com consistência banco/anexos e restore; guest WinVM com boot direto,
+TPM/QGA, shutdown, tela e fallback; G3 conta/modelo/cota/grant por requisição e
+ausência de fallback pago; G4 cinco participantes, 800×600/1280×800, escala,
+teclado, touch e leitor de tela. Mockups de `docs/audits/visual-system-20261102/`
+aguardam escolha do operador; nenhuma direção aplicada.
+
+Correção externa proposta, **não executada**: GitHub REST `PATCH
+/repos/Misael-art/phase-zero/releases/431700133` com corpo
+`{"prerelease":true,"make_latest":"false"}`. Antes da escrita, revalidar
+ID/tag/estado atual e obter autorização específica para editar a release já
+publicada. Não mover tags históricas. Próximo passo: conferir CI/Gitleaks do
+SHA final e, com ambientes/contas autorizados, executar gates físicos acima;
+somente então preparar manifesto de aceite de stable.
