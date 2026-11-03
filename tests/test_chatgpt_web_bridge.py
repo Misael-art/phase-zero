@@ -197,7 +197,8 @@ def configure(bridge: Bridge, runner: FakeRunner, route_active: bool) -> None:
     cli.parent.mkdir(parents=True)
     cli.write_text("#!/bin/sh\n")
     (paths.core_home / "config.json").write_text(json.dumps(
-        {"mode": "browser-only", "solAvailable": True, "runtimeCommand": [str(cli)]}))
+        {"mode": "browser-only", "solAvailable": True, "runtimeCommand": [str(cli)],
+         "experimentalFreshConversationPerTurn": True}))
     bridge.seed_codex_home()
     state = bridge.load_state()
     bridge.snapshot_baseline(state)
@@ -1398,7 +1399,8 @@ def test_setup_after_a_reset_restarts_the_launcher_before_configuring_again(host
         if verb.startswith("setup"):
             order.append("upstream-setup")
             (bridge.paths.core_home / "config.json").write_text(json.dumps(
-                {"mode": "browser-only", "solAvailable": True}))
+                {"mode": "browser-only", "solAvailable": True,
+                 "experimentalFreshConversationPerTurn": True}))
             runner.upstream["route status"] = (0, json.dumps({"installed": True,
                                                                "active": True}), "")
             runner.port_busy = True
@@ -2007,3 +2009,17 @@ def test_setup_never_reports_ready_when_route_stayed_inactive(host):
         bridge.setup(login_wait=0)
     assert error.value.code == "route-inactive"
     assert bridge.load_state()["updatePending"]["to"] == PINNED
+
+
+def test_fresh_conversation_per_turn_is_forced_once_with_a_backup(host):
+    bridge, runner, _ = host
+    configure(bridge, runner, route_active=True)
+    config = bridge.paths.core_home / "config.json"
+    config.write_text(json.dumps({"mode": "full", "experimentalFreshConversationPerTurn": False}))
+    original = config.read_bytes()
+
+    assert bridge.ensure_fresh_conversation_per_turn() is True
+    assert json.loads(config.read_text())["experimentalFreshConversationPerTurn"] is True
+    backups = list(bridge.paths.journal.glob("core-config-pre-fresh-*.json"))
+    assert [item.read_bytes() for item in backups] == [original]
+    assert bridge.ensure_fresh_conversation_per_turn() is False
