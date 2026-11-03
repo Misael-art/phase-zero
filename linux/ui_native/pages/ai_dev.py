@@ -41,6 +41,8 @@ _PRIMARY_IDS = {
     "ai.desktop.claude.update",
     "ai.desktop.updates.on",
     "ai.desktop.updates.off",
+    "ai.codex-update",
+    "ai.desktop.codex.apply",
     "ai.mcp-sync",
     "ai.compat",
     "ai.memory",
@@ -549,8 +551,25 @@ class AiDevPage(BasePage):
         layout.setSpacing(8)
         layout.addWidget(SectionHeader(
             "Apps desktop de IA",
-            "Claude Desktop oficial · repositório assinado da Anthropic",
+            "Claude Desktop e versões do Codex CLI e serviço local",
         ))
+        self.codex_state = QLabel("● Verificando versões do Codex…")
+        self.codex_state.setWordWrap(True)
+        self.codex_state.setAccessibleName("Versões do Codex CLI e serviço local")
+        layout.addWidget(self.codex_state)
+        self.codex_update = self._action_button(
+            "ai.codex-update", "Alinhar Codex", primary=False, direct=True)
+        if self.codex_update is not None:
+            self.codex_update.setToolTip("Atualiza CLI e serviço oficial. Pode interromper tarefas ativas ou na fila.")
+            layout.addWidget(self.codex_update)
+        self.codex_desktop_state = QLabel("● Verificando Codex Desktop…")
+        self.codex_desktop_state.setWordWrap(True)
+        self.codex_desktop_state.setAccessibleName("Atualização do Codex Desktop")
+        layout.addWidget(self.codex_desktop_state)
+        self.codex_desktop_update = self._action_button(
+            "ai.desktop.codex.apply", "Atualizar Codex Desktop", primary=False, direct=True)
+        if self.codex_desktop_update is not None:
+            layout.addWidget(self.codex_desktop_update)
         self.desktop_state = QLabel("● Verificando…")
         self.desktop_state.setObjectName("chatgptWebState")
         self.desktop_state.setAccessibleName("Estado do Claude Desktop")
@@ -594,6 +613,10 @@ class AiDevPage(BasePage):
     def _apply_desktop_buttons(self) -> None:
         running = self._operation_running
         installed = self._claude_installed
+        if self.codex_update is not None:
+            self.codex_update.setEnabled(not running and getattr(self, "_codex_mismatch", False))
+        if self.codex_desktop_update is not None:
+            self.codex_desktop_update.setEnabled(not running and getattr(self, "_codex_desktop_ready", False))
         if self.desktop_install is not None:
             self.desktop_install.setVisible(installed is False)
             self.desktop_install.setEnabled(not running and installed is False)
@@ -608,6 +631,42 @@ class AiDevPage(BasePage):
         self.desktop_auto.setToolTip(action.description if action else "")
 
     def _on_desktop_status(self, payload: dict) -> None:
+        codex = payload.get("codexCli") if isinstance(payload.get("codexCli"), dict) else {}
+        daemon = codex.get("daemon") if isinstance(codex.get("daemon"), dict) else {}
+        cli_version = codex.get("version") or "desconhecida"
+        server_version = daemon.get("appServerVersion") or daemon.get("managedCodexVersion") or "desconhecida"
+        self._codex_mismatch = codex.get("requiresAttention") is True
+        if self._codex_mismatch:
+            self._set_label_state(self.codex_state,
+                                  f"● Codex CLI {cli_version} · serviço {server_version} · versões divergentes",
+                                  "warning")
+        elif codex.get("coherent") is True:
+            self._set_label_state(self.codex_state,
+                                  f"● Codex CLI e serviço {cli_version} · alinhados", "success")
+        else:
+            self._set_label_state(self.codex_state,
+                                  f"● Codex CLI {cli_version} · serviço {server_version} · verificação pendente",
+                                  "warning")
+        codex_desktop = payload.get("codexDesktop") if isinstance(payload.get("codexDesktop"), dict) else {}
+        desktop_status = codex_desktop.get("updateStatus")
+        app_running = codex_desktop.get("appRunning") is True
+        self._codex_desktop_ready = desktop_status in {"ready_to_install", "failed"} and not app_running
+        desktop_version = codex_desktop.get("installedVersion") or "desconhecida"
+        candidate = codex_desktop.get("candidateVersion") or "desconhecida"
+        if desktop_status == "ready_to_install":
+            self._set_label_state(self.codex_desktop_state,
+                                  f"● Codex Desktop {desktop_version} · atualização {candidate} pronta"
+                                  + (" · feche o aplicativo para instalar" if app_running else ""), "warning")
+        elif desktop_status == "failed":
+            self._set_label_state(self.codex_desktop_state,
+                                  f"● Codex Desktop {desktop_version} · atualização {candidate} falhou"
+                                  + (" · feche o aplicativo para reparar e instalar" if app_running else ""), "warning")
+        elif desktop_status in {"up_to_date", "idle"}:
+            self._set_label_state(self.codex_desktop_state,
+                                  f"● Codex Desktop {desktop_version} · sem atualização preparada", "success")
+        else:
+            self._set_label_state(self.codex_desktop_state,
+                                  f"● Codex Desktop {desktop_version} · estado da atualização desconhecido", "warning")
         claude = payload.get("claudeDesktop") if isinstance(payload.get("claudeDesktop"), dict) else {}
         installed = claude.get("installed") if isinstance(claude.get("installed"), bool) else None
         self._claude_installed = installed
@@ -1210,6 +1269,11 @@ class AiDevPage(BasePage):
             return
         if action_id in (_DESKTOP_STATUS_ID, _CLAUDE_CHECK_ID):
             self._set_label_state(self.desktop_state, "● Não foi possível consultar o Claude Desktop. Tente de novo.", "warning")
+            if action_id == _DESKTOP_STATUS_ID:
+                self._codex_mismatch = False
+                self._codex_desktop_ready = False
+                self._set_label_state(self.codex_state, "● Não foi possível verificar as versões do Codex.", "warning")
+                self._set_label_state(self.codex_desktop_state, "● Não foi possível verificar o Codex Desktop.", "warning")
             self._apply_desktop_buttons()
             return
         if action_id == "private.bonsai.status":

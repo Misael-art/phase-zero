@@ -41,6 +41,7 @@ _APP_NAMES = {item.id: item.title for item in CAPABILITIES}
 # These names deliberately merge actions from several old categories. A
 # product has one stable ID even when its setup is offered in multiple places.
 _AI_APPS = {
+    "codex": "codex",
     "opencode": "opencode", "omo": "omo", "memory": "ai-memory",
     "ollama": "ollama", "webui": "open-webui", "usagebar": "usagebar",
     "codexbar": "codexbar", "bonsai": "claude-code", "claude": "claude-code", "9router": "9router",
@@ -49,6 +50,7 @@ _AI_APPS = {
 }
 _PROXIES = {"kimi": "kimiproxy", "qwen": "qwen-proxy", "deeps": "deepseek-proxy", "mimo": "mimo-proxy"}
 _EXTRA_APPS = {
+    "codex": "Codex CLI",
     "ai-memory": "ai-memory", "claude-code": "Claude Code", "claude-desktop": "Claude Desktop",
     "codex-desktop": "Codex Desktop", "codexbar": "CodexBar", "deepseek-proxy": "DeepSeek Proxy",
     "hermes": "Hermes", "kimiproxy": "Kimi Proxy", "mimo-proxy": "MiMo Proxy",

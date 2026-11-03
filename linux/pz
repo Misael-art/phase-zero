@@ -167,6 +167,8 @@ Usage:
   pz ai desktop update-claude  Update Claude Desktop when newer
   pz ai desktop install-qwen   Install official Qwen Code Desktop AppImage
   pz ai desktop repair-codex   Repair failed Codex Desktop local update
+  pz ai codex status           Compare Codex CLI and background service versions
+  pz ai codex update           Update both through official Codex installer; may interrupt tasks
   pz ai desktop repair         Repair desktop apps and automatic updates
   pz windows-vm apps status    Check WinBoat/WinPodX, Podman, KVM and FreeRDP
   pz windows-vm apps setup     Install and configure verified Windows frontends
@@ -287,7 +289,7 @@ Usage:
   pz self-update plan        Create verified user-update plan
   pz self-update apply       Apply confirmed source-bundle update
   pz updates check           Unified PhaseZero apps and host update inventory
-  pz updates apply <app>     Explicit verified user-app update
+  pz updates apply <app>     Explicit verified user-app update (codex updates CLI and daemon)
   pz updates install-service Enable daily check-only timer
   pz host status               Host hygiene: ledger, backups, footprint
   pz host backups migrate      Move legacy .bak files into the central store
@@ -713,6 +715,10 @@ cmd_ai() {
         codex-profiles)
             shift
             python3 "$PZ_ROOT/linux/ai/codex_profiles.py" "${@:-list}"
+            ;;
+        codex)
+            shift
+            bash "$PZ_ROOT/linux/ai/setup-codex.sh" "${@:-status}"
             ;;
         chatgpt-web)
             # Experimental and opt-in (PXA-010): kept out of help and catalog on purpose.

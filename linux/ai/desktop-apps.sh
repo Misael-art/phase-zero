@@ -50,6 +50,7 @@ Actions:
   codex-guard-watch      Watch and repair new Codex update workspaces
   repair-codex           Rebuild failed Codex Desktop candidate
   install-codex-ready    Install rebuilt Codex package through PolicyKit
+  apply-codex           Install a ready Codex Desktop update or repair a failed candidate
   check-codex            Run guarded Codex update check
   install-services       Enable Codex guard and periodic desktop updates
   update                 Update Claude and check Codex
@@ -712,6 +713,43 @@ install_codex_ready() {
     mv "${CODEX_REPAIR_STATE}.tmp" "$CODEX_REPAIR_STATE"
 }
 
+apply_codex() {
+    pz_check_deps codex-update-manager pacman jq
+    local state candidate installed diagnosis
+    state="$(codex-update-manager status)"
+    diagnosis="$(codex-update-manager diagnose --json 2>/dev/null || true)"
+    if jq -e '.app.running == true or .appRunning == true' <<< "$diagnosis" >/dev/null 2>&1; then
+        pz_error "close Codex Desktop before installing its prepared update"
+        return 1
+    fi
+    candidate="$(jq -r '.candidate_version // empty' <<< "$state")"
+    case "$(jq -r '.status // empty' <<< "$state")" in
+        ready_to_install)
+            [ -n "$candidate" ] || { pz_error "Codex Desktop candidate version missing"; return 1; }
+            codex-update-manager install-ready
+            ;;
+        failed)
+            repair_codex
+            candidate="$(jq -r '.version' "$CODEX_REPAIR_STATE")"
+            install_codex_ready
+            ;;
+        up_to_date)
+            pz_info "Codex Desktop already current"
+            return 0
+            ;;
+        *)
+            pz_error "Codex Desktop has no prepared update; run check-codex and inspect status"
+            return 1
+            ;;
+    esac
+    installed="$(pacman -Q codex-desktop | awk '{print $2}')"
+    [[ "$installed" == "$candidate"-* ]] || {
+        pz_error "Codex Desktop install not confirmed: candidate $candidate, installed $installed"
+        return 1
+    }
+    pz_info "Codex Desktop installed: $installed"
+}
+
 check_codex() {
     command -v codex-update-manager >/dev/null 2>&1 || {
         pz_warn "codex-update-manager not installed"
@@ -780,8 +818,15 @@ EOF
 
 desktop_status() {
     local claude_version="" codex_status="" codex_installed="" codex_candidate=""
-    local repaired_package="" repaired_version="" repaired_ready=false repaired_state_ready=false
+    local repaired_package="" repaired_version="" repaired_ready=false repaired_state_ready=false codex_cli='{"status":"unavailable"}'
+    local codex_diagnosis='{}' codex_app_running=null
     claude_version="$(installed_claude_version || true)"
+    codex_cli="$(bash "$PZ_ROOT/linux/ai/setup-codex.sh" status 2>/dev/null || true)"
+    jq -e 'type == "object" and .tool == "codex"' <<< "$codex_cli" >/dev/null 2>&1 || codex_cli='{"status":"unavailable"}'
+    if command -v codex-update-manager >/dev/null 2>&1; then
+        codex_diagnosis="$(codex-update-manager diagnose --json 2>/dev/null || true)"
+        codex_app_running="$(jq -r 'if .app.running == true or .appRunning == true then true elif .app.running == false or .appRunning == false then false else null end' <<< "$codex_diagnosis" 2>/dev/null || echo null)"
+    fi
     if [ -f "$CODEX_STATE" ]; then
         codex_status="$(jq -r '.status // "unknown"' "$CODEX_STATE" 2>/dev/null || true)"
         codex_installed="$(jq -r '.installed_version // empty' "$CODEX_STATE" 2>/dev/null || true)"
@@ -825,6 +870,8 @@ desktop_status() {
         --argjson claudeDesktopEntryOk "$([ -f "$APPLICATIONS_DIR/claude-desktop.desktop" ] && echo true || echo false)" \
         --argjson qwenInstalled "$([ -x "$QWEN_ROOT/current/Qwen-Code-Desktop-x86_64.AppImage" ] && echo true || echo false)" \
         --argjson repairedReady "$repaired_ready" \
+        --argjson codexCli "$codex_cli" \
+        --argjson codexAppRunning "$codex_app_running" \
         --argjson guardActive "$(bool_json systemctl --user is-active phasezero-codex-desktop-guard.service)" \
         --argjson guardEnabled "$(bool_json systemctl --user is-enabled phasezero-codex-desktop-guard.service)" \
         --argjson timerActive "$(bool_json systemctl --user is-active phasezero-ai-desktop-update.timer)" \
@@ -861,8 +908,10 @@ desktop_status() {
             repairedPackage: $repairedPackage,
             repairedPackageReady: $repairedReady,
             guardActive: $guardActive,
-            guardEnabled: $guardEnabled
+            guardEnabled: $guardEnabled,
+            appRunning: $codexAppRunning
           },
+          codexCli: $codexCli,
           updater: {
             timerActive: $timerActive,
             timerEnabled: $timerEnabled
@@ -931,6 +980,7 @@ main() {
         codex-guard-watch) codex_guard_watch ;;
         repair-codex) repair_codex ;;
         install-codex-ready) install_codex_ready ;;
+        apply-codex) apply_codex ;;
         check-codex) check_codex ;;
         install-services) install_services ;;
         disable-updates)

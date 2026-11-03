@@ -990,6 +990,24 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
             args, "system-search", badge="JSON", visibility="advanced",
             status_args=args,
         ))
+    actions.append(_a(
+        "ai.codex-status", "IA & Dev", "Status Codex CLI e serviço",
+        "Compara versões instaladas e em execução, sem alterar tarefas.",
+        ("ai", "codex", "status"), "system-search", badge="JSON",
+        status_args=("ai", "codex", "status"),
+    ))
+    actions.append(_a(
+        "ai.codex-update", "IA & Dev", "Alinhar Codex CLI e serviço",
+        "Atualiza Codex e seu serviço oficial. Reinício pode interromper tarefas ativas ou na fila.",
+        ("updates", "apply", "codex"), "software-update-available",
+        mutable=True, preview=("ai", "desktop", "status"),
+    ))
+    actions.append(_a(
+        "ai.desktop.codex.apply", "IA & Dev", "Atualizar Codex Desktop",
+        "Instala pacote já preparado pelo atualizador do Codex Desktop; repara candidato falho antes de instalar.",
+        ("updates", "apply", "codex-desktop"), "software-update-available",
+        mutable=True, preview=("ai", "desktop", "status"),
+    ))
     actions.append(
         _a(
             "ai.proxies-credentials-mimo",
