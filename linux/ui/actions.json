@@ -4075,6 +4075,41 @@
       "input_label": ""
     },
     {
+      "name": "ai.codex-status",
+      "label": "Status Codex CLI e serviço",
+      "command": "linux/pz ai codex status",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.codex-update",
+      "label": "Alinhar Codex CLI e serviço",
+      "command": "linux/pz updates apply codex",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai desktop status"
+    },
+    {
+      "name": "ai.desktop.codex.apply",
+      "label": "Atualizar Codex Desktop",
+      "command": "linux/pz updates apply codex-desktop",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai desktop status"
+    },
+    {
       "name": "ai.proxies-credentials-mimo",
       "label": "Salvar chave MiMo bloqueado",
       "command": "linux/pz ai proxies set-credentials mimo-ai-proxy",
