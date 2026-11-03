@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "source": "linux.ui_native.catalog.build_catalog",
   "platform": "linux",
-  "actionCount": 649,
+  "actionCount": 652,
   "dynamicActionPatterns": [
     "hub.capabilities.status",
     "hub.capability.install.<capabilityId>",
@@ -410,6 +410,9 @@
     {"actionId":"emulation.nsz","targetId":"platform.emulation","targetKind":"platform","destination":"Plataformas","role":"shortcut","context":"Emulação","instanceScope":"host","installationAuthorityId":null},
     {"actionId":"emulation.ps3-game","targetId":"platform.emulation","targetKind":"platform","destination":"Plataformas","role":"shortcut","context":"Emulação","instanceScope":"host","installationAuthorityId":null},
     {"actionId":"boot.status","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
+    {"actionId":"boot.kde-login.status","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
+    {"actionId":"boot.kde-login.enable","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
+    {"actionId":"boot.kde-login.disable","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
     {"actionId":"boot.selector","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
     {"actionId":"boot.menu","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
     {"actionId":"boot.safe-menu","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
