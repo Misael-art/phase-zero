@@ -64,7 +64,9 @@ sed -i -E \
     "$ROOT/packaging/linux/aur/.SRCINFO"
 sed -i -E "s/^([[:space:]]*tag:[[:space:]]*)v.*/\\1v$NEW/" "$ROOT/packaging/linux/flatpak/io.phasezero.ControlCenter.yml"
 if ! grep -Fq "<release version=\"$NEW\"" "$ROOT/packaging/linux/io.phasezero.ControlCenter.metainfo.xml"; then
-    sed -i "/<releases>/a\\    <release version=\"$NEW\" date=\"$RELEASE_DATE\"/>" \
+    release_type=""
+    [ "$CHANNEL" = "stable" ] || release_type=' type="development"'
+    sed -i "/<releases>/a\\    <release version=\"$NEW\" date=\"$RELEASE_DATE\"$release_type/>" \
         "$ROOT/packaging/linux/io.phasezero.ControlCenter.metainfo.xml"
 fi
 
