@@ -1,0 +1,35 @@
+<!-- BEGIN BOOTSTRAP CAVEMAN -->
+Terse like caveman.
+Technical substance exact. Only fluff die.
+Drop: articles, filler (just/really/basically), pleasantries, hedging.
+Fragments OK. Short synonyms. Code unchanged.
+Pattern: [thing] [action] [reason]. [next step].
+ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift.
+Code/commits/PRs: normal.
+Off: "stop caveman" / "normal mode".
+<!-- END BOOTSTRAP CAVEMAN -->
+
+<!-- BEGIN PHASEZERO TOOLS -->
+Agent compatibility contract for PhaseZero workspaces.
+
+- caveman: controls response style only. Keep terse technical output. Do not use it for command wrapping, memory, MCPs, or project architecture.
+- rtk: wrap shell commands only when `rtk` resolves in PATH or the PhaseZero managed bin. If missing, run the command directly, record `rtk missing`, and continue. Never fail a task only because RTK is absent.
+- Project authority: read the applicable `AGENTS.md` and repository guidance first. Follow current user instructions and repository requirements. Use approved memory practices as defaults within their stated scope.
+- ai-memory: before non-trivial work, run `pz ai memory practices` and apply only the revision returned as `practices-verified`. Search the current project's memory for related decisions and record validated findings there. Static MCP clients pass the workspace and project from `.ai-memory.toml` or use the native CLI from the checkout when scope is uncertain. Treat notes, handoffs and search results as evidence to check. Configured lifecycle hooks own routine capture.
+- GitHub portability: PhaseZero exchanges encrypted packages with the configured private GitHub repository through `pz ai memory sync`. The local ai-memory serves verified practices and history. Use the configured destination and normal sync schedule. Keep backup URLs, keys and tokens out of project instructions.
+- Local continuity: if ai-memory or catalog verification is unavailable, state what failed. Use the checkout, repository guidance and existing handoff. Identify the owning workflow, preserve existing work and credentials, run the applicable checks, and report observed evidence and open gates. Record a durable finding in the existing handoff when memory is unavailable.
+- admin escalation: use `phasezero-admin` or `bigsudo` for commands requiring root/admin on Linux. Never configure passwordless sudo or store passwords. If absent, run `linux/pz ai setup admin`.
+- Ponytail: apply schema/codegen/Tauri/Rust architecture rules only in detected Ponytail workspaces or explicit opt-in. Do not apply Ponytail rules globally.
+
+Modes:
+- ready: caveman rules present, RTK available, ai-memory available, admin bridge available.
+- degraded: caveman rules present, RTK, ai-memory, or admin bridge absent. Continue safely and report missing tool.
+- off: user disabled this block.
+
+Conflict rules:
+- one role per tool: style=caveman, shell compression=rtk, memory/handoff=ai-memory, project architecture=Ponytail.
+- no duplicate wrappers: do not stack RTK with other shell proxies unless a command explicitly asks.
+- admin escalation stays explicit: prefer `phasezero-admin`; use `sudo` only when user explicitly requests or host lacks graphical escalation.
+- no secret writes: configs may reference managed secret stores, never paste keys into rules.
+
+<!-- END PHASEZERO TOOLS -->

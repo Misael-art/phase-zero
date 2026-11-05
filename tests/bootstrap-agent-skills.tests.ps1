@@ -138,6 +138,14 @@ Keep this custom line.
         $content | Should Match 'rtk'
         $content | Should Match 'ai-memory'
         $content | Should Match 'caveman'
+        foreach ($relative in @('AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'QWEN.md',
+                '.github\copilot-instructions.md', '.cursor\rules\phasezero-tools.mdc',
+                '.windsurf\rules\phasezero-tools.md', '.clinerules\phasezero-tools.md', '.roo\rules\phasezero-tools.md')) {
+            $rules = Get-Content -LiteralPath (Join-Path $workspaceRoot $relative) -Raw
+            $rules | Should Match 'configured private GitHub repository'
+            $rules | Should Match 'Local continuity'
+            ([regex]::Matches($rules, 'BEGIN PHASEZERO TOOLS').Count) | Should Be 1
+        }
         (Test-Path (Join-Path $workspaceRoot '.windsurf\rules\phasezero-tools.md')) | Should Be $true
         (Test-Path (Join-Path $workspaceRoot '.clinerules\phasezero-tools.md')) | Should Be $true
         (Test-Path (Join-Path $workspaceRoot '.github\copilot-instructions.md')) | Should Be $true

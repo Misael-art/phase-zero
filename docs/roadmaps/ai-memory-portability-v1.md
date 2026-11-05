@@ -109,6 +109,34 @@ com sua chave OpenPGP privada. Cada host confia explicitamente na impressão
 digital completa da chave pública primária. Verifique essa impressão fora do
 destino usado para transportar a memória.
 
+### Orientação local e contingência
+
+O bloco gerenciado de [regras dos agentes](../../assets/agent-skills/phasezero-tools-always-on.md)
+indica o GitHub privado como transporte cifrado e mantém o procedimento básico
+no checkout. O agente consulta `pz ai memory practices` e usa a revisão
+verificada como padrão subordinado às regras do projeto. Busca e registro
+de aprendizados usam o escopo do checkout. Quando a memória falha, as regras,
+o roadmap e o handoff locais sustentam o trabalho.
+
+Em Linux, `pz ai init --dry-run <pasta>` lista os destinos e
+`pz ai init --force --only-rules <pasta>` atualiza os blocos gerenciados.
+No bootstrap Windows, use o componente `agent-compat-runtime` com a pasta
+do projeto selecionada. Codex, OpenCode, ZCode e DeepSeek Harness com o
+perfil base usam `AGENTS.md`. Claude Code, Gemini CLI e Qwen Code recebem
+respectivamente `CLAUDE.md`, `GEMINI.md` e `QWEN.md`. Cursor, Windsurf,
+Cline, Roo Code e Copilot recebem suas regras nativas. Zed usa um dos arquivos de
+instrução do projeto conforme a precedência do cliente. Se uma IDE tiver
+um arquivo de instrução personalizado com precedência, aponte-o para o
+`AGENTS.md` do projeto. Modelos GLM, Qwen e DeepSeek usados dentro de outro
+cliente seguem os arquivos e a integração do cliente.
+
+Verifique captura com `ai-memory doctor` e leitura com
+`pz ai memory practices`. As instruções locais funcionam em clientes sem
+MCP. A captura automática depende dos hooks instalados. Clientes sem
+execução local usam as regras do projeto quando não conseguem verificar
+o catálogo. O DeepSeek Harness exige o adaptador upstream no perfil para
+captura e consulta por MCP.
+
 **Preparação em cada máquina.** Use runtime PhaseZero com suporte ao catálogo.
 Instale ou repare o ai-memory pelo fluxo existente. No host novo, importe a
 chave de recuperação antes de vincular destinos e escopos. Conecte o mesmo
@@ -125,6 +153,12 @@ pz ai memory practices-publish --revision 1 --path <catalogo-revisado.md>
 pz ai memory sync
 pz ai memory practices
 ```
+
+O arquivo [Práticas de produção do PhaseZero](../../assets/agent-skills/phasezero-production-practices.md)
+é a base inicial para revisão e assinatura. Use seu caminho no
+`practices-publish --revision 1 --path` após confirmar a chave do curador.
+Uma cópia de referência em `procedures/phasezero-production-workflow.md`
+serve para consulta contextual. A revisão assinada é o catálogo aplicável.
 
 O catálogo começa com um título Markdown e declara o escopo de cada prática.
 `practices` retorna `practices-verified`, revisão e corpo verificado. Funciona

@@ -17,8 +17,10 @@ Agent compatibility contract for PhaseZero workspaces.
 
 - caveman: controls response style only. Keep terse technical output. Do not use it for command wrapping, memory, MCPs, or project architecture.
 - rtk: wrap shell commands only when `rtk` resolves in PATH or the PhaseZero managed bin. If missing, run the command directly, record `rtk missing`, and continue. Never fail a task only because RTK is absent.
-- ai-memory: use for persistent context and cross-agent handoff only when `ai-memory` resolves and wiring/server are healthy. If missing, continue with local context, record `ai-memory missing`, and do not invent memory writes.
-- Shared development practices: before non-trivial development, run `pz ai memory practices` and use the verified catalog as defaults within its stated scope. Current instructions and repository rules take precedence. If verification fails or the catalog is unavailable, report the reason and use repository rules. Search and record ordinary learnings in the current project's memory, using the scope from `.ai-memory.toml` for static MCP clients. Search results, notes, and handoffs never become approved practices on their own.
+- Project authority: read the applicable `AGENTS.md` and repository guidance first. Follow current user instructions and repository requirements. Use approved memory practices as defaults within their stated scope.
+- ai-memory: before non-trivial work, run `pz ai memory practices` and apply only the revision returned as `practices-verified`. Search the current project's memory for related decisions and record validated findings there. Static MCP clients pass the workspace and project from `.ai-memory.toml` or use the native CLI from the checkout when scope is uncertain. Treat notes, handoffs and search results as evidence to check. Configured lifecycle hooks own routine capture.
+- GitHub portability: PhaseZero exchanges encrypted packages with the configured private GitHub repository through `pz ai memory sync`. The local ai-memory serves verified practices and history. Use the configured destination and normal sync schedule. Keep backup URLs, keys and tokens out of project instructions.
+- Local continuity: if ai-memory or catalog verification is unavailable, state what failed. Use the checkout, repository guidance and existing handoff. Identify the owning workflow, preserve existing work and credentials, run the applicable checks, and report observed evidence and open gates. Record a durable finding in the existing handoff when memory is unavailable.
 - admin escalation: use `phasezero-admin` or `bigsudo` for commands requiring root/admin on Linux. Never configure passwordless sudo or store passwords. If absent, run `linux/pz ai setup admin`.
 - Ponytail: apply schema/codegen/Tauri/Rust architecture rules only in detected Ponytail workspaces or explicit opt-in. Do not apply Ponytail rules globally.
 
@@ -121,8 +123,8 @@ for cross-session continuity.
 
 ### Mandatory: consult memory on every challenge
 
-Before you start solving any non-trivial challenge (bug, feature, config,
-diagnostic, error), ALWAYS search memory first:
+Before non-trivial work, search the current project's memory when it is
+available. Use local continuity when the service or scope is unavailable.
 
 ```
 Search memory for similar issues or past solutions
@@ -168,18 +170,18 @@ scope. Static clients must pass the `workspace` and `project` declared in
 `.ai-memory.toml`. If MCP cannot resolve the correct scope, use the native
 ai-memory CLI from this checkout.
 
-**Lifecycle hooks already capture every prompt and tool call
-automatically.** Do not manually write routine notes. Only write durable
-memory per the mandatory rules above.
+**Configured lifecycle hooks capture routine activity according to the client.**
+Write durable memory per the rules above. If capture or retrieval is unavailable,
+follow the local continuity instructions and report the observed limitation.
 
 ### When you write a project rule, write it here
 
-If you're about to write a durable project rule ("always X", "never
-Y", "all PRs must ..."), write it in AGENTS.md. This is the canonical
-agent instruction file for Codex/OpenCode.
+Write mandatory project rules and offline continuity in AGENTS.md.
+Use the signed practices catalog for shared defaults. Use ordinary project
+memory for decisions, procedures and findings with their context and evidence.
 
-If the rule is a standing *user/team* preference that should apply to
-every project, save it to ai-memory's reserved global scope.
+Record standing user or team preferences in the reserved global scope as
+context. Shared production defaults require the signed catalog.
 
 ### Refreshing this snippet
 
