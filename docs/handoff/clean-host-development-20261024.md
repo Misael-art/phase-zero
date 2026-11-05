@@ -502,3 +502,29 @@ ID/tag/estado atual e obter autorização específica para editar a release já
 publicada. Não mover tags históricas. Próximo passo: conferir CI/Gitleaks do
 SHA final e, com ambientes/contas autorizados, executar gates físicos acima;
 somente então preparar manifesto de aceite de stable.
+
+## Práticas de desenvolvimento compartilhadas — 2026-11-05
+
+Raiz canônica PhaseZero, branch `codex/clean-host-dev-bootstrap`.
+Base `69edf4a6`, implementação `bcf53216`. O gerenciador existente de
+ai-memory distribui um catálogo OpenPGP assinado em escopo próprio. Só
+`pz ai memory practices` entrega o corpo verificado ao agente. O bootstrap de
+projetos instala o apontador e a precedência. A marcação do próprio PhaseZero
+fixa `default/misael-art-phase-zero` para chamadas MCP estáticas.
+
+Validação neste Linux: 39 pytest de memória, incluindo os dois servidores
+ai-memory 3.3.1 e companion 0.1.0, e 3 Pester do contrato de portabilidade.
+Passaram smoke de `pz ai init`, compatibilidade de agentes, sintaxe Bash,
+ShellCheck com as exclusões de CI e revisão do diff. A prova nativa confirmou
+captura de eventos sintéticos Codex e Claude Code, publicação A→B, consulta
+offline, aprendizado B→A, atualização, rejeição de versão antiga e adulteração,
+e continuidade do conhecimento regular após assinatura recusada. A fixture
+usa cofre em memória, volume de diretório e chaveiros GPG isolados.
+
+Escopo de aceite seguinte: roteiro em
+[portabilidade do ai-memory](../roadmaps/ai-memory-portability-v1.md#práticas-aprovadas-entre-hosts).
+Dois hosts físicos, Windows nativo, destino GitHub com o catálogo novo e
+sessão completa de cada cliente continuam pendentes. O catálogo real
+depende da escolha da chave pública do curador e do primeiro Markdown
+revisado. O ramo remoto também contém o hotfix anterior `69edf4a6`, ausente
+de `main`. Separar a revisão do catálogo do hotfix antes do PR para main.
