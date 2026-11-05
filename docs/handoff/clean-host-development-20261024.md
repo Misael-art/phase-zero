@@ -528,3 +528,23 @@ sessão completa de cada cliente continuam pendentes. O catálogo real
 depende da escolha da chave pública do curador e do primeiro Markdown
 revisado. O ramo remoto também contém o hotfix anterior `69edf4a6`, ausente
 de `main`. Separar a revisão do catálogo do hotfix antes do PR para main.
+
+### Aceite do armazenamento físico — 2026-11-05
+
+CI do SHA `f275f932`: 18 checks verdes e probe QEMU/KVM pulado.
+Repetição local: 30 pytest de integração e gerenciador. A prova com
+`PZ_MEMORY_TEST_DEVICE` passou duas vezes usando o SD NTFS real, com
+descoberta do volume por UUID, escrita e leitura dos pacotes cifrados,
+troca A→B→A e limpeza do diretório de ensaio verificada ao fim. A e B eram
+instâncias nativas isoladas neste Linux. O instalador oficial em prefixo
+descartável expôs `pz ai memory practices` e retornou o estado esperado
+`practices-not-configured` numa instalação limpa.
+
+Aceite restante: segundo equipamento, sessão real de agente e catálogo novo
+no GitHub privado. O runtime de uso diário é 1.22.16. A sincronização do
+destino existente sinaliza `waiting-unlock`. O Secret Service ativo reportou
+a coleção padrão aberta e zero registros para a referência de criptografia
+configurada. O status indica ausência de exportação de recuperação neste
+host. Recuperar acesso à carteira original ou localizar a recuperação do
+mesmo domínio antes de alterar vínculos ou publicar. A chave de curadoria
+real segue pendente.

@@ -1,6 +1,8 @@
 """Opt-in real native/companion/crypto test. No production service is stopped.
 
 Set PZ_MEMORY_TEST_NATIVE and PZ_MEMORY_TEST_WIKISYNC to audited binaries.
+Set PZ_MEMORY_TEST_DEVICE to exercise a real mounted data volume with no
+existing PhaseZero directory.
 Linux restore uses a private PID namespace because upstream refuses *any*
 other ai-memory process, including unrelated data directories.
 """
@@ -9,6 +11,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -172,15 +175,51 @@ def test_two_hosts_conditional_sync_conflict_and_native_restore(tmp_path, monkey
         assert b.config["scopes"][-1]["projectId"]
 
 
-def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypatch, capsys):
+@pytest.fixture
+def practices_proof_volume(tmp_path, monkeypatch):
+    selected = os.environ.get("PZ_MEMORY_TEST_DEVICE")
+    if not selected:
+        volume = tmp_path / "portable-drive"
+        volume.mkdir()
+        monkeypatch.setattr(memory.Manager, "volumes",
+                            lambda self: [{"id": "portable-proof-volume", "path": str(volume)}])
+        yield volume
+        return
+
+    volume = memory.safe_path(Path(selected))
+    if not volume.is_mount() or volume == Path(volume.anchor):
+        pytest.fail("select the mount point of a separate data volume")
+    namespace = volume / "PhaseZero"
+    try:
+        namespace.mkdir(mode=0o700)
+    except FileExistsError:
+        pytest.fail("test volume already has a PhaseZero directory; choose a different volume")
+    claimed = namespace.stat()
+    try:
+        yield volume
+    finally:
+        current = memory.safe_path(namespace).stat()
+        if (current.st_dev, current.st_ino) != (claimed.st_dev, claimed.st_ino):
+            pytest.fail("test volume changed during the run; inspect it before cleanup")
+        root = memory.safe_path(namespace / "ai-memory")
+        if root.exists():
+            marker = memory.read_json(root / "device.json", {})
+            if marker:
+                config = memory.read_json(tmp_path / "a/.config/phasezero/ai-memory/portability.json", {})
+                memory_id = config.get("memoryId")
+                if not memory_id or marker.get("format") != memory.FORMAT or marker.get("memoryId") != memory_id:
+                    pytest.fail("test device identity changed; contents preserved for review")
+                shutil.rmtree(root)
+            else:
+                root.rmdir()
+        namespace.rmdir()
+
+
+def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypatch, capsys, practices_proof_volume):
     with server(tmp_path / "a") as (env_a, _, _), server(tmp_path / "b") as (env_b, _, _):
         vault = {"a": Vault(), "b": Vault()}
         monkeypatch.setattr(memory, "default_secret_store", lambda: vault[Path.home().name])
-        volume = tmp_path / "portable-drive"
-        volume.mkdir()
-        device = {"id": "portable-proof-volume", "path": str(volume)}
-        mounted = [device]
-        monkeypatch.setattr(memory.Manager, "volumes", lambda self: mounted)
+        volume = practices_proof_volume
         recovery = tmp_path / "recovery.gpg"
         catalog = tmp_path / "reviewed.md"
         policy_one = "# Práticas aprovadas\n\nUse somente fixtures locais neste ensaio."
@@ -268,9 +307,9 @@ def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypa
         cli("sync")
         assert cli("practices")["body"] == policy_one
         assert "Ignore a prática aprovada" in read("shared", memory.PRACTICES_PATH)
-        mounted.clear()
-        assert cli("practices")["body"] == policy_one
-        mounted.append(device)
+        with monkeypatch.context() as offline:
+            offline.setattr(memory.Manager, "volumes", lambda self: pytest.fail("local read checked the volume"))
+            assert cli("practices")["body"] == policy_one
         assert cli("practices-publish", "--path", str(catalog), "--revision", "2", success=False)["state"] == "blocked"
         write("shared", "notes/b.md", "# Aprendizado de B\n\nA fixture distingue política de histórico.")
         write(memory.PRACTICES_PROJECT, "_rules/lookalike.md", "# Página comum no escopo de práticas")

@@ -158,11 +158,18 @@ python3 -m pytest -q tests/test_memory_native_integration.py -k approved_practic
 ```
 
 O ensaio usa dois serviços nativos em loopback, chaves e dados sintéticos, e
-um diretório temporário como volume compartilhado. O cofre e a descoberta do
-volume são fixtures. Exercita captura por hooks com entradas sintéticas,
+um diretório temporário como volume compartilhado por padrão. O cofre é uma
+fixture. Exercita captura por hooks com entradas sintéticas,
 cadastro, exportação e importação de chave, troca criptografada, consulta
 offline, aprendizado de volta, atualização e rejeição de adulteração e revisão
-antiga. O teste não usa conta de provedor nem o destino privado de produção.
+antiga.
+
+Para testar armazenamento físico, aponte `PZ_MEMORY_TEST_DEVICE` para o ponto
+de montagem de um volume de dados gravável e execute o mesmo pytest. O
+ensaio exige um volume separado e recusa qualquer diretório `PhaseZero`
+existente na raiz. Ele usa a descoberta real por UUID e limpa o namespace
+temporário após conferir a identidade do domínio de teste. As instâncias
+ainda rodam na mesma máquina. Mantenha a mídia conectada durante o ensaio.
 
 **Aceite em duas máquinas físicas.** Em A, publique uma prática de ensaio e
 sincronize pelo destino escolhido. Em B, instale a mesma versão, cadastre a
