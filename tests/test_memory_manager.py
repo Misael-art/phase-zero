@@ -26,9 +26,9 @@ def manager(tmp_path, monkeypatch):
     home.mkdir()
     for name, path in {"HOME": home, "XDG_CONFIG_HOME": home / ".config",
                        "XDG_STATE_HOME": home / ".local/state", "AI_MEMORY_DATA_DIR": home / "memory",
-                       "GNUPGHOME": home / ".gnupg"}.items():
+                       "GNUPGHOME": home / "proof-keyring"}.items():
         monkeypatch.setenv(name, str(path))
-    (home / ".gnupg").mkdir(mode=0o700)
+    (home / "proof-keyring").mkdir(mode=0o700)
     monkeypatch.setenv("AI_MEMORY_BIN", "/bin/echo")
     result = memory.Manager(vault=Vault())
     result.initialize()

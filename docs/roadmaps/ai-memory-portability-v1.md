@@ -99,6 +99,82 @@ limitada a seis horas. Sincronização manual ignora espera. Backups continuam
 independentes de conflitos de conhecimento. Arquivos de conhecimento sem mudança
 não geram novos objetos nem expulsam versões úteis na mídia.
 
+## Práticas aprovadas entre hosts
+
+Cada host consulta a cópia local de `default/phasezero-development-practices`,
+no caminho `_rules/development-practices.md`. O catálogo usa o mesmo domínio de
+criptografia e os mesmos destinos da sincronização. A chave de assinatura do
+curador é independente da chave de recuperação. O curador assina o Markdown
+com sua chave OpenPGP privada. Cada host confia explicitamente na impressão
+digital completa da chave pública primária. Verifique essa impressão fora do
+destino usado para transportar a memória.
+
+**Preparação em cada máquina.** Use runtime PhaseZero com suporte ao catálogo.
+Instale ou repare o ai-memory pelo fluxo existente. No host novo, importe a
+chave de recuperação antes de vincular destinos e escopos. Conecte o mesmo
+repositório GitHub privado ou cadastre a mesma mídia. Cadastre o projeto comum
+separadamente, para que possa enviar e receber aprendizados. Importe só a chave
+pública do curador nos hosts leitores.
+
+```bash
+gpg --import curador-publico.asc
+pz ai memory practices-configure --fingerprint <impressao-digital-primaria>
+# Apenas no host do curador, após revisão do Markdown:
+pz ai memory practices-publish --revision 1 --path <catalogo-revisado.md>
+# Em cada host:
+pz ai memory sync
+pz ai memory practices
+```
+
+O catálogo começa com um título Markdown e declara o escopo de cada prática.
+`practices` retorna `practices-verified`, revisão e corpo verificado. Funciona
+com o ai-memory local ativo mesmo sem o destino conectado. Práticas são
+padrões subordinados ao pedido atual e às regras do repositório. A regra de
+consulta vai no bloco gerenciado de `pz ai init`. Agentes que só usam MCP
+podem recuperar contexto histórico normalmente, mas precisam de um ponto de
+entrada que execute a verificação para consumir o catálogo aprovado.
+
+Para corrigir ou revogar uma prática, publique o catálogo completo com revisão
+maior. A última revisão aceita fica registrada localmente. Depois que o host
+aceita uma atualização, cópias anteriores não fazem a prática revogada voltar.
+Quem estiver offline continua com a revisão já recebida. Erro de verificação
+é explícito e remete às regras do repositório. Notas, handoffs e outras
+páginas não entram no catálogo. A rejeição de um catálogo não impede a troca
+de aprendizados nem o backup completo. Proteja a chave privada do curador e guarde o
+material de recuperação separadamente da mídia.
+
+### Prova reproduzível
+
+Com ai-memory e ai-memory-wikisync já instalados, rode do checkout oficial.
+
+```bash
+proof_tmp="${XDG_CACHE_HOME:-$HOME/.cache}/phasezero-dev/memory-proof"
+mkdir -p "$proof_tmp/tmp" "$proof_tmp/pytest"
+export TMPDIR="$proof_tmp/tmp"
+export PYTEST_DEBUG_TEMPROOT="$proof_tmp/pytest"
+export PZ_MEMORY_TEST_NATIVE="$(command -v ai-memory)"
+export PZ_MEMORY_TEST_WIKISYNC="$(command -v ai-memory-wikisync)"
+python3 -m pytest -q tests/test_memory_native_integration.py -k approved_practices
+```
+
+O ensaio usa dois serviços nativos em loopback, chaves e dados sintéticos, e
+um diretório temporário como volume compartilhado. O cofre e a descoberta do
+volume são fixtures. Exercita captura por hooks com entradas sintéticas,
+cadastro, exportação e importação de chave, troca criptografada, consulta
+offline, aprendizado de volta, atualização e rejeição de adulteração e revisão
+antiga. O teste não usa conta de provedor nem o destino privado de produção.
+
+**Aceite em duas máquinas físicas.** Em A, publique uma prática de ensaio e
+sincronize pelo destino escolhido. Em B, instale a mesma versão, cadastre a
+chave pública e sincronize. Em uma sessão no projeto, peça ao agente para
+informar a revisão, aplicar a prática numa tarefa de teste e registrar um
+aprendizado identificado. Confira a captura com `ai-memory doctor` e o
+aprendizado em A após sincronizar B e A. Publique uma revisão em A que
+substitua a prática e confira sua aplicação em B. Repita a leitura em B com
+o destino desconectado e registre versão, agente, destino e revisões
+observadas. Para clientes com integração parcial, declare qual parte ficou
+pendente. Use o destino privado já autorizado ou uma mídia de ensaio.
+
 ## Evidência em 2026-11-01
 
 Host: BigLinux/Manjaro, `misael-jupiter`. Instalação real 1.31.1 → 3.3.1,

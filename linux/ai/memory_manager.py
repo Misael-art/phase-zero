@@ -41,6 +41,11 @@ MAX_KNOWLEDGE = 8 * 1024 * 1024
 MAX_EXPANDED = 16 * 1024**3
 FAMILIES = ("concepts", "decisions", "gotchas", "procedures", "notes", "_rules")
 SAFE_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}\Z")
+PRACTICES_PROJECT = "phasezero-development-practices"
+PRACTICES_SCOPE = hashlib.sha256(b"phasezero:development-practices:v1").hexdigest()
+PRACTICES_PATH = "_rules/development-practices.md"
+PRACTICES_SIGNATURE = "\n\n<!-- phasezero-practices-signature\n"
+PRACTICES_REVISION = re.compile(r"<!-- phasezero-practices revision: ([1-9][0-9]{0,8}) -->\n")
 
 
 class MemoryError(RuntimeError):
@@ -501,6 +506,95 @@ class Manager:
         self.save()
         return {"ok": True, "state": "scope-enrolled", "scopeId": scope_id}
 
+    def configure_practices(self, fingerprint, repo_path):
+        fingerprint = (fingerprint or "").upper()
+        if not re.fullmatch(r"[0-9A-F]{40}|[0-9A-F]{64}", fingerprint):
+            raise MemoryError("practices-full-gpg-fingerprint-required")
+        if self.config.get("practicesSigner", fingerprint) != fingerprint:
+            raise MemoryError("practices-signer-change-requires-explicit-migration")
+        keys = run(["gpg", "--batch", "--with-colons", "--list-keys", fingerprint], allowed=(0, 2))
+        primary = next((line.split(":")[9] for line in keys.stdout.decode().splitlines()
+                        if line.startswith("fpr:")), None)
+        if keys.returncode or primary != fingerprint:
+            raise MemoryError("practices-trusted-primary-key-not-found")
+        scope = next((item for item in self.config.get("scopes", []) if item["id"] == PRACTICES_SCOPE), None)
+        if not scope:
+            self.add_scope(PRACTICES_PROJECT, "default", repo_path, "_rules",
+                           create_project=True, identity=PRACTICES_SCOPE)
+        elif (scope["workspace"], scope["project"], scope["families"]) != ("default", PRACTICES_PROJECT, ["_rules"]):
+            raise MemoryError("practices-scope-mismatch")
+        if self.config.get("practicesSigner") != fingerprint:
+            self.config["practicesSigner"] = fingerprint
+            self.save()
+        return {"ok": True, "state": "practices-configured", "fingerprint": fingerprint, "scopeId": PRACTICES_SCOPE}
+
+    def practices_signer(self):
+        if not self.config.get("practicesSigner") or not any(
+            item["id"] == PRACTICES_SCOPE for item in self.config.get("scopes", [])
+        ):
+            raise MemoryError("practices-not-configured")
+        return self.config["practicesSigner"]
+
+    def verify_practices(self, page):
+        payload, separator, signature = page.rstrip().rpartition(PRACTICES_SIGNATURE)
+        revision = PRACTICES_REVISION.match(payload)
+        if not separator or not revision or not signature.endswith("\n-->"):
+            raise MemoryError("practices-signature-required")
+        with self.scratch() as temp:
+            signature_path = temp / "signature.asc"
+            signature_path.write_bytes(signature.removesuffix("\n-->").encode() + b"\n")
+            verification = run(["gpg", "--batch", "--no-auto-key-retrieve", "--status-fd", "1",
+                                "--verify", signature_path, "-"], data=payload.encode(), allowed=(0, 1, 2))
+        valid_signers = [line.split()[-1] for line in verification.stdout.decode().splitlines()
+                         if line.startswith("[GNUPG:] VALIDSIG ")]
+        if verification.returncode or valid_signers != [self.practices_signer()]:
+            raise MemoryError("practices-signature-untrusted")
+        return int(revision[1]), payload[revision.end():], hashlib.sha256(payload.encode()).hexdigest()
+
+    def practices(self):
+        signer = self.practices_signer()
+        try:
+            response = self.native("read-page", "--json", "--workspace", "default",
+                                   "--project", PRACTICES_PROJECT, "--path", PRACTICES_PATH, timeout=10)
+        except MemoryError as error:
+            raise MemoryError("practices-page-unavailable") from error
+        page = json.loads(response.stdout)
+        revision, body, checksum = self.verify_practices(page["body"])
+        accepted_path = self.state / "practices-accepted.json"
+        accepted = read_json(accepted_path, {})
+        record = {"revision": revision, "sha256": checksum}
+        if revision < accepted.get("revision", 0) or (revision == accepted.get("revision") and accepted != record):
+            raise MemoryError("practices-revision-conflict-or-rollback")
+        if record != accepted:
+            write_json(accepted_path, record)
+        return {"ok": True, "state": "practices-verified", "revision": revision, "body": body,
+                "fingerprint": signer, "workspace": "default", "project": PRACTICES_PROJECT, "path": PRACTICES_PATH}
+
+    def publish_practices(self, path, revision):
+        signer = self.practices_signer()
+        if revision is None or not 1 <= revision <= 999999999:
+            raise MemoryError("practices-positive-revision-required")
+        accepted = read_json(self.state / "practices-accepted.json", {})
+        if revision <= accepted.get("revision", 0):
+            raise MemoryError("practices-revision-must-increase")
+        source = safe_path(Path(path))
+        if not source.is_file() or source.stat().st_size > 32 * 1024:
+            raise MemoryError("practices-markdown-file-up-to-32KiB-required")
+        body = source.read_text(encoding="utf-8").strip()
+        if not body.startswith("# ") or PRACTICES_SIGNATURE in body:
+            raise MemoryError("practices-markdown-heading-required")
+        payload = f"<!-- phasezero-practices revision: {revision} -->\n{body}"
+        signature = run(["gpg", "--batch", "--local-user", signer, "--armor", "--detach-sign",
+                         "--output", "-"], data=payload.encode()).stdout.decode().strip()
+        page = payload + PRACTICES_SIGNATURE + signature + "\n-->\n"
+        self.verify_practices(page)
+        self.native("write-page", "--workspace", "default", "--project", PRACTICES_PROJECT,
+                    "--path", PRACTICES_PATH, "--tier", "procedural", "--pinned", "--body", "-", data=page.encode())
+        result = self.practices()
+        if (result["revision"], result["body"]) != (revision, body):
+            raise MemoryError("practices-published-page-changed")
+        return {"ok": True, "state": "practices-published-locally", "revision": revision, "path": PRACTICES_PATH}
+
     def companion_run(self, scope, directory, *, check=False, export=False, prefer=None):
         env = self.client_environment()
         args = [self.companion, "export" if export else "sync", "--dest", directory,
@@ -520,6 +614,10 @@ class Manager:
         directory = self.state / "exports" / scope["id"]
         self.companion_run(scope, directory, export=True)
         files = sorted(p for p in directory.rglob("*.md") if ".ai-memory-wikisync" not in p.parts)
+        if scope["id"] == PRACTICES_SCOPE:
+            files = [p for p in files if p.relative_to(directory).as_posix() == PRACTICES_PATH]
+            for page in files:
+                self.verify_exported_practices(page)
         hashes = {p.relative_to(directory).as_posix(): digest(p) for p in files}
         provenance_path = self.state / "provenance" / (scope["id"] + ".json")
         provenance = read_json(provenance_path, {})
@@ -535,6 +633,12 @@ class Manager:
         blob, manifest = self.snapshot("knowledge", temp, scope=snapshot_scope, files=files)
         return blob, manifest, fingerprint
 
+    def verify_exported_practices(self, path):
+        content = path.read_text(encoding="utf-8")
+        if content.startswith("---\n"):
+            _, _, content = content[4:].partition("\n---\n")
+        return self.verify_practices(content.lstrip("\n"))
+
     def import_knowledge(self, blob, scope, peer, temp, *, prefer=None):
         root, manifest = self.verify(blob, temp)
         if manifest.get("kind") != "knowledge" or manifest.get("scopeId") != scope["id"]:
@@ -542,6 +646,18 @@ class Manager:
         peer_id = manifest.get("sourceHost", {}).get("id")
         if not isinstance(peer_id, str) or not SAFE_ID.fullmatch(peer_id) or peer_id != peer:
             raise MemoryError("invalid-peer-identity")
+        if scope["id"] == PRACTICES_SCOPE:
+            paths = [item["path"] for item in manifest["items"]]
+            if not paths:
+                return
+            if paths != ["payload/" + PRACTICES_PATH]:
+                raise MemoryError("practices-bundle-unexpected-page")
+            revision, _, checksum = self.verify_exported_practices(root / paths[0])
+            accepted = read_json(self.state / "practices-accepted.json", {})
+            if revision < accepted.get("revision", 0):
+                return  # A peer may still be using its last synchronized copy.
+            if revision == accepted.get("revision") and checksum != accepted["sha256"]:
+                raise MemoryError("practices-revision-conflict-or-rollback")
         directory = self.state / "imports" / scope["id"] / peer_id
         # Per-peer companion baselines stay local and never travel in bundles.
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -572,6 +688,16 @@ class Manager:
         for key, value in manifest.get("provenance", {}).items():
             provenance.setdefault(key, value)
         write_json(provenance_path, provenance)
+        if scope["id"] == PRACTICES_SCOPE:
+            self.practices()
+
+    def import_peer(self, blob, scope, peer, temp, practice_errors, *, prefer=None):
+        try:
+            self.import_knowledge(blob, scope, peer, temp, prefer=prefer)
+        except Exception as error:
+            if scope["id"] != PRACTICES_SCOPE:
+                raise
+            practice_errors.append(self.error_code(error))
 
     def resolve(self, conflict_id, prefer, *, plan=False):
         if not conflict_id or not re.fullmatch(r"[0-9a-f]{64}", conflict_id):
@@ -683,6 +809,7 @@ class Manager:
         if tree.get("truncated"):
             raise MemoryError("github-tree-budget-exceeded")
         by_id = {s["id"]: s for s in scopes}
+        practice_errors = []
         for item in tree["tree"]:
             match = re.fullmatch(r"knowledge/([a-zA-Z0-9-]+)/([0-9a-f]{64})\.gpg", item["path"])
             if not match or match[1] == self.config["hostId"] or match[2] not in by_id:
@@ -692,7 +819,9 @@ class Manager:
             blob = self.gh(base + "/git/blobs/" + item["sha"])
             downloaded = temp / (match[1] + "-" + match[2] + ".gpg")
             atomic(downloaded, base64.b64decode(blob["content"], validate=False))
-            self.import_knowledge(downloaded, by_id[match[2]], match[1], temp / uuid.uuid4().hex, prefer=prefer)
+            self.import_peer(downloaded, by_id[match[2]], match[1], temp / uuid.uuid4().hex,
+                             practice_errors, prefer=prefer)
+        return practice_errors
 
     def github_push(self, blob, scope, fingerprint):
         config = self.config["github"]
@@ -842,6 +971,7 @@ class Manager:
     def device_pull(self, device, scopes, temp, *, prefer=None):
         root = self.device_root(device)
         by_id = {s["id"]: s for s in scopes}
+        practice_errors = []
         for pointer in sorted((root / "knowledge").glob("*/*/latest.json")):
             peer, scope_id = pointer.parent.parent.name, pointer.parent.name
             if peer == self.config["hostId"] or scope_id not in by_id:
@@ -853,7 +983,9 @@ class Manager:
             blob = safe_path(pointer.parent / (checksum + ".gpg"))
             if blob.stat().st_size > MAX_KNOWLEDGE or digest(blob) != checksum:
                 raise MemoryError("device-knowledge-integrity-failed")
-            self.import_knowledge(blob, by_id[scope_id], peer, temp / uuid.uuid4().hex, prefer=prefer)
+            self.import_peer(blob, by_id[scope_id], peer, temp / uuid.uuid4().hex,
+                             practice_errors, prefer=prefer)
+        return practice_errors
 
     def sync(self, *, automatic=False, force_backup=False):
         if not self.config.get("keyRef"):
@@ -900,26 +1032,35 @@ class Manager:
             # Pull before exporting, but no destructive mirroring on either side.
             healthy = []
             knowledge_errors = {}
+            practice_errors = {}
             for target_id, device in available:
                 try:
                     if device:
-                        self.device_pull(device, scopes, temp)
+                        errors = self.device_pull(device, scopes, temp)
                     else:
-                        self.github_pull(scopes, temp)
+                        errors = self.github_pull(scopes, temp)
+                    if errors:
+                        practice_errors[target_id] = errors
                     healthy.append((target_id, device))
                 except Exception as error:
                     knowledge_errors[target_id] = self.error_code(error)
             exports = []
             if healthy:
-                try:
-                    for scope in scopes:
+                for scope in scopes:
+                    try:
                         scope_temp = temp / scope["id"]
                         scope_temp.mkdir()
                         exports.append((scope, *self.export_knowledge(scope, scope_temp)))
-                except Exception as error:
-                    for target_id, _device in healthy:
-                        knowledge_errors[target_id] = self.error_code(error)
-                    exports = []
+                    except Exception as error:
+                        reason = self.error_code(error)
+                        if scope["id"] == PRACTICES_SCOPE:
+                            for target_id, _device in healthy:
+                                practice_errors.setdefault(target_id, []).append(reason)
+                            continue
+                        for target_id, _device in healthy:
+                            knowledge_errors[target_id] = reason
+                        exports = []
+                        break
             backup_blob = None
             for target_id, device in available:
                 old = previous_targets.get(target_id, {})
@@ -956,6 +1097,10 @@ class Manager:
                         retryAfter=(datetime.now(timezone.utc) + timedelta(seconds=seconds + secrets.randbelow(30))).isoformat(timespec="seconds"))
                 elif target_result["ok"]:
                     target_result.update(failures=0, retryAfter=None)
+                if target_id in practice_errors:
+                    if target_result["ok"]:
+                        target_result["state"] = "practices-needs-attention"
+                    target_result.update(ok=False, practicesErrors=sorted(set(practice_errors[target_id])))
                 result["targets"].append(target_result)
         result["ok"] = result["ok"] and all(r["ok"] for r in result["targets"])
         result.setdefault("state", "current" if result["ok"] else "needs-attention")
@@ -977,6 +1122,12 @@ class Manager:
             "select-existing-project-and-workspace-from-memory-status": "Selecione projeto existente ou escolha criar projeto neste host.",
             "install-PhaseZero-runtime-before-enabling-automation": "Instale runtime PhaseZero antes de ligar automação.",
             "operation-busy": "Outra operação está em andamento. Aguarde e atualize estado.",
+            "practices-not-configured": "Cadastre a chave pública do curador com practices-configure.",
+            "practices-page-unavailable": "Confirme que o ai-memory local está ativo e sincronize um catálogo aprovado.",
+            "practices-trusted-primary-key-not-found": "Importe a chave pública do curador e confira a impressão digital completa.",
+            "practices-signature-required": "A página não contém um catálogo assinado. Use as regras do repositório.",
+            "practices-signature-untrusted": "A assinatura não corresponde à chave confiável ou o catálogo foi alterado.",
+            "practices-revision-conflict-or-rollback": "A revisão recebida diverge da versão já aceita. Confira com o curador.",
             "operation-failed-check-dependencies-or-system-vault": "Confira dependências e desbloqueio do cofre do sistema.",
         }
         if reason.startswith("command-failed:gh:"):
@@ -1092,7 +1243,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("status", "plan", "install", "repair", "initialize", "sync", "backup",
                         "scope-add", "scope-remove", "device-add", "device-remove", "github", "automatic", "watch",
-                        "verify", "restore-plan", "restore", "key-export", "key-import", "install-sync", "resolve", "conflict-plan", "settings", "github-remove", "github-login", "github-open-backups"))
+                        "verify", "restore-plan", "restore", "key-export", "key-import", "install-sync", "resolve", "conflict-plan", "settings", "github-remove", "github-login", "github-open-backups",
+                        "practices", "practices-configure", "practices-publish"))
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--automatic", action="store_true")
     parser.add_argument("--enabled", choices=("yes", "no"), default="yes")
@@ -1100,6 +1252,8 @@ def main(argv=None):
     parser.add_argument("--workspace", default="default")
     parser.add_argument("--repo-path")
     parser.add_argument("--identity")
+    parser.add_argument("--fingerprint")
+    parser.add_argument("--revision", type=int)
     parser.add_argument("--families", default=",".join(FAMILIES))
     parser.add_argument("--id")
     parser.add_argument("--path")
@@ -1152,6 +1306,14 @@ def main(argv=None):
                     if not args.project or not args.repo_path:
                         raise MemoryError("project-and-repository-path-required")
                     result = manager.add_scope(args.project, args.workspace, args.repo_path, args.families, create_project=args.create_project, identity=args.identity)
+                elif action == "practices-configure":
+                    result = manager.configure_practices(args.fingerprint, args.repo_path or Path.cwd())
+                elif action == "practices-publish":
+                    if not args.path:
+                        raise MemoryError("practices-markdown-path-required")
+                    result = manager.publish_practices(args.path, args.revision)
+                elif action == "practices":
+                    result = manager.practices()
                 elif action == "device-add":
                     if not args.path:
                         raise MemoryError("mounted-device-path-required")

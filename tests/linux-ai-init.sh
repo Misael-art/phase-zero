@@ -30,6 +30,9 @@ grep -q 'BEGIN BOOTSTRAP CAVEMAN' "$PROJECT/AGENTS.md"
 grep -q 'BEGIN PHASEZERO TOOLS' "$PROJECT/CLAUDE.md"
 grep -q 'BEGIN PHASEZERO TOOLS' "$PROJECT/GEMINI.md"
 grep -q 'BEGIN PHASEZERO TOOLS' "$PROJECT/.github/copilot-instructions.md"
+for instructions in "$PROJECT/AGENTS.md" "$PROJECT/CLAUDE.md"; do
+    grep -Fq 'pz ai memory practices' "$instructions"
+done
 [ -f "$PROJECT/.cursor/rules/caveman.mdc" ]
 [ -f "$PROJECT/.windsurf/rules/phasezero-tools.md" ]
 [ -f "$PROJECT/.clinerules/phasezero-tools.md" ]

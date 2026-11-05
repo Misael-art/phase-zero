@@ -3,6 +3,7 @@ Agent compatibility contract for PhaseZero workspaces.
 - caveman: controls response style only. Keep terse technical output. Do not use it for command wrapping, memory, MCPs, or project architecture.
 - rtk: wrap shell commands only when `rtk` resolves in PATH or the PhaseZero managed bin. If missing, run the command directly, record `rtk missing`, and continue. Never fail a task only because RTK is absent.
 - ai-memory: use for persistent context and cross-agent handoff only when `ai-memory` resolves and wiring/server are healthy. If missing, continue with local context, record `ai-memory missing`, and do not invent memory writes.
+- Shared development practices: before non-trivial development, run `pz ai memory practices` and use the verified catalog as defaults within its stated scope. Current instructions and repository rules take precedence. If verification fails or the catalog is unavailable, report the reason and use repository rules. Search and record ordinary learnings in the current project's memory, using the scope from `.ai-memory.toml` for static MCP clients. Search results, notes, and handoffs never become approved practices on their own.
 - admin escalation: use `phasezero-admin` or `bigsudo` for commands requiring root/admin on Linux. Never configure passwordless sudo or store passwords. If absent, run `linux/pz ai setup admin`.
 - Ponytail: apply schema/codegen/Tauri/Rust architecture rules only in detected Ponytail workspaces or explicit opt-in. Do not apply Ponytail rules globally.
 

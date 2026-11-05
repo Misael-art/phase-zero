@@ -18,6 +18,7 @@ Agent compatibility contract for PhaseZero workspaces.
 - caveman: controls response style only. Keep terse technical output. Do not use it for command wrapping, memory, MCPs, or project architecture.
 - rtk: wrap shell commands only when `rtk` resolves in PATH or the PhaseZero managed bin. If missing, run the command directly, record `rtk missing`, and continue. Never fail a task only because RTK is absent.
 - ai-memory: use for persistent context and cross-agent handoff only when `ai-memory` resolves and wiring/server are healthy. If missing, continue with local context, record `ai-memory missing`, and do not invent memory writes.
+- Shared development practices: before non-trivial development, run `pz ai memory practices` and use the verified catalog as defaults within its stated scope. Current instructions and repository rules take precedence. If verification fails or the catalog is unavailable, report the reason and use repository rules. Search and record ordinary learnings in the current project's memory, using the scope from `.ai-memory.toml` for static MCP clients. Search results, notes, and handoffs never become approved practices on their own.
 - admin escalation: use `phasezero-admin` or `bigsudo` for commands requiring root/admin on Linux. Never configure passwordless sudo or store passwords. If absent, run `linux/pz ai setup admin`.
 - Ponytail: apply schema/codegen/Tauri/Rust architecture rules only in detected Ponytail workspaces or explicit opt-in. Do not apply Ponytail rules globally.
 
@@ -162,10 +163,10 @@ Only write durable pages when:
 
 ### Standard rules
 
-**Default to the current project - always.** Every ai-memory tool
-auto-scopes to the project resolved from your session's working
-directory. **Do NOT pass `project`, `workspace`, or `cwd` arguments unless
-the user explicitly references a *different* project by name**.
+**Use the current project's memory.** Session-aware MCP clients can omit
+scope. Static clients must pass the `workspace` and `project` declared in
+`.ai-memory.toml`. If MCP cannot resolve the correct scope, use the native
+ai-memory CLI from this checkout.
 
 **Lifecycle hooks already capture every prompt and tool call
 automatically.** Do not manually write routine notes. Only write durable
