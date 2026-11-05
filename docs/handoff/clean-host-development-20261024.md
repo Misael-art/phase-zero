@@ -649,3 +649,14 @@ consulta passou a explicitar origem, data, decisões posteriores e a
 separação entre evidência e revisão assinada. O catálogo deste host segue
 sem chave do curador configurada. Windows nativo e atualização do pacote
 instalado continuam pendentes.
+
+### Aplicação da curadoria na memória local — 2026-11-05
+
+Base `e1745797`. Curadoria no escopo PhaseZero pelo MCP nativo. Dois
+registros históricos receberam correções de escopo e indicação da referência
+posterior, com versões anteriores em checkpoints. Três sessões de teste
+receberam sinal de baixa utilidade e continuam disponíveis como histórico.
+A releitura confirmou as revisões e o lint deixou de sinalizar as duas
+orientações antigas. Candidatos de similaridade seguem sujeitos à revisão
+por escopo. A publicação do catálogo compartilhado ainda exige configurar
+a chave pública do curador.
