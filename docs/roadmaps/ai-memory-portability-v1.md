@@ -171,6 +171,27 @@ existente na raiz. Ele usa a descoberta real por UUID e limpa o namespace
 temporário após conferir a identidade do domínio de teste. As instâncias
 ainda rodam na mesma máquina. Mantenha a mídia conectada durante o ensaio.
 
+Para testar o **GitHub real**, execute a mesma prova com
+`PZ_MEMORY_TEST_GITHUB=OWNER/phasezero-memory-proof-IDENTIFICADOR` e a
+autenticação `gh` já ativa. Aponte `GH_CONFIG_DIR` para a configuração
+existente do GitHub CLI antes de iniciar os ambientes isolados. Use um nome
+novo e escolha um transporte por execução. A prova cria um repositório
+privado dedicado com dados sintéticos. Publica duas revisões, recebe o
+aprendizado de volta, verifica a rejeição da assinatura inválida e volta a
+publicar o catálogo válido. Também baixa o snapshot de A, confere o SHA-256
+e restaura o SQLite em um ambiente descartável.
+
+Para continuar o mesmo ensaio em outro computador, use uma instalação
+limpa ou isolada. Transfira `curator-public.asc`, `recovery.gpg` e
+`github-proof.json` gerados no diretório temporário do caso. Importe a
+recuperação sintética antes de cadastrar o repositório e a impressão
+digital indicada no recibo. Cadastre o escopo `default/shared` com
+`_rules,notes` e a identidade fixa do ensaio, 64 caracteres `b`.
+Após sincronizar, o agente deve informar a revisão 2, aplicar a prática
+e registrar uma nota própria nesse escopo. O recibo e o arquivo de
+recuperação pertencem ao ensaio. A senha sintética está definida em
+`recover` no teste de integração.
+
 **Aceite em duas máquinas físicas.** Em A, publique uma prática de ensaio e
 sincronize pelo destino escolhido. Em B, instale a mesma versão, cadastre a
 chave pública e sincronize. Em uma sessão no projeto, peça ao agente para

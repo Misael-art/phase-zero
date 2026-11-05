@@ -548,3 +548,23 @@ configurada. O status indica ausência de exportação de recuperação neste
 host. Recuperar acesso à carteira original ou localizar a recuperação do
 mesmo domínio antes de alterar vínculos ou publicar. A chave de curadoria
 real segue pendente.
+
+### Aceite do transporte GitHub — 2026-11-05
+
+Base `fe132fbc`. A prova com `PZ_MEMORY_TEST_GITHUB` passou em 246 s usando
+o GitHub real e duas instâncias nativas isoladas. Repositório dedicado
+privado confirmado, quatro pacotes de conhecimento cifrados e dois snapshots
+de host. A→B publicou duas revisões. B→A entregou o aprendizado. A recusou
+a assinatura adulterada e manteve o fluxo de notas. B republicou a revisão
+válida e a sincronização seguinte passou. A leitura local da prática
+funcionou com acesso ao GitHub desabilitado na fixture.
+
+O snapshot de A foi baixado do GitHub, teve 55.346 bytes e SHA-256
+conferido contra o recibo de publicação. A restauração nativa em namespace
+descartável passou `PRAGMA integrity_check` e preservou a sessão sintética
+de Codex. Regressão local sem GitHub: 30 pytest passaram. O kit privado
+contém apenas a chave pública, a recuperação sintética e o recibo.
+
+Próximo aceite do mecanismo: usar esse kit em outro equipamento e abrir
+uma sessão real de agente. A ativação do repositório de produção é uma
+operação separada e depende da recuperação da chave original.

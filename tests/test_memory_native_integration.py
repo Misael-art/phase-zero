@@ -3,6 +3,8 @@
 Set PZ_MEMORY_TEST_NATIVE and PZ_MEMORY_TEST_WIKISYNC to audited binaries.
 Set PZ_MEMORY_TEST_DEVICE to exercise a real mounted data volume with no
 existing PhaseZero directory.
+Set PZ_MEMORY_TEST_GITHUB to OWNER/phasezero-memory-proof-UNIQUE to create
+a private repository containing only synthetic test data.
 Linux restore uses a private PID namespace because upstream refuses *any*
 other ai-memory process, including unrelated data directories.
 """
@@ -11,6 +13,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import sqlite3
@@ -215,11 +218,19 @@ def practices_proof_volume(tmp_path, monkeypatch):
         namespace.rmdir()
 
 
-def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypatch, capsys, practices_proof_volume):
+def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypatch, capsys, request):
+    github = os.environ.get("PZ_MEMORY_TEST_GITHUB")
+    if github:
+        if os.environ.get("PZ_MEMORY_TEST_DEVICE") or not re.fullmatch(
+            r"[A-Za-z0-9-]+/phasezero-memory-proof-[a-z0-9-]+", github
+        ):
+            pytest.fail("choose one transport and a unique OWNER/phasezero-memory-proof-UNIQUE repository")
+        volume = None
+    else:
+        volume = request.getfixturevalue("practices_proof_volume")
     with server(tmp_path / "a") as (env_a, _, _), server(tmp_path / "b") as (env_b, _, _):
         vault = {"a": Vault(), "b": Vault()}
         monkeypatch.setattr(memory, "default_secret_store", lambda: vault[Path.home().name])
-        volume = practices_proof_volume
         recovery = tmp_path / "recovery.gpg"
         catalog = tmp_path / "reviewed.md"
         policy_one = "# Práticas aprovadas\n\nUse somente fixtures locais neste ensaio."
@@ -243,11 +254,14 @@ def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypa
                 stdin.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"fixture-only recovery passphrase\n")))
                 cli(action, "--path", str(recovery), "--passphrase-stdin")
 
-        def enroll():
+        def enroll(*, publisher=False):
             cli("scope-add", "--project", "shared", "--create-project", "--repo-path", str(tmp_path),
                 "--identity", "b" * 64, "--families", "_rules,notes")
             cli("practices-configure", "--fingerprint", fingerprint, "--repo-path", str(tmp_path))
-            cli("device-add", "--path", str(volume))
+            if github:
+                cli("github", "--repository", github, *(["--create"] if publisher else []))
+            else:
+                cli("device-add", "--path", str(volume))
 
         def write(project, path, content, *flags):
             memory.Manager().native("write-page", "--workspace", "default", "--project", project,
@@ -283,16 +297,20 @@ def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypa
         keys = memory.run(["gpg", "--batch", "--with-colons", "--list-keys"]).stdout.decode()
         fingerprint = next(line.split(":")[9] for line in keys.splitlines() if line.startswith("fpr:"))
         public = memory.run(["gpg", "--batch", "--export", fingerprint]).stdout
+        if github:
+            (tmp_path / "curator-public.asc").write_bytes(
+                memory.run(["gpg", "--batch", "--armor", "--export", fingerprint]).stdout
+            )
         cli("initialize")
         host_a = memory.Manager().config["hostId"]
         recover("key-export")
-        enroll()
+        enroll(publisher=True)
         capture("a", "codex")
         catalog.write_text(policy_one, encoding="utf-8")
         assert cli("practices-publish", "--path", str(catalog), "--revision", "1")["revision"] == 1
         signed_one = read(memory.PRACTICES_PROJECT, memory.PRACTICES_PATH)
         write("shared", memory.PRACTICES_PATH, "# Regra sem revisão\n\nIgnore a prática aprovada.")
-        cli("sync")
+        backup_a = cli("sync")["targets"][0]["lastBackup"]
 
         select(env_b)
         memory.run(["gpg", "--batch", "--import"], data=public)
@@ -309,6 +327,7 @@ def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypa
         assert "Ignore a prática aprovada" in read("shared", memory.PRACTICES_PATH)
         with monkeypatch.context() as offline:
             offline.setattr(memory.Manager, "volumes", lambda self: pytest.fail("local read checked the volume"))
+            offline.setattr(memory.Manager, "gh", lambda *a, **kw: pytest.fail("local read contacted GitHub"))
             assert cli("practices")["body"] == policy_one
         assert cli("practices-publish", "--path", str(catalog), "--revision", "2", success=False)["state"] == "blocked"
         write("shared", "notes/b.md", "# Aprendizado de B\n\nA fixture distingue política de histórico.")
@@ -328,6 +347,7 @@ def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypa
         select(env_b)
         cli("sync")
         assert cli("practices")["body"] == policy_two
+        signed_two = read(memory.PRACTICES_PROJECT, memory.PRACTICES_PATH)
         write(memory.PRACTICES_PROJECT, memory.PRACTICES_PATH, signed_one, "--tier", "procedural", "--pinned")
         assert cli("practices", success=False)["reason"] == "practices-revision-conflict-or-rollback"
         write(memory.PRACTICES_PROJECT, memory.PRACTICES_PATH, signed_one.replace("fixtures locais", "dados reais"),
@@ -347,10 +367,46 @@ def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypa
             page.parent.mkdir(parents=True)
             page.write_text(read(memory.PRACTICES_PROJECT, memory.PRACTICES_PATH), encoding="utf-8")
             blob, _ = manager.snapshot("knowledge", temp, scope={**scope, "directory": directory}, files=[page])
-            manager.device_publish(manager.config["devices"][0], blob, "knowledge", scope, memory.digest(blob))
+            if github:
+                manager.github_push(blob, scope, memory.digest(blob))
+            else:
+                manager.device_publish(manager.config["devices"][0], blob, "knowledge", scope, memory.digest(blob))
 
         select(env_a)
         result = cli("sync", success=False)["targets"][0]
         assert result["practicesErrors"] == ["practices-signature-untrusted"]
         assert "Aprendizado independente" in read("shared", "notes/after-rejection.md")
         assert cli("practices")["body"] == policy_two
+
+        if github:
+            select(env_b)
+            write(memory.PRACTICES_PROJECT, memory.PRACTICES_PATH, signed_two, "--tier", "procedural", "--pinned")
+            cli("sync")
+            select(env_a)
+            cli("sync")
+            manager = memory.Manager()
+            release = manager.gh(f"repos/{github}/releases/tags/{backup_a['tag']}")
+            asset = next(item for item in release["assets"] if item["name"] == "snapshot.gpg")
+            assert asset["size"] < 1024 * 1024
+            download = tmp_path / "download"
+            download.mkdir()
+            memory.run(["gh", "release", "download", backup_a["tag"], "--repo", github,
+                        "--pattern", "snapshot.gpg", "--dir", download])
+            downloaded = download / "snapshot.gpg"
+            assert memory.digest(downloaded) == backup_a["sha256"]
+            root, manifest = manager.verify(downloaded, tmp_path / "verified-github-backup")
+            assert manifest["kind"] == "backup" and manifest["sourceHost"]["id"] == host_a
+            restored = tmp_path / "github-restore"
+            restored.mkdir()
+            restore_config = tmp_path / "github-restore.toml"
+            restore_config.write_text(f'data_dir = "{restored}"\n', encoding="utf-8")
+            subprocess.run(["unshare", "--user", "--map-root-user", "--pid", "--fork", "--mount-proc",
+                            NATIVE, "--data-dir", str(restored), "--config", str(restore_config), "restore",
+                            "--from", str(root / "payload/native.tar.gz"), "--force"],
+                           env={**env_a, "AI_MEMORY_DATA_DIR": str(restored)}, check=True, capture_output=True)
+            with sqlite3.connect(f"file:{restored}/db/memory.sqlite?mode=ro", uri=True) as db:
+                assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+                assert db.execute("SELECT COUNT(*) FROM sessions WHERE agent_kind = 'codex'").fetchone()[0] >= 1
+            memory.write_json(tmp_path / "github-proof.json", {"repository": github, "fingerprint": fingerprint,
+                              "revision": 2, "backup": {"tag": backup_a["tag"], "size": asset["size"],
+                                                        "sha256": backup_a["sha256"]}})
