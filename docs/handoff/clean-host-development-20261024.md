@@ -568,3 +568,30 @@ contém apenas a chave pública, a recuperação sintética e o recibo.
 Próximo aceite do mecanismo: usar esse kit em outro equipamento e abrir
 uma sessão real de agente. A ativação do repositório de produção é uma
 operação separada e depende da recuperação da chave original.
+
+### Diretrizes de produção e contingência local — 2026-11-05
+
+Base `759c5cd9`, implementação `138e00ed`. O bloco comum descreve
+precedência, leitura da revisão verificada, GitHub privado como transporte
+cifrado, memória do projeto e continuidade pelo checkout e handoff. Nove
+arquivos nativos versionados correspondem ao template comum. Bootstrap
+Linux e Windows atualizam blocos gerenciados. Qwen usa `QWEN.md` e o
+adaptador nativo de MCP/hooks. Roo preserva o arquivo legado ativo.
+
+Diretrizes iniciais em `assets/agent-skills/phasezero-production-practices.md`.
+Referência local gravada e relida em
+`default/misael-art-phase-zero`, `procedures/phasezero-production-workflow.md`.
+O ensaio nativo assinou e recuperou o texto inicial em ambiente isolado.
+33 pytest passaram, além de smoke de init, compatibilidade, guarda de
+workspace, ShellCheck e comparação dos nove blocos. Ensaio de Qwen com
+configuração descartável confirmou MCP e hooks. PowerShell no Linux
+confirmou nove alvos, idempotência e preservação de conteúdo Qwen/Roo.
+O Pester 6 local falhou no escopo dos helpers da suíte existente. O
+contrato executado diretamente passou e o Windows nativo segue sem prova.
+
+Próximo passo para ativar o catálogo oficial: configurar a chave pública
+do curador, assinar a revisão inicial no host curador e recuperar acesso
+ao domínio criptográfico antes da primeira sincronização de produção.
+O operador optou por prosseguir com a implementação com a prova de
+portabilidade disponível. O ensaio em um segundo equipamento fica
+registrado como validação pendente.
