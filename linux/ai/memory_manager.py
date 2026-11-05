@@ -71,7 +71,7 @@ def safe_path(path: Path) -> Path:
     return path
 
 
-def atomic(path: Path, payload: bytes) -> None:
+def atomic(path: Path, payload: bytes, *, expected_sha256: str | None = None) -> None:
     path = safe_path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, name = tempfile.mkstemp(prefix=".partial-", dir=path.parent)
@@ -80,6 +80,8 @@ def atomic(path: Path, payload: bytes) -> None:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        if expected_sha256 is not None and (not path.is_file() or digest(safe_path(path)) != expected_sha256):
+            raise MemoryError("source-changed-before-replace")
         os.replace(name, path)
         if os.name != "nt":
             parent = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
@@ -368,6 +370,7 @@ class Manager:
                 "devices": devices, "github": self.config.get("github"),
                 "companionInstalled": Path(self.companion).is_file() or shutil.which(self.companion) is not None,
                 "conflicts": self.conflicts(),
+                "curation": read_json(self.state / "curation" / "latest.json", {}),
                 "sync": state, "dataDir": str(self.data), "observedAt": now()}
 
     def conflicts(self):
@@ -1128,6 +1131,20 @@ class Manager:
             "practices-signature-required": "A página não contém um catálogo assinado. Use as regras do repositório.",
             "practices-signature-untrusted": "A assinatura não corresponde à chave confiável ou o catálogo foi alterado.",
             "practices-revision-conflict-or-rollback": "A revisão recebida diverge da versão já aceita. Confira com o curador.",
+            "curation-select-memorial": "Selecione o memorial.md que deseja revisar.",
+            "curation-memorial-file-required": "Selecione um memorial.md em UTF-8, com título Markdown e até 32 KiB.",
+            "curation-no-eligible-subscription": "Nenhuma conta com cota confirmada para um modelo de alta capacidade. Confira o login e as cotas e tente novamente.",
+            "curation-account-changed": "A conta mudou durante a seleção. Confirme o login e inicie nova curadoria.",
+            "curation-source-changed": "O memorial mudou. Inicie nova curadoria para revisar a versão atual.",
+            "source-changed-before-replace": "O arquivo mudou antes de salvar. Gere uma proposta para a versão atual.",
+            "curation-review-source-first": "Revise a prévia atual e confirme a operação.",
+            "curation-report-required": "Gere uma proposta de curadoria para revisar.",
+            "curation-no-changes": "A proposta não contém mudanças para aplicar.",
+            "curation-invalid-result": "O CLI retornou uma proposta inválida. Confira o memorial antes de gerar outra.",
+            "curation-unsubstantiated-result": "A proposta contém achado sem evidência verificável no memorial.",
+            "curation-overlapping-edits": "A proposta contém edições que se sobrepõem. Gere uma nova proposta.",
+            "curation-cli-timeout-or-unavailable": "O CLI selecionado ficou indisponível ou excedeu o tempo. Confira a sessão e a rede.",
+            "curation-cli-failed": "O CLI selecionado interrompeu a revisão. Confira a sessão e a cota antes de tentar novamente.",
             "operation-failed-check-dependencies-or-system-vault": "Confira dependências e desbloqueio do cofre do sistema.",
         }
         if reason.startswith("command-failed:gh:"):
@@ -1244,7 +1261,8 @@ def main(argv=None):
     parser.add_argument("action", choices=("status", "plan", "install", "repair", "initialize", "sync", "backup",
                         "scope-add", "scope-remove", "device-add", "device-remove", "github", "automatic", "watch",
                         "verify", "restore-plan", "restore", "key-export", "key-import", "install-sync", "resolve", "conflict-plan", "settings", "github-remove", "github-login", "github-open-backups",
-                        "practices", "practices-configure", "practices-publish"))
+                        "practices", "practices-configure", "practices-publish",
+                        "curate-plan", "curate", "curate-review", "curate-apply"))
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--automatic", action="store_true")
     parser.add_argument("--enabled", choices=("yes", "no"), default="yes")
@@ -1314,6 +1332,15 @@ def main(argv=None):
                     result = manager.publish_practices(args.path, args.revision)
                 elif action == "practices":
                     result = manager.practices()
+                elif action in {"curate-plan", "curate", "curate-review", "curate-apply"}:
+                    from linux.ai import memory_curation
+                    if action == "curate-plan":
+                        result = memory_curation.plan(args.path)
+                    elif action == "curate":
+                        result = memory_curation.run_curation(manager, args.path, args.expected_sha256, args.confirm)
+                    else:
+                        result = memory_curation.review(manager, args.id, apply=action == "curate-apply",
+                                                        confirm=args.confirm, checksum=args.expected_sha256)
                 elif action == "device-add":
                     if not args.path:
                         raise MemoryError("mounted-device-path-required")
@@ -1451,4 +1478,5 @@ def restore_native(manager, root, manifest):
 
 
 if __name__ == "__main__":
+    sys.modules["linux.ai.memory_manager"] = sys.modules[__name__]
     raise SystemExit(main())

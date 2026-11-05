@@ -7,6 +7,7 @@ import tarfile
 import pytest
 
 from linux.ai import memory_manager as memory
+from linux.ai import memory_curation as curation
 
 
 class Vault:
@@ -46,6 +47,103 @@ def scope_files(manager, tmp_path):
     manager.config["scopes"] = [{k: v for k, v in scope.items() if k not in {"directory", "provenance"}}]
     manager.save()
     return scope, page
+
+
+def test_curation_reviews_exact_source_and_preserves_backup(manager, tmp_path, monkeypatch):
+    source = tmp_path / "memorial.md"
+    original = "# Memorial\n\nRevise depois.\n"
+    source.write_text(original)
+    calls = []
+    codex = {"provider": "Codex", "model": "gpt-6-astra", "remaining": 15}
+    claude = {"provider": "Claude Code", "model": "claude-opus-5-5", "remaining": 60}
+    monkeypatch.setattr(curation, "codex_candidate", lambda _scratch: codex)
+    monkeypatch.setattr(curation, "claude_candidate", lambda _scratch: claude)
+    monkeypatch.setenv("PZ_BACKUP_ROOT", str(tmp_path / "backups"))
+
+    def generate(route, _scratch, body):
+        calls.append((route, body))
+        return {"achados": [{"tipo": "ambiguidade", "trecho": "Revise depois.", "evidencia": "Revise depois.",
+                             "motivo": "Falta momento.", "proposta": "Revise antes de publicar."}]}
+
+    monkeypatch.setattr(curation, "generate", generate)
+    checksum = curation.plan(source)["sha256"]
+    with pytest.raises(memory.MemoryError, match="curation-review-source-first"):
+        curation.run_curation(manager, source, checksum, None)
+    assert calls == []
+    summary = curation.run_curation(manager, source, checksum, "CURATE")
+    assert calls == [(claude, original)]
+    assert source.read_text() == original
+    proposal = curation.review(manager, summary["id"])
+    assert "+Revise antes de publicar." in proposal["diff"]
+    source.write_text(original + "Edição simultânea.\n")
+    with pytest.raises(memory.MemoryError, match="curation-source-changed"):
+        curation.review(manager, summary["id"], apply=True, confirm="APPLY-CURATION", checksum=checksum)
+    source.write_text(original)
+    assert curation.review(manager, summary["id"], apply=True, confirm="APPLY-CURATION",
+                           checksum=proposal["sha256"])["state"] == "curation-applied"
+    assert source.read_text().endswith("Revise antes de publicar.\n")
+    assert next((tmp_path / "backups").glob("*/memorial.md.bak.*")).read_text() == original
+    assert memory.read_json(manager.state / "curation/latest.json")["applied"]
+
+
+def test_curation_blocks_missing_quota_and_does_not_replay_failed_dispatch(manager, tmp_path, monkeypatch):
+    source = tmp_path / "memorial.md"
+    source.write_text("# Memorial\n")
+    checksum = curation.plan(source)["sha256"]
+    monkeypatch.setattr(curation, "codex_candidate", lambda _scratch: None)
+    monkeypatch.setattr(curation, "claude_candidate", lambda _scratch: None)
+    with pytest.raises(memory.MemoryError, match="curation-no-eligible-subscription"):
+        curation.run_curation(manager, source, checksum, "CURATE")
+    monkeypatch.setattr(curation, "codex_candidate", lambda _scratch: {"provider": "Codex", "remaining": 20})
+    monkeypatch.setattr(curation, "claude_candidate", lambda _scratch: {"provider": "Claude Code", "remaining": 10})
+    sent = []
+
+    def fail(route, *_args):
+        sent.append(route["provider"])
+        raise memory.MemoryError("curation-cli-failed")
+
+    monkeypatch.setattr(curation, "generate", fail)
+    with pytest.raises(memory.MemoryError, match="curation-cli-failed"):
+        curation.run_curation(manager, source, checksum, "CURATE")
+    assert sent == ["Codex"]
+    assert not (manager.state / "curation/latest.json").exists()
+
+
+def test_curation_rejects_invented_evidence_and_overlapping_replacements():
+    source = "# Memorial\n\nRevise depois de testar."
+    finding = {"tipo": "conflito", "trecho": "Revise depois", "evidencia": "Linha inventada",
+               "motivo": "Ajustar momento.", "proposta": "Revise antes"}
+    with pytest.raises(memory.MemoryError, match="curation-unsubstantiated-result"):
+        curation.proposed_text(source, {"achados": [finding]})
+    finding["evidencia"] = "# Memorial"
+    with pytest.raises(memory.MemoryError, match="curation-overlapping-edits"):
+        curation.proposed_text(source, {"achados": [finding, {**finding, "trecho": "depois de testar"}]})
+
+
+def test_curation_refuses_stale_codex_quota_and_paid_credits():
+    limits = {"primary": {"usedPercent": 40, "resetsAt": 500},
+              "secondary": {"usedPercent": 87, "resetsAt": 600}}
+    assert curation.available_codex({"quota": limits}, 100) == 13
+    assert curation.available_codex({"quota": limits}, 500) == 0
+    assert curation.available_codex({"quota": {**limits, "credits": {"hasCredits": True}}}, 100) == 0
+
+
+def test_curation_claude_respects_shared_and_optional_model_quota(tmp_path, monkeypatch):
+    (tmp_path / ".credentials.json").write_text("{}")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(curation.shutil, "which", lambda _name: "/fixture/claude")
+    monkeypatch.setattr(curation, "native_call", lambda *_args: json.dumps({
+        "loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "pro"}))
+    windows = [{"name": name, "remaining": remaining, "resetsAt": "fixture"}
+               for name, remaining in (("5 horas", 90), ("semanal", 60), ("semanal Sonnet", 0))]
+    quota = {"extraUsageEnabled": False, "windows": windows}
+    monkeypatch.setattr(curation.quota_meter, "claude_meter", lambda *_args, **_kw: quota)
+    assert curation.claude_candidate(tmp_path)["remaining"] == 60
+    windows.append({"name": "semanal Opus", "remaining": 0, "resetsAt": "fixture"})
+    assert curation.claude_candidate(tmp_path) is None
+    windows.pop()
+    quota["extraUsageEnabled"] = True
+    assert curation.claude_candidate(tmp_path) is None
 
 
 def test_key_is_only_in_os_vault_and_status_does_not_decrypt(manager, monkeypatch):

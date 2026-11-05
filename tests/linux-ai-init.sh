@@ -37,6 +37,7 @@ for instructions in "$PROJECT/AGENTS.md" "$PROJECT/CLAUDE.md" "$PROJECT/GEMINI.m
     grep -Fq 'pz ai memory practices' "$instructions"
     grep -Fq 'configured private GitHub repository' "$instructions"
     grep -Fq 'Local continuity' "$instructions"
+    grep -Fq 'Fôlego and RetroDev Studio' "$instructions"
 done
 [ -f "$PROJECT/.cursor/rules/caveman.mdc" ]
 [ -f "$PROJECT/.windsurf/rules/phasezero-tools.md" ]

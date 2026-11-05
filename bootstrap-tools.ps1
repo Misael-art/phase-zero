@@ -27008,6 +27008,7 @@ Read AGENTS.md and follow current user and repository instructions.
 Use pz ai memory practices before non-trivial work. Apply verified practices within scope.
 The configured private GitHub repository transports encrypted memory packages.
 If memory is unavailable, use the checkout, run the applicable checks and preserve the handoff.
+For interface work, use the PhaseZero memorial's Fôlego and RetroDev Studio cases to define the user's task, the outcome, and how to verify the real journey.
 '@.Trim()
 }
 

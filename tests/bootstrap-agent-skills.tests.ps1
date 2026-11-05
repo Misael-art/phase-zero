@@ -144,6 +144,7 @@ Keep this custom line.
             $rules = Get-Content -LiteralPath (Join-Path $workspaceRoot $relative) -Raw
             $rules | Should Match 'configured private GitHub repository'
             $rules | Should Match 'Local continuity'
+            $rules | Should Match 'Fôlego and RetroDev Studio'
             ([regex]::Matches($rules, 'BEGIN PHASEZERO TOOLS').Count) | Should Be 1
         }
         (Test-Path (Join-Path $workspaceRoot '.windsurf\rules\phasezero-tools.md')) | Should Be $true

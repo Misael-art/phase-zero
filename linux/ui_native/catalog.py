@@ -239,9 +239,17 @@ def _memory_actions() -> list[ActionSpec]:
          (_p("path", "Chave de recuperação (.gpg)", "file"), _p("passphrase", "Senha de recuperação", "secret")), True),
         ("resolve", "Resolver conflito de conhecimento", "Resolve somente conflito selecionado; mantém cópia criptografada da versão recebida.",
          ("resolve", "--id", "{id}", "--prefer", "{prefer}"), (_p("id", "ID do conflito"), _p("prefer", "Versão a preservar: server = local, repo = recebida", "choice", choices=("server", "repo"))), True),
+        ("curate", "Curar memorial", "Gera proposta com modelo de alta capacidade e cota confirmada.",
+         ("curate", "--path", "{path}", "--expected-sha256", "{expectedSha256}", "--confirm", "CURATE"),
+         (_p("path", "Arquivo memorial.md", "file"),), True),
+        ("curate-apply", "Revisar proposta", "Mostra as mudanças e a evidência antes de atualizar o arquivo local.",
+         ("curate-apply", "--id", "{id}", "--expected-sha256", "{expectedSha256}", "--confirm", "APPLY-CURATION"),
+         (_p("id", "ID da proposta"),), True),
     ):
         preview = (("ai", "memory", "restore-plan", "--path", "{path}") if name == "restore" else
-                   ("ai", "memory", "conflict-plan", "--id", "{id}") if name == "resolve" else status)
+                   ("ai", "memory", "conflict-plan", "--id", "{id}") if name == "resolve" else
+                   ("ai", "memory", "curate-plan", "--path", "{path}") if name == "curate" else
+                   ("ai", "memory", "curate-review", "--id", "{id}") if name == "curate-apply" else status)
         result.append(replace(_a("ai.memory-" + name, "IA & Dev", title, description,
                          ("ai", "memory", *arguments, "--json"), "document-save" if name == "backup" else "view-refresh",
                          mutable=mutable, preview=preview if mutable else None, parameters=parameters,
@@ -249,7 +257,7 @@ def _memory_actions() -> list[ActionSpec]:
                          status_args=status,
                          risk="high" if name in {"restore", "resolve"} else "normal",
                          group="Memória", visibility="advanced"), timeout_s=2700 if mutable else 120,
-                         preview_bindings=(("expectedSha256", "sha256"),) if name == "restore" else (),
+                         preview_bindings=(("expectedSha256", "sha256"),) if name in {"restore", "curate", "curate-apply"} else (),
                          impact=description if name == "resolve" else ""))
     return result
 

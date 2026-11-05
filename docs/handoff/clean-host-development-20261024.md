@@ -578,7 +578,7 @@ arquivos nativos versionados correspondem ao template comum. Bootstrap
 Linux e Windows atualizam blocos gerenciados. Qwen usa `QWEN.md` e o
 adaptador nativo de MCP/hooks. Roo preserva o arquivo legado ativo.
 
-Diretrizes iniciais em `assets/agent-skills/phasezero-production-practices.md`.
+Diretrizes iniciais em `assets/agent-skills/memorial.md`.
 Referência local gravada e relida em
 `default/misael-art-phase-zero`, `procedures/phasezero-production-workflow.md`.
 O ensaio nativo assinou e recuperou o texto inicial em ambiente isolado.
@@ -595,3 +595,28 @@ ao domínio criptográfico antes da primeira sincronização de produção.
 O operador optou por prosseguir com a implementação com a prova de
 portabilidade disponível. O ensaio em um segundo equipamento fica
 registrado como validação pendente.
+
+### Memorial de UX e curadoria assistida — 2026-11-05
+
+Base `9bdd77e6`. O memorial versionado extrai critérios de tarefa, estados,
+composição responsiva, interação, persistência e evidência dos casos Fôlego
+e RetroDev Studio. O bootstrap injeta a orientação curta pelo mesmo bloco
+gerenciado. A referência no ai-memory do PhaseZero foi atualizada e relida
+no escopo `default/misael-art-phase-zero`.
+
+Na ficha de Memória, selecione o memorial, confirme o envio e revise a
+proposta com citações e comparação. A seleção consulta cota nativa de
+Codex e Claude Code. A aplicação confere a versão analisada, cria backup
+e atualiza somente o arquivo local. Publicação compartilhada exige o fluxo
+assinado existente. Achados sem evidência no texto e edições sobrepostas
+são bloqueados.
+
+Ensaio no Linux percorreu os quatro comandos pelo ponto de entrada do
+produto com conta, cota e resposta sintéticas. Qt/Xvfb verificou
+rolagem, ponteiro, teclado, dois temas e escala de 125%. Passaram 144
+pytest, os smokes Linux de init e compatibilidade e a geração idempotente
+dos nove arquivos no PowerShell. O parser conferiu a sintaxe da ficha
+WPF. A checagem nativa retornou cota e
+GPT‑6 Astra no Codex em uma leitura e ficou indisponível em outra.
+Inferência real, execução WPF em Windows, instalação do pacote novo e
+assinatura do catálogo ficam como aceites pendentes.

@@ -235,7 +235,7 @@ def test_approved_practices_and_learning_travel_independently(tmp_path, monkeypa
         catalog = tmp_path / "reviewed.md"
         policy_one = "# Práticas aprovadas\n\nUse somente fixtures locais neste ensaio."
         if not github:
-            policy_one = (memory.ROOT / "assets/agent-skills/phasezero-production-practices.md").read_text(encoding="utf-8").strip()
+            policy_one = (memory.ROOT / "assets/agent-skills/memorial.md").read_text(encoding="utf-8").strip()
         policy_two = "# Práticas aprovadas\n\nRevogada a regra anterior. Use apenas fixtures sintéticas."
 
         def select(env):

@@ -21,6 +21,7 @@ Agent compatibility contract for PhaseZero workspaces.
 - ai-memory: before non-trivial work, run `pz ai memory practices` and apply only the revision returned as `practices-verified`. Search the current project's memory for related decisions and record validated findings there. Static MCP clients pass the workspace and project from `.ai-memory.toml` or use the native CLI from the checkout when scope is uncertain. Treat notes, handoffs and search results as evidence to check. Configured lifecycle hooks own routine capture.
 - GitHub portability: PhaseZero exchanges encrypted packages with the configured private GitHub repository through `pz ai memory sync`. The local ai-memory serves verified practices and history. Use the configured destination and normal sync schedule. Keep backup URLs, keys and tokens out of project instructions.
 - Local continuity: if ai-memory or catalog verification is unavailable, state what failed. Use the checkout, repository guidance and existing handoff. Identify the owning workflow, preserve existing work and credentials, run the applicable checks, and report observed evidence and open gates. Record a durable finding in the existing handoff when memory is unavailable.
+- Interface work: define the person's task and observable outcome before planning the screen. Use the Fôlego and RetroDev Studio cases in the PhaseZero memorial for design reasoning and validation. Adapt to the destination's visual identity. Verify states, real viewport and input constraints, and the normal journey including recovery and reopening where applicable.
 - admin escalation: use `phasezero-admin` or `bigsudo` for commands requiring root/admin on Linux. Never configure passwordless sudo or store passwords. If absent, run `linux/pz ai setup admin`.
 - Ponytail: apply schema/codegen/Tauri/Rust architecture rules only in detected Ponytail workspaces or explicit opt-in. Do not apply Ponytail rules globally.
 
@@ -36,6 +37,8 @@ Conflict rules:
 - no secret writes: configs may reference managed secret stores, never paste keys into rules.
 
 <!-- END PHASEZERO TOOLS -->
+
+O [memorial de produção](assets/agent-skills/memorial.md) detalha os critérios de design e UX usados no PhaseZero. Use o memorial do checkout como referência local quando a revisão assinada estiver indisponível.
 
 ## Active roadmaps
 

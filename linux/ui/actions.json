@@ -2727,6 +2727,30 @@
       "plan_command": "linux/pz ai memory conflict-plan --id {id}"
     },
     {
+      "name": "ai.memory-curate",
+      "label": "Curar memorial",
+      "command": "linux/pz ai memory curate --path {path} --expected-sha256 {expectedSha256} --confirm CURATE --json",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai memory curate-plan --path {path}"
+    },
+    {
+      "name": "ai.memory-curate-apply",
+      "label": "Revisar proposta",
+      "command": "linux/pz ai memory curate-apply --id {id} --expected-sha256 {expectedSha256} --confirm APPLY-CURATION --json",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai memory curate-review --id {id}"
+    },
+    {
       "name": "ai.tokens-apply",
       "label": "Aplicar perfil de eficiência",
       "command": "linux/pz ai token-economy apply --project {project} --agent {agent} --profile {profile} --json",

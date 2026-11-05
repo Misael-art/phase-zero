@@ -154,7 +154,7 @@ pz ai memory sync
 pz ai memory practices
 ```
 
-O arquivo [Práticas de produção do PhaseZero](../../assets/agent-skills/phasezero-production-practices.md)
+O arquivo [Memorial de produção do PhaseZero](../../assets/agent-skills/memorial.md)
 é a base inicial para revisão e assinatura. Use seu caminho no
 `practices-publish --revision 1 --path` após confirmar a chave do curador.
 Uma cópia de referência em `procedures/phasezero-production-workflow.md`
@@ -176,6 +176,27 @@ Quem estiver offline continua com a revisão já recebida. Erro de verificação
 páginas não entram no catálogo. A rejeição de um catálogo não impede a troca
 de aprendizados nem o backup completo. Proteja a chave privada do curador e guarde o
 material de recuperação separadamente da mídia.
+
+### Curadoria do memorial
+
+Na ficha **IA & Dev → Memória dos agentes**, escolha **Curar memorial** e selecione
+um `memorial.md`. O PhaseZero mostra o caminho e pede consentimento para enviar
+o texto do arquivo ao provedor. A operação consulta a cota vigente pelo CLI
+nativo e usa um modelo de alta capacidade com esforço alto. O Codex usa
+GPT‑6 Astra ou GPT‑6.1 Sol conforme a disponibilidade da conta. O Claude Code
+usa Opus 5.5 quando as janelas da assinatura têm saldo e o uso extra está
+desligado. Se a conta informa uma janela Opus separada, ela também precisa
+ter saldo.
+O PhaseZero bloqueia o pedido sem rota elegível e evita reenviar uma operação
+despachada para outra conta.
+
+**Revisar proposta** apresenta os trechos, as razões, a evidência citada e as
+alterações. O PhaseZero confere o formato, a ocorrência dos trechos e das
+evidências, a ausência de sobreposição e o hash da versão examinada. A avaliação
+semântica permanece com o revisor. A obsolescência depende do que o texto
+consegue demonstrar. Confirme **Aplicar ao memorial local** para salvar com
+cópia anterior no backup do PhaseZero. A publicação compartilhada segue o
+fluxo assinado acima.
 
 ### Prova reproduzível
 
