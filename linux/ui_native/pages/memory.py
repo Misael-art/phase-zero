@@ -226,6 +226,8 @@ class MemoryCard(QFrame):
             self.curation_status.setText(f"{outcome} {report['provider']} · {report['model']}")
         else:
             self.curation_status.setText("Selecione um memorial.md para gerar uma proposta de revisão.")
+        if payload.get("curationRunning"):
+            self.curation_status.setText("Curadoria em andamento em outra operação.")
         self.apply_buttons()
 
     def failed(self):
@@ -236,7 +238,6 @@ class MemoryCard(QFrame):
 
     def apply_buttons(self):
         payload = self.payload or {}
-        idle = not self.page._operation_running and not payload.get("operationRunning", False)
         report = payload.get("curation") or {}
         review_pending = bool(report.get("findings") and not report.get("applied"))
         curation_primary = "curate-apply" if review_pending else "curate"
@@ -270,12 +271,14 @@ class MemoryCard(QFrame):
                 enabled = bool(payload.get("github"))
             elif name in {"verify", "restore", "key-export"}:
                 enabled = bool(payload.get("keyConfigured"))
-            if name in {"curate", "curate-apply"}:
+            is_curation = name in {"curate", "curate-apply"}
+            if is_curation:
                 style = "primaryButton" if name == curation_primary else "secondaryButton"
                 if button.objectName() != style:
                     button.setObjectName(style)
                     button.style().unpolish(button)
                     button.style().polish(button)
-            button.setEnabled(bool((idle or name == "portability-status" and not self.page._operation_running) and enabled))
+            busy = payload.get("curationRunning" if is_curation else "operationRunning")
+            button.setEnabled(bool(not self.page._operation_running and (not busy or name == "portability-status") and enabled))
         self.buttons["install"].setVisible(payload.get("installed") is not True)
         self.buttons["sync"].setVisible(payload.get("installed") is True)

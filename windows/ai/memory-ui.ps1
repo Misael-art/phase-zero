@@ -247,7 +247,7 @@ function Show-PhaseZeroMemoryWindow {
                 } else { $curationResult.Text = 'Curadoria cancelada antes do envio.' }
             } elseif ($data.state -eq 'curation-ready') {
                 $context.Curation = $data
-                $curationResult.Text = "$($data.summary) $($data.provider) · $($data.model)"
+                $curationResult.Text = "$($data.summary) $($data.provider) · $($data.model)`n`nLeitura do modelo`n$($data.assessment)"
             } elseif ($data.state -eq 'curation-reviewed') {
                 $context.Review = $data
                 $findings = $data.achados | ForEach-Object { "$($_.tipo) · $($_.motivo)`nEvidência`n$($_.evidencia)" }

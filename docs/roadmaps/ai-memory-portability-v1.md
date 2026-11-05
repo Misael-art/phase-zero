@@ -190,9 +190,16 @@ ter saldo.
 O PhaseZero bloqueia o pedido sem rota elegível e evita reenviar uma operação
 despachada para outra conta.
 
+Na ficha Linux, o andamento mostra a checagem de cota, o provedor e modelo
+escolhidos e a conferência da resposta. A curadoria usa trava própria e a
+consulta de práticas e a sincronização mantêm o fluxo normal. O resultado
+traz a leitura do modelo sobre o documento, inclusive quando há zero achados.
+
 **Revisar proposta** apresenta os trechos, as razões, a evidência citada e as
 alterações. O PhaseZero confere o formato, a ocorrência dos trechos e das
-evidências, a ausência de sobreposição e o hash da versão examinada. A avaliação
+evidências, a ausência de sobreposição e o hash da versão examinada. O campo
+de substituição recebe Markdown final. Instruções editoriais reconhecidas e
+itens vazios de lista introduzidos pela edição são bloqueados. A avaliação
 semântica permanece com o revisor. A obsolescência depende do que o texto
 consegue demonstrar. Confirme **Aplicar ao memorial local** para salvar com
 cópia anterior no backup do PhaseZero. A publicação compartilhada segue o

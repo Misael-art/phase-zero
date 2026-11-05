@@ -46,6 +46,7 @@ PRACTICES_SCOPE = hashlib.sha256(b"phasezero:development-practices:v1").hexdiges
 PRACTICES_PATH = "_rules/development-practices.md"
 PRACTICES_SIGNATURE = "\n\n<!-- phasezero-practices-signature\n"
 PRACTICES_REVISION = re.compile(r"<!-- phasezero-practices revision: ([1-9][0-9]{0,8}) -->\n")
+CURATION_ACTIONS = {"curate-plan", "curate", "curate-review", "curate-apply"}
 
 
 class MemoryError(RuntimeError):
@@ -172,6 +173,16 @@ def locked(path: Path):
                 msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+def operation_running(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        with locked(path):
+            return False
+    except MemoryError:
+        return True
 
 
 def unpack(archive: Path, destination: Path, limit=MAX_EXPANDED) -> None:
@@ -347,13 +358,7 @@ class Manager:
                 except MemoryError:
                     online = False
             devices.append({**device, "online": online})
-        busy = False
-        if (self.state / "operation.lock").exists():
-            try:
-                with locked(self.state / "operation.lock"):
-                    pass
-            except MemoryError:
-                busy = True
+        busy = operation_running(self.state / "operation.lock")
         if state.get("state") == "running" and not busy:
             state = {**state, "state": "interrupted-retry-required", "ok": False}
         return {"schemaVersion": 1, "ok": True, "installed": installed, "version": version,
@@ -371,6 +376,7 @@ class Manager:
                 "companionInstalled": Path(self.companion).is_file() or shutil.which(self.companion) is not None,
                 "conflicts": self.conflicts(),
                 "curation": read_json(self.state / "curation" / "latest.json", {}),
+                "curationRunning": operation_running(self.state / "curation" / "operation.lock"),
                 "sync": state, "dataDir": str(self.data), "observedAt": now()}
 
     def conflicts(self):
@@ -1143,6 +1149,7 @@ class Manager:
             "curation-invalid-result": "O CLI retornou uma proposta inválida. Confira o memorial antes de gerar outra.",
             "curation-unsubstantiated-result": "A proposta contém achado sem evidência verificável no memorial.",
             "curation-overlapping-edits": "A proposta contém edições que se sobrepõem. Gere uma nova proposta.",
+            "curation-editorial-replacement": "O modelo explicou a edição sem fornecer o texto final. Gere outra proposta.",
             "curation-cli-timeout-or-unavailable": "O CLI selecionado ficou indisponível ou excedeu o tempo. Confira a sessão e a rede.",
             "curation-cli-failed": "O CLI selecionado interrompeu a revisão. Confira a sessão e a cota antes de tentar novamente.",
             "operation-failed-check-dependencies-or-system-vault": "Confira dependências e desbloqueio do cofre do sistema.",
@@ -1298,8 +1305,9 @@ def main(argv=None):
             manager.watch()
             return 0
         else:
-            with locked(manager.state / "operation.lock"):
-                action = args.action
+            action = args.action
+            lock_path = "curation/operation.lock" if action in CURATION_ACTIONS else "operation.lock"
+            with locked(manager.state / lock_path):
                 if action in {"install", "repair", "install-sync"}:
                     script = ROOT / ("windows/ai/memory.ps1" if os.name == "nt" else "linux/ai/setup-memory.sh")
                     if os.name == "nt":
@@ -1332,7 +1340,7 @@ def main(argv=None):
                     result = manager.publish_practices(args.path, args.revision)
                 elif action == "practices":
                     result = manager.practices()
-                elif action in {"curate-plan", "curate", "curate-review", "curate-apply"}:
+                elif action in CURATION_ACTIONS:
                     from linux.ai import memory_curation
                     if action == "curate-plan":
                         result = memory_curation.plan(args.path)

@@ -1590,7 +1590,7 @@ class PreviewDialog(StatefulDialog):
             comparison.setMinimumHeight(210)
             findings = "\n\n".join(f"{item['tipo'].capitalize()} · {item['motivo']}\nEvidência\n{item['evidencia']}"
                                    for item in result.parsed["achados"])
-            comparison.setPlainText(findings + "\n\n" + result.parsed["diff"])
+            comparison.setPlainText("Alterações propostas\n\n" + result.parsed["diff"] + "\n\nEvidências\n\n" + findings)
             self.body.addWidget(comparison, 1)
         for index, line in enumerate(_capability_space_lines(result.parsed)):
             space_label = QLabel(line)
@@ -1731,9 +1731,11 @@ class ProgressDialog(StatefulDialog):
         super().__init__(title, "running", parent)
         self._started = time.monotonic()
         self._running = True
-        summary = QLabel("Aguarde. O PhaseZero está cuidando desta etapa.")
-        summary.setObjectName("cardDescription")
-        self.body.addWidget(summary)
+        self.summary = QLabel("Aguarde. O PhaseZero está cuidando desta etapa.")
+        self.summary.setTextFormat(Qt.PlainText)
+        self.summary.setWordWrap(True)
+        self.summary.setObjectName("cardDescription")
+        self.body.addWidget(self.summary)
         self.details_toggle = QToolButton()
         self.details_toggle.setObjectName("technicalDisclosure")
         self.details_toggle.setText("Ver detalhes técnicos")
@@ -1785,6 +1787,10 @@ class ProgressDialog(StatefulDialog):
     def set_progress(self, value: int) -> None:
         self.progress.setRange(0, 100)
         self.progress.setValue(value)
+
+    def set_stage(self, text: str) -> None:
+        self.summary.setText(text)
+        self.body.setAlignment(Qt.AlignTop)
 
     def finish(self) -> None:
         self._running = False
@@ -1858,6 +1864,12 @@ class ResultDialog(StatefulDialog):
         summary.setWordWrap(True)
         self.summary_label = summary
         self.body.addWidget(summary)
+        if result.action_id == "ai.memory-curate" and isinstance(result.parsed, dict) and result.parsed.get("assessment"):
+            assessment = QLabel("Leitura do modelo\n" + result.parsed["assessment"])
+            assessment.setTextFormat(Qt.PlainText)
+            assessment.setWordWrap(True)
+            assessment.setObjectName("cardDescription")
+            self.body.addWidget(assessment)
         self.view = StructuredResultView(
             result.parsed, formatted, self, advanced_mode=advanced_mode
         )

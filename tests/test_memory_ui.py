@@ -125,3 +125,15 @@ def test_curation_selects_file_then_reviews_saved_proposal(page, monkeypatch):
     dialog.reject()
     card.update_status({**payload, "curation": {**report, "applied": True}})
     assert not card.buttons["curate-apply"].isEnabled()
+
+
+def test_curation_status_keeps_sync_and_curation_independent(page):
+    card = page.memory_card
+    payload = {"installed": True, "service": "active", "keyConfigured": True, "github": {"repository": "o/r"}}
+    card.update_status({**payload, "curationRunning": True})
+    assert "andamento" in card.curation_status.text()
+    assert card.buttons["sync"].isEnabled()
+    assert not card.buttons["curate"].isEnabled()
+    card.update_status({**payload, "operationRunning": True})
+    assert not card.buttons["sync"].isEnabled()
+    assert card.buttons["curate"].isEnabled()

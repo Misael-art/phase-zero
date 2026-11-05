@@ -62,7 +62,8 @@ def test_curation_reviews_exact_source_and_preserves_backup(manager, tmp_path, m
 
     def generate(route, _scratch, body):
         calls.append((route, body))
-        return {"achados": [{"tipo": "ambiguidade", "trecho": "Revise depois.", "evidencia": "Revise depois.",
+        return {"resumo": "O memorial orienta o momento da revisão.",
+                "achados": [{"tipo": "ambiguidade", "trecho": "Revise depois.", "evidencia": "Revise depois.",
                              "motivo": "Falta momento.", "proposta": "Revise antes de publicar."}]}
 
     monkeypatch.setattr(curation, "generate", generate)
@@ -71,6 +72,7 @@ def test_curation_reviews_exact_source_and_preserves_backup(manager, tmp_path, m
         curation.run_curation(manager, source, checksum, None)
     assert calls == []
     summary = curation.run_curation(manager, source, checksum, "CURATE")
+    assert summary["assessment"] == "O memorial orienta o momento da revisão."
     assert calls == [(claude, original)]
     assert source.read_text() == original
     proposal = curation.review(manager, summary["id"])
@@ -94,8 +96,10 @@ def test_curation_blocks_missing_quota_and_does_not_replay_failed_dispatch(manag
     monkeypatch.setattr(curation, "claude_candidate", lambda _scratch: None)
     with pytest.raises(memory.MemoryError, match="curation-no-eligible-subscription"):
         curation.run_curation(manager, source, checksum, "CURATE")
-    monkeypatch.setattr(curation, "codex_candidate", lambda _scratch: {"provider": "Codex", "remaining": 20})
-    monkeypatch.setattr(curation, "claude_candidate", lambda _scratch: {"provider": "Claude Code", "remaining": 10})
+    monkeypatch.setattr(curation, "codex_candidate", lambda _scratch: {
+        "provider": "Codex", "model": "gpt-6-astra", "remaining": 20})
+    monkeypatch.setattr(curation, "claude_candidate", lambda _scratch: {
+        "provider": "Claude Code", "model": "claude-opus-5-5", "remaining": 10})
     sent = []
 
     def fail(route, *_args):
@@ -118,6 +122,39 @@ def test_curation_rejects_invented_evidence_and_overlapping_replacements():
     finding["evidencia"] = "# Memorial"
     with pytest.raises(memory.MemoryError, match="curation-overlapping-edits"):
         curation.proposed_text(source, {"achados": [finding, {**finding, "trecho": "depois de testar"}]})
+
+
+def test_curation_requires_final_text_and_complete_list_item_removal():
+    source = "# Memorial\n\n- Revise depois.\n- Outro ponto.\n"
+    finding = {"tipo": "ambiguidade", "trecho": "Revise depois.", "evidencia": "Revise depois.",
+               "motivo": "Falta prazo.", "proposta": "Substituir por: “Revise antes de publicar.”"}
+    with pytest.raises(memory.MemoryError, match="curation-editorial-replacement"):
+        curation.proposed_text(source, {"achados": [finding]})
+    finding["proposta"] = ""
+    with pytest.raises(memory.MemoryError, match="curation-invalid-result"):
+        curation.proposed_text(source, {"achados": [finding]})
+    finding["trecho"] = "- Revise depois.\n"
+    assert curation.proposed_text(source, {"achados": [finding]}) == "# Memorial\n\n- Outro ponto.\n"
+
+
+def test_curation_uses_own_lock_so_practices_remain_readable(manager, tmp_path, monkeypatch, capsys):
+    source = tmp_path / "memorial.md"
+    source.write_text("# Memorial\n")
+
+    class FixtureManager(memory.Manager):
+        def __new__(cls):
+            return manager
+
+    monkeypatch.setattr(memory, "Manager", FixtureManager)
+    monkeypatch.setattr(manager, "practices", lambda: {"ok": True, "state": "practices-verified"})
+    with memory.locked(manager.state / "curation/operation.lock"):
+        assert memory.main(["practices"]) == 0
+        assert json.loads(capsys.readouterr().out)["state"] == "practices-verified"
+        assert memory.main(["curate-plan", "--path", str(source)]) == 1
+        assert json.loads(capsys.readouterr().out)["reason"] == "operation-busy"
+    with memory.locked(manager.state / "operation.lock"):
+        assert memory.main(["curate-plan", "--path", str(source)]) == 0
+        assert json.loads(capsys.readouterr().out)["state"] == "curation-planned"
 
 
 def test_curation_refuses_stale_codex_quota_and_paid_credits():

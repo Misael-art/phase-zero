@@ -620,3 +620,32 @@ WPF. A checagem nativa retornou cota e
 GPT‑6 Astra no Codex em uma leitura e ficou indisponível em outra.
 Inferência real, execução WPF em Windows, instalação do pacote novo e
 assinatura do catálogo ficam como aceites pendentes.
+
+### Curadoria real e diagnóstico da memória — 2026-11-05
+
+Base `9e1e4d3f`. Central de Controle Qt do checkout em Linux, com cliques
+automatizados no seletor e nos diálogos reais. A primeira execução no
+Codex GPT‑6 Astra retornou zero achados no memorial do projeto. Em uma
+cópia com problemas plantados, encontrou três categorias. A primeira
+proposta continha instruções editoriais no texto de substituição. O
+contrato agora pede Markdown final e bloqueia prefixos editoriais
+reconhecidos e exclusões que deixam itens vazios.
+
+O ensaio confirmou que a trava de curadoria bloqueava a consulta de
+práticas. A trava própria restaurou a consulta em paralelo, que retornou
+o estado real do catálogo durante a inferência. A ficha Linux passou a
+mostrar etapas e provedor. O recibo passou a guardar a leitura do modelo.
+O segundo ensaio da cópia produziu três edições aplicáveis. A interface
+bloqueou a fonte modificada, depois aplicou com confirmação. Reabertura e
+backup conferidos. Os resultados de teste foram mantidos fora do Git.
+Depois do ajuste de precedência, a execução real do memorial versionado
+retornou zero achados e registrou o resumo do modelo. 147 testes de
+regressão passaram, incluindo integração nativa da memória.
+
+Auditoria local no escopo PhaseZero encontrou dois testes com título
+duplicado, quatro sessões antigas sem acessos, dois sinais de desatualização
+e candidatos de similaridade que exigem verificação por escopo. A regra de
+consulta passou a explicitar origem, data, decisões posteriores e a
+separação entre evidência e revisão assinada. O catálogo deste host segue
+sem chave do curador configurada. Windows nativo e atualização do pacote
+instalado continuam pendentes.

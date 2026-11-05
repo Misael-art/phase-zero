@@ -5,7 +5,7 @@ Estas práticas orientam desenvolvimento, diagnóstico e continuidade nos projet
 ## Preparar o trabalho
 
 - Identifique o projeto, o fluxo oficial, o responsável pelo componente e o critério de aceite. Leia as regras locais e o roadmap da frente quando houver.
-- Consulte a memória do escopo atual por decisões, procedimentos e falhas semelhantes. Abra as páginas pertinentes e confronte as informações com o checkout e o ambiente atuais. Trate resultados de busca e passagens de contexto como evidência histórica.
+- Consulte a memória do projeto por decisões, procedimentos e falhas semelhantes. Antes de reaplicar uma orientação, confira escopo, origem, data e decisões posteriores no checkout e no ambiente atuais. Sessões, resultados de busca e relatórios de lint servem como evidência. Para adotar práticas compartilhadas, use a revisão marcada como `practices-verified`. Se estiver indisponível, siga as regras versionadas e use o memorial do checkout como referência.
 - Preserve a raiz canônica, as mudanças de outras tarefas e os dados existentes. Integre a solução ao fluxo que já atende o projeto e limite a mudança ao comportamento solicitado.
 
 ## Validar e entregar

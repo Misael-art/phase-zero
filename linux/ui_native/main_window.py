@@ -874,6 +874,10 @@ class MainWindow(QMainWindow):
         scrollbar.setValue(scrollbar.maximum())
         if self.progress_dialog is not None:
             self.progress_dialog.append_output(text, error)
+            if self.pending_action is not None and self.pending_action.id == "ai.memory-curate":
+                for line in text.splitlines():
+                    if line.startswith("PZ_CURATION_STAGE="):
+                        self.progress_dialog.set_stage(line.partition("=")[2])
 
     def update_progress(self, value: int) -> None:
         self.progress.setRange(0, 100)
