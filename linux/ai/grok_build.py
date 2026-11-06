@@ -29,7 +29,9 @@ PIN = {
     "url": f"{BASE_URL}/grok-1.0.77-linux-x86_64",
 }
 STABLE_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
-CLI_VERSION = re.compile(r"grok ([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?)(?: \([^\n]+\))?")
+CLI_VERSION = re.compile(
+    r"grok ([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?)(?: \([^\n]+\))?(?: \[[a-z]+\])?"
+)
 
 
 class GrokError(Exception):
