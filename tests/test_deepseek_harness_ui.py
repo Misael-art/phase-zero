@@ -45,6 +45,25 @@ def test_harness_waits_for_observation_and_exposes_all_catalog_operations(page):
     assert requested[-1].id == "ai.deepseek-harness-install"
 
 
+def test_grok_card_shows_action_for_install_and_manual_update(page):
+    status = "ai.grok-build.status"
+    check = "ai.grok-build.check"
+    buttons = page._grok_buttons
+    assert not buttons["open"].isEnabled()
+    page._on_status_ready(status, "", {"installed": False, "supportedInstall": True,
+                                     "artifact": {"url": "https://x.ai/cli/example", "size": 201655392}})
+    assert buttons["install"].isEnabled()
+    assert "binário oficial" in page.grok_detail.text()
+    page._on_status_ready(status, "", {"installed": True, "version": "1.0.77"})
+    assert buttons["open"].isEnabled() and buttons["install"].isHidden()
+    page._on_status_ready(check, "", {"installed": True, "version": "1.0.77", "updateAvailable": True,
+                                    "latestVersion": "1.0.78", "downloadMode": "manual"})
+    assert buttons["update"].isHidden()
+    assert "grok update" in page.grok_detail.text()
+    page.block_while_running(True)
+    assert all(not button.isEnabled() for button in buttons.values())
+
+
 @pytest.mark.parametrize("state,runtime", [("installed", "stopped"), ("running", "running"), ("degraded", "crashed-or-stale")])
 def test_harness_callbacks_preserve_busy_lock_and_recover(page, state, runtime):
     payload = {"installed": True, "state": state, "runtimeState": runtime, "memoryBudget": "sufficient"}

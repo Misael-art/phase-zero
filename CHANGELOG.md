@@ -5,6 +5,9 @@ As versões seguem a data de build em `version.json`.
 
 ## [Unreleased]
 
+### Adicionado
+- **Agentes de desenvolvimento.** Desenvolvimento e menu PhaseZero levam às fichas DeepSeek Harness e Grok Build. O Harness abre no navegador. O Grok abre no terminal, oferece login oficial e verifica versões pelo atualizador do fornecedor.
+
 ### Corrigido
 - **Codex Web: "ChatGPT model 6 could not be selected and verified".** Upstream v6.1.17 falha na verificação do modelo ao reutilizar conversa retida (miuuyy/codex-chatgpt-web#956). Preparar/Atualizar passa a ligar `experimentalFreshConversationPerTurn` (chat novo por turno), com backup da configuração no journal; launcher reinicia só sem Codex do perfil aberto.
 - **Log da VM Windows inundado.** Consulta de estado deixava de dimensionar uma VM real, mas gravava o aviso de RAM mínima a cada atualização da UI. Aviso agora só aparece em planejar, instalar ou iniciar.
