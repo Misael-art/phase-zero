@@ -47,6 +47,7 @@ _AI_APPS = {
     "codexbar": "codexbar", "bonsai": "claude-code", "claude": "claude-code", "9router": "9router",
     "odysseus": "odysseus", "hermes": "hermes", "omniroute": "omniroute",
     "deepseek-harness": "deepseek-harness",
+    "grok-build": "grok-build",
 }
 _PROXIES = {"kimi": "kimiproxy", "qwen": "qwen-proxy", "deeps": "deepseek-proxy", "mimo": "mimo-proxy"}
 _EXTRA_APPS = {
@@ -58,9 +59,14 @@ _EXTRA_APPS = {
     "omniroute": "OmniRoute", "open-webui": "Open WebUI", "opencode": "OpenCode",
     "qwen-code-desktop": "Qwen Code Desktop", "qwen-proxy": "Qwen Proxy",
     "deepseek-harness": "DeepSeek Harness",
+    "grok-build": "Grok Build",
     "9router": "9Router", "usagebar": "UsageBar",
 }
 _EXTRA_APP_METADATA = {
+    "grok-build": {
+        "risk": "high",
+        "sources": [{"kind": "vendor", "name": "x.ai/cli · binário oficial"}],
+    },
     "deepseek-harness": {
         "risk": "high",
         "license": "MIT",
@@ -82,10 +88,12 @@ _CANONICAL_APP_ACTIONS = {
     "app.ai-memory": "ai.memory",
     "app.ollama": "ai.ollama",
     "app.deepseek-harness": "ai.deepseek-harness-install",
+    "app.grok-build": "ai.grok-build.install",
 }
 _INSTALL_AUTHORITY_BY_ACTION = {
     "ai.memory": "linux/ai/memory_manager.py",
     "ai.deepseek-harness-install": "linux/ai/deepseek_harness_manager.py",
+    "ai.grok-build.install": "linux/ai/grok_build.py",
     "ai.ollama": "linux/ai/setup-ollama.sh",
     "server.llm": "linux/ai/setup-ollama.sh",
 }

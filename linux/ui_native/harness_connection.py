@@ -15,7 +15,7 @@ def recommended_workspace(root: Path, saved: str = "") -> Path | None:
     candidates = [saved, os.environ.get("PZ_WORKSPACE_ROOT", "")]
     cwd = Path.cwd()
     candidates.extend(str(p) for p in (cwd, *cwd.parents) if (p / ".git").exists())
-    candidates += [str(root) if (root / ".git").exists() else "", str(Path.home() / "Projects/PhaseZero")]
+    candidates += [str(root) if (root / ".git").exists() else ""]
     for value in candidates:
         if value:
             path = Path(value).expanduser()

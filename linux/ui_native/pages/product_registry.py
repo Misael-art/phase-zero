@@ -744,7 +744,8 @@ class ProductRegistryPage(BasePage):
             self._detail_layout.addWidget(notice)
             return
         economy_agents = {"app.codex": "codex", "app.codex-desktop": "codex", "app.claude-code": "claude-code", "app.opencode": "opencode",
-                          "app.deepseek-harness": "deepseek-harness", "app.hermes": "hermes",
+                          "app.deepseek-harness": "deepseek-harness", "app.grok-build": "grok-build",
+                          "app.hermes": "hermes",
                           "app.gemini-cli": "gemini", "app.cursor": "cursor", "app.windsurf": "windsurf",
                           "app.kimi-code": "kimi-code", "app.zcode": "zcode", "app.copilot-cli": "copilot"}
         agent = economy_agents.get(self._selected_app_id)

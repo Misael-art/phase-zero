@@ -196,6 +196,8 @@ Usage:
   pz ai opencode run --route=9router -- <args>  Blocked until account-bound grants are enforceable
   pz ai opencode rollback <manifest> Restore an OpenCode route transaction
   pz ai deepseek-harness <action>  Official Harness (plan|status|install|update|start|open|login|stop|doctor|uninstall)
+  pz ai grok-build <action>        Official Grok Build (status|check|plan|install|update|open|login)
+  pz ai agent-shortcuts           Register agent shortcuts in the PhaseZero menu
   pz ai setup <tool>           Setup AI tool (codex|ollama|webui|claude|desktop|opencode|omo|openclaw|memory|admin|rtk|caveman|headroom|compat|ides|ide-apps|usagebar|codexbar|all)
   pz ai drift [status|sync [--dry-run]]  Compare installed runtime copies with the repo (exit 2 on drift)
   pz ai codexbar <action>      CodexBar CLI + optional KodexBar plasmoid (status|setup|health|auth|watchdog|plasmoid|plasmoid-remove|repair)
@@ -646,6 +648,14 @@ cmd_ai() {
             shift
             PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
                 python3 "$PZ_ROOT/linux/ai/deepseek_harness_manager.py" "${@:-status}"
+            ;;
+        grok-build)
+            shift
+            python3 "$PZ_ROOT/linux/ai/grok_build.py" "$@"
+            ;;
+        agent-shortcuts)
+            shift
+            bash "$PZ_ROOT/linux/ai/agent-shortcuts.sh" "$@"
             ;;
         doctor)
             local mcp_doctor codexbar_health codexbar_status

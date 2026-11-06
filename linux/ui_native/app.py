@@ -57,6 +57,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="PhaseZero Central de Controle")
     parser.add_argument("--version", action="version", version=f"PhaseZero {__version__}")
     parser.add_argument("--category", default="")
+    parser.add_argument("--journey", choices=("deepseek-harness", "grok-build"))
     parser.add_argument("--smoke-test", action="store_true")
     parser.add_argument("--screenshot", default="")
     parser.add_argument("--light", action="store_true")
@@ -94,6 +95,8 @@ def main() -> int:
         window.theme_id = theme
         window.theme_changed.connect(lambda theme: apply_theme(app, theme))
     window.show()
+    if args.journey and not args.boot_selector:
+        window.show_journey("IA & Dev", args.journey)
     if args.smoke_test:
         def finish() -> None:
             if args.screenshot:
