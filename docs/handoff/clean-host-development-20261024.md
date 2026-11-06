@@ -21,7 +21,12 @@ fonte padrão `mic-biglinux`, nenhuma fonte de headset salva. O Fôlego mantém
 as duas referências saudáveis, zero tentativas e disjuntor vazio. Não houve
 troca artificial do perfil ou teste do efeito no hardware falho. Alterações
 preexistentes de `AGENTS.md`, deste handoff e o script de touch não integram
-este incremento. CI e PR da nova mudança serão conferidos após publicação.
+este incremento. Commits de código e handoff estão na branch registrada,
+SHA remoto `09c99430f63d2fc676b5b4340cf8e3ef2178bc03`. PR #132 draft:
+o diff inclui commits anteriores dessa branch ainda fora da `main`. Uma
+branch isolada foi preparada sem novo checkout, mas a guarda de push recusou
+publicá-la fora da continuidade registrada; o bloqueio não foi contornado.
+CI do PR estava em andamento na última consulta; não há merge/release.
 
 ## Integração manual de entrada — 30/10/2026
 
