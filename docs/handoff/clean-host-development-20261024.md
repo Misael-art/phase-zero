@@ -1,5 +1,28 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Preferência de microfone após deriva de perfil — 06/11/2026
+
+Código `154225b3e4b7dcf4a21331e297eefe893a08b588` na branch de
+continuidade. O watcher PhaseZero capturava o áudio a cada três segundos; um
+`pro-audio` com `Int Mic`/`DMIC Enable` desligado podia substituir o snapshot
+`HiFi (Mic, Speaker)` antes de o Fôlego reparar. Agora, quando a entrada padrão
+continua `mic-biglinux`, essa captura falha e preserva a referência interna;
+o próximo ciclo reconcilia. Headset indisponível também não substitui a
+referência. Microfone externo padrão e Pro Audio com ambos os controles ligados
+continuam ajustes capturáveis. Contrato em
+[steamdeck-kde-input-v1.md](../roadmaps/steamdeck-kde-input-v1.md).
+
+Validação: 27 casos de `tests/test_desktop_session.py` passaram em HOME/XDG e
+temporários privados em disco com Python 3.14.7/pytest já provisionados pelo
+Fôlego. O wrapper PhaseZero `doctor --profile core` recusou o venv ausente;
+nenhuma instalação privilegiada foi feita. No host, serviço próprio reiniciado
+uma vez, `active/running` PID 307531; sem jogo/lease, perfil salvo interno,
+fonte padrão `mic-biglinux`, nenhuma fonte de headset salva. O Fôlego mantém
+as duas referências saudáveis, zero tentativas e disjuntor vazio. Não houve
+troca artificial do perfil ou teste do efeito no hardware falho. Alterações
+preexistentes de `AGENTS.md`, deste handoff e o script de touch não integram
+este incremento. CI e PR da nova mudança serão conferidos após publicação.
+
 ## Integração manual de entrada — 30/10/2026
 
 Correção posterior após teste do operador sem dock: pedir senha sem teclado
