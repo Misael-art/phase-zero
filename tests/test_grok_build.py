@@ -15,7 +15,7 @@ def test_install_validates_before_activation_and_adopts_without_replacing(monkey
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("PATH", "/usr/bin")
     artifact = tmp_path / "official"
-    binary = b"#!/bin/sh\nprintf 'grok 1.2.3 (fixture)\\n'\n"
+    binary = b"#!/bin/sh\nprintf 'grok 1.2.3 (fixture) [stable]\\n'\n"
     monkeypatch.setattr(grok, "PIN", {"version": "1.2.3", "size": len(binary),
                                     "sha256": hashlib.sha256(binary).hexdigest()})
     artifact.write_bytes(binary.replace(b"fixture", b"invalid"))
