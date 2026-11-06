@@ -802,6 +802,11 @@ class MainWindow(QMainWindow):
                 dialog = HarnessConnectionDialog(self.root, self, saved_workspace=saved)
             else:
                 dialog = ParameterDialog(action, self)
+                if action.id == "ai.grok-build.open":
+                    from .harness_connection import recommended_workspace
+                    suggested = recommended_workspace(self.root)
+                    if suggested is not None:
+                        dialog.suggest_path("workspace", suggested)
             if dialog.exec() != ParameterDialog.Accepted:
                 if action.id == "ai.deepseek-harness-start":
                     dialog.key.clear()

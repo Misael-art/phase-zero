@@ -107,3 +107,4 @@ echo "Desktop: $APP_DIR/io.phasezero.ControlCenter.desktop"
 
 # Default on-demand repair launchers; never execute repairs during install.
 python3 "$CURRENT_LINK/linux/repairs/manager.py" install
+bash "$CURRENT_LINK/linux/ai/agent-shortcuts.sh" "$BIN_HOME/phasezero-control-center"

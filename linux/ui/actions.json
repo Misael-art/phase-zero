@@ -3534,6 +3534,75 @@
       "plan_command": "linux/pz ai claude preflight bonsai --cwd {input}"
     },
     {
+      "name": "ai.grok-build.status",
+      "label": "Status Grok Build",
+      "command": "linux/pz ai grok-build status",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.grok-build.install",
+      "label": "Instalar Grok Build",
+      "command": "linux/pz ai grok-build install --artifact {artifact}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai grok-build plan"
+    },
+    {
+      "name": "ai.grok-build.open",
+      "label": "Abrir projeto no Grok Build",
+      "command": "linux/pz ai grok-build open --workspace {workspace}",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.grok-build.login",
+      "label": "Entrar no Grok Build",
+      "command": "linux/pz ai grok-build login",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai grok-build status"
+    },
+    {
+      "name": "ai.grok-build.check",
+      "label": "Verificar atualização do Grok Build",
+      "command": "linux/pz ai grok-build update-plan",
+      "mutable": false,
+      "require_plan": false,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": ""
+    },
+    {
+      "name": "ai.grok-build.update",
+      "label": "Atualizar Grok Build",
+      "command": "linux/pz ai grok-build update",
+      "mutable": true,
+      "require_plan": true,
+      "module": "IA & Dev",
+      "elevated": false,
+      "input_kind": "",
+      "input_label": "",
+      "plan_command": "linux/pz ai grok-build update-plan"
+    },
+    {
       "name": "ai.deepseek-harness-status",
       "label": "Status DeepSeek Harness",
       "command": "linux/pz ai deepseek-harness status --json",

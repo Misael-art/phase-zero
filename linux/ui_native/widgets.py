@@ -1053,6 +1053,11 @@ class ParameterDialog(QDialog):
         if value:
             target.setText(value)
 
+    def suggest_path(self, name: str, value: Path) -> None:
+        field = self._fields.get(name)
+        if isinstance(field, QLineEdit) and not field.text():
+            field.setText(str(value))
+
     def _validate(self) -> None:
         values = self.values()
         missing = [parameter.label for parameter in self.action.parameters if parameter.required and not values.get(parameter.name)]
