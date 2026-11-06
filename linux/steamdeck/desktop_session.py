@@ -373,6 +373,22 @@ def capture_preferences():
         for name, profile in old.get("profiles", {}).items():
             if "acp5x" in name and profile != "off" and value["audio"]["profiles"].get(name, "off") == "off":
                 raise RuntimeError("Placa interna indisponível; preferências anteriores preservadas.")
+            if ("acp5x" in name and profile == "HiFi (Mic, Speaker)"
+                    and old.get("defaults", {}).get("source") == "mic-biglinux"
+                    and value["audio"].get("defaults", {}).get("source") == "mic-biglinux"):
+                active = value["audio"]["profiles"].get(name)
+                if active == "pro-audio":
+                    # Pro Audio can expose a PCM while the internal mic path is
+                    # disabled. Do not replace the working desktop baseline.
+                    for control in ("Int Mic", "DMIC Enable"):
+                        status = run("amixer", "-c", "acp5x", "sget", control, timeout=2)
+                        if (status.returncode or not re.search(
+                                r"^\s+Mono: Playback \[on\]$", status.stdout, re.MULTILINE)):
+                            raise RuntimeError("Microfone interno não ativo em Pro Audio; preferência HiFi preservada.")
+                elif active and active.startswith("HiFi (Headset"):
+                    cards = {card["name"]: card for card in audio_list("cards")}
+                    if not cards.get(name, {}).get("profiles", {}).get(active, {}).get("available"):
+                        raise RuntimeError("Perfil de headset indisponível; preferência de microfone interno preservada.")
         value["audio"]["profiles"] = {**old.get("profiles", {}), **value["audio"]["profiles"]}
         for kind in ("sinks", "sources"):
             value["audio"]["endpoints"][kind] = {
