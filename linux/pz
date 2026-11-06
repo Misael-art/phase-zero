@@ -225,6 +225,8 @@ Usage:
   pz ai backup verify          Valida senha, paths e SHA-256 sem restaurar
   pz ai backup restore --plan  Prévia obrigatória da restauração e rollback
   pz ai memory <action>        Memória: status|install|repair|sync|backup|scope-add|device-add|github|automatic|key-export|key-import|verify|restore-plan|restore
+  pz ai memory practices       Lê práticas compartilhadas com assinatura verificada
+  pz ai memory curate-plan     Prepara curadoria de um memorial.md para revisão
   pz ai 9router status         Router health and redacted providers; clients stay blocked
   pz ai 9router install        Install loopback service; consumer use still requires grants
   pz ai 9router dashboard      Blocked until per-request connection grants are enforceable

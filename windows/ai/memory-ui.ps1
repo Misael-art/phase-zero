@@ -21,7 +21,7 @@ function Show-PhaseZeroMemoryWindow {
     $panel = New-Object System.Windows.Controls.StackPanel
     $panel.Margin = '20'
     $scroll.Content = $panel; $dialog.Content = $scroll
-    $context = @{ Worker = $null; Pending = $null; Buttons = @(); Result = $null }
+    $context = @{ Worker = $null; Pending = $null; Buttons = @(); Result = $null; Curation = $null; Review = $null }
     $manager = Join-Path $RepoRoot 'linux/ai/memory_manager.py'
 
     $state = New-Object System.Windows.Controls.TextBlock
@@ -97,6 +97,45 @@ function Show-PhaseZeroMemoryWindow {
     & $addButton $row 'Reparar' { & $invoke @('repair','--json') }.GetNewClosure()
     & $addButton $row 'Sincronizar agora' { & $invoke @('sync','--json') }.GetNewClosure() $true
     & $addButton $row 'Atualizar estado' { & $invoke @('status','--json') }.GetNewClosure()
+
+    $curationTitle = New-Object System.Windows.Controls.TextBlock
+    $curationTitle.Text = 'Curadoria do memorial'
+    $curationTitle.FontSize = 18; $curationTitle.Margin = '0,8,0,4'
+    $panel.Children.Add($curationTitle) | Out-Null
+    $curationResult = New-Object System.Windows.Controls.TextBox
+    $curationResult.Text = 'Selecione um memorial.md para gerar uma proposta de revisão.'
+    $curationResult.IsReadOnly = $true; $curationResult.TextWrapping = 'Wrap'
+    $curationResult.MaxHeight = 220; $curationResult.VerticalScrollBarVisibility = 'Auto'
+    $curationResult.Style = $Owner.FindResource('DarkReadonly')
+    [System.Windows.Automation.AutomationProperties]::SetName($curationResult, 'Estado, evidências e comparação da curadoria')
+    $panel.Children.Add($curationResult) | Out-Null
+    $row = & $addRow
+    & $addButton $row 'Curar memorial' {
+        $picker = New-Object Microsoft.Win32.OpenFileDialog
+        $picker.Title = 'Selecionar memorial'
+        $picker.Filter = 'Memorial (memorial.md)|memorial.md'
+        $picker.InitialDirectory = Join-Path $RepoRoot 'assets/agent-skills'
+        if ($picker.ShowDialog($dialog)) {
+            $context.Review = $null
+            & $invoke @('curate-plan','--path',$picker.FileName)
+        }
+    }.GetNewClosure()
+    & $addButton $row 'Revisar proposta' {
+        $context.Review = $null
+        & $invoke @('curate-review','--id',$context.Curation.id)
+    }.GetNewClosure()
+    $reviewButton = $context.Buttons[-1]
+    $reviewButton.IsEnabled = $false
+    & $addButton $row 'Aplicar ao memorial local' {
+        $review = $context.Review
+        $approval = [System.Windows.MessageBox]::Show($dialog, "Atualizar este memorial local com as mudanças revisadas?`n`n$($review.path)", 'Aplicar curadoria', 'OKCancel', 'Question', 'Cancel')
+        if ($approval -eq 'OK') {
+            & $invoke @('curate-apply','--id',$review.id,'--confirm','APPLY-CURATION','--expected-sha256',$review.sha256)
+        }
+    }.GetNewClosure()
+    $applyButton = $context.Buttons[-1]
+    $applyButton.IsEnabled = $false
+
     $row = & $addRow
     & $addButton $row 'Ligar automação' { & $invoke @('automatic','--enabled','yes') }.GetNewClosure()
     & $addButton $row 'Pausar automação' { & $invoke @('automatic','--enabled','no') }.GetNewClosure()
@@ -192,13 +231,44 @@ function Show-PhaseZeroMemoryWindow {
     $timer.Interval = [TimeSpan]::FromMilliseconds(200)
     $timer.Add_Tick({
         if (-not $context.Worker -or -not $context.Pending.IsCompleted) { return }
+        $nextCuration = $null
         try {
             $output = $context.Worker.EndInvoke($context.Pending)
             $data = ($output -join "`n") | ConvertFrom-Json
             $context.Result = $data
             $state.Text = if ($data.ok) { 'Operação concluída' } else { 'Memória requer atenção' }
             $technical.Text = $data | ConvertTo-Json -Depth 8
+            if ($data.state -eq 'curation-planned') {
+                $curationResult.Text = $data.summary
+                $approval = [System.Windows.MessageBox]::Show($dialog, "$($data.summary)`n`n$($data.path)`n`n$($data.nextAction)", 'Gerar proposta de curadoria', 'OKCancel', 'Question', 'Cancel')
+                if ($approval -eq 'OK') {
+                    $curationResult.Text = 'Verificando cota e gerando proposta…'
+                    $nextCuration = @('curate','--path',$data.path,'--expected-sha256',$data.sha256,'--confirm','CURATE')
+                } else { $curationResult.Text = 'Curadoria cancelada antes do envio.' }
+            } elseif ($data.state -eq 'curation-ready') {
+                $context.Curation = $data
+                $curationResult.Text = "$($data.summary) $($data.provider) · $($data.model)`n`nLeitura do modelo`n$($data.assessment)"
+            } elseif ($data.state -eq 'curation-reviewed') {
+                $context.Review = $data
+                $findings = $data.achados | ForEach-Object { "$($_.tipo) · $($_.motivo)`nEvidência`n$($_.evidencia)" }
+                $curationResult.Text = "$($data.path)`n$($data.provider) · $($data.model)`n`n" + ($findings -join "`n`n") + "`n`n" + $data.diff
+                $curationResult.ScrollToHome()
+                $curationResult.Focus() | Out-Null
+            } elseif ($data.state -eq 'curation-applied') {
+                $context.Curation = $null; $context.Review = $null
+                $curationResult.Text = $data.summary
+            } elseif ($data.reason -like 'curation-*' -or $data.reason -eq 'source-changed-before-replace') {
+                $context.Review = $null
+                $curationResult.Text = $data.message
+            }
             if ($data.PSObject.Properties.Name -contains 'installed') {
+                $context.Curation = $data.curation
+                if ($data.curation.id) {
+                    $statusText = if ($data.curation.applied) { 'Alterações aplicadas ao memorial local.' }
+                    elseif ($data.curation.findings) { "$($data.curation.findings) achado(s) para revisar." }
+                    else { 'A revisão não identificou achados com evidência.' }
+                    $curationResult.Text = "$statusText $($data.curation.provider) · $($data.curation.model)"
+                }
                 $state.Text = if ($data.installed -and $data.serverReachable) { 'Memória ativa' } elseif ($data.installed) { 'Memória precisa de reparo' } else { 'Memória não instalada' }
                 $lines = @('Automação: ' + $(if ($data.automatic) { 'ligada' } else { 'pausada' }))
                 $lines += 'Projetos compartilhados: ' + (($data.scopes | ForEach-Object project) -join ', ')
@@ -218,7 +288,10 @@ function Show-PhaseZeroMemoryWindow {
         finally {
             $context.Worker.Dispose(); $context.Worker = $null; $context.Pending = $null
             foreach ($button in $context.Buttons) { $button.IsEnabled = $true }
+            $reviewButton.IsEnabled = [bool]($context.Curation.findings -and -not $context.Curation.applied)
+            $applyButton.IsEnabled = [bool]$context.Review
         }
+        if ($nextCuration) { & $invoke $nextCuration }
     }.GetNewClosure())
     $dialog.Add_Closing({ param($ClosingWindow, $ClosingArguments) if ($context.Worker) { $ClosingArguments.Cancel = $true; $ClosingWindow.Title = 'Memória · operação em andamento'; $state.Text = 'Aguarde conclusão da operação para fechar.' } }.GetNewClosure())
     $timer.Start()

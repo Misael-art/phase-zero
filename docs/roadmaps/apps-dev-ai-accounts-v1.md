@@ -3028,9 +3028,17 @@ O host ainda falha em `full-runtime`: o launcher 6.1.8 não completou turno
 com MCP sob o sandbox read-only do perfil isolado. `launcher-mode` permanece
 browser-only. O presente ajuste corrige diagnóstico e copy, não declara
 Full funcional. Chrome da conta não estava exposto ao controle desta sessão;
-permissão real de plugin não foi observada. Reavaliar o plano de MCP local
-read/fetch após essa prova: a restrição por plano que o motivou foi
-superada pela documentação atual, embora o escopo restrito continue opção.
+permissão real de plugin não foi observada. Reavaliar o escopo de MCP local
+após confirmar a superfície, a conta e as permissões do workspace.
+
+**Curadoria de 2026-11-05.** A disponibilidade documentada para servidores MCP
+personalizados no ChatGPT Web inclui leitura e busca para Pro e Full MCP para
+Business e Enterprise/Edu. O guia de integração descreve escrita sujeita às
+permissões da superfície. No bridge PhaseZero, `write-unverified` registra que
+a capacidade dessa rota ainda precisa de prova. Runtime compatível,
+autorização e teste reversível continuam como gates.
+[Disponibilidade no ChatGPT Web](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt)
+e [guia de plugins MCP](https://developers.openai.com/api/docs/guides/custom-mcp-server).
 
 Prova hermética: `tests/test_chatgpt_web_bridge.py` e
 `tests/test_chatgpt_web_card.py`: 62 passaram; caso Pro confirma próximo gate

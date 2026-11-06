@@ -1,5 +1,33 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Preferência de microfone após deriva de perfil — 06/11/2026
+
+Código `154225b3e4b7dcf4a21331e297eefe893a08b588` na branch de
+continuidade. O watcher PhaseZero capturava o áudio a cada três segundos; um
+`pro-audio` com `Int Mic`/`DMIC Enable` desligado podia substituir o snapshot
+`HiFi (Mic, Speaker)` antes de o Fôlego reparar. Agora, quando a entrada padrão
+continua `mic-biglinux`, essa captura falha e preserva a referência interna;
+o próximo ciclo reconcilia. Headset indisponível também não substitui a
+referência. Microfone externo padrão e Pro Audio com ambos os controles ligados
+continuam ajustes capturáveis. Contrato em
+[steamdeck-kde-input-v1.md](../roadmaps/steamdeck-kde-input-v1.md).
+
+Validação: 27 casos de `tests/test_desktop_session.py` passaram em HOME/XDG e
+temporários privados em disco com Python 3.14.7/pytest já provisionados pelo
+Fôlego. O wrapper PhaseZero `doctor --profile core` recusou o venv ausente;
+nenhuma instalação privilegiada foi feita. No host, serviço próprio reiniciado
+uma vez, `active/running` PID 307531; sem jogo/lease, perfil salvo interno,
+fonte padrão `mic-biglinux`, nenhuma fonte de headset salva. O Fôlego mantém
+as duas referências saudáveis, zero tentativas e disjuntor vazio. Não houve
+troca artificial do perfil ou teste do efeito no hardware falho. Alterações
+preexistentes de `AGENTS.md`, deste handoff e o script de touch não integram
+este incremento. Commits de código e handoff estão na branch registrada,
+SHA remoto `09c99430f63d2fc676b5b4340cf8e3ef2178bc03`. PR #132 draft:
+o diff inclui commits anteriores dessa branch ainda fora da `main`. Uma
+branch isolada foi preparada sem novo checkout, mas a guarda de push recusou
+publicá-la fora da continuidade registrada; o bloqueio não foi contornado.
+CI do PR estava em andamento na última consulta; não há merge/release.
+
 ## Integração manual de entrada — 30/10/2026
 
 Correção posterior após teste do operador sem dock: pedir senha sem teclado
@@ -502,3 +530,161 @@ ID/tag/estado atual e obter autorização específica para editar a release já
 publicada. Não mover tags históricas. Próximo passo: conferir CI/Gitleaks do
 SHA final e, com ambientes/contas autorizados, executar gates físicos acima;
 somente então preparar manifesto de aceite de stable.
+
+## Práticas de desenvolvimento compartilhadas — 2026-11-05
+
+Raiz canônica PhaseZero, branch `codex/clean-host-dev-bootstrap`.
+Base `69edf4a6`, implementação `bcf53216`. O gerenciador existente de
+ai-memory distribui um catálogo OpenPGP assinado em escopo próprio. Só
+`pz ai memory practices` entrega o corpo verificado ao agente. O bootstrap de
+projetos instala o apontador e a precedência. A marcação do próprio PhaseZero
+fixa `default/misael-art-phase-zero` para chamadas MCP estáticas.
+
+Validação neste Linux: 39 pytest de memória, incluindo os dois servidores
+ai-memory 3.3.1 e companion 0.1.0, e 3 Pester do contrato de portabilidade.
+Passaram smoke de `pz ai init`, compatibilidade de agentes, sintaxe Bash,
+ShellCheck com as exclusões de CI e revisão do diff. A prova nativa confirmou
+captura de eventos sintéticos Codex e Claude Code, publicação A→B, consulta
+offline, aprendizado B→A, atualização, rejeição de versão antiga e adulteração,
+e continuidade do conhecimento regular após assinatura recusada. A fixture
+usa cofre em memória, volume de diretório e chaveiros GPG isolados.
+
+Escopo de aceite seguinte: roteiro em
+[portabilidade do ai-memory](../roadmaps/ai-memory-portability-v1.md#práticas-aprovadas-entre-hosts).
+Dois hosts físicos, Windows nativo, destino GitHub com o catálogo novo e
+sessão completa de cada cliente continuam pendentes. O catálogo real
+depende da escolha da chave pública do curador e do primeiro Markdown
+revisado. O ramo remoto também contém o hotfix anterior `69edf4a6`, ausente
+de `main`. Separar a revisão do catálogo do hotfix antes do PR para main.
+
+### Aceite do armazenamento físico — 2026-11-05
+
+CI do SHA `f275f932`: 18 checks verdes e probe QEMU/KVM pulado.
+Repetição local: 30 pytest de integração e gerenciador. A prova com
+`PZ_MEMORY_TEST_DEVICE` passou duas vezes usando o SD NTFS real, com
+descoberta do volume por UUID, escrita e leitura dos pacotes cifrados,
+troca A→B→A e limpeza do diretório de ensaio verificada ao fim. A e B eram
+instâncias nativas isoladas neste Linux. O instalador oficial em prefixo
+descartável expôs `pz ai memory practices` e retornou o estado esperado
+`practices-not-configured` numa instalação limpa.
+
+Aceite restante: segundo equipamento, sessão real de agente e catálogo novo
+no GitHub privado. O runtime de uso diário é 1.22.16. A sincronização do
+destino existente sinaliza `waiting-unlock`. O Secret Service ativo reportou
+a coleção padrão aberta e zero registros para a referência de criptografia
+configurada. O status indica ausência de exportação de recuperação neste
+host. Recuperar acesso à carteira original ou localizar a recuperação do
+mesmo domínio antes de alterar vínculos ou publicar. A chave de curadoria
+real segue pendente.
+
+### Aceite do transporte GitHub — 2026-11-05
+
+Base `fe132fbc`. A prova com `PZ_MEMORY_TEST_GITHUB` passou em 246 s usando
+o GitHub real e duas instâncias nativas isoladas. Repositório dedicado
+privado confirmado, quatro pacotes de conhecimento cifrados e dois snapshots
+de host. A→B publicou duas revisões. B→A entregou o aprendizado. A recusou
+a assinatura adulterada e manteve o fluxo de notas. B republicou a revisão
+válida e a sincronização seguinte passou. A leitura local da prática
+funcionou com acesso ao GitHub desabilitado na fixture.
+
+O snapshot de A foi baixado do GitHub, teve 55.346 bytes e SHA-256
+conferido contra o recibo de publicação. A restauração nativa em namespace
+descartável passou `PRAGMA integrity_check` e preservou a sessão sintética
+de Codex. Regressão local sem GitHub: 30 pytest passaram. O kit privado
+contém apenas a chave pública, a recuperação sintética e o recibo.
+
+Próximo aceite do mecanismo: usar esse kit em outro equipamento e abrir
+uma sessão real de agente. A ativação do repositório de produção é uma
+operação separada e depende da recuperação da chave original.
+
+### Diretrizes de produção e contingência local — 2026-11-05
+
+Base `759c5cd9`, implementação `138e00ed`. O bloco comum descreve
+precedência, leitura da revisão verificada, GitHub privado como transporte
+cifrado, memória do projeto e continuidade pelo checkout e handoff. Nove
+arquivos nativos versionados correspondem ao template comum. Bootstrap
+Linux e Windows atualizam blocos gerenciados. Qwen usa `QWEN.md` e o
+adaptador nativo de MCP/hooks. Roo preserva o arquivo legado ativo.
+
+Diretrizes iniciais em `assets/agent-skills/memorial.md`.
+Referência local gravada e relida em
+`default/misael-art-phase-zero`, `procedures/phasezero-production-workflow.md`.
+O ensaio nativo assinou e recuperou o texto inicial em ambiente isolado.
+33 pytest passaram, além de smoke de init, compatibilidade, guarda de
+workspace, ShellCheck e comparação dos nove blocos. Ensaio de Qwen com
+configuração descartável confirmou MCP e hooks. PowerShell no Linux
+confirmou nove alvos, idempotência e preservação de conteúdo Qwen/Roo.
+O Pester 6 local falhou no escopo dos helpers da suíte existente. O
+contrato executado diretamente passou e o Windows nativo segue sem prova.
+
+Próximo passo para ativar o catálogo oficial: configurar a chave pública
+do curador, assinar a revisão inicial no host curador e recuperar acesso
+ao domínio criptográfico antes da primeira sincronização de produção.
+O operador optou por prosseguir com a implementação com a prova de
+portabilidade disponível. O ensaio em um segundo equipamento fica
+registrado como validação pendente.
+
+### Memorial de UX e curadoria assistida — 2026-11-05
+
+Base `9bdd77e6`. O memorial versionado extrai critérios de tarefa, estados,
+composição responsiva, interação, persistência e evidência dos casos Fôlego
+e RetroDev Studio. O bootstrap injeta a orientação curta pelo mesmo bloco
+gerenciado. A referência no ai-memory do PhaseZero foi atualizada e relida
+no escopo `default/misael-art-phase-zero`.
+
+Na ficha de Memória, selecione o memorial, confirme o envio e revise a
+proposta com citações e comparação. A seleção consulta cota nativa de
+Codex e Claude Code. A aplicação confere a versão analisada, cria backup
+e atualiza somente o arquivo local. Publicação compartilhada exige o fluxo
+assinado existente. Achados sem evidência no texto e edições sobrepostas
+são bloqueados.
+
+Ensaio no Linux percorreu os quatro comandos pelo ponto de entrada do
+produto com conta, cota e resposta sintéticas. Qt/Xvfb verificou
+rolagem, ponteiro, teclado, dois temas e escala de 125%. Passaram 144
+pytest, os smokes Linux de init e compatibilidade e a geração idempotente
+dos nove arquivos no PowerShell. O parser conferiu a sintaxe da ficha
+WPF. A checagem nativa retornou cota e
+GPT‑6 Astra no Codex em uma leitura e ficou indisponível em outra.
+Inferência real, execução WPF em Windows, instalação do pacote novo e
+assinatura do catálogo ficam como aceites pendentes.
+
+### Curadoria real e diagnóstico da memória — 2026-11-05
+
+Base `9e1e4d3f`. Central de Controle Qt do checkout em Linux, com cliques
+automatizados no seletor e nos diálogos reais. A primeira execução no
+Codex GPT‑6 Astra retornou zero achados no memorial do projeto. Em uma
+cópia com problemas plantados, encontrou três categorias. A primeira
+proposta continha instruções editoriais no texto de substituição. O
+contrato agora pede Markdown final e bloqueia prefixos editoriais
+reconhecidos e exclusões que deixam itens vazios.
+
+O ensaio confirmou que a trava de curadoria bloqueava a consulta de
+práticas. A trava própria restaurou a consulta em paralelo, que retornou
+o estado real do catálogo durante a inferência. A ficha Linux passou a
+mostrar etapas e provedor. O recibo passou a guardar a leitura do modelo.
+O segundo ensaio da cópia produziu três edições aplicáveis. A interface
+bloqueou a fonte modificada, depois aplicou com confirmação. Reabertura e
+backup conferidos. Os resultados de teste foram mantidos fora do Git.
+Depois do ajuste de precedência, a execução real do memorial versionado
+retornou zero achados e registrou o resumo do modelo. 147 testes de
+regressão passaram, incluindo integração nativa da memória.
+
+Auditoria local no escopo PhaseZero encontrou dois testes com título
+duplicado, quatro sessões antigas sem acessos, dois sinais de desatualização
+e candidatos de similaridade que exigem verificação por escopo. A regra de
+consulta passou a explicitar origem, data, decisões posteriores e a
+separação entre evidência e revisão assinada. O catálogo deste host segue
+sem chave do curador configurada. Windows nativo e atualização do pacote
+instalado continuam pendentes.
+
+### Aplicação da curadoria na memória local — 2026-11-05
+
+Base `e1745797`. Curadoria no escopo PhaseZero pelo MCP nativo. Dois
+registros históricos receberam correções de escopo e indicação da referência
+posterior, com versões anteriores em checkpoints. Três sessões de teste
+receberam sinal de baixa utilidade e continuam disponíveis como histórico.
+A releitura confirmou as revisões e o lint deixou de sinalizar as duas
+orientações antigas. Candidatos de similaridade seguem sujeitos à revisão
+por escopo. A publicação do catálogo compartilhado ainda exige configurar
+a chave pública do curador.

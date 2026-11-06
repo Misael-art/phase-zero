@@ -99,6 +99,172 @@ limitada a seis horas. Sincronização manual ignora espera. Backups continuam
 independentes de conflitos de conhecimento. Arquivos de conhecimento sem mudança
 não geram novos objetos nem expulsam versões úteis na mídia.
 
+## Práticas aprovadas entre hosts
+
+Cada host consulta a cópia local de `default/phasezero-development-practices`,
+no caminho `_rules/development-practices.md`. O catálogo usa o mesmo domínio de
+criptografia e os mesmos destinos da sincronização. A chave de assinatura do
+curador é independente da chave de recuperação. O curador assina o Markdown
+com sua chave OpenPGP privada. Cada host confia explicitamente na impressão
+digital completa da chave pública primária. Verifique essa impressão fora do
+destino usado para transportar a memória.
+
+### Orientação local e contingência
+
+O bloco gerenciado de [regras dos agentes](../../assets/agent-skills/phasezero-tools-always-on.md)
+indica o GitHub privado como transporte cifrado e mantém o procedimento básico
+no checkout. O agente consulta `pz ai memory practices` e usa a revisão
+verificada como padrão subordinado às regras do projeto. Busca e registro
+de aprendizados usam o escopo do checkout. Quando a memória falha, as regras,
+o roadmap e o handoff locais sustentam o trabalho.
+
+Em Linux, `pz ai init --dry-run <pasta>` lista os destinos e
+`pz ai init --force --only-rules <pasta>` atualiza os blocos gerenciados.
+No bootstrap Windows, use o componente `agent-compat-runtime` com a pasta
+do projeto selecionada. Codex, OpenCode, ZCode e DeepSeek Harness com o
+perfil base usam `AGENTS.md`. Claude Code, Gemini CLI e Qwen Code recebem
+respectivamente `CLAUDE.md`, `GEMINI.md` e `QWEN.md`. Cursor, Windsurf,
+Cline, Roo Code e Copilot recebem suas regras nativas. Zed usa um dos arquivos de
+instrução do projeto conforme a precedência do cliente. Se uma IDE tiver
+um arquivo de instrução personalizado com precedência, aponte-o para o
+`AGENTS.md` do projeto. Modelos GLM, Qwen e DeepSeek usados dentro de outro
+cliente seguem os arquivos e a integração do cliente.
+
+Verifique captura com `ai-memory doctor` e leitura com
+`pz ai memory practices`. As instruções locais funcionam em clientes sem
+MCP. A captura automática depende dos hooks instalados. Clientes sem
+execução local usam as regras do projeto quando não conseguem verificar
+o catálogo. O DeepSeek Harness exige o adaptador upstream no perfil para
+captura e consulta por MCP.
+
+**Preparação em cada máquina.** Use runtime PhaseZero com suporte ao catálogo.
+Instale ou repare o ai-memory pelo fluxo existente. No host novo, importe a
+chave de recuperação antes de vincular destinos e escopos. Conecte o mesmo
+repositório GitHub privado ou cadastre a mesma mídia. Cadastre o projeto comum
+separadamente, para que possa enviar e receber aprendizados. Importe só a chave
+pública do curador nos hosts leitores.
+
+```bash
+gpg --import curador-publico.asc
+pz ai memory practices-configure --fingerprint <impressao-digital-primaria>
+# Apenas no host do curador, após revisão do Markdown:
+pz ai memory practices-publish --revision 1 --path <catalogo-revisado.md>
+# Em cada host:
+pz ai memory sync
+pz ai memory practices
+```
+
+O arquivo [Memorial de produção do PhaseZero](../../assets/agent-skills/memorial.md)
+é a base inicial para revisão e assinatura. Use seu caminho no
+`practices-publish --revision 1 --path` após confirmar a chave do curador.
+Uma cópia de referência em `procedures/phasezero-production-workflow.md`
+serve para consulta contextual. A revisão assinada é o catálogo aplicável.
+
+O catálogo começa com um título Markdown e declara o escopo de cada prática.
+`practices` retorna `practices-verified`, revisão e corpo verificado. Funciona
+com o ai-memory local ativo mesmo sem o destino conectado. Práticas são
+padrões subordinados ao pedido atual e às regras do repositório. A regra de
+consulta vai no bloco gerenciado de `pz ai init`. Agentes que só usam MCP
+podem recuperar contexto histórico normalmente, mas precisam de um ponto de
+entrada que execute a verificação para consumir o catálogo aprovado.
+
+Para corrigir ou revogar uma prática, publique o catálogo completo com revisão
+maior. A última revisão aceita fica registrada localmente. Depois que o host
+aceita uma atualização, cópias anteriores não fazem a prática revogada voltar.
+Quem estiver offline continua com a revisão já recebida. Erro de verificação
+é explícito e remete às regras do repositório. Notas, handoffs e outras
+páginas não entram no catálogo. A rejeição de um catálogo não impede a troca
+de aprendizados nem o backup completo. Proteja a chave privada do curador e guarde o
+material de recuperação separadamente da mídia.
+
+### Curadoria do memorial
+
+Na ficha **IA & Dev → Memória dos agentes**, escolha **Curar memorial** e selecione
+um `memorial.md`. O PhaseZero mostra o caminho e pede consentimento para enviar
+o texto do arquivo ao provedor. A operação consulta a cota vigente pelo CLI
+nativo e usa um modelo de alta capacidade com esforço alto. O Codex usa
+GPT‑6 Astra ou GPT‑6.1 Sol conforme a disponibilidade da conta. O Claude Code
+usa Opus 5.5 quando as janelas da assinatura têm saldo e o uso extra está
+desligado. Se a conta informa uma janela Opus separada, ela também precisa
+ter saldo.
+O PhaseZero bloqueia o pedido sem rota elegível e evita reenviar uma operação
+despachada para outra conta.
+
+Na ficha Linux, o andamento mostra a checagem de cota, o provedor e modelo
+escolhidos e a conferência da resposta. A curadoria usa trava própria e a
+consulta de práticas e a sincronização mantêm o fluxo normal. O resultado
+traz a leitura do modelo sobre o documento, inclusive quando há zero achados.
+
+**Revisar proposta** apresenta os trechos, as razões, a evidência citada e as
+alterações. O PhaseZero confere o formato, a ocorrência dos trechos e das
+evidências, a ausência de sobreposição e o hash da versão examinada. O campo
+de substituição recebe Markdown final. Instruções editoriais reconhecidas e
+itens vazios de lista introduzidos pela edição são bloqueados. A avaliação
+semântica permanece com o revisor. A obsolescência depende do que o texto
+consegue demonstrar. Confirme **Aplicar ao memorial local** para salvar com
+cópia anterior no backup do PhaseZero. A publicação compartilhada segue o
+fluxo assinado acima.
+
+### Prova reproduzível
+
+Com ai-memory e ai-memory-wikisync já instalados, rode do checkout oficial.
+
+```bash
+proof_tmp="${XDG_CACHE_HOME:-$HOME/.cache}/phasezero-dev/memory-proof"
+mkdir -p "$proof_tmp/tmp" "$proof_tmp/pytest"
+export TMPDIR="$proof_tmp/tmp"
+export PYTEST_DEBUG_TEMPROOT="$proof_tmp/pytest"
+export PZ_MEMORY_TEST_NATIVE="$(command -v ai-memory)"
+export PZ_MEMORY_TEST_WIKISYNC="$(command -v ai-memory-wikisync)"
+python3 -m pytest -q tests/test_memory_native_integration.py -k approved_practices
+```
+
+O ensaio usa dois serviços nativos em loopback, chaves e dados sintéticos, e
+um diretório temporário como volume compartilhado por padrão. O cofre é uma
+fixture. Exercita captura por hooks com entradas sintéticas,
+cadastro, exportação e importação de chave, troca criptografada, consulta
+offline, aprendizado de volta, atualização e rejeição de adulteração e revisão
+antiga.
+
+Para testar armazenamento físico, aponte `PZ_MEMORY_TEST_DEVICE` para o ponto
+de montagem de um volume de dados gravável e execute o mesmo pytest. O
+ensaio exige um volume separado e recusa qualquer diretório `PhaseZero`
+existente na raiz. Ele usa a descoberta real por UUID e limpa o namespace
+temporário após conferir a identidade do domínio de teste. As instâncias
+ainda rodam na mesma máquina. Mantenha a mídia conectada durante o ensaio.
+
+Para testar o **GitHub real**, execute a mesma prova com
+`PZ_MEMORY_TEST_GITHUB=OWNER/phasezero-memory-proof-IDENTIFICADOR` e a
+autenticação `gh` já ativa. Aponte `GH_CONFIG_DIR` para a configuração
+existente do GitHub CLI antes de iniciar os ambientes isolados. Use um nome
+novo e escolha um transporte por execução. A prova cria um repositório
+privado dedicado com dados sintéticos. Publica duas revisões, recebe o
+aprendizado de volta, verifica a rejeição da assinatura inválida e volta a
+publicar o catálogo válido. Também baixa o snapshot de A, confere o SHA-256
+e restaura o SQLite em um ambiente descartável.
+
+Para continuar o mesmo ensaio em outro computador, use uma instalação
+limpa ou isolada. Transfira `curator-public.asc`, `recovery.gpg` e
+`github-proof.json` gerados no diretório temporário do caso. Importe a
+recuperação sintética antes de cadastrar o repositório e a impressão
+digital indicada no recibo. Cadastre o escopo `default/shared` com
+`_rules,notes` e a identidade fixa do ensaio, 64 caracteres `b`.
+Após sincronizar, o agente deve informar a revisão 2, aplicar a prática
+e registrar uma nota própria nesse escopo. O recibo e o arquivo de
+recuperação pertencem ao ensaio. A senha sintética está definida em
+`recover` no teste de integração.
+
+**Aceite em duas máquinas físicas.** Em A, publique uma prática de ensaio e
+sincronize pelo destino escolhido. Em B, instale a mesma versão, cadastre a
+chave pública e sincronize. Em uma sessão no projeto, peça ao agente para
+informar a revisão, aplicar a prática numa tarefa de teste e registrar um
+aprendizado identificado. Confira a captura com `ai-memory doctor` e o
+aprendizado em A após sincronizar B e A. Publique uma revisão em A que
+substitua a prática e confira sua aplicação em B. Repita a leitura em B com
+o destino desconectado e registre versão, agente, destino e revisões
+observadas. Para clientes com integração parcial, declare qual parte ficou
+pendente. Use o destino privado já autorizado ou uma mídia de ensaio.
+
 ## Evidência em 2026-11-01
 
 Host: BigLinux/Manjaro, `misael-jupiter`. Instalação real 1.31.1 → 3.3.1,

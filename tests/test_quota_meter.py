@@ -73,12 +73,14 @@ def test_claude_meter_reads_usage_without_leaking_the_token(env):
             return {"organization": {"organization_type": "claude_pro"}}
         seen.update(url=url, auth=headers["Authorization"])
         return {"five_hour": {"utilization": 40.0, "resets_at": "2026-10-31T15:00:00+00:00"},
-                "seven_day": {"utilization": 90.0, "resets_at": "2026-11-02T03:00:00+00:00"}}
+                "seven_day": {"utilization": 90.0, "resets_at": "2026-11-02T03:00:00+00:00"},
+                "extra_usage": {"is_enabled": False}}
 
     item = qm.claude_meter(env, NOW, fetch, use_cache=False)
 
     assert seen["url"] == qm.CLAUDE_USAGE_URL and seen["auth"] == "Bearer secret-token"
     assert item["remaining"] == 10 and item["plan"] == "Pro" and item["error"] is None
+    assert item["extraUsageEnabled"] is False
     assert "secret-token" not in json.dumps(item)
     assert "secret-token" not in qm.cache_file(env).read_text()
     assert qm.cache_file(env).stat().st_mode & 0o777 == 0o600

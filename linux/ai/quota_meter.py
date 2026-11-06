@@ -393,9 +393,11 @@ def claude_meter(env: dict[str, str], now: dt.datetime,
     # Anthropic exposes no paid-until date; monthly billing renews on the signup day.
     renewal = next_anniversary(created, now).isoformat() if created and profile.get(
         "status") in (None, "active") else None
+    extra_usage = payload.get("extra_usage") if isinstance(payload, dict) else None
     return meter("claude:default", "Claude (Code + Desktop)", "claude", CLAUDE_COLOR, windows,
                  plan=(profile.get("plan") or plan_name(plan)) if not error else None, subscriptionUntil=renewal,
                  subscriptionEstimated=bool(renewal), subscriptionStatus=profile.get("status"),
+                 extraUsageEnabled=extra_usage.get("is_enabled") if isinstance(extra_usage, dict) else None,
                  seenAt=dt.datetime.fromtimestamp((cached or {}).get("at", now.timestamp()), dt.timezone.utc).isoformat() if payload else None,
                  source="anthropic-oauth-usage", error=error)
 

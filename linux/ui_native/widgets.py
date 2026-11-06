@@ -1535,10 +1535,14 @@ class PreviewDialog(StatefulDialog):
         blockers = result.parsed.get("blockers") if isinstance(result.parsed, dict) else None
         pending = is_pending_report(result.parsed)
         preview_ok = (result.ok or pending) and not blockers
+        curation = result.parsed.get("state") if isinstance(result.parsed, dict) else None
+        curation_preview = curation in {"curation-planned", "curation-reviewed"}
         dialog_state = "success" if preview_ok and not pending else "warning" if preview_ok else "error"
         state_only = bool(action and action.preview_kind == "state")
         if not preview_ok:
             dialog_title = "Não é seguro aplicar agora"
+        elif curation_preview:
+            dialog_title = "Revisar proposta" if curation == "curation-reviewed" else "Confirmar envio do memorial"
         elif state_only:
             dialog_title = "Revisar antes de aplicar"
         else:
@@ -1567,6 +1571,27 @@ class PreviewDialog(StatefulDialog):
         summary.setWordWrap(True)
         summary.setObjectName("cardDescription")
         self.body.addWidget(summary)
+        if curation_preview:
+            path_label = QLabel(result.parsed["path"])
+            path_label.setTextFormat(Qt.PlainText)
+            path_label.setWordWrap(True)
+            path_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+            path_label.setAccessibleName("Arquivo selecionado")
+            self.body.addWidget(path_label)
+        if curation == "curation-reviewed":
+            model = QLabel(f"{result.parsed['provider']} · {result.parsed['model']}")
+            model.setTextFormat(Qt.PlainText)
+            model.setWordWrap(True)
+            self.body.addWidget(model)
+            comparison = QPlainTextEdit()
+            comparison.setReadOnly(True)
+            comparison.setObjectName("logView")
+            comparison.setAccessibleName("Evidências e comparação do memorial")
+            comparison.setMinimumHeight(210)
+            findings = "\n\n".join(f"{item['tipo'].capitalize()} · {item['motivo']}\nEvidência\n{item['evidencia']}"
+                                   for item in result.parsed["achados"])
+            comparison.setPlainText("Alterações propostas\n\n" + result.parsed["diff"] + "\n\nEvidências\n\n" + findings)
+            self.body.addWidget(comparison, 1)
         for index, line in enumerate(_capability_space_lines(result.parsed)):
             space_label = QLabel(line)
             space_label.setObjectName("capabilitySpaceSummary" if index == 0 else "capabilitySpaceDetail")
@@ -1661,11 +1686,16 @@ class PreviewDialog(StatefulDialog):
         copy.clicked.connect(lambda: QApplication.clipboard().setText(self.output.toPlainText()))
         cancel = self.add_action("Voltar", QDialogButtonBox.RejectRole)
         self.confirm = self.add_action(
-            "Confirmar e aplicar",
+            "Gerar proposta" if curation == "curation-planned" else
+            "Aplicar ao memorial local" if curation == "curation-reviewed" else "Confirmar e aplicar",
             QDialogButtonBox.AcceptRole,
             variant="dangerButton" if action and action.risk == "high" else "primaryButton",
             enabled=preview_ok and not (action and action.risk == "high"),
         )
+        if curation_preview:
+            self.confirm.setAutoDefault(False)
+            self.confirm.setDefault(False)
+            cancel.setDefault(True)
         if action and action.risk == "high":
             warning = QLabel("Alto risco: digite CONFIRMAR para liberar a execução.")
             warning.setObjectName("errorTitle")
@@ -1701,9 +1731,11 @@ class ProgressDialog(StatefulDialog):
         super().__init__(title, "running", parent)
         self._started = time.monotonic()
         self._running = True
-        summary = QLabel("Aguarde. O PhaseZero está cuidando desta etapa.")
-        summary.setObjectName("cardDescription")
-        self.body.addWidget(summary)
+        self.summary = QLabel("Aguarde. O PhaseZero está cuidando desta etapa.")
+        self.summary.setTextFormat(Qt.PlainText)
+        self.summary.setWordWrap(True)
+        self.summary.setObjectName("cardDescription")
+        self.body.addWidget(self.summary)
         self.details_toggle = QToolButton()
         self.details_toggle.setObjectName("technicalDisclosure")
         self.details_toggle.setText("Ver detalhes técnicos")
@@ -1755,6 +1787,10 @@ class ProgressDialog(StatefulDialog):
     def set_progress(self, value: int) -> None:
         self.progress.setRange(0, 100)
         self.progress.setValue(value)
+
+    def set_stage(self, text: str) -> None:
+        self.summary.setText(text)
+        self.body.setAlignment(Qt.AlignTop)
 
     def finish(self) -> None:
         self._running = False
@@ -1828,6 +1864,12 @@ class ResultDialog(StatefulDialog):
         summary.setWordWrap(True)
         self.summary_label = summary
         self.body.addWidget(summary)
+        if result.action_id == "ai.memory-curate" and isinstance(result.parsed, dict) and result.parsed.get("assessment"):
+            assessment = QLabel("Leitura do modelo\n" + result.parsed["assessment"])
+            assessment.setTextFormat(Qt.PlainText)
+            assessment.setWordWrap(True)
+            assessment.setObjectName("cardDescription")
+            self.body.addWidget(assessment)
         self.view = StructuredResultView(
             result.parsed, formatted, self, advanced_mode=advanced_mode
         )

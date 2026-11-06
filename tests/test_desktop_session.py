@@ -189,6 +189,64 @@ def test_capture_preserves_intentional_desktop_mute(tmp_path):
     assert json.loads((tmp_path / "preferences.json").read_text())["audio"] == snapshot
 
 
+@pytest.mark.parametrize("switches_on", [False, True])
+def test_capture_does_not_replace_working_internal_mic_with_broken_pro_audio(tmp_path, switches_on):
+    card = "alsa_card.pci-0000_04_00.5-platform-acp5x_mach.0"
+    previous = {"schema_version": 1, "audio": {"profiles": {card: "HiFi (Mic, Speaker)"},
+        "endpoints": {"sources": {"mic-biglinux": {"mute": False, "volume": [65536]}}},
+        "defaults": {"source": "mic-biglinux"}}}
+    current = {"profiles": {card: "pro-audio"}, "endpoints": {"sources": {}},
+               "defaults": {"source": "mic-biglinux"}}
+    desktop.write(tmp_path / "preferences.json", previous)
+    def switch(*args, **kwargs):
+        assert args[:4] == ("amixer", "-c", "acp5x", "sget")
+        return subprocess.CompletedProcess(args, 0,
+            "Simple mixer control\n  Mono: Playback [on]\n" if switches_on else
+            "Simple mixer control\n  Mono: Playback [off]\n", "")
+    with patch.object(desktop, "state_dir", return_value=tmp_path), \
+         patch.object(desktop, "audio_snapshot", return_value=current), \
+         patch.object(desktop, "run", side_effect=switch):
+        if switches_on:
+            desktop.capture_preferences()
+        else:
+            with pytest.raises(RuntimeError, match="HiFi preservada"):
+                desktop.capture_preferences()
+    saved = desktop.read(tmp_path / "preferences.json")
+    assert saved["audio"]["profiles"][card] == ("pro-audio" if switches_on else "HiFi (Mic, Speaker)")
+    if not switches_on:
+        assert saved == previous
+
+
+def test_capture_keeps_internal_mic_when_selected_headset_is_unavailable(tmp_path):
+    card = "alsa_card.pci-0000_04_00.5-platform-acp5x_mach.0"
+    previous = {"schema_version": 1, "audio": {"profiles": {card: "HiFi (Mic, Speaker)"},
+                                                 "endpoints": {}, "defaults": {"source": "mic-biglinux"}}}
+    desktop.write(tmp_path / "preferences.json", previous)
+    current = {"profiles": {card: "HiFi (Headset, Speaker)"}, "endpoints": {},
+               "defaults": {"source": "mic-biglinux"}}
+    with patch.object(desktop, "state_dir", return_value=tmp_path), \
+         patch.object(desktop, "audio_snapshot", return_value=current), \
+         patch.object(desktop, "audio_list", return_value=[{"name": card, "profiles": {
+             "HiFi (Headset, Speaker)": {"available": False}}}]):
+        with pytest.raises(RuntimeError, match="headset indisponível"):
+            desktop.capture_preferences()
+    assert desktop.read(tmp_path / "preferences.json") == previous
+
+
+def test_capture_keeps_intentional_external_microphone_choice(tmp_path):
+    card = "alsa_card.pci-0000_04_00.5-platform-acp5x_mach.0"
+    previous = {"schema_version": 1, "audio": {"profiles": {card: "HiFi (Mic, Speaker)"},
+        "endpoints": {}, "defaults": {"source": "mic-biglinux"}}}
+    desktop.write(tmp_path / "preferences.json", previous)
+    current = {"profiles": {card: "pro-audio"}, "endpoints": {},
+               "defaults": {"source": "external-usb-mic"}}
+    with patch.object(desktop, "state_dir", return_value=tmp_path), \
+         patch.object(desktop, "audio_snapshot", return_value=current), \
+         patch.object(desktop, "run", side_effect=AssertionError("internal mic probe not applicable")):
+        desktop.capture_preferences()
+    assert desktop.read(tmp_path / "preferences.json")["audio"]["defaults"]["source"] == "external-usb-mic"
+
+
 def test_symlink_preferences_never_overwrite_target(tmp_path):
     valuable = tmp_path / "valuable"
     valuable.write_text("preserve")
@@ -272,6 +330,24 @@ def test_failed_startup_restore_cannot_overwrite_healthy_preferences(tmp_path):
          patch.object(desktop.time, "sleep", side_effect=StopIteration):
         with pytest.raises(StopIteration):
             desktop.watch()
+
+
+def test_failed_capture_reenters_reconciliation_in_next_watch_cycle(tmp_path):
+    calls = []
+    def fail_capture():
+        calls.append("capture")
+        raise RuntimeError("microphone route disabled")
+    with patch.object(desktop, "state_dir", return_value=tmp_path), \
+         patch.object(desktop, "lease_status", return_value={"active": False}), \
+         patch.object(desktop, "other_game_active", return_value=False), \
+         patch.object(desktop, "reconcile", side_effect=lambda: calls.append("restore") or {"ok": True}), \
+         patch.object(desktop, "capture_preferences", side_effect=fail_capture), \
+         patch.object(desktop, "protect_input", return_value=[]), \
+         patch.object(desktop, "keyboard_restore", return_value=[]), \
+         patch.object(desktop.time, "sleep", side_effect=[None, None, StopIteration]):
+        with pytest.raises(StopIteration):
+            desktop.watch()
+    assert calls == ["restore", "capture", "restore"]
 
 
 def test_dead_emulator_process_does_not_block_desktop_restoration(tmp_path):

@@ -1,14 +1,15 @@
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPlainTextEdit
 
 from linux.ui_native.catalog import build_catalog
 from linux.ui_native.command_runner import CommandRunner
+from linux.ui_native.models import OperationResult
 from linux.ui_native.pages.ai_dev import AiDevPage
 from linux.ui_native.pages.memory import STATUS_ID
 from linux.ui_native.status_loader import StatusLoader
-from linux.ui_native.widgets import ParameterDialog
+from linux.ui_native.widgets import ParameterDialog, PreviewDialog
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -89,3 +90,50 @@ def test_recovery_uses_save_dialog_for_new_file(page, monkeypatch, tmp_path):
     assert dialog.values()["path"] == str(target)
     assert not target.exists()
     dialog.close()
+
+
+def test_curation_selects_file_then_reviews_saved_proposal(page, monkeypatch):
+    card = page.memory_card
+    payload = {"installed": True, "service": "active"}
+    card.update_status(payload)
+    assert card.buttons["curate"].isEnabled()
+    assert not card.buttons["curate-apply"].isEnabled()
+    requested = []
+    page.action_requested.connect(requested.append)
+    monkeypatch.setattr("linux.ui_native.pages.memory.QFileDialog.getOpenFileName", lambda *_: ("", ""))
+    card.buttons["curate"].click()
+    assert requested == []
+    path = "/fixture/with spaces/memorial.md"
+    monkeypatch.setattr("linux.ui_native.pages.memory.QFileDialog.getOpenFileName", lambda *_: (path, ""))
+    card.buttons["curate"].click()
+    assert requested[-1].preview_args[-2:] == ("--path", path)
+    assert requested[-1].preview_bindings == (("expectedSha256", "sha256"),)
+    report = {"id": "f" * 32, "findings": 1, "provider": "Codex", "model": "gpt-6-astra"}
+    card.update_status({**payload, "curation": report})
+    card.buttons["curate-apply"].click()
+    assert requested[-1].preview_args[-2:] == ("--id", report["id"])
+    preview = OperationResult(requested[-1].id, [], True, 0, "", "", "", "", parsed={
+        "ok": True, "state": "curation-reviewed", "path": path, **report,
+        "achados": [{"tipo": "ambiguidade", "motivo": "Falta prazo.", "evidencia": "Revisar depois."}],
+        "diff": "-Revisar depois.\n+Revisar antes de publicar."})
+    dialog = PreviewDialog(preview, requested[-1])
+    comparison = next(field for field in dialog.findChildren(QPlainTextEdit)
+                      if field.accessibleName() == "Evidências e comparação do memorial")
+    assert "Falta prazo." in comparison.toPlainText()
+    assert "+Revisar antes de publicar." in comparison.toPlainText()
+    assert dialog.confirm.text() == "Aplicar ao memorial local" and not dialog.confirm.isDefault()
+    dialog.reject()
+    card.update_status({**payload, "curation": {**report, "applied": True}})
+    assert not card.buttons["curate-apply"].isEnabled()
+
+
+def test_curation_status_keeps_sync_and_curation_independent(page):
+    card = page.memory_card
+    payload = {"installed": True, "service": "active", "keyConfigured": True, "github": {"repository": "o/r"}}
+    card.update_status({**payload, "curationRunning": True})
+    assert "andamento" in card.curation_status.text()
+    assert card.buttons["sync"].isEnabled()
+    assert not card.buttons["curate"].isEnabled()
+    card.update_status({**payload, "operationRunning": True})
+    assert not card.buttons["sync"].isEnabled()
+    assert card.buttons["curate"].isEnabled()
