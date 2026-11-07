@@ -648,3 +648,76 @@ CI de entrada `bb0afd7e` teve `shell-test` falhando em hot-backup SQLite do
 Homelab (REV-002), observado antes deste incremento; logs preservados. Não foi
 reproduzido em main nesta sessão nem alterado fora da frente. PR permanece
 draft; merge/release dependem dos gates pendentes e da prova de ferramentas.
+
+### Codex Web principal: início discreto e recuperação automática — 2026-11-07
+
+Código revisável `5d6948136ad56357fce46deb77aeaad212ad675d`, branch
+`codex/codex-web-background`, sobre `396347cffa4013fd2b1feafe933906e9b15e0989`
+(`codex/accounts-key-manager`, PR #134). Equivalente local da correção nova:
+`027bb086`, na branch compartilhada `codex/agent-launchers`. O incremento
+inclui o adaptador de composer que já existia localmente, necessário à página
+atual; não publica alterações alheias de estabilidade, memória, AGENTS ou touch.
+
+Pessoa/tarefa/aceite: conta principal acessa **Codex Web Principal** pelo menu
+ou área de trabalho; login da sessão prepara o backend sem abrir janela nem
+notificação de sucesso. Primeiro onboarding e falhas continuam visíveis pelo
+fluxo upstream. Não há troca automática de conta/modelo nem fallback pago.
+
+Owner continua `linux/ai/chatgpt_web_bridge.py`. Launcher usa `--hidden`,
+`Restart=on-failure`, espera de 5 s e limite de cinco partidas em 300 s. O próprio
+unit executa preparo antes de cada partida e restaura o helper de composer após
+iniciar. Helper usa snapshot estável, ordem sem bloqueio e reaproveita unit em
+encerramento. `systemctl is-active` retorna código 3 durante `activating`;
+esse estado agora permite agendar o helper pelo `ExecStartPost`.
+
+Falha real descoberta na injeção: Chromium deixava o túnel no scope anterior;
+`/proc/PID/exe` podia negar leitura ao próprio usuário. Runtime recusava nova
+partida e restaurava a rota nativa do perfil dedicado. Identificação agora
+confere UID, executável ou argv com binário e diretório de perfil exatos,
+cgroup e marcas de início estáveis. Preparo encerra somente scopes órfãos
+desse perfil. Não sinaliza apps de outras contas nem enfraquece sandbox.
+Três tentativas intermediárias falharam; recibos preservados. Após correção,
+SIGKILL apenas do launcher próprio recuperou serviço, túnel, composer e rota
+automaticamente em **11,13 s**, com zero túneis órfãos.
+
+Diagnóstico de conector ignora abas vazias/com origem nula e tenta outra aba
+do próprio ChatGPT dentro do prazo global. Ausência temporária não vira logout.
+Agrupador `linux/ui/menu.py` preserva owner `codex-profiles`/`chatgpt-web`;
+antes trocava por `true`, tornando o atalho principal inconsistente. Metadado
+do menu reparado após comparar Exec/nome/ícone com cópia da área de trabalho,
+com backup pelo owner existente.
+
+Host BigLinux/Manjaro KDE Wayland, launcher **6.1.17**, Codex **0.167.0**:
+
+- Conta da página autenticada comparada à principal por identidade derivada;
+  igualdade confirmada, sem exportar identidade ou credenciais. Configuração e
+  auth da instalação nativa, e auth do Codex Web, mantiveram hashes.
+- Aprovação automática encontrada ligada e desligada pela API nativa do app.
+  Sandbox e aprovações do perfil continuam herdados da escolha existente.
+- Turno real `chatgpt-web/light` respondeu PONG. Primeiro canary de ferramentas
+  recebeu 429; após recuperação, `chatgpt-web/medium` leu arquivo próprio e
+  gravou cópia idêntica em sandbox `workspace-write` com rede, sem API paga.
+  Prova é existência/conteúdo do arquivo, não apenas texto do modelo.
+- 163 regressões de bridge/perfis/cartão, 31 de menus e 13 de coesão de
+  instalação passaram. Painel Codex também passou na rodada anterior.
+  Temporários por usuário em disco; wrapper `doctor --profile ui` pronto.
+- Instalador oficial por usuário aplicado de export Git imutável do SHA de
+  código acima. Versão nominal **1.22.17**, sem tag/release nova. Dois módulos
+  instalados conferidos byte a byte; snapshot estável e opt-in de início no
+  login atualizados pelo gerenciador instalado. Wrapper real de login retornou
+  `ready=true`, sem janela do launcher no KWin. Atalho real da área de trabalho
+  abriu Codex Desktop visível no perfil dedicado; comando do menu é idêntico.
+
+Evidências privadas: `~/.cache/phasezero-dev/codex-web-resilience/` e
+`~/.local/share/phasezero/chatgpt-web/smoke/tools-proof-20261107/`.
+Fontes exportadas temporariamente removidas após instalar; pacote upstream não
+foi modificado nem baixado novamente. Estado de teste e recibos ficam privados.
+
+Publicação: incremento separado da base de contas, sem merge/release. CI deve
+ser consultado no SHA publicado. Próximo login físico, reboot, Windows e
+durabilidade de sessão perante revogação/limites externos não foram homologados.
+Catálogo de práticas retornou `practices-not-configured`; memória do projeto e
+memorial local usados. Fetch foi destravado preservando em recuperação privada
+uma referência automática de checkpoint Codex comprovadamente vazia; branches,
+commits e demais referências intactos. Caminho de recuperação:
+`~/.local/share/project-recovery/PhaseZero/git-empty-checkpoint-20261107/`.
