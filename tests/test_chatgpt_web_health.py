@@ -13,6 +13,15 @@ from linux.ai.chatgpt_web_health import Recovery, classify_error, decisions, rec
 from test_chatgpt_web_bridge import ACKS, FakeRunner
 
 
+def test_repair_entrypoint_exposes_web_recovery_without_touching_host():
+    import sys
+    manager = Path(__file__).resolve().parents[1] / "linux/repairs/manager.py"
+    result = subprocess.run([sys.executable, str(manager), "codex-web", "--help"],
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert "enable" in result.stdout and "status" in result.stdout and "--deep" in result.stdout
+
+
 @pytest.mark.parametrize("message,status,code,expected", [
     ("ChatGPT model 6 could not be selected and verified", 400, "", "model-compatibility"),
     ("", 400, "model_version_unavailable", "model-compatibility"),
