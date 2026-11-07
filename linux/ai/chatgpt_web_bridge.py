@@ -743,7 +743,8 @@ def chatgpt_page_targets(devtools_file: Path) -> list[str]:
         pages = json.loads(resp.read())
     return [page["webSocketDebuggerUrl"] for page in pages
             if page.get("type") == "page" and page.get("webSocketDebuggerUrl")
-            and str(page.get("url", "")).startswith("https://chatgpt.com")]
+            and urllib.parse.urlsplit(str(page.get("url", ""))).scheme == "https"
+            and urllib.parse.urlsplit(str(page.get("url", ""))).hostname == "chatgpt.com"]
 
 
 def dom_compat_pass(devtools_file: Path) -> int:
@@ -871,7 +872,8 @@ class Runner:
         its loopback DevTools port. Tokens and cookies stay in that page; only
         connector metadata comes back.
         """
-        script = ("(async()=>{const s=await (await fetch('/api/auth/session')).json();"
+        script = ("(async()=>{if(location.origin!=='https://chatgpt.com')return {unavailable:true};"
+                  "const s=await (await fetch('/api/auth/session')).json();"
                   "if(!s.accessToken)return {signedIn:false};"
                   "const h={Authorization:'Bearer '+s.accessToken};"
                   "const g=async u=>{const r=await fetch(u,{headers:h});return r.ok?r.json():null};"
@@ -889,12 +891,31 @@ class Runner:
             port = int(devtools_file.read_text(encoding="utf-8").split()[0])
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as resp:
                 pages = json.loads(resp.read())
-            target = next(page["webSocketDebuggerUrl"] for page in pages
-                          if page.get("type") == "page"
-                          and str(page.get("url", "")).startswith("https://chatgpt.com"))
-            value = cdp_evaluate(target, script, CONNECTOR_CHECK_TIMEOUT)
-        except (OSError, ValueError, StopIteration, KeyError, urllib.error.URLError) as error:
+            targets = [page["webSocketDebuggerUrl"] for page in pages
+                       if page.get("type") == "page" and page.get("webSocketDebuggerUrl")
+                       and urllib.parse.urlsplit(str(page.get("url", ""))).hostname == "chatgpt.com"]
+        except (OSError, ValueError, KeyError, urllib.error.URLError) as error:
             return {"ok": None, "detail": f"sessão do launcher inacessível: {error}"}
+        value = None
+        # A crashed/loading tab can retain its URL while its origin is null.
+        # Try the remaining launcher pages before classifying the session.
+        deadline = time.monotonic() + CONNECTOR_CHECK_TIMEOUT
+        for target in targets:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                candidate = cdp_evaluate(target, script, remaining)
+            except (OSError, ValueError, KeyError):
+                continue
+            if not isinstance(candidate, dict) or candidate.get("unavailable"):
+                continue
+            value = candidate
+            if value.get("signedIn") and value.get("listed"):
+                break
+        if value is None:
+            return {"ok": None, "detail": "página ChatGPT ainda indisponível no launcher; "
+                    "aguarde ou recarregue a janela"}
         if not isinstance(value, dict) or not value.get("signedIn"):
             return {"ok": False, "detail": "launcher sem sessão ChatGPT"}
         bound = [item for item in value.get("connectors", []) if item.get("tunnelId") == tunnel_id]
@@ -1020,14 +1041,30 @@ class Runner:
         (`app-codex-web-gpt-launcher-<pid>.scope`) is what ties it to a launcher.
         """
         found: list[dict[str, Any]] = []
-        for entry in Path("/proc").iterdir():
+        for entry in getattr(self, "proc_dir", Path("/proc")).iterdir():
             if not entry.name.isdigit():
                 continue
             try:
-                if entry.stat().st_uid != os.getuid() or Path(os.readlink(entry / "exe")) != binary:
+                if entry.stat().st_uid != os.getuid():
                     continue
+                before = self.process_start_ticks(int(entry.name))
+                try:
+                    if Path(os.readlink(entry / "exe")) != binary:
+                        continue
+                except OSError:
+                    # Non-dumpable tunnel clients can deny exe even to their
+                    # owner. Require the exact binary AND profile directory in
+                    # argv; never accept a process name alone.
+                    args = (entry / "cmdline").read_bytes().split(b"\0")
+                    expected = os.fsencode(binary.parent.parent / "tunnel/profiles")
+                    if (not args or args[0] != os.fsencode(binary)
+                            or b"--profile-dir" not in args
+                            or args[args.index(b"--profile-dir") + 1] != expected):
+                        continue
                 cgroup = (entry / "cgroup").read_text(encoding="utf-8", errors="replace")
-            except OSError:
+                if not before.isdigit() or self.process_start_ticks(int(entry.name)) != before:
+                    continue
+            except (OSError, IndexError):
                 continue
             owner = re.search(r"app-codex-web-gpt-launcher-(\d+)\.scope", cgroup)
             found.append({"pid": int(entry.name), "scopePid": int(owner[1]) if owner else None})
@@ -1226,28 +1263,39 @@ class Bridge:
 
     def launcher_active(self) -> bool:
         code, out, _ = self.runner.run(["systemctl", "--user", "is-active", self.paths.unit_name], timeout=10)
-        return code == 0 and out.strip() in {"active", "activating"}
+        # is-active exits 3 during ExecStartPost even though the unit is starting.
+        return code in {0, 3} and out.strip() in {"active", "activating"}
 
     def compat_active(self) -> bool:
         code, out, _ = self.runner.run(["systemctl", "--user", "is-active", self.paths.compat_unit_name],
                                        timeout=10)
-        return code == 0 and out.strip() in {"active", "activating"}
+        return code in {0, 3} and out.strip() in {"active", "activating"}
 
-    def ensure_dom_compat(self) -> str:
+    def ensure_dom_compat(self, *, restart: bool = False) -> str:
         """Run the composer shim beside the launcher; bound to it, so it stops with it.
 
         Best effort: a failure here never blocks the launcher, it only shows in status.
         """
         unit = self.paths.compat_unit_name
-        if self.compat_active():
+        if self.compat_active() and not restart:
             return "active"
         if not self.launcher_active():
             return "inactive"
-        command = ["systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}",
+        self.install_managed_entrypoint()
+        # BindsTo can still be stopping the old helper when the launcher
+        # restarts. Queue a new start on that same unit instead of trying to
+        # recreate its transient definition while it still exists.
+        code, _, _ = self.runner.run([
+            "systemctl", "--user", "restart", "--no-block", unit], timeout=10)
+        if code == 0:
+            return "restarted"
+        # Do not wait for After=launcher from the launcher's ExecStartPost:
+        # that would keep both units waiting for each other at startup.
+        command = ["systemd-run", "--user", "--collect", "--quiet", "--no-block", f"--unit={unit}",
                    "--description=PhaseZero ChatGPT Web composer compatibility",
                    "-p", f"BindsTo={self.paths.unit_name}", "-p", f"After={self.paths.unit_name}",
                    "-p", "Restart=on-failure", "-p", "RestartSec=5",
-                   sys.executable, str(Path(__file__).resolve()), "dom-compat",
+                   str(self.managed_python()), str(self.paths.manager_script), "dom-compat",
                    "--devtools-file", str(self.paths.launcher_data / "DevToolsActivePort")]
         code, _, _ = self.runner.run(command, timeout=30)
         return "started" if code == 0 else "failed"
@@ -2172,23 +2220,38 @@ class Bridge:
         # launcher could create it and register itself.
         self.paths.autostart_dir.mkdir(parents=True, exist_ok=True)
         self.force_autostart_off(self.paths.launcher_data)
+        self.install_managed_entrypoint()
         env = self.upstream_env()
+        env.update({"PZ_CHATGPT_WEB_ROOT": str(self.paths.root),
+                    "PZ_CHATGPT_WEB_INSTANCE": self.paths.instance,
+                    "PZ_CHATGPT_WEB_SLOT": self.env.get("PZ_CHATGPT_WEB_SLOT", "0")})
         bundled = str(self.paths.app / "usr/lib")
         env["LD_LIBRARY_PATH"] = bundled + (f":{env['LD_LIBRARY_PATH']}"
                                             if env.get("LD_LIBRARY_PATH") else "")
         command = ["systemd-run", "--user", "--collect", "--quiet", f"--unit={self.paths.unit_name}",
                    "--description=PhaseZero ChatGPT Web launcher (experimental)",
-                   "-p", "KillMode=mixed", "-p", "TimeoutStopSec=45", "-p", "Restart=no"]
+                   "-p", "KillMode=mixed", "-p", "TimeoutStopSec=45",
+                   "-p", "Restart=on-failure", "-p", "RestartSec=5",
+                   "-p", "StartLimitIntervalSec=300", "-p", "StartLimitBurst=5",
+                   "-p", "ExecStartPre=:" + shlex.join([
+                       str(self.managed_python()), str(self.paths.manager_script),
+                       "launcher-prepare"]).replace("%", "%%"),
+                   "-p", "ExecStartPost=-:" + shlex.join([
+                       str(self.managed_python()), str(self.paths.manager_script),
+                       "dom-compat-start"]).replace("%", "%%")]
         for prop in self.hardening_properties():
             command += ["-p", prop]
         passthrough = ("CODEX_HOME", "CODEX_CHATGPT_WEB_HOME", "CODEX_WEB_GPT_LAUNCHER_DATA_DIR",
                        "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE",
                        "XDG_CURRENT_DESKTOP", "DBUS_SESSION_BUS_ADDRESS", "XAUTHORITY", "LANG",
-                       "LD_LIBRARY_PATH")
+                       "LD_LIBRARY_PATH", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                       "PZ_CHATGPT_WEB_ROOT", "PZ_CHATGPT_WEB_INSTANCE", "PZ_CHATGPT_WEB_SLOT")
         for name in passthrough:
             if env.get(name):
                 command.append(f"--setenv={name}={env[name]}")
-        command.append(str(self.paths.app / LAUNCHER_BINARY))
+        # Upstream honours --hidden only after onboarding and with a tray.
+        # First setup remains visible; normal logins and crash recovery stay quiet.
+        command += [str(self.paths.app / LAUNCHER_BINARY), "--hidden"]
         code, out, err = self.runner.run(command, env=env, timeout=30)
         if code != 0:
             raise BridgeError(f"launcher não iniciou: {(err or out).strip()[:300]}", "launch-failed")
@@ -2580,7 +2643,7 @@ class Bridge:
         self.launch()
 
     def setup(self, report: Callable[[str, str], None] = lambda *_: None,
-              login_wait: float = LOGIN_WAIT_SECONDS) -> dict[str, Any]:
+              login_wait: float = LOGIN_WAIT_SECONDS, *, notify_ready: bool = True) -> dict[str, Any]:
         """Everything from a recorded opt-in to a working Web model, idempotent."""
         self.require_opt_in(self.load_state())
         self.recover_runtime_migration()
@@ -2611,6 +2674,9 @@ class Bridge:
                 done("sessão", "login já feito no launcher foi movido para o perfil isolado")
             self.launch()
         done("launcher", "ativo no unit isolado (~/.codex e autostart somente leitura)")
+        # Also repair a missing helper when the launcher was already running.
+        # Previously only a fresh launch installed it, leaving login recovery broken.
+        self.ensure_dom_compat()
         self._wait(self.descriptor_ready, DESCRIPTOR_WAIT_SECONDS,
                    "launcher não ficou pronto a tempo; veja `journalctl --user -u "
                    f"{self.paths.unit_name}`", "launcher-timeout")
@@ -2679,10 +2745,11 @@ class Bridge:
         state = self.load_state()
         if state.pop("updatePending", None) is not None:
             self.save_state(state)
-        self.runner.notify(NOTIFY_TITLE + " — pronto",
-                           "Modelo Web ativo no perfil dedicado.\n"
-                           "Abra com: pz ai chatgpt-web desktop\n"
-                           "O Codex Desktop normal continua na cota nativa.")
+        if notify_ready:
+            self.runner.notify(NOTIFY_TITLE + " — pronto",
+                               "Modelo Web ativo no perfil dedicado.\n"
+                               "Abra com: pz ai chatgpt-web desktop\n"
+                               "O Codex Desktop normal continua na cota nativa.")
         return {"ready": True, "steps": steps, "stage": self.status()["stage"],
                 "model": self.default_model(), "liveCodexRouteTouched": self.live_route_touched(),
                 "next": ["pz ai chatgpt-web desktop (Codex Desktop no perfil dedicado)",
@@ -2880,7 +2947,7 @@ class Bridge:
             raise BridgeError("início no login não está ligado (ou a entrada foi alterada); "
                               "nada foi iniciado", "autostart-off")
         try:
-            return self.setup(login_wait=0)
+            return self.setup(login_wait=0, notify_ready=False)
         except BridgeError as error:
             self.runner.notify(NOTIFY_TITLE + " — não iniciou",
                                f"{error}\nRode: pz ai chatgpt-web setup", critical=True)
@@ -3953,6 +4020,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_parser(name)
     compat = sub.add_parser("dom-compat")  # internal: run by the compat unit
     compat.add_argument("--devtools-file", required=True)
+    sub.add_parser("dom-compat-start")  # internal: launcher ExecStartPost, including restarts
+    sub.add_parser("launcher-prepare")  # internal: stop this profile's orphan tunnel before restart
     update = sub.add_parser("update", help="atualiza o app para a release mais nova (hash conferido)")
     update.add_argument("--check", action="store_true", help="só consulta, não altera nada")
     desktop = sub.add_parser("desktop", help="Codex Desktop no perfil dedicado")
@@ -4032,6 +4101,11 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
         return bridge.update(lambda step, detail: print(f"• {step}: {detail}", flush=True))
     if command == "launch":
         return bridge.launch()
+    if command == "dom-compat-start":
+        return {"composerCompat": bridge.ensure_dom_compat(restart=True)}
+    if command == "launcher-prepare":
+        bridge.require_opt_in(bridge.load_state())
+        return {"stoppedOrphanTunnels": bridge.stop_orphan_tunnels()}
     if command == "smoke":
         return bridge.smoke()
     if command == "desktop":
