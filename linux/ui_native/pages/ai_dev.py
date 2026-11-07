@@ -116,13 +116,20 @@ _BRIDGE_BUTTONS = (
      "volta sozinho ao modo Web se algo falhar. O Codex segue no sandbox somente leitura."),
     ("chatgptWebToolsOff", "Desligar ferramentas", ("tools", "disable"), True,
      "Volta ao modo Web e encerra o túnel. O ~/.codex do seu Codex normal não é alterado."),
-    ("chatgptWebSmoke", "Testar modelo (1 mensagem)", ("smoke",), True,
-     "Envia um turno real pelo bridge. Gasta uma mensagem da sua conta ChatGPT."),
+    ("chatgptWebSmoke", "Testar (1 mensagem)", ("smoke",), True,
+     "Envia um turno real pelo modelo Web selecionado. Gasta uma mensagem da sua conta ChatGPT."),
     ("chatgptWebUpdate", "Atualizar app", ("update",), True,
      "Baixa a versão mais nova do Codex Web GPT, confere o SHA-256 publicado na release, "
      "migra a integração e religa o launcher isolado. Feche somente o Codex do perfil Web "
      "antes; login e preferências são mantidos. Se uma atualização ficou incompleta, "
      "conclui com o pacote local já conferido; clique novamente para retomar."),
+    ("chatgptWebDiagnosis", "Diagnosticar", ("recovery", "status", "--deep"), False,
+     "Verifica modelo, serviço, túnel, permissões e integridade sem enviar mensagens."),
+    ("chatgptWebRecoveryOn", "Ativar autorreparo", ("recovery", "enable"), True,
+     "Monitora esta conta em segundo plano e recupera falhas locais quando seguro. "
+     "Não envia mensagens, troca conta, altera permissões nem renova limites externos."),
+    ("chatgptWebRecoveryOff", "Pausar autorreparo", ("recovery", "disable"), True,
+     "Desliga o monitor desta conta; preserva a janela, a sessão e a configuração."),
     ("chatgptWebDisable", "Desligar", ("disable",), True,
      "Restaura a rota do perfil dedicado e encerra o launcher. O ~/.codex do seu Codex "
      "normal não é alterado; o login do ChatGPT no launcher é mantido."),
@@ -974,6 +981,12 @@ class AiDevPage(BasePage):
         self.bridge_policy.setObjectName("chatgptWebPolicy")
         self.bridge_policy.setWordWrap(True)
         layout.addWidget(self.bridge_policy)
+        self.bridge_recovery = QLabel("")
+        self.bridge_recovery.setObjectName("cardDescription")
+        self.bridge_recovery.setProperty("bridgeRole", "recovery")
+        self.bridge_recovery.setWordWrap(True)
+        self.bridge_recovery.setAccessibleName("Autorreparo e limites do Codex Web")
+        layout.addWidget(self.bridge_recovery)
         self.bridge_next = QLabel("")
         self.bridge_next.setObjectName("cardDescription")
         self.bridge_next.setProperty("bridgeRole", "next")
@@ -1037,7 +1050,7 @@ class AiDevPage(BasePage):
                    else " pela preferência desta conta.")
                 + " Ajuste em Contas e conexões → Contas Codex.")
         starting = {"chatgptWebOpen", "chatgptWebSetup", "chatgptWebToolsOn",
-                    "chatgptWebSmoke", "chatgptWebUpdate"}
+                    "chatgptWebSmoke", "chatgptWebUpdate", "chatgptWebRecoveryOn"}
         for name, button in self._bridge_buttons.items():
             button.setEnabled(not running and (enabled or name not in starting)
                               and (name != "chatgptWebOpen" or self._bridge_ready))
@@ -1057,6 +1070,28 @@ class AiDevPage(BasePage):
         running = bool(node("launcher").get("active") and node("route").get("active")
                        and payload.get("daemonListening"))
         self._bridge_ready = running
+        recovery = node("recovery")
+        recovery_text = ("Autorreparo ativo." if recovery.get("enabled") and recovery.get("timerActive")
+                         else "Monitor precisa de verificação." if recovery.get("enabled")
+                         else "Autorreparo desligado.")
+        recovery_states = {
+            "ready": "Serviço Web disponível.", "waiting-for-idle": "Aguarda tarefa terminar para reparar.",
+            "waiting-for-resources": "Aguarda recursos do computador.",
+            "waiting-for-startup": "Aguarda inicialização do serviço.",
+            "circuit-open": "Reparos pausados após falhas repetidas; use Diagnosticar.",
+            "model-compatibility": "Compatibilidade do seletor precisa de reparo.",
+            "awaiting-validation": "Compatibilidade reparada; aguarda nova mensagem para confirmar.",
+            "login-required": "Login no ChatGPT precisa ser renovado.",
+            "permission-required": "Permissão do conector precisa de verificação.",
+            "rate-limited": "ChatGPT Web pediu uma pausa; mensagens não serão reenviadas.",
+            "quota-exhausted": "Limite informado pelo provedor; aguarda renovação.",
+            "network-unavailable": "Rede indisponível; aguarda conexão.",
+            "upstream-unavailable": "Serviço externo indisponível; aguarda recuperação.",
+            "configuration-conflict": "Configuração alterada; preservada para revisão.",
+            "repair-failed": "Reparo não confirmado; veja Diagnosticar.",
+        }
+        self.bridge_recovery.setText(recovery_text + " " + recovery_states.get(recovery.get("state"), "")
+            + " O aviso de cota do Codex normal não mede o limite do ChatGPT Web.")
         self._bridge_buttons["chatgptWebSetup"].setText(
             "Reparar" if running else "Preparar ou reparar")
         login = {"enabled": "inicia com o login", "off": "início no login desligado",
@@ -1389,6 +1424,7 @@ class AiDevPage(BasePage):
         if action_id == _BRIDGE_STATUS_ID:
             self._set_bridge_state("● Não foi possível ler o estado. Use Atualizar.", "warning")
             self.bridge_tools.setText("Estado das ferramentas indisponível.")
+            self.bridge_recovery.setText("Estado do autorreparo indisponível. Use Atualizar ou Diagnosticar.")
             self.bridge_account.setText("")
             self.bridge_next.setText("")
             self.bridge_next.hide()

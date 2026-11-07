@@ -52,11 +52,15 @@ def status():
 
 
 def main():
+    if sys.argv[1:2] == ["codex-web"]:
+        return subprocess.run([sys.executable, str(ROOT / "linux/ai/chatgpt_web_bridge.py"),
+                               "--json", "recovery", *(sys.argv[2:] or ["status"])], check=False).returncode
     if sys.argv[1:2] == ["stability"]:
         return subprocess.run([sys.executable, str(ROOT / "linux/repairs/stability.py"),
                                *sys.argv[2:]], check=False).returncode
     parser = argparse.ArgumentParser()
-    parser.epilog = "Captura e ICC: pz repair stability (status|plan|apply|rollback) [--yes]"
+    parser.epilog = ("Captura e ICC: pz repair stability (status|plan|apply|rollback) [--yes]. "
+                     "Codex Web: pz repair codex-web (status|plan|apply|enable|disable) [--deep]")
     parser.add_argument("action", choices=("install", "status", "run"), default="status", nargs="?")
     parser.add_argument("repair", choices=REPAIRS, nargs="?")
     parser.add_argument("--confirm", action="store_true")

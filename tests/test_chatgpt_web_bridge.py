@@ -1949,7 +1949,8 @@ def test_update_records_setup_failure_and_retry_finishes_same_release(host, monk
         bridge_module.load_pin(bridge.paths.pin_root)
 
 
-@pytest.mark.parametrize("case", ["reused", "same-process", "unknown-identity", "other-profile", "changing-pid", "locked"])
+@pytest.mark.parametrize("case", ["reused", "idle-desktop", "prestart", "live-launcher", "same-process",
+                                 "unknown-identity", "other-profile", "changing-pid", "locked"])
 def test_tunnel_pid_recovery_preserves_other_aliases_and_never_signals(host, monkeypatch, case):
     bridge, runner, home = host
     configure(bridge, runner, route_active=False)
@@ -1978,10 +1979,14 @@ def test_tunnel_pid_recovery_preserves_other_aliases_and_never_signals(host, mon
     registry = root / "processes.yaml"
     registry.write_text(json.dumps(entries))
     before = registry.read_bytes()
+    runner.codex_pids = [5678] if case == "idle-desktop" else []
+    runner.unit_active = case in {"prestart", "live-launcher"}
     original_run = runner.run
     def run(args, **kwargs):
         if args[0] == str(binary):
             return 0, json.dumps({"state_root": str(root)}), ""
+        if args[:3] == ["systemctl", "--user", "show"]:
+            return 0, "0\n" if case == "prestart" else "5678\n", ""
         return original_run(args, **kwargs)
     monkeypatch.setattr(runner, "run", run)
     ticks = iter(["222", "333"] if case == "changing-pid" else ["111", "111"] if case == "same-process" else ["222", "222"])
@@ -1990,11 +1995,16 @@ def test_tunnel_pid_recovery_preserves_other_aliases_and_never_signals(host, mon
     with lock.open("r+b") as stream:
         if case == "locked":
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        assert bridge.repair_stale_tunnel_pid() is (case == "reused")
+        if case == "live-launcher":
+            with pytest.raises(BridgeError, match="encerre o launcher"):
+                bridge.repair_stale_tunnel_pid(allow_starting=True)
+        else:
+            assert bridge.repair_stale_tunnel_pid(allow_starting=case == "prestart") is (
+                case in {"reused", "idle-desktop", "prestart"})
     assert runner.terminated == []
     after = json.loads(registry.read_text())
     assert after["unrelated"] == entries["unrelated"]
-    if case == "reused":
+    if case in {"reused", "idle-desktop", "prestart"}:
         assert after["codex-chatgpt-web"]["mode"] == "stopped"
         assert after["codex-chatgpt-web"]["pid"] == 0
         assert after["codex-chatgpt-web"]["custom"] == "preserve"
@@ -2218,3 +2228,23 @@ def test_connector_probe_does_not_report_logout_for_a_blank_page(tmp_path, monke
     monkeypatch.setattr(bridge_module, "cdp_evaluate", lambda *a: {"unavailable": True})
     result = Runner().connector_status(devtools, "tunnel_test")
     assert result["ok"] is None and "indisponível" in result["detail"]
+
+
+def test_smoke_exercises_the_desktop_model_instead_of_a_legacy_alias(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch)
+    bridge.paths.codex_config.write_text(bridge.paths.codex_config.read_text() + '\nmodel = "chatgpt-web/gpt-6-sol"\n')
+    runner.codex_reply = "PONG"
+    result = bridge.smoke()
+    assert result["ok"] is True and result["model"] == "chatgpt-web/gpt-6-sol"
+    call = next(call for call in runner.calls if call[0].endswith("/codex"))
+    assert call[call.index("-m") + 1] == "chatgpt-web/gpt-6-sol"
+    assert "chatgpt-web/light" not in call and "chatgpt-web/medium" not in call
+
+
+def test_smoke_never_falls_back_from_a_native_model_to_web_or_paid_api(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch)
+    bridge.paths.codex_config.write_text(bridge.paths.codex_config.read_text() + '\nmodel = "native-selected-model"\n')
+    with pytest.raises(BridgeError) as error:
+        bridge.smoke()
+    assert error.value.code == "web-model-required"
+    assert not any(call[0].endswith("/codex") for call in runner.calls)
