@@ -265,6 +265,7 @@ Usage:
   pz doctor                    Run full system diagnostics
   pz support-bundle [--plan]   Generate support tarball (--plan: preview sem escrita)
   pz repair-plan               Generate repair plan
+  pz repair stability <action> Crash diagnostics and reversible ICC/journal setup (status|plan|apply|rollback)
   pz tune <area> [apply|revert|status] [--dry-run]
                                Tuning por área (browser|gaming|dev): aplica, reverte
                                pelos backups gravados ou reporta estado em JSON
