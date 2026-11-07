@@ -3566,3 +3566,32 @@ no endpoint oficial e na UI; desconectar/expirar e desligar rede; verificar que 
 ficam desconhecidos. Na bandeja real, manter coleta lenta simulada, interagir com menu e
 fechar; confirmar processo coletor encerrado. Não usar conta privada como fixture automática.
 Evidência e resultados do lote: handoff `clean-host-development-20261024.md`.
+
+### PXA-010 — modelo exato e recuperação monitorada — 2026-11-07
+
+Pessoa acessa Codex Web da conta pelo atalho; backend inicia discretamente no
+login e falhas locais recuperam sem fechar tarefa ou repetir mensagem. Owner:
+bridge existente, módulo `chatgpt_web_health.py` e `pz repair codex-web`.
+Código instalado `949cfc24bf427eac1d9a925d733606c66a804fa5`, PR #135 draft,
+dependente de #134; sem promoção de release ou aceite geral G2/G3/G4.
+
+Reconexões reproduzidas em `chatgpt-web/gpt-6-sol` High: rótulo português
+`6 Alta` não era reconhecido pelo verificador upstream 6.1.17. Adaptador DOM
+traduz controles conhecidos preservando seleção real; smoke passou a usar
+modelo selecionado em vez de alias light. Cota nativa esgotada não é
+medida da cota Web: modelo exato respondeu, renderizou na janela e comprovou
+leitura/gravação real de arquivo enquanto o aviso nativo estava presente.
+
+Monitor opt-in sem inferência, timer por perfil, trava compartilhada, prazo e
+memória limitados, budget persistente, cooldown e disjuntor. Recupera helper,
+backend próprio ocioso, túnel órfão comprovado, rota e atalhos gerenciados.
+Espera por trabalho ativo/recursos; preserva políticas, conta, credenciais e
+desligamento manual. Limites/rede aguardam recuperação externa; login e
+permissão exigem fluxo oficial, sem troca de conta/modelo ou replay.
+
+244 regressões do artefato, resposta High, canary de ferramentas, recuperação
+real de helper/rota e queda do backend em 18,72 s. Instalação oficial aplicada
+e módulos conferidos. Matriz por falha, evidências privadas e limites de
+validação no [handoff IA](../handoff/ai-stack-remediation-handoff.md#codex-web-reconexões-no-modelo-selecionado-e-monitor-do-perfil--2026-11-07).
+Digitação física, novo login/reboot, Windows e expiração real de conta não
+homologados; CI do SHA publicado ainda precisa ser observado.

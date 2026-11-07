@@ -721,3 +721,98 @@ memorial local usados. Fetch foi destravado preservando em recuperação privada
 uma referência automática de checkpoint Codex comprovadamente vazia; branches,
 commits e demais referências intactos. Caminho de recuperação:
 `~/.local/share/project-recovery/PhaseZero/git-empty-checkpoint-20261107/`.
+
+### Codex Web: reconexões no modelo selecionado e monitor do perfil — 2026-11-07
+
+Código instalado/revisável `949cfc24bf427eac1d9a925d733606c66a804fa5`, mesma
+branch `codex/codex-web-background` e [PR #135](https://github.com/Misael-art/phase-zero/pull/135).
+Equivalentes locais `d362401f` e `2466b054` em `codex/agent-launchers`.
+AGENTS, handoff de host limpo, touch e commits das outras frentes preservados.
+Sem merge, tag ou release; versão nominal continua 1.22.17.
+
+**Causa reproduzida:** o modelo realmente selecionado pela janela era
+`chatgpt-web/gpt-6-sol`, esforço High. O verificador do launcher 6.1.17 não
+reconhecia os rótulos portugueses `6 Alta` e `6 Alta, 3 de 5.`. Retornava
+`model_version_unavailable` antes de enviar a mensagem; Codex repetia a conexão
+cinco vezes. Os smokes anteriores com aliases light/medium não cobriam essa
+seleção e não homologavam o caminho da janela. Agora o smoke testa o modelo
+selecionado, recusando modelo nativo nesse perfil em vez de substituí-lo.
+
+Owner continua o adaptador DOM existente em `linux/ai/chatgpt_web_bridge.py`.
+Compatibilidade traduz somente rótulos conhecidos do controle real, preserva
+família, rádio/slider selecionados e idioma da conta. Sem editar AppImage,
+runtime verificado, conta, modelo, idioma global, sandbox ou aprovações.
+Remover essa tradução quando o verificador upstream suportar esses rótulos e
+o modelo exato passar sem ela. A tela roxa é o tema da conta, não uma falha.
+
+**Cota distinta:** `account/rateLimits/read` do app-server oficial confirmou
+limite atingido no Codex nativo. O aviso nativo é real;
+não mede a cota do ChatGPT Web. Enquanto o aviso continuava visível, o mesmo
+modelo Web respondeu e usou ferramentas. Não houve reset de limites, troca de
+conta nem fallback pago. Contrato oficial:
+[app-server](https://learn.chatgpt.com/docs/app-server).
+
+`linux/ai/chatgpt_web_health.py` integra diagnóstico e recuperação ao bridge,
+CLI `pz repair codex-web` e cartão privado IA & Dev. Uma trava por perfil
+serializa manutenção manual e monitor. Opt-in explícito instalado no host:
+`pz-chatgpt-web-launcher-health.timer`, a cada 60 s com dispersão; serviço
+oneshot com prazo 90 s, prioridade reduzida e memória limitada a 256 MiB.
+Estado privado no diretório já existente do perfil; nenhuma carteira nova.
+Limite de três ações em dez minutos, orçamento persistido antes da mutação e
+espera crescente. Desligar produto, rota, início no login ou launcher
+manualmente revoga o monitor; pausa do monitor preserva sessão e janela.
+
+| Situação | Política integrada | Evidência |
+| --- | --- | --- |
+| Composer ausente ou seletor localizado | Reaplicar helper; mesma falha de modelo só uma vez até novo turno | Modelo exato antes falhou/depois respondeu; helper parado recuperado pelo serviço real |
+| Launcher cai; túnel fica em scope antigo | systemd reinicia; preparo limpa somente órfão comprovado do perfil | SIGKILL próprio após instalar: recuperado em 18,72 s, GUI preservada, zero órfãos |
+| Metadado de PID reutilizado | Preparo confere alias/binário/perfil/UID/start ticks sob trava upstream; nunca sinaliza PID reutilizado | Regressões para PID igual, reutilizado, ambíguo, lock ocupado, GUI ociosa, ExecStartPre/MainPID zero e launcher vivo |
+| Daemon parado ou túnel local quebrado | Reiniciar backend comprovadamente próprio e ocioso; verificar retorno | Falha de backend real; fixture cobre porta/túnel, dono desconhecido e timeout |
+| Rota dedicada perdida | Restaurar pelo owner e conferir; manter configuração nativa | Injeção real recuperada pelo timer, hashes nativos iguais |
+| Atalho/entrada de login gerenciados ausentes | Restaurar só cópia com origem comprovada; respeitar remoção intencional | Regressões de atalho, owner legado, symlink e arquivo alheio |
+| Tarefa ativa, manutenção concorrente, pressão de recursos | Aguardar; não reiniciar backend | Matriz de regressões e trava real compartilhada |
+| 429, cota, rede ou indisponibilidade externa | Registrar estado e aguardar; não repetir mensagem; falha local posterior continua reparável | 429 real anterior; política atual em fixtures, sem derrubar rede do host |
+| Login, conector ou chave vencidos | Ação oficial do operador; aviso limitado por estado | Diagnóstico real de sessão/conector; expiração/revogação simuladas, sem revogar conta real |
+| Integridade/política/isolamento conflitantes; falhas repetidas | Preservar configuração, bloquear mutação ou abrir disjuntor; diagnóstico acessível | Fixtures de pacote alterado, dono incerto, budget/timeout/cooldown; sem download automático |
+
+Validação no host BigLinux/KDE Wayland, Codex 0.167.0 e launcher 6.1.17:
+
+- Modelo exato High respondeu PONG, turno do app-server completou sem erros e
+  resposta foi renderizada na janela roxa real. Teste de ferramentas leu canary
+  e gravou cópia byte a byte. Entrada enviada pelo app-server oficial; digitação
+  física não foi automatizada: ferramenta de entrada rejeitou ydotool local.
+- Queda controlada do backend próprio recuperou launcher, composer, túnel e
+  rota; GUI continuou aberta, auth/config nativos iguais e nenhum novo turno
+  gerado. Timer saudável entre ciclos; ciclo normal observou cerca de 31 MiB.
+  Smoke instalado após a recuperação respondeu PONG no modelo selecionado;
+  diagnóstico profundo final: ready, integridade/túnel/conector verificados,
+  timer active/waiting e último serviço success.
+- 244 regressões do artefato revisado passaram: 242 sem metadados Git + dois
+  contratos Git consultados separadamente com índice da revisão. Na primeira
+  exportação, dois testes exigiam Git ausente; tentativa de dar contexto Git à
+  suite inteira interferiu nas fixtures de `git init`. A referência temporária
+  `core.worktree` foi removida após conferir valor exato; árvore, índice normal
+  e HEAD preservados. Não aplicar GIT_DIR/GIT_WORK_TREE à suite inteira.
+- O teste novo do comando `repair codex-web --help` protege dependências do
+  artefato: exportação inicial omitira `import sys` da variante revisável do
+  manager. Corrigido antes da publicação; instalador oficial final retornou 0.
+- Cartão Qt renderizado a 510 e 1000 px; ações de diagnóstico/ativação/pausa e
+  distinção de cotas visíveis. Nome do teste encurtado após encontrar corte.
+- Instalador por usuário aplicado de export Git imutável. Quatro módulos
+  instalados coincidem com SHA acima; snapshot atualizado pelo comando
+  instalado. Backup anterior em
+  `~/.local/share/phasezero/backups/1.22.17.20261107192329.198048`.
+
+Evidências privadas: `~/.cache/phasezero-dev/codex-web-autorepair/`, incluindo
+`saved-model/`, `saved-model-fixed/`, `gui-rpc/`, `gui-response.png`,
+`high-tools/receipt.json`, `monitor-helper-proof.json`, `monitor-route-proof.json`
+e `current-backend-crash-proof.json`. Sem chats ou credenciais no Git.
+
+CI da base `92a295ff`: uma execução python-test passou; outra falhou somente
+em `test_supervisor_sigterm_closes_its_runtime_port` do DeepSeek Harness
+(1 falhou/1806 passaram), demais checks executados passaram. Não alterar esse
+teste externo para liberar o lote. Conferir CI do novo SHA ao publicar.
+Windows, novo login/reboot físico, leitor de tela/toque e durabilidade perante
+revogação/cotas futuras seguem gates próprios. Catálogo de práticas sem revisão
+assinada; memória escopada e memorial local usados. Não prometer recuperação de
+limites impostos pelo provedor nem reparo de configurações de dono desconhecido.
