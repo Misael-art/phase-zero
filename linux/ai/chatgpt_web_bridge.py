@@ -50,9 +50,11 @@ from __future__ import annotations
 
 import argparse
 import base64
+from contextlib import contextmanager
 import datetime as dt
 import difflib
 import getpass
+from functools import wraps
 import hashlib
 import importlib.util
 import json
@@ -289,6 +291,18 @@ class BridgeError(RuntimeError):
     def __init__(self, message: str, code: str = "blocked") -> None:
         super().__init__(message)
         self.code = code
+
+
+def managed_change(method):
+    """Share one reentrant lease with recovery; never race an interactive setup."""
+    @wraps(method)
+    def run(self, *args, **kwargs):
+        with self.maintenance() as available:
+            if not available:
+                raise BridgeError("manutenção do perfil já em andamento; tente novamente em instantes",
+                                  "maintenance-busy")
+            return method(self, *args, **kwargs)
+    return run
 
 
 def desktop_profiles_supported() -> bool:
@@ -724,15 +738,53 @@ def cdp_evaluate(ws_url: str, expression: str, timeout: float) -> Any:
 # ChatGPT dropped that attribute (2026-11), so every turn and the launcher's own
 # session inspection waited for a composer forever. The shim only tags the form
 # that already holds ChatGPT's own composer textbox; it reads and sends nothing.
-COMPOSER_COMPAT_SCRIPT = (
-    "(()=>{const sel='[data-composer-markdown][contenteditable=\"true\"][role=\"textbox\"]';"
-    "const mark=()=>{let n=0;for(const e of document.querySelectorAll(sel)){const f=e.closest('form');"
-    "if(f&&!f.hasAttribute('data-chatgpt-composer')){f.setAttribute('data-chatgpt-composer','');n++;}}return n;};"
-    "const n=mark();if(!window.__pzComposerCompat){let q=false;"
-    "window.__pzComposerCompat=new MutationObserver(()=>{if(q)return;q=true;"
-    "requestAnimationFrame(()=>{q=false;mark();});});"
-    "window.__pzComposerCompat.observe(document.documentElement,{childList:true,subtree:true});}"
-    "return n;})()")
+# Upstream's family verifier understands English/Chinese effort labels only.
+# Translate only the observed Portuguese model-picker labels, preserving the
+# actual family, selected radio, slider value and account language preference.
+# This is a visible translation of the same control, never fabricated selection.
+MODEL_LABEL_COMPAT_JS = r"""
+function pzModelLabel(text) {
+  const modes = {'instantâneo':'Instant','instantânea':'Instant','médio':'Medium',
+    'média':'Medium','alto':'High','alta':'High','extra alto':'Extra high',
+    'extra alta':'Extra high'};
+  return text.replace(/^((?:GPT[-\s]?)?(?:5\.6|6)(?:\s+(?:Sol|Astra))?\s+)(extra alt[oa]|instantâne[oa]|médi[oa]|alt[oa])(?=\s*(?:[,.;:]|$))/iu,
+    (_, family, mode) => family + modes[mode.toLowerCase()]);
+}
+"""
+COMPOSER_COMPAT_SCRIPT = r"""(()=>{
+""" + MODEL_LABEL_COMPAT_JS + r"""
+const mark=()=>{
+  let n=0;
+  for(const e of document.querySelectorAll('[data-composer-markdown][contenteditable="true"][role="textbox"]')){
+    const f=e.closest('form');
+    if(f&&!f.hasAttribute('data-chatgpt-composer')){f.setAttribute('data-chatgpt-composer','');n++;}
+  }
+  const roots=[...document.querySelectorAll('[data-model-picker-view-toggle="true"] [data-menu-row-content]')];
+  for(const e of document.querySelectorAll('[role="menuitem"][aria-describedby]')){
+    if(!e.querySelector('[role="slider"]'))continue;
+    for(const id of e.getAttribute('aria-describedby').split(/\s+/)){
+      const node=document.getElementById(id);if(node)roots.push(node);
+    }
+  }
+  for(const root of roots){
+    const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+    for(let node=walker.nextNode();node;node=walker.nextNode()){
+      const next=pzModelLabel(node.textContent);
+      if(next!==node.textContent){node.textContent=next;n++;}
+    }
+  }
+  return n;
+};
+const n=mark();
+if(window.__pzComposerCompatVersion!==2){
+  window.__pzComposerCompat?.disconnect();let queued=false;
+  window.__pzComposerCompat=new MutationObserver(()=>{
+    if(queued)return;queued=true;requestAnimationFrame(()=>{queued=false;mark();});
+  });
+  window.__pzComposerCompat.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
+  window.__pzComposerCompatVersion=2;
+}
+return n;})()"""
 DOM_COMPAT_INTERVAL = 1.5
 
 
@@ -1161,6 +1213,7 @@ class Paths:
         self.manager_script = self.manager_dir / "chatgpt_web_bridge.py"
         self.manager_secret_store = self.manager_dir / "secret_store.py"
         self.manager_windows_secret_store = self.manager_dir / "windows_credential_store.py"
+        self.manager_health = self.manager_dir / "chatgpt_web_health.py"
         self.autostart_wrapper = self.autostart_bin / "chatgpt-web-autostart.sh"
         self.autostart_target = self.autostart_bin / "chatgpt-web-autostart.target"
         self.open_wrapper = self.autostart_bin / "chatgpt-web-open.sh"
@@ -1187,6 +1240,34 @@ class Bridge:
         self.settle_seconds = float(self.env.get("PZ_CHATGPT_WEB_SETTLE_SECONDS",
                                                  LAUNCH_SETTLE_SECONDS))
         self.poll_seconds = float(self.env.get("PZ_CHATGPT_WEB_POLL_SECONDS", 2))
+        self._maintenance_depth = 0
+
+    @contextmanager
+    def maintenance(self):
+        if self._maintenance_depth:
+            self._maintenance_depth += 1
+            try:
+                yield True
+            finally:
+                self._maintenance_depth -= 1
+            return
+        import fcntl
+        private_dir(self.paths.root)
+        path = self.paths.root / "recovery.lock"
+        if path.is_symlink() or (path.exists() and path.stat().st_uid != os.getuid()):
+            raise BridgeError("trava de manutenção não pertence ao perfil; preservada", "maintenance-conflict")
+        with path.open("a") as stream:
+            os.chmod(path, 0o600)
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+            self._maintenance_depth = 1
+            try:
+                yield True
+            finally:
+                self._maintenance_depth = 0
 
     # ---- state -----------------------------------------------------------
 
@@ -1489,7 +1570,7 @@ class Bridge:
             command.append(f"--setenv={name}={env[name]}")
         return self.runner.run(command + self.runtime_command() + args, env=env, timeout=timeout)
 
-    def repair_stale_tunnel_pid(self) -> bool:
+    def repair_stale_tunnel_pid(self, *, allow_starting: bool = False) -> bool:
         """Clear only this profile's proven reused PID, under upstream's own lock.
 
         tunnel-client 0.0.16 inspects /proc/PID/exe before comparing start ticks.
@@ -1505,8 +1586,14 @@ class Bridge:
                 or not binary.resolve().is_relative_to(self.paths.core_home.resolve())):
             return False
         self.require_opt_in(self.load_state())
-        if self.launcher_active() or self.runner.codex_processes(self.paths.codex_home):
-            raise BridgeError("encerre o perfil dedicado antes de recuperar o túnel", "codex-running")
+        if self.launcher_active():
+            # ExecStartPre is activating but has no main process yet. A desktop
+            # waiting for its backend need not be closed to repair stale metadata.
+            code, main_pid, _ = self.runner.run([
+                "systemctl", "--user", "show", self.paths.unit_name,
+                "-p", "MainPID", "--value"], timeout=10)
+            if not allow_starting or code != 0 or main_pid.strip() != "0":
+                raise BridgeError("encerre o launcher antes de recuperar o túnel", "codex-running")
         code, out, _ = self.runner.run([str(binary), "runtimes", "cleanup", "--json"],
                                       env=self.upstream_env(), timeout=30)
         try:
@@ -1659,6 +1746,7 @@ class Bridge:
         atomic_write(target, (json.dumps(current, indent=2) + "\n").encode())
         return True
 
+    @managed_change
     def repair(self) -> dict[str, Any]:
         """Stop launchers running outside the unit and quarantine the upstream autostart."""
         stopped: list[int] = []
@@ -1874,6 +1962,7 @@ class Bridge:
             "eligibility": self.eligibility(state), "runtimeKey": self.key_status(state),
             "toolsGate": self.tools_steps() if state.get("optIn") else None,
             "lastSmoke": state.get("lastSmoke"), "autostart": self.autostart_status(),
+            "recovery": self.recovery_summary(),
             "lockedCapabilities": LOCKED_CAPABILITIES, "pendingGates": list(PENDING_GATES),
             "usageMeter": "local-estimate-not-official-quota",
         }
@@ -2063,6 +2152,7 @@ class Bridge:
             atomic_write(self.paths.pin_file, data)
         self.paths = Paths(self.env)
 
+    @managed_change
     def update(self, report: Callable[[str, str], None] = lambda *_: None) -> dict[str, Any]:
         """Verify the new release; keep post-install configuration failures resumable."""
         if self.paths.instance:
@@ -2186,6 +2276,7 @@ class Bridge:
         state["routeBaseline"] = {"path": str(backup), "sha256": sha256_bytes(data),
                                   "at": iso(self.clock())}
 
+    @managed_change
     def launch(self) -> dict[str, Any]:
         state = self.load_state()
         self.require_opt_in(state)
@@ -2277,7 +2368,10 @@ class Bridge:
                 "composerCompat": self.ensure_dom_compat(),
                 "next": "Entre no ChatGPT dentro da janela do launcher e rode `setup`."}
 
+    @managed_change
     def stop_launcher(self) -> dict[str, Any]:
+        if self._maintenance_depth == 1 and self.load_state().get("recovery", {}).get("enabled"):
+            self.recovery("disable")
         if not self.launcher_active():
             return {"launcher": "inactive"}
         route = self.route_status()
@@ -2461,6 +2555,7 @@ class Bridge:
                        "liveCodexRouteTouched": self.live_route_touched()})
         return result
 
+    @managed_change
     def route_enable(self) -> dict[str, Any]:
         state = self.load_state()
         self.require_opt_in(state)
@@ -2496,7 +2591,10 @@ class Bridge:
         return {"route": "active", "diff": check["diff"], "backup": str(backup),
                 "next": "Reinicie o Codex do perfil dedicado para carregar a rota."}
 
+    @managed_change
     def route_disable(self, *, allow_reset: bool = True) -> dict[str, Any]:
+        if self._maintenance_depth == 1 and self.load_state().get("recovery", {}).get("enabled"):
+            self.recovery("disable")
         state = self.load_state()
         if not self.upstream_config():
             return {"route": "not-installed"}
@@ -2625,6 +2723,7 @@ class Bridge:
         atomic_write(path, (json.dumps(config, indent=2) + "\n").encode())
         return True
 
+    @managed_change
     def restart_launcher(self) -> None:
         """The launcher only starts the Responses daemon at startup, once configured."""
         running = self.runner.codex_processes(self.paths.codex_home)
@@ -2642,6 +2741,7 @@ class Bridge:
             raise BridgeError("launcher não encerrou para reiniciar", "stop-failed")
         self.launch()
 
+    @managed_change
     def setup(self, report: Callable[[str, str], None] = lambda *_: None,
               login_wait: float = LOGIN_WAIT_SECONDS, *, notify_ready: bool = True) -> dict[str, Any]:
         """Everything from a recorded opt-in to a working Web model, idempotent."""
@@ -2759,7 +2859,11 @@ class Bridge:
 
     def smoke(self) -> dict[str, Any]:
         """One real turn through the bridge. Spends one message of the ChatGPT account."""
-        model = self.default_model(light=True)
+        # Exercise the selected model: a hidden legacy/light alias can succeed
+        # while the exact model offered by Desktop is broken.
+        model = tomllib.loads(self._config_text()).get("model") or self.default_model()
+        if not isinstance(model, str) or not model.startswith(WEB_MODEL_PREFIX):
+            raise BridgeError("selecione um modelo Web neste perfil antes de testar", "web-model-required")
         scratch = private_dir(self.paths.root / "smoke")
         reply_file = scratch / "last-message.txt"
         reply_file.unlink(missing_ok=True)
@@ -2835,10 +2939,12 @@ class Bridge:
         source = Path(__file__).resolve()
         helper = source.with_name("secret_store.py")
         windows_helper = source.with_name("windows_credential_store.py")
+        health_helper = source.with_name("chatgpt_web_health.py")
         try:
             script_bytes = source.read_bytes()
             helper_bytes = helper.read_bytes()
             windows_helper_bytes = windows_helper.read_bytes()
+            health_bytes = health_helper.read_bytes()
         except OSError as error:
             raise BridgeError(f"gerenciador incompleto: {error}", "manager-source") from None
         if self.paths.manager_dir.is_symlink():
@@ -2846,12 +2952,49 @@ class Bridge:
         private_dir(self.paths.manager_dir)
         atomic_write(self.paths.manager_secret_store, helper_bytes)
         atomic_write(self.paths.manager_windows_secret_store, windows_helper_bytes)
+        atomic_write(self.paths.manager_health, health_bytes)
         atomic_write(self.paths.manager_script, script_bytes)
 
     def managed_python(self) -> Path:
         system_python = Path("/usr/bin/python3")
         return (system_python if os.name != "nt" and system_python.is_file()
                 else Path(getattr(sys, "_base_executable", sys.executable)))
+
+    @staticmethod
+    def write_recovery_file(path: Path, text: str, mode: int = 0o600) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, text.encode(), mode)
+
+    def recovery(self, action: str, deep: bool = False) -> dict[str, Any]:
+        manager = load_sibling("chatgpt_web_health").Recovery(self)
+        try:
+            if action in {"status", "plan"}:
+                return manager.status(deep)
+            if action == "cycle":
+                return manager.apply(automatic=True)
+            if action == "apply":
+                return manager.apply()
+            with self.maintenance() as available:
+                if not available:
+                    raise BridgeError("manutenção do perfil já em andamento", "maintenance-busy")
+                return {"enable": manager.enable, "disable": manager.disable}[action]()
+        except RuntimeError as error:
+            raise BridgeError(str(error), "recovery-failed") from None
+
+    def recovery_summary(self) -> dict[str, Any]:
+        enabled = bool(self.load_state().get("recovery", {}).get("enabled"))
+        path = self.paths.root / "recovery-state.json"
+        record = {} if path.is_symlink() else (self._read_json(path) or {})
+        unit = self.paths.unit_name.removesuffix(".service") + "-health.timer"
+        active = False
+        if enabled:
+            code, out, _ = self.runner.run(["systemctl", "--user", "is-active", unit], timeout=10)
+            active = code == 0 and out.strip() == "active"
+        return {"enabled": enabled, "timerActive": active,
+                "state": "configuration-conflict" if path.is_symlink() else record.get("state"),
+                "observedAt": record.get("observedAt"),
+                "lastSuccessfulWebTurnAt": (record.get("observation") or {}).get("lastSuccessfulWebTurnAt"),
+                "nativeCodexQuotaIsWebQuota": False}
 
     def autostart_target_text(self) -> str:
         return f"{self.managed_python()}\n{self.paths.manager_script}\n"
@@ -2893,6 +3036,7 @@ class Bridge:
         return {"state": state, "entry": str(entry), "optedInAt": (record or {}).get("at"),
                 "startsUpstreamLauncherDirectly": False}
 
+    @managed_change
     def autostart_enable(self, acknowledged: bool) -> dict[str, Any]:
         state = self.load_state()
         self.require_opt_in(state)
@@ -2932,7 +3076,10 @@ class Bridge:
         atomic_write(entry, self.autostart_entry_text().encode(), 0o600)
         return self.autostart_status()["state"] == "enabled"
 
+    @managed_change
     def autostart_disable(self) -> dict[str, Any]:
+        if self.load_state().get("recovery", {}).get("enabled"):
+            self.recovery("disable")
         state = self.load_state()
         self.paths.managed_autostart.unlink(missing_ok=True)
         self.paths.autostart_wrapper.unlink(missing_ok=True)
@@ -3307,7 +3454,10 @@ class Bridge:
 
     # ---- ordered teardown ------------------------------------------------
 
+    @managed_change
     def disable(self) -> dict[str, Any]:
+        if self.load_state().get("recovery", {}).get("enabled"):
+            self.recovery("disable")
         steps: list[dict[str, Any]] = [{"step": "route", **self.route_disable()}]
         running = self.runner.codex_processes(self.paths.codex_home)
         if running:
@@ -3622,6 +3772,7 @@ class Bridge:
                 atomic_write(target, (folder / name).read_bytes())
         self.restart_launcher()
 
+    @managed_change
     def tools_enable(self, tunnel_id: str | None = None) -> dict[str, Any]:
         """Switch the isolated launcher to Full, verify tunnel and connector, or roll back.
 
@@ -3687,6 +3838,7 @@ class Bridge:
                 "sandbox": "read-only", "backup": str(backup),
                 "liveCodexRouteTouched": self.live_route_touched()}
 
+    @managed_change
     def tools_disable(self) -> dict[str, Any]:
         """Back to the Web-only model; the tunnel goes offline with the Full daemon."""
         state = self.load_state()
@@ -4022,6 +4174,9 @@ def build_parser() -> argparse.ArgumentParser:
     compat.add_argument("--devtools-file", required=True)
     sub.add_parser("dom-compat-start")  # internal: launcher ExecStartPost, including restarts
     sub.add_parser("launcher-prepare")  # internal: stop this profile's orphan tunnel before restart
+    recovery = sub.add_parser("recovery", help="diagnóstico, monitoramento e autorreparo sem inferência")
+    recovery.add_argument("action", choices=("status", "plan", "apply", "enable", "disable", "cycle"))
+    recovery.add_argument("--deep", action="store_true", help="confere pacote, túnel e conector")
     update = sub.add_parser("update", help="atualiza o app para a release mais nova (hash conferido)")
     update.add_argument("--check", action="store_true", help="só consulta, não altera nada")
     desktop = sub.add_parser("desktop", help="Codex Desktop no perfil dedicado")
@@ -4105,7 +4260,11 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
         return {"composerCompat": bridge.ensure_dom_compat(restart=True)}
     if command == "launcher-prepare":
         bridge.require_opt_in(bridge.load_state())
-        return {"stoppedOrphanTunnels": bridge.stop_orphan_tunnels()}
+        stopped = bridge.stop_orphan_tunnels()
+        return {"stoppedOrphanTunnels": stopped,
+                "repairedStaleTunnelPid": bridge.repair_stale_tunnel_pid(allow_starting=True)}
+    if command == "recovery":
+        return bridge.recovery(args.action, args.deep)
     if command == "smoke":
         return bridge.smoke()
     if command == "desktop":

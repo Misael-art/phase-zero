@@ -88,6 +88,9 @@ def test_bridge_card_offers_the_everyday_commands_once_opted_in(qapp, monkeypatc
         "chatgptWebToolsOff": ("ai", "chatgpt-web", "tools", "disable"),
         "chatgptWebSmoke": ("ai", "chatgpt-web", "smoke"),
         "chatgptWebUpdate": ("ai", "chatgpt-web", "update"),
+        "chatgptWebDiagnosis": ("ai", "chatgpt-web", "recovery", "status", "--deep"),
+        "chatgptWebRecoveryOn": ("ai", "chatgpt-web", "recovery", "enable"),
+        "chatgptWebRecoveryOff": ("ai", "chatgpt-web", "recovery", "disable"),
         "chatgptWebDisable": ("ai", "chatgpt-web", "disable"),
     }
     assert set(buttons) == set(expected)
@@ -183,3 +186,14 @@ def test_non_pro_web_default_keeps_stop_and_diagnostics_available(qapp, monkeypa
         assert not buttons[key].isEnabled()
     assert buttons["chatgptWebDisable"].isEnabled()
     assert buttons["chatgptWebTools"].isEnabled()
+
+
+def test_recovery_copy_distinguishes_native_quota_and_requires_live_monitor(qapp, monkeypatch, tmp_path):
+    page, _ = build_page(monkeypatch, tmp_path, opted_in=True)
+    label = page.bridge_recovery
+    page._on_bridge_status({**STATUS, "recovery": {"enabled": True, "timerActive": True, "state": "ready"}})
+    assert "Autorreparo ativo" in label.text() and "não mede o limite do ChatGPT Web" in label.text()
+    page._on_bridge_status({**STATUS, "recovery": {"enabled": True, "timerActive": False}})
+    assert "precisa de verificação" in label.text()
+    page._on_bridge_status({**STATUS, "recovery": {"enabled": True, "timerActive": True, "state": "rate-limited"}})
+    assert "não serão reenviadas" in label.text()
