@@ -5,6 +5,16 @@ As versões seguem a data de build em `version.json`.
 
 ## [Unreleased]
 
+## [1.22.17] - 2026-11-07
+
+### Adicionado
+- **Gestão de contas e chaves.** Resumo por plataforma, limites e renovação quando informados; carteira com busca, filtros, idade do cadastro e detalhes de uso gerenciado.
+
+### Corrigido
+- **Remoção de chaves em uso.** DeepSeek Harness encerra o vínculo exato sob a trava do manager antes da exclusão no cofre nativo; falhas preservam a chave.
+
+Os dados de validade, saldo e uso externo continuam desconhecidos quando faltam evidências. Canal beta; aceites físicos e de provedor permanecem abertos.
+
 ### Adicionado
 - **Agentes de desenvolvimento.** Desenvolvimento e menu PhaseZero levam às fichas DeepSeek Harness e Grok Build. O Harness abre no navegador. O Grok abre no terminal, oferece login oficial e verifica versões pelo atualizador do fornecedor.
 
