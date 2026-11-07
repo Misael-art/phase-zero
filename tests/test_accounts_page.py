@@ -303,11 +303,12 @@ def test_account_quota_shows_unknown_official_zero_and_local_estimate(qapp):
         timestamp = "2026-09-25T10:00:00Z"
         official = replace(connection, quota=Quota(
             "messages", "mensagens", remaining=0, total=500,
-            source="official", observed_at=timestamp,
+            source="official", observed_at=timestamp, reset_at="2026-12-01T00:00:00Z",
         ))
         official_label = render_quota(official)
         assert "Fonte oficial: 0 mensagens restantes (total 500)" in official_label
         assert "observado" in official_label
+        assert "renova em" in official_label
 
         estimate = replace(connection, quota=Quota(
             "tokens", "tokens", remaining=2.5, source="local_estimate",
@@ -334,13 +335,16 @@ def test_hidden_ai_dev_page_probes_only_when_opened(qapp):
             page.block_while_running(False)
             assert calls == []
             window.show_category("IA & Dev")
-        assert calls == [("ai.status", ["ai", "status"]),
+        expected = [("ai.status", ["ai", "status"]),
                          ("private.bonsai.status", ["ai", "claude", "bonsai-status"]),
                          ("ai.quota.status", ["ai", "quota", "status", "--json"]),
                          ("ai.deepseek-harness-status", ["ai", "deepseek-harness", "status", "--json"]),
                          ("ai.memory-portability-status", ["ai", "memory", "status", "--json"]),
                          ("ai.token-economy", ["ai", "token-economy", "status", "--json"]),
                          ("ai.desktop.status", ["ai", "desktop", "status"])]
+        if "ai.grok-build.status" in page.by_id:
+            expected.insert(4, ("ai.grok-build.status", ["ai", "grok-build", "status"]))
+        assert calls == expected
     finally:
         window.close()
         host_patcher.stop()
@@ -661,9 +665,10 @@ def test_public_credential_flow_uses_secure_vault_without_connecting_or_granting
             "schemaVersion": 2, "total": 0, "enabled": 0,
             "usable": 0, "secretsRedacted": True,
         }
-        assert "nenhum app autorizado" in page.findChild(
+        assert "Validade desconhecida" in page.findChild(
             QLabel, "storedApiCredentialState",
         ).text()
+        assert "Uso externo desconhecido" in " ".join(label.text() for label in page.findChildren(QLabel))
 
         page.findChild(QCheckBox, "hideAccountIdentity").setChecked(True)
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -673,6 +678,7 @@ def test_public_credential_flow_uses_secure_vault_without_connecting_or_granting
         ).text()
 
         page._confirm_remove_api_credential = lambda _entry: True
+        page.findChild(QPushButton, "manageApiCredential").click()
         page.findChild(QPushButton, "removeApiCredential").click()
         deadline = time.monotonic() + 3
         while page._credential_busy and time.monotonic() < deadline:
@@ -728,6 +734,7 @@ def test_credential_ui_fails_closed_when_secure_store_is_unavailable(
 
         secure_store.failure = None
         page._confirm_remove_api_credential = lambda _entry: True
+        page.findChild(QPushButton, "manageApiCredential").click()
         page.findChild(QPushButton, "removeApiCredential").click()
         deadline = time.monotonic() + 3
         while page._credential_busy and time.monotonic() < deadline:

@@ -493,6 +493,7 @@ def status_payload(command: str = "status") -> dict[str, Any]:
         connectionFeatures=control.get("features", []),
         lifecycleNotice=saved.get("stopReason", ""),
         apiCredentialSource="phasezero-wallet" if saved.get("apiCredentialId") else "upstream-or-unselected",
+        apiCredentialId=saved.get("apiCredentialId", "") if route == "api" else "",
         installationState="present" if status == "installed" else "absent" if status == "absent" else "unknown",
         origin="phasezero" if runtime else "unknown",
         configurationState="needed" if route not in {"account", "api"} else "unknown",
@@ -1180,6 +1181,27 @@ def _stop_supervisor(timeout: float = 5) -> dict[str, Any]:
     if record.is_file() and not record.is_symlink():
         record.unlink()
     return result
+
+
+def revoke_wallet_use(credential_id: str, remove_credential=None):
+    """End this wallet binding under the same lock used by start.
+
+    Optional local-vault removal runs inside the lock, so another managed
+    start cannot resolve the credential between stopping and deleting it.
+    No provider revocation or unrelated runtime stop is performed.
+    """
+    if not isinstance(credential_id, str) or not re.fullmatch(r"credential:[0-9a-f]{32}", credential_id):
+        raise DshError("invalid-credential", "Invalid wallet credential reference")
+    with _operation_lock():
+        saved = _load_json(state_file(), {})
+        if isinstance(saved, dict) and saved.get("authRoute") == "api" and saved.get("apiCredentialId") == credential_id:
+            _stop_supervisor()
+            saved = _load_json(state_file(), {})
+            if not isinstance(saved, dict):
+                raise DshError("state-unavailable", "Could not read stopped Harness state")
+            saved.update(apiCredentialId="", state="stopped", stopReason="wallet-use-revoked", updatedAt=utc_now())
+            _atomic_json(state_file(), saved)
+        return remove_credential() if remove_credential is not None else True
 
 
 def doctor_payload() -> dict[str, Any]:

@@ -253,6 +253,16 @@ class CredentialVault:
                     "secure store failed; cleanup reference remains pending",
                 ) from None
 
+    def reload_metadata(self) -> None:
+        """Refresh the canonical registry without looking up secure values.
+
+        A failed read leaves the previous snapshot intact for recovery; callers
+        must present the error rather than treating that snapshot as current.
+        """
+        with self._lock:
+            fresh = CredentialVault(self.path, self.secret_store, self._metadata_protector)
+            self._entries = {entry.account_id: entry for entry in fresh.entries}
+
     def remove(self, account_id: str) -> bool:
         with self._lock:
             entry = self._entries.get(account_id)

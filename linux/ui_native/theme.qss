@@ -127,7 +127,7 @@ QMainWindow {
     color: {{text_dim}};
     font-size: {{text_sm}}px;
 }
-#searchBox {
+#searchBox, #credentialSearch, #addApiCredentialDialog QLineEdit {
     min-height: 38px;
     border: 1px solid {{border}};
     border-radius: {{radius_md}}px;
@@ -136,7 +136,7 @@ QMainWindow {
     background: {{surface_input}};
     selection-background-color: {{accent}};
 }
-#searchBox:focus {
+#searchBox:focus, #credentialSearch:focus, #addApiCredentialDialog QLineEdit:focus {
     border: 1px solid {{focus_ring}};
     background: {{surface_alt}};
 }
@@ -352,6 +352,43 @@ QPushButton:disabled {
     background: {{surface_disabled}};
     border-color: {{border_subtle}};
 }
+QPushButton[primary="true"] {
+    color: {{on_accent}};
+    background: {{accent}};
+    border-color: {{accent_hover}};
+    font-weight: 700;
+}
+QPushButton[primary="true"]:hover { background: {{accent_hover}}; }
+QPushButton[primary="true"]:disabled { background: {{surface_disabled}}; color: {{text_muted}}; }
+#accountMetric, #accountManagement, #accountPlatform, #credentialDetails {
+    background: {{surface}};
+    border: 1px solid {{border}};
+    border-radius: {{radius_md}}px;
+}
+#accountMetricValue {
+    color: {{text_strong}};
+    font-size: {{text_2xl}}px;
+    font-weight: 800;
+}
+#credentialTotals { color: {{text_strong}}; font-weight: 600; }
+#credentialTable {
+    background: {{surface}};
+    color: {{text}};
+    border: 1px solid {{border}};
+    border-radius: {{radius_md}}px;
+}
+#credentialTable QHeaderView::section {
+    color: {{text_dim}};
+    background: {{surface}};
+    border: 0;
+    border-bottom: 1px solid {{border_divider}};
+    padding: 8px 4px;
+}
+#credentialCell, #storedApiCredentialLabel, #storedApiCredentialState {
+    background: transparent;
+    border-bottom: 1px solid {{border_divider}};
+}
+#storedApiCredentialLabel { color: {{text_strong}}; font-weight: 600; }
 #secondaryButton {
     color: {{text}};
     background: {{border}};
