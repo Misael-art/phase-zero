@@ -89,12 +89,14 @@ class CodexProfileDialog(QDialog):
 
 class CodexProfilesPanel(QWidget):
     action_requested = Signal(object)
+    snapshot_changed = Signal(object)
 
     def __init__(self, runner, *, hidden: bool, parent=None):
         super().__init__(parent)
         self.setObjectName("codexProfilesPanel")
         self.hidden = hidden
         self._pending_metadata = {}
+        self.snapshot = {}
         self.manager = CodexProfiles()
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -237,8 +239,12 @@ class CodexProfilesPanel(QWidget):
         try:
             snapshot = self.manager.status()
         except (ProfileError, OSError):
+            self.snapshot = {}
+            self.snapshot_changed.emit(self.snapshot)
             self.status.setText("Registro Codex indisponível. Contas preservadas; restaure backup antes de editar.")
             return
+        self.snapshot = snapshot
+        self.snapshot_changed.emit(snapshot)
         install = QFrame()
         install_row = QHBoxLayout(install)
         install_row.setContentsMargins(0, 0, 0, 0)

@@ -8,21 +8,23 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QRadioButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from linux.ai.account_adapters import adapt_account_sources
 from linux.ai.account_contract import Account, Connection, Evidence, public_account, redacted_summary
 from linux.ai.credential_vault import CredentialEntry, CredentialVault, CredentialVaultError, credential_vault_path
+from linux.ai.credential_inventory import observe_managed_uses, remove_local_credential
+from linux.ai.deepseek_harness_manager import DshError
 from linux.ai.grants import CONSENT_RECORD_ADAPTERS, GrantError, GrantLedger
 from linux.ai.secret_store import SecretStoreUnavailable
 
 from ..a11y_events import announce_accessible
 from ..command_runner import CommandRunner
 from ..codex_profiles_panel import CodexProfilesPanel
+from ..credential_manager import CredentialManager, text_label
 from ..models import ActionSpec
 from ..preferences import UiPreferences
-from ..widgets import SectionHeader
 from .base import BasePage
 
 
@@ -243,12 +245,21 @@ class _CredentialWorker(QRunnable):
         result: object = None
         error = ""
         try:
+            if self.operation in {"add", "remove"}:
+                self.vault.reload_metadata()
             if self.operation == "add":
                 result = self.vault.add(*self.values)
             elif self.operation == "remove":
-                result = self.vault.remove(self.values[0])
+                result = remove_local_credential(self.vault, self.values[0])
+            elif self.operation == "observe":
+                result = observe_managed_uses()
+            elif self.operation == "revoke":
+                from linux.ai.deepseek_harness_manager import revoke_wallet_use
+                result = revoke_wallet_use(self.values[0])
             else:
                 raise CredentialVaultError("unsupported credential operation")
+        except DshError as exc:
+            error = f"managed-use:{exc.code}"
         except (CredentialVaultError, SecretStoreUnavailable, ValueError) as exc:
             error = str(exc)
         except Exception:
@@ -295,13 +306,13 @@ class AccountsPage(BasePage):
         self._grant_load_error = False
         self._credential_load_error = False
         self._credential_busy = False
-        self._credential_confirmed_ids: set[str] = set()
         self._credential_worker: _CredentialWorker | None = None
         self._credential_status: QLabel | None = None
-        self._credentials_layout: QVBoxLayout | None = None
         self._add_credential_button: QPushButton | None = None
         self.preferences = UiPreferences(self)
         self._privacy_toggle: QCheckBox | None = None
+        self._credential_uses = ()
+        self._usage_observation = "Uso no host ainda não consultado."
         try:
             self.grant_ledger = GrantLedger(_grant_ledger_path())
         except (OSError, ValueError, TypeError):
@@ -325,10 +336,6 @@ class AccountsPage(BasePage):
         layout = QVBoxLayout(content)
         layout.setContentsMargins(2, 2, 8, 12)
         layout.setSpacing(10)
-        layout.addWidget(SectionHeader(
-            "Contas e conexões",
-            "Identidade aparece só nesta tela privada. Status sem prova continua desconhecido.",
-        ))
         row = QHBoxLayout()
         self.summary = QLabel("Ainda não verificado")
         self.summary.setObjectName("accountsSummary")
@@ -339,58 +346,117 @@ class AccountsPage(BasePage):
         refresh.clicked.connect(self.refresh_accounts)
         row.addWidget(refresh)
         layout.addLayout(row)
+        metrics = QHBoxLayout()
+        self._metrics = {}
+        for key, title in (("active", "Sessões válidas observadas"), ("known", "Contas e perfis locais"),
+                           ("providers", "Plataformas observadas"), ("keys", "Chaves cadastradas")):
+            card = QFrame()
+            card.setObjectName("accountMetric")
+            cell = QVBoxLayout(card)
+            value = text_label("—", "accountMetricValue")
+            value.setAccessibleName(title)
+            self._metrics[key] = value
+            cell.addWidget(value)
+            cell.addWidget(text_label(title))
+            metrics.addWidget(card, 1)
+        layout.addLayout(metrics)
+        self._coverage = text_label("Atualize o status para consultar as fontes disponíveis. Registros locais não provam login ou saldo.")
+        self._coverage.setObjectName("accountCoverage")
+        layout.addWidget(self._coverage)
+        platforms_heading = text_label("Plataformas e limites", "sectionHeading")
+        self._platforms = QWidget()
+        self._platform_layout = QVBoxLayout(self._platforms)
+        self._platform_layout.setContentsMargins(0, 0, 0, 0)
+
+        management = QFrame()
+        management.setObjectName("accountManagement")
+        management_layout = QVBoxLayout(management)
+        management_layout.addWidget(text_label("Gerencie suas contas e chaves", "sectionHeading"))
+        management_layout.addWidget(text_label("Consulte as contas reconhecidas ou abra a carteira para buscar chaves, revisar datas e administrar seu uso."))
+        buttons = QHBoxLayout()
+        show_accounts = QPushButton("Ver todas as contas")
+        show_accounts.setObjectName("showAllAccounts")
+        show_accounts.setCheckable(True)
+        buttons.addWidget(show_accounts)
+        manage = QPushButton("Gerenciar chaves")
+        manage.setObjectName("openCredentialManager")
+        manage.setProperty("primary", True)
+        manage.clicked.connect(self._open_credential_manager)
+        buttons.addWidget(manage)
+        management_layout.addLayout(buttons)
+        layout.addWidget(management)
+        layout.addWidget(platforms_heading)
+        layout.addWidget(self._platforms)
+
+        self._account_list = QWidget()
+        account_layout = QVBoxLayout(self._account_list)
+        account_layout.setContentsMargins(0, 0, 0, 0)
+        account_layout.addWidget(text_label("Todas as contas · perfis e conexões", "sectionHeading"))
+        account_layout.addWidget(text_label("Permissões de cada consumidor ficam junto à conexão correspondente. Perfis Codex mantêm seus controles de Desktop, CLI e Web."))
+        self.codex_profiles = CodexProfilesPanel(
+            self.runner, hidden=self.preferences.hide_account_identity, parent=self,
+        )
+        self.codex_profiles.action_requested.connect(self.action_requested.emit)
+        self.codex_profiles.snapshot_changed.connect(lambda _snapshot: self._render_overview())
+        account_layout.addWidget(self.codex_profiles)
+        cards = QWidget()
+        self._cards_layout = QVBoxLayout(cards)
+        self._cards_layout.setContentsMargins(0, 0, 0, 0)
+        self._cards_layout.setSpacing(8)
+        account_layout.addWidget(cards)
+        self._account_empty = text_label("Sem observações de conexão. Atualize o status; perfis locais acima não comprovam sessões válidas.")
+        account_layout.addWidget(self._account_empty)
+        layout.addWidget(self._account_list)
+        self._account_list.hide()
+        show_accounts.toggled.connect(self._account_list.setVisible)
+
+        layout.addWidget(text_label("Adicionar uma conta ou chave", "sectionHeading"))
+        layout.addWidget(text_label("Conecte pelo fluxo oficial do aplicativo ou cadastre uma chave no cofre. Usar uma chave exige seleção e consentimento no consumidor."))
+        registration = QHBoxLayout()
         add_connection = QPushButton("Adicionar conexão")
         add_connection.setObjectName("addAccountConnection")
         add_connection.clicked.connect(self._show_channel_catalog)
-        layout.addWidget(add_connection)
+        registration.addWidget(add_connection)
+        add_key = QPushButton("Cadastrar chave de API")
+        add_key.setObjectName("registerApiCredential")
+        add_key.clicked.connect(self._show_add_api_credential)
+        registration.addWidget(add_key)
+        layout.addLayout(registration)
+
+        layout.addWidget(text_label("Privacidade e permissões", "sectionHeading"))
         self._privacy_toggle = QCheckBox("Ocultar identidade das contas")
         self._privacy_toggle.setObjectName("hideAccountIdentity")
         self._privacy_toggle.setAccessibleName("Ocultar identidade das contas nesta tela")
         self._privacy_toggle.setChecked(self.preferences.hide_account_identity)
         self._privacy_toggle.toggled.connect(self._set_identity_hidden)
         layout.addWidget(self._privacy_toggle)
-        self.codex_profiles = CodexProfilesPanel(
-            self.runner, hidden=self.preferences.hide_account_identity, parent=self,
-        )
-        self.codex_profiles.action_requested.connect(self.action_requested.emit)
-        layout.addWidget(self.codex_profiles)
-        credential_heading = QLabel("Chaves de API")
-        credential_heading.setObjectName("accountCredentialsHeading")
-        layout.addWidget(credential_heading)
-        credential_note = QLabel(
-            "Chaves ficam no cofre seguro local. Guardar não valida nem conecta o provedor; "
-            "nenhum aplicativo recebe permissão automaticamente."
-        )
-        credential_note.setObjectName("accountCredentialsNote")
-        credential_note.setWordWrap(True)
-        layout.addWidget(credential_note)
-        self._add_credential_button = QPushButton("Armazenar chave de API")
-        self._add_credential_button.setObjectName("addApiCredential")
-        self._add_credential_button.clicked.connect(self._show_add_api_credential)
-        layout.addWidget(self._add_credential_button)
-        self._credential_status = QLabel("")
-        self._credential_status.setObjectName("credentialVaultStatus")
-        self._credential_status.setAccessibleName("Status do cofre de credenciais")
-        self._credential_status.setWordWrap(True)
-        layout.addWidget(self._credential_status)
-        credentials = QWidget()
-        self._credentials_layout = QVBoxLayout(credentials)
-        self._credentials_layout.setContentsMargins(0, 0, 0, 0)
-        self._credentials_layout.setSpacing(6)
-        layout.addWidget(credentials)
-        self._render_credentials()
-        cards = QWidget()
-        self._cards_layout = QVBoxLayout(cards)
-        self._cards_layout.setContentsMargins(0, 0, 0, 0)
-        self._cards_layout.setSpacing(8)
-        layout.addWidget(cards)
+        layout.addWidget(text_label("Cofre nativo protege os segredos. A lista é privada da sessão local; ocultar identidade não muda permissões do sistema. Consentimento de proxy não libera inferência enquanto faltar vínculo por requisição."))
         privacy = QLabel("Esta tela privada mostra nomes e estado. Relatórios redigidos incluem só contagens; IDs e referências secretas não são exportados.")
         privacy.setObjectName("accountsPrivacy")
         privacy.setWordWrap(True)
         layout.addWidget(privacy)
         layout.addStretch()
         scroll.setWidget(content)
-        self._layout.addWidget(scroll, 1)
+        self._views = QStackedWidget()
+        self._views.addWidget(scroll)
+        key_scroll = QScrollArea()
+        key_scroll.setWidgetResizable(True)
+        key_scroll.setFrameShape(QFrame.NoFrame)
+        self.credential_manager = CredentialManager()
+        key_scroll.setWidget(self.credential_manager)
+        self._views.addWidget(key_scroll)
+        self._layout.addWidget(self._views, 1)
+        self._credential_status = self.credential_manager.status
+        self._add_credential_button = self.credential_manager.add
+        self.credential_manager.add_requested.connect(self._show_add_api_credential)
+        self.credential_manager.close_requested.connect(self._close_credential_manager)
+        self.credential_manager.observe_requested.connect(lambda: self._start_credential_operation("observe", ()))
+        self.credential_manager.remove_requested.connect(self._remove_api_credential)
+        self.credential_manager.revoke_requested.connect(self._revoke_api_credential_use)
+        self.credential_manager.connect_requested.connect(self._configure_credential_use)
+        self.credential_manager.replace_requested.connect(self._show_add_api_credential)
+        self._render_credentials()
+        self._render_overview()
         self.status_loader.status_ready.connect(self._source_ready)
         self.status_loader.status_failed.connect(self._source_failed)
 
@@ -402,15 +468,67 @@ class AccountsPage(BasePage):
     def consume_action_values(self, action: ActionSpec) -> dict[str, str]:
         return self.codex_profiles.consume_action_values(action)
 
-    def _show_add_api_credential(self) -> None:
+    def _open_credential_manager(self) -> None:
+        self._reload_wallet_metadata()
+        self._views.setCurrentIndex(1)
+        self.credential_manager.search.setFocus(Qt.OtherFocusReason)
+
+    def _reload_wallet_metadata(self) -> None:
+        if self._credential_busy:
+            return
+        unavailable = self.credential_vault is None
+        try:
+            if self.credential_vault is None:
+                self.credential_vault = CredentialVault(_credential_vault_path())
+            else:
+                self.credential_vault.reload_metadata()
+        except (OSError, ValueError, TypeError, CredentialVaultError):
+            self.credential_vault = None
+        if unavailable and self.credential_vault is not None:
+            self._credential_status.clear()
+        self._render_credentials()
+        self._render_overview()
+
+    def reload(self) -> None:
+        # Refresh local metadata only. Providers require the explicit status CTA.
+        self._reload_wallet_metadata()
+
+    def _close_credential_manager(self) -> None:
+        self.credential_manager.close_details()
+        self.credential_manager.search.clear()
+        self._views.setCurrentIndex(0)
+        self.findChild(QPushButton, "openCredentialManager").setFocus(Qt.OtherFocusReason)
+
+    def _configure_credential_use(self, provider: str) -> None:
+        if provider.strip().casefold() == "deepseek":
+            self.request_category("IA & Dev", "deepseek-harness")
+        else:
+            self._show_channel_catalog()
+
+    def _revoke_api_credential_use(self, account_id: str) -> None:
+        if self._credential_busy:
+            return
+        if QMessageBox.question(self, "Revogar uso gerenciado?",
+                                "Encerra somente o DeepSeek Harness vinculado a esta chave e desfaz a seleção. "
+                                "A cópia local e a chave no provedor são preservadas. Outros apps não são controlados aqui.",
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+            self._start_credential_operation("revoke", (account_id,))
+
+    def _show_add_api_credential(self, provider: str = "") -> None:
         if self.credential_vault is None or self._credential_busy:
             return
         dialog = AddApiCredentialDialog(self)
+        if isinstance(provider, str) and provider:
+            dialog.provider.setText(provider)
         if dialog.exec() != QDialog.Accepted:
+            dialog.secret.clear()
+            dialog.deleteLater()
             return
         values = dialog.values()
         dialog.secret.clear()
+        dialog.deleteLater()
         self._start_credential_operation("add", values)
+        self._open_credential_manager()
 
     def _start_credential_operation(self, operation: str, values: tuple[str, ...]) -> None:
         if self.credential_vault is None or self._credential_busy:
@@ -418,8 +536,11 @@ class AccountsPage(BasePage):
         self._credential_busy = True
         if self._add_credential_button is not None:
             self._add_credential_button.setEnabled(False)
+        self.findChild(QPushButton, "registerApiCredential").setEnabled(False)
         if self._credential_status is not None:
-            self._credential_status.setText("Aguardando resposta do cofre seguro…")
+            self._credential_status.setText("Consultando vínculos no host…" if operation == "observe" else
+                                            "Revogando uso gerenciado…" if operation == "revoke" else
+                                            "Aguardando resposta do cofre seguro…")
             announce_accessible(self._credential_status, self._credential_status.text())
         worker = _CredentialWorker(self.credential_vault, operation, values)
         worker.signals.finished.connect(self._credential_operation_finished)
@@ -431,17 +552,22 @@ class AccountsPage(BasePage):
     def _credential_operation_finished(self, operation: str, result: object, error: str) -> None:
         self._credential_busy = False
         self._credential_worker = None
-        if not error and operation == "add" and isinstance(result, CredentialEntry):
-            self._credential_confirmed_ids.add(result.account_id)
-        if not error and operation == "remove" and self.credential_vault is not None:
-            self._credential_confirmed_ids.intersection_update(
-                entry.account_id for entry in self.credential_vault.entries
-            )
+        if operation == "observe":
+            self._credential_uses = tuple(result) if not error and isinstance(result, tuple) else ()
+            self._usage_observation = "Consulta local concluída." if not error else "Consulta local indisponível; uso não confirmado."
+        elif not error and operation in {"revoke", "remove"}:
+            self._credential_uses = ()
+            self._usage_observation = "Vínculos mudaram; atualize o uso no host para consultar novamente."
         if self._add_credential_button is not None:
             self._add_credential_button.setEnabled(self.credential_vault is not None)
+        self.findChild(QPushButton, "registerApiCredential").setEnabled(self.credential_vault is not None)
         if self._credential_status is not None:
             if error:
-                if "backend is unavailable" in error:
+                if operation == "observe":
+                    message = "Consulta ao host indisponível. Nenhuma chave alterada; tente atualizar novamente."
+                elif error.startswith("managed-use:"):
+                    message = "Não foi possível confirmar o encerramento do uso gerenciado; chave preservada. Verifique o DeepSeek Harness e tente novamente."
+                elif "backend is unavailable" in error:
                     message = (
                         "Cofre seguro indisponível; nenhuma chave foi guardada."
                         if operation == "add" else
@@ -465,75 +591,39 @@ class AccountsPage(BasePage):
                 )
             elif operation == "remove" and result is True:
                 message = "Cópia local removida do cofre; a chave do provedor não foi revogada."
+            elif operation == "observe":
+                message = "Vínculos locais consultados. Validade, saldo e uso externo não verificados."
+            elif operation == "revoke":
+                message = "Uso gerenciado revogado; cópia local e chave no provedor preservadas."
             else:
                 message = "Referência local removida; a chave do provedor não foi revogada."
             self._credential_status.setText(message)
             announce_accessible(self._credential_status, message)
         self._render_credentials()
+        self._render_overview()
 
     def _render_credentials(self) -> None:
-        if self._credentials_layout is None:
+        if not hasattr(self, "credential_manager"):
             return
-        while self._credentials_layout.count():
-            item = self._credentials_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        self.credential_manager.set_entries(
+            self.credential_vault.entries if self.credential_vault else (),
+            hidden=self.preferences.hide_account_identity, busy=self._credential_busy,
+            unavailable=self.credential_vault is None,
+        )
+        self.credential_manager.set_uses(self._credential_uses, self._usage_observation)
+        self.findChild(QPushButton, "registerApiCredential").setEnabled(
+            self.credential_vault is not None and not self._credential_busy
+        )
 
         if self.credential_vault is None:
             if self._credential_status is not None:
                 self._credential_status.setText(
                     "Cofre de credenciais indisponível ou registro inválido; ações bloqueadas."
                 )
+                self._credential_status.show()
             if self._add_credential_button is not None:
                 self._add_credential_button.setEnabled(False)
             return
-
-        if self._credential_status is not None and not self._credential_status.text():
-            self._credential_status.setText(
-                "Nenhuma chave de API armazenada." if not self.credential_vault.entries else
-                "Referências locais registradas; presença atual no cofre, validade e uso por apps não verificados."
-            )
-
-        hidden = self.preferences.hide_account_identity
-        for index, entry in enumerate(self.credential_vault.entries, start=1):
-            card = QFrame()
-            card.setObjectName("storedApiCredential")
-            row = QHBoxLayout(card)
-            details = QVBoxLayout()
-            label = QLabel(
-                f"Chave {index}" if hidden else f"{entry.provider} · {entry.nickname}"
-            )
-            label.setObjectName("storedApiCredentialLabel")
-            presence = (
-                "Gravação não confirmada · referência mantida para limpeza" if entry.state == "pending"
-                else "Cofre confirmou gravação nesta sessão"
-                if entry.account_id in self._credential_confirmed_ids else
-                "Registro ativo · presença atual no cofre não consultada"
-            )
-            state = QLabel(
-                f"{presence} · sessão e cota não verificadas · nenhum app autorizado"
-            )
-            state.setObjectName("storedApiCredentialState")
-            state.setWordWrap(True)
-            details.addWidget(label)
-            details.addWidget(state)
-            row.addLayout(details, 1)
-            remove = QPushButton("Remover cópia local")
-            remove.setObjectName("removeApiCredential")
-            remove.setAccessibleName(
-                f"Remover chave {index}" if hidden else f"Remover chave de {entry.provider}"
-            )
-            remove.setToolTip(
-                "Apaga somente esta cópia local do cofre; não revoga a chave no provedor."
-            )
-            remove.setEnabled(not self._credential_busy)
-            remove.clicked.connect(
-                lambda _checked=False, account_id=entry.account_id:
-                self._remove_api_credential(account_id)
-            )
-            row.addWidget(remove)
-            self._credentials_layout.addWidget(card)
 
     def _remove_api_credential(self, account_id: str) -> None:
         if self.credential_vault is None or self._credential_busy:
@@ -553,7 +643,8 @@ class AccountsPage(BasePage):
             self,
             "Remover cópia local?",
             f"A cópia segura de {label} será apagada deste sistema. "
-            "A chave não será revogada no provedor e apps não serão alterados.",
+            "O uso vinculado no DeepSeek Harness será encerrado antes da remoção. "
+            "A chave não será revogada no provedor; uso por outros apps permanece desconhecido.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -563,6 +654,7 @@ class AccountsPage(BasePage):
         self.preferences.set_hide_account_identity(hidden)
         self._render_cards()
         self._render_credentials()
+        self._render_overview()
         if hasattr(self, "codex_profiles"):
             self.codex_profiles.set_hidden(hidden)
 
@@ -668,6 +760,7 @@ class AccountsPage(BasePage):
             if widget is not None:
                 widget.deleteLater()
         self._radios_by_provider.clear()
+        self._render_overview()
         for index, (account, connection) in enumerate(self._accounts, start=1):
             public = public_account(account)
             hidden = self.preferences.hide_account_identity
@@ -752,6 +845,52 @@ class AccountsPage(BasePage):
                     )
                     self._cards_layout.addWidget(action)
 
+    def _render_overview(self) -> None:
+        if not hasattr(self, "_metrics"):
+            return
+        sessions = sum(connection.session.effective_state == "yes" for _account, connection in self._accounts)
+        profiles = getattr(getattr(self, "codex_profiles", None), "snapshot", {}).get("profiles", [])
+        profiles = [row for row in profiles if not row.get("archived")]
+        providers = {account.provider for account, _connection in self._accounts}
+        if profiles:
+            providers.add("Codex")
+        queried = bool(self._outcomes)
+        self._metrics["active"].setText(str(sessions) if queried else "—")
+        self._metrics["known"].setText(str(len(self._accounts) + len(profiles)))
+        self._metrics["providers"].setText(str(len(providers)))
+        self._metrics["keys"].setText(str(len(self.credential_vault.entries)) if self.credential_vault else "—")
+        self._coverage.setText(
+            f"{len(self._accounts)} registros de conexão + {len(profiles)} perfis Codex locais. "
+            "Perfis podem pertencer à mesma conta; sessão exige evidência. "
+            + ("Consulta parcial; confira fontes e horários abaixo." if any(value != "ok" for value in self._outcomes.values()) else
+               "Atualize o status para consultar as conexões disponíveis." if not queried else
+               "Sessões contadas conforme evidência disponível; cotas de fontes distintas não são somadas.")
+        )
+        self._account_empty.setVisible(not self._accounts)
+        while self._platform_layout.count():
+            widget = self._platform_layout.takeAt(0).widget()
+            if widget:
+                widget.hide()
+                widget.deleteLater()
+        if not providers:
+            self._platform_layout.addWidget(text_label("Plataformas ainda não observadas. Atualize o status ou adicione uma conexão."))
+        for provider in sorted(providers, key=str.casefold):
+            pairs = [(account, connection) for account, connection in self._accounts if account.provider == provider]
+            card = QFrame()
+            card.setObjectName("accountPlatform")
+            details = QVBoxLayout(card)
+            count = len(pairs) + (len(profiles) if provider == "Codex" else 0)
+            details.addWidget(text_label(f"{provider} · {count} registros", "sectionHeading"))
+            if provider == "Codex":
+                details.addWidget(text_label("Perfis locais · sessões, saldo, expiração e renovação não verificados."))
+            for index, (account, connection) in enumerate(pairs, start=1):
+                label = f"Conta {index}" if self.preferences.hide_account_identity else account.nickname or account.provider
+                session = connection.session
+                state = "expirada" if session.is_expired else {"yes": "válida observada", "no": "não ativa", "unknown": "desconhecida"}[session.effective_state]
+                expiry = self._format_observation_time(session.expires_at) if session.expires_at else "não informada"
+                details.addWidget(text_label(f"{label} · sessão {state} · expiração: {expiry}\n{self._quota_state(connection)}\n{self._observation_state(connection)}"))
+            self._platform_layout.addWidget(card)
+
     def _toggle_grant(self, connection: Connection, consumer_id: str) -> None:
         current = next((grant for grant in self.grant_ledger.for_consumer(consumer_id)
                         if grant.connection_id == connection.connection_id), None)
@@ -828,7 +967,8 @@ class AccountsPage(BasePage):
         if quota.observed_at:
             timestamp = datetime.fromisoformat(quota.observed_at.replace("Z", "+00:00"))
             observed = f" · observado {timestamp.astimezone().strftime('%d/%m %H:%M')}"
-        return f"{source}: {amount}{observed}"
+        reset = f" · renova em {AccountsPage._format_observation_time(quota.reset_at)}" if quota.reset_at else " · renovação não informada"
+        return f"{source}: {amount}{reset}{observed}"
 
     @staticmethod
     def _format_observation_time(value: str) -> str:
