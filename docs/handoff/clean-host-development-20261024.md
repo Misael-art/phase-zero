@@ -1,5 +1,55 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Contas e conexões: carteira e gestão de chaves — 07/11/2026
+
+Incremento de código `a6e5e06fcd0f16b6f1bbe072ffeed6b8a4c50357`, branch de revisão
+`codex/accounts-key-manager`, sobre `b7c223b643dd41a70a67d584c3ba6973c41de154`
+(PR #133). O commit local equivalente é `0495c9c703638c49cecb779d2dc31b0a8fb8667b`.
+Essa base preserva os launchers Grok/DeepSeek já instalados, sem publicar os
+commits de outras frentes da branch local. AGENTS, alterações anteriores deste
+handoff e reparo de touch permaneceram fora do incremento.
+
+Contas agora separa sessões observadas, registros/perfis locais, plataformas e
+chaves. Perfis não comprovam identidades distintas. Cotas preservam unidade,
+fonte e horário; renovação aparece quando informada. Ver todas as contas mantém
+Codex e os consentimentos existentes. Gerenciar chaves abre busca, filtros,
+ordenação e detalhe por chave com cadastro/idade, origem e vínculos gerenciados.
+A carteira continua CredentialVault/cofre nativo, sem novo banco ou segredo na
+listagem. Criação no provedor, validade, expiração, saldo e última requisição
+permanecem desconhecidos quando faltam dados. Revisão de cadastro após 90 dias
+é lembrete local, não prova de comprometimento. Lista usa acesso da sessão local;
+autorização/desbloqueio do cofre continua nas operações nativas, sem falso gate.
+
+Cobertura de uso: DeepSeek Harness selecionado por referência exata, com estado,
+pasta sugerida, supervisor e horário da observação. Uso externo segue desconhecido.
+Revogar uso encerra e desfaz somente esse vínculo. Remoção segura serializa
+encerramento e exclusão local com a trava do próprio manager; falha ao parar
+preserva a chave. Substituição cadastra outra chave e exige seleção/consentimento
+no consumidor. Nenhuma revogação no provedor ou grant de proxy é presumida.
+
+Validação: 203 pytest focados passaram em 59,27 s; jornadas claro/escuro em
+100/150/200%, 800×600 e 1280×800, teclado, privacidade, filtros e reabertura.
+Qt/Xvfb exercitado no host. Secret Service real com chave inválida própria e
+Harness real 0.2.1-rc.2/Node privado existente passaram: cadastro pela UI,
+observação, revogação, reinício explicitamente selecionado e parada antes da
+remoção. Recibo privado: `~/.cache/phasezero-dev/accounts-host.PdF0J4/receipt.json`.
+Sem login de operador ou inferência. Venv de testes não contém PyGObject; o teste
+nativo usou Python do launcher, sem trocar backend por arquivo.
+
+Smoke do pacote instalado em raiz descartável passou. Instalador oficial de
+usuário aplicou fonte imutável do SHA de código acima; versão nominal continua
+1.22.16, sem tag/release nova. Backup anterior:
+`~/.local/share/phasezero/backups/1.22.16.20261107085718.600230`.
+Os sete arquivos Linux alterados coincidiram byte a byte com esse SHA. Launcher
+instalado abriu Contas e conexões em Xvfb e encerrou pelo smoke normal; evidência
+privada em `~/.cache/phasezero-dev/accounts-installed.WHyvxm/accounts.png`.
+
+Próximo gate: CI do SHA de revisão e integração do PR #133 antes deste incremento.
+Na consulta da base, python-test estava vermelho; demais checks executados
+passaram. Windows, conta/cota reais, uso externo, leitor de tela e toque físico
+não foram homologados. Não houve merge/release. Catálogo assinado de práticas
+retornou practices-not-configured; memória local e memorial do checkout usados.
+
 ## Preferência de microfone após deriva de perfil — 06/11/2026
 
 Código `154225b3e4b7dcf4a21331e297eefe893a08b588` na branch de
