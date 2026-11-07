@@ -688,3 +688,42 @@ A releitura confirmou as revisões e o lint deixou de sinalizar as duas
 orientações antigas. Candidatos de similaridade seguem sujeitos à revisão
 por escopo. A publicação do catálogo compartilhado ainda exige configurar
 a chave pública do curador.
+
+
+## Reparo de estabilidade integrado ao PhaseZero — 2026-11-07
+
+Código em `9c1701588fefacf2ed14ecd35d8eacba034a602f`, branch local
+`codex/agent-launchers`. `linux/pz repair stability` usa o gerenciador de
+reparos existente, com `status`, `plan`, `apply --yes` e `rollback --yes`.
+Contrato e uso em [host-stability.md](../troubleshooting/host-stability.md).
+
+Aplicação no host às 07:55 -03 criou dois drop-ins gerenciados: exclusão de
+`sddm` no autoaplicador ICC e journal persistente com limite de 150 MiB e
+sync de 60 s. Configuração efetiva conferida; journald ativo. Mesma identidade
+de boot, sem reinício da sessão, SDDM, drivers, firmware ou mudança de cmdline.
+Entrada natural no greeter e preservação física do perfil de cor permanecem
+gates. Backend pstore e detectores continuam sem ativação; causa dos resets
+não foi isolada.
+
+Recibo com intenção, hashes e fase em
+`/var/lib/phasezero/repairs/stability/state.json`. Arquivos originais não são
+sobrescritos. Configuração pessoal, symlink, recibo desconhecido, alteração
+posterior e redução de uma política já mais forte bloqueiam a operação.
+Falha parcial/timeout exige verificação ou reversão explícita, sem retry cego.
+Nenhum daemon, coleta paralela ou limpeza de logs foi instalado.
+
+Validação: 26 testes focais passaram em 0,72 s com Python 3.14.7/pytest já
+provisionados pelo Fôlego, temporários próprios em disco. Incluem aplicação,
+idempotência, rollback, falha parcial, timeout, precedência e proteção de
+arquivos. Primeiro ensaio falhou na preparação do diretório temporário; corrigido
+antes da rodada válida. ShellCheck de `linux/pz` passou com as opções oficiais
+do CI; verificação de diff passou. PR #133 já apresentava falha de
+`python-test` no SHA anterior de outra frente; não atribuir esse CI ao reparo.
+
+Push normal recusado pela guarda: branch atual fora da continuidade registrada.
+Não houve bypass, novo PR, merge ou release. Recuperação identificada no destino
+privado já registrado `~/.local/share/project-recovery/PhaseZero/`, com bundle
+incremental e manifesto. Próximo gate de publicação: reconciliar este incremento
+com a continuidade registrada sem carregar mudanças alheias. Prompts entregues
+separam instrumentação Gamescope (SteamZero) de telemetria passiva (Fôlego);
+nenhum agente dessas frentes foi iniciado nesta tarefa.
