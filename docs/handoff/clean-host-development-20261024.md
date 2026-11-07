@@ -722,8 +722,10 @@ do CI; verificação de diff passou. PR #133 já apresentava falha de
 
 Push normal recusado pela guarda: branch atual fora da continuidade registrada.
 Não houve bypass, novo PR, merge ou release. Recuperação identificada no destino
-privado já registrado `~/.local/share/project-recovery/PhaseZero/`, com bundle
-incremental e manifesto. Próximo gate de publicação: reconciliar este incremento
+privado já registrado `~/.local/share/project-recovery/PhaseZero/`, com patch
+Git verificado e manifesto. Bundle adicional preservado, mas sua verificação
+recusou a conectividade do pré-requisito; não é recuperação certificada.
+Próximo gate de publicação: reconciliar este incremento
 com a continuidade registrada sem carregar mudanças alheias. Prompts entregues
 separam instrumentação Gamescope (SteamZero) de telemetria passiva (Fôlego);
 nenhum agente dessas frentes foi iniciado nesta tarefa.
