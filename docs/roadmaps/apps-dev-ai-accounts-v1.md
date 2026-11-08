@@ -3587,3 +3587,30 @@ e módulos conferidos. Matriz por falha, evidências privadas e limites de
 validação no [handoff IA](../handoff/ai-stack-remediation-handoff.md#codex-web-reconexões-no-modelo-selecionado-e-monitor-do-perfil--2026-11-07).
 Digitação física, novo login/reboot, Windows e expiração real de conta não
 homologados; CI do SHA publicado ainda precisa ser observado.
+
+### PXA-006/008/009 — créditos API OpenAI e OpenCode — 2026-11-07
+
+Owner: CredentialVault, carteira de Contas e conexões e manager OpenCode.
+Código `3a5a9c21501035540e109d9b833a4fdee46beae4`, branch de revisão
+`codex/openai-api-credits` sobre PR #135. Observação monetária por organização,
+com origem/vencimento e saldo desconhecido distinto de zero; v1→v2 com backup,
+sem novo store de segredo. Preço da assinatura não é saldo. Benefício oficial
+Pro/Business exige ativação; Plus não elegível. Créditos comprados podem ser
+consumidos após promocionais, conforme faturamento OpenAI.
+
+Adapter API direto do OpenCode usa grant por chave e helper do cofre a cada
+requisição HTTP, sem 9Router. Fixa organização/projeto/modelo/destino; revogação
+bloqueia próximas chamadas. Seleção do padrão exige consentimento, runtime e
+probe de autenticação/modelos. Plugin e contrato experimental continuam sem
+homologação no cliente real; versão mínima adotada não substitui essa prova.
+
+Artefato: 113 regressões passaram em lote limitado a 512 MiB e 75% de um núcleo;
+seis jornadas antigas de escala não repetidas após reboot. Formulários próprios
+renderizados com fonte 100/200%, sem rolagem horizontal. Host manteve >5,9 GiB
+disponíveis no lote final. Causa do crash continua indeterminada.
+
+Gates reais abertos: chave nativa OpenCode recusada (401), carteira OpenAI vazia,
+CLI 2.0.12, benefício/saldo não observados. Padrão não alterado; nenhuma compra
+ou inferência API. Retomar por concessão/chave válidas, cliente compatível e
+turno real com conferência do faturamento. Não fechar G3/PXA-008 por fixture.
+Detalhes e continuidade no [handoff IA](../handoff/ai-stack-remediation-handoff.md).

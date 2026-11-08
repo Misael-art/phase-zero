@@ -816,3 +816,193 @@ Windows, novo login/reboot físico, leitor de tela/toque e durabilidade perante
 revogação/cotas futuras seguem gates próprios. Catálogo de práticas sem revisão
 assinada; memória escopada e memorial local usados. Não prometer recuperação de
 limites impostos pelo provedor nem reparo de configurações de dono desconhecido.
+
+### Créditos API da assinatura OpenAI e padrão OpenCode — 2026-11-07
+
+Código revisável `3a5a9c21501035540e109d9b833a4fdee46beae4`, branch
+`codex/openai-api-credits`, sobre `664718e9` de `codex/codex-web-background`
+(PR #135, dependente de #134). Equivalente local `bc49c710` na raiz canônica.
+Não confundir implementação com ativação do benefício ou consumo homologado.
+
+Fonte consultada: [créditos API para assinantes](https://developers.openai.com/api/docs/guides/chatgpt-api-credits).
+Benefício exige Pro/Business elegível, ativação e organização vinculada;
+Plus não está incluído. Concessão inicial pode ser proporcional e vence no
+ciclo. Crédito pertence à organização, não à chave. OpenAI usa promocionais
+antes dos comprados; esse benefício não amplia cota do Codex autenticado e não
+cobre Codex via chave API. Não presumir saldo a partir do preço do plano.
+
+Owner financeiro continua `CredentialVault`: metadados API por organização,
+chaves vinculadas à mesma observação, moeda, origem, ativação, total/saldo e
+vencimento. Registro v1 permanece legível; primeira cota grava schema v2 com
+backup central antes da migração. Segredos continuam no cofre nativo;
+metadados Windows mantêm envelope DPAPI. Não há nova carteira ou banco.
+UI da carteira oferece Registrar cota da API e, para OpenAI, Configurar uso no
+app. Informações manuais ficam marcadas `user_reported`; não viram consulta
+oficial, contador automático ou saldo atual. Renovação exige nova observação.
+Valor desconhecido é distinto de zero e de crédito vencido.
+
+`linux/ai/opencode_api.py` implementa seleção explícita da chave, organização,
+projeto e modelo, com consentimento de consumo API. Antes de alterar padrão,
+confere runtime, lê carteira e consulta `/v1/models` com chave selecionada e
+headers da organização/projeto. Consulta autenticação/modelos, não saldo.
+Modelo Codex é recusado nesse fluxo. Configuração usa provedor próprio
+`phasezero-openai-api`, modelo padrão e política que limita caminho normal de
+provedores; credencial persistida é somente placeholder sem acesso.
+
+Plugin local `linux/ai/assets/opencode-openai-api/` intercepta cada requisição
+HTTP desse provedor. Resolve chave por pipe interno do helper Python isolado,
+reconfere registro/grant/cota e fixa Authorization/organização/projeto. Aceita
+apenas endpoints HTTPS autorizados e modelo selecionado; rejeita redirects e
+WebSocket. Nenhuma chave em argv, configuração OpenCode ou log do adaptador.
+Modo interno `credential` retorna segredo por pipe; nunca executá-lo em terminal
+capturado ou exibir seu stdout para diagnosticar. Use status sem credenciais.
+Revogação/remoção bloqueia próxima requisição; requisição já autorizada pode
+estar em andamento. Revogar mantém provedor bloqueado, sem escolher outra
+conta. `disable-openai` restaura backup somente com hashes correspondentes;
+edições posteriores do usuário são preservadas. Guards 9Router permanecem.
+
+Contrato de extensão é experimental e ainda precisa de prova no OpenCode real.
+Referências: [plugins server](https://opencode.ai/docs/build/plugins/server),
+[políticas](https://opencode.ai/docs/policies/) e
+[configuração](https://opencode.ai/docs/config/). Mínimo 2.2.6 é guarda adotada
+pelo adaptador, não homologação de qualquer versão superior. CLI/desktop devem
+estar alinhados. Políticas gerenciadas e código de outros plugins permanecem
+fora da prova das fixtures; não afirmar fechamento geral de PXA-008.
+
+**Bloqueios reais reobservados após reinício:** carteira sem chave OpenAI;
+chave existente no armazenamento nativo do OpenCode recusada com HTTP 401 /
+`invalid_api_key`; CLI instalada 2.0.12. Concessão, organização beneficiada e
+saldo não observados. Tentativa controlada de configurar foi recusada e
+configuração do OpenCode permaneceu byte a byte igual. Nenhuma inferência API,
+compra, recarga, upgrade de plano ou ativação de benefício foi executada.
+Navegador Chrome autenticado não estava acessível pelo conector. Foi solicitado
+ao operador ativar benefício oficial e cadastrar chave da organização no cofre;
+não pedir segredo no chat nem reaproveitar cookies de outra aplicação.
+
+Retomada após crash/reboot informado pelo operador: causa não estabelecida.
+Consulta limitada ao kernel anterior não encontrou OOM/pânico; pstore exigiu
+permissão e não foi lido. Não usar ausência desses registros como diagnóstico.
+Testes retomados em scopes próprios e sequenciais, CPUQuota 75% de um núcleo,
+MemoryMax 512 MiB, MemorySwapMax zero, Nice 10 e IOWeight 10. Amostragem a cada
+dois segundos interrompe somente scope próprio se MemAvailable <4 GiB,
+PSI full memória >=2%, full I/O >=8%, CPU some >=35% ou prazo >180 s.
+Não houve encerramento de processos alheios, reset de rede ou teste de carga.
+
+Validação do artefato Git: **113 passaram, seis jornadas antigas de escala
+deselecionadas**; mínimo disponível do lote 6043 MiB, sem gatilho de pressão.
+Lotes anteriores separados: 82 core e 30 UI; uma regressão adicional cobre
+formulários com texto dobrado. Render Qt dos dois formulários em 100/200% de
+fonte: rolagem vertical, ações acessíveis, sem rolagem horizontal após correção.
+Não equivale a escala física, leitor de tela, conta/consumo ou SDK OpenCode real.
+Gitleaks do commit passou; `bash -n linux/pz` e diff sem whitespace inválido.
+Práticas assinadas indisponíveis (`practices-not-configured`); memorial local e
+memória escopada usados. AGENTS, handoff de host limpo e reparo de touch alheios
+permanecem fora do incremento.
+
+Evidência privada em `~/.cache/phasezero-dev/openai-api-credits/`: recibos dos
+scopes, render dos formulários e `live-readonly-receipt.json`. Driver de
+limitação é temporário dessa validação, não outro monitor residente do host.
+Próximos gates: runtime CLI/desktop compatível, SDK carregado no cliente real,
+concessão e chave válidas da organização, configuração pelo fluxo guiado e
+turno API controlado com observação do faturamento. Não declarar padrão API
+ativo neste host antes dessas provas; não comprar créditos para contornar gate.
+
+Aplicação no host: instalador oficial retornou zero sob limite de CPU/RAM;
+11 arquivos instalados conferidos contra o SHA de código acima. Configuração,
+auth nativa do OpenCode e metadados da carteira mantiveram hashes. Backup:
+`~/.local/share/phasezero/backups/1.22.17.20261107214114.101197`.
+Versão nominal 1.22.17, sem release nova. [PR #136 draft](https://github.com/Misael-art/phase-zero/pull/136),
+publicação inicial `677211b2`, confirmada no remoto. CI precisa de observação
+própria; instalação do cadastro não comprova ativação ou consumo da API.
+
+### Retomada do upgrade e chave Pro real — 2026-11-07
+
+Após novos reinícios, inventário confirmou que o upgrade ainda não começara:
+desktop/CLI 2.0.12, chave nova ainda ausente no provedor. Boot atual observado
+`7fb93068-0b66-415e-b394-a4144387e6d9`. Kernel/journal dos boots anteriores não
+estabelecem causa dos travamentos. Não atribuir reinício ao teste de outra
+tarefa ou a um processo apenas porque aparece no fim do journal.
+
+Download automático dos dois pacotes foi autorizado explicitamente. Fontes:
+repositórios Manjaro extra e Chaotic-AUR já configurados; Electron44 44.5.1-1
+e OpenCode desktop 2.2.6-1, total 273.488.097 bytes. SHA256 conferidos contra
+metadados dos repositórios e assinaturas verificadas pelo keyring local; pacman
+concluiu a transação sem alterar outros pacotes. Manifesto e recibos privados
+em `~/.cache/phasezero-dev/openai-api-credits/`. Download sequencial limitado
+a 8 MiB/s, scope de teste sem gatilho, mínimo disponível 6784 MiB.
+
+Antes de abrir o desktop, checkpoint SQLite sem consumidor e reflink central
+preservaram banco de 6.117.539.840 bytes. Backups anterior e posterior ao upgrade
+abrem em modo somente leitura; schema passou de 72 para 85 objetos. Isso não
+equivale a varredura integral do banco ou validação de cada conversa.
+
+Dois impedimentos de alinhamento foram reproduzidos e corrigidos no owner
+`setup-opencode.sh`: desktop novo usa cache `2.2.6-x64`, enquanto helper buscava
+somente `2.2.6`; cache anterior foi removido pelo app, deixando symlink antigo
+quebrado. Helper agora reconhece sufixo da arquitetura e CLI do pacote em
+`/usr/lib/opencode-desktop/opencode-cli`, sempre conferindo versão exata.
+Não exige inicializar GUI para encontrar CLI empacotada nem baixa npm por engano.
+
+Backup legado reutilizava `.pz-bak`; durante execução controlada houve cópia
+física de vários GiB e PSI full de memória chegou a 2,92%. Guarda interrompeu
+somente scope próprio antes do alinhamento, sem reinício do host. Novo helper
+`opencode_database.py` verifica consumidores, mantém lock SQLite exclusivo,
+checkpointa WAL e exige reflink para novo destino no store central. Não
+sobrescreve backup antigo, não tenta cópia física após falha e propaga erro
+antes de mudar symlink. Filesystem sem reflink exige backup planejado; falha
+não significa alinhamento concluído. Parcial próprio de 4,3 GiB foi retirado
+após confirmar backups centrais consistentes e registrar recibo. Retomada real
+alinhou CLI/desktop 2.2.6 em seis segundos, mínimo disponível 6760 MiB.
+
+Desktop real abriu. Encerramento via serviço produziu SIGTRAP no Electron44,
+sem arquivo de core; não foi travamento/reinício do host. KDE moveu app e seu
+servidor para scope próprio `app-ai.opencode.desktop-63359.scope`; limites do
+serviço inicial não cobrem esse scope após a transferência. Somente esse scope
+de validação foi encerrado para liberar banco. Não alegar limite herdado por
+todos os descendentes ou encerramento limpo da GUI. Preferir `--standalone`
+nas provas CLI isoladas e conferir cgroup efetivo.
+
+Conta principal mostrou assinatura Pro válida. Nova chave restrita criada no
+projeto selecionado: Models read, Responses write, Chat Completions request,
+demais recursos sem permissão. Cadastro ativo e leitura do cofre confirmada.
+Identificadores e evidência financeira permanecem no registro privado. Segredo passou por stdin privado, sem arquivo de
+chave/argv/log. Conector do navegador não tinha ambiente D-Bus; tentativa
+inicial deixou referência pendente. Após desbloqueio nativo e uso da sessão
+D-Bus correta, referência pendente própria foi reconciliada pelo fluxo do cofre,
+sem nova chave no provedor nem cópia de sessão. Probe autenticado retornou
+96 modelos, incluindo `gpt-6.1-sol`; isso valida chave e escopo, não saldo.
+
+Caminho direto oficial `https://chatgpt.com/settings/billing` expôs benefício
+que não aparecia na observação anterior: concessão proporcional inicial e
+renovação conforme plano elegível. Organização selecionada é mesma da chave;
+API Platform antes do resgate não mostrava concessão ativa. Etapa final informa que
+resgate desativa modelos Codex via todas as chaves API dessa organização,
+inclusive com créditos comprados; uso Codex pela assinatura permanece.
+Consentimento específico a esse efeito foi solicitado e continua pendente
+nesta observação. Checkbox/final de resgate não foram submetidos; não marcar
+crédito ativo nem padrão API configurado enquanto isso permanecer pendente.
+
+Prova adicional no binário 2.2.6, HOME/XDG privados: plugin real carregou e
+registrou hooks; provedor/modelo apareceu. Requisição contra destino local
+deliberadamente não autorizado foi recusada pelo hook antes de qualquer
+leitura de credencial. Sem chamada de inferência externa nessa prova. Recibos
+`native-plugin-probe/loaded.json` e `request.log` privados. Testes focados:
+14 pytest passaram; shell de alinhamento cobre cache com arquitetura,
+ausência de download npm e recusa antes de mudar CLI quando banco está ocupado;
+shellcheck com fontes e diff check passaram. CI da base `fcdf622b` estava
+verde nos checks executados (dois skips), sem merge/release.
+
+Correção acima publicada no PR #136, código/SHA remoto confirmado
+`2db902558f004d73499473fe3b301203190536f2`; equivalente local `85a50c22`.
+Instalador oficial aplicou esse artefato, versão nominal 1.22.17; três módulos
+conferidos byte a byte, backup da instalação anterior
+`~/.local/share/phasezero/backups/1.22.17.20261107225859.136435`.
+Instalação sob guarda terminou em dois segundos, mínimo disponível 6954 MiB.
+Carteira agora registra chave ativa e observação oficial por organização com
+benefício `not-activated`, valores não preenchidos: oferta continua pendente,
+não saldo concedido. `openai-credit-status` instalado confirma uma
+chave, uma organização, padrão não alterado. Chave nativa inválida antiga do
+OpenCode foi preservada; não a reutilizar nem expor ao diagnosticar. Falta
+consentimento ao efeito informado pela OpenAI e submissão final, depois
+observar concessão/validade, configurar chave/projeto exatos e provar turno
+com API real. AGENTS, handoff de host limpo e reparo de touch alheios intactos.

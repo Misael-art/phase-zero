@@ -36,12 +36,14 @@ class CredentialManager(QWidget):
     revoke_requested = Signal(str)
     connect_requested = Signal(str)
     replace_requested = Signal(str)
+    credit_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("credentialManager")
         self.entries: tuple[CredentialEntry, ...] = ()
         self.uses: tuple[CredentialUse, ...] = ()
+        self.credits = {}
         self.hidden = False
         self.busy = False
         self.unavailable = False
@@ -212,6 +214,7 @@ class CredentialManager(QWidget):
             return "Sem vínculo observado\nUso externo desconhecido"
         use = uses[0]
         state = {"running": "Processo ativo", "starting-or-unhealthy": "Processo ativo; saúde incerta",
+                 "configured": "Conexão selecionada; processo não observado",
                  "stopped": "Processo parado", "crashed-or-stale": "Processo não confirmado"}.get(use.state, "Estado desconhecido")
         return f"{use.consumer}\n{state}"
 
@@ -282,7 +285,7 @@ class CredentialManager(QWidget):
             self.table.setCellWidget(row, 6, manage)
             self.table.setRowHeight(row, 142 if not self._compact else 104)
         self.table.setFixedHeight(max(160, min(8, len(rows)) * (104 if self._compact else 142) + 42))
-        self.coverage.setText(self.observation + " Cobertura: vínculos do DeepSeek Harness; demais apps e uso externo não verificados.")
+        self.coverage.setText(self.observation + " Cobertura: vínculos do DeepSeek Harness e OpenCode API OpenAI; processos do OpenCode e uso externo não verificados.")
         self._render_details()
         self._reflow()
 
@@ -294,7 +297,8 @@ class CredentialManager(QWidget):
 
     def _render_details(self):
         entry = next((entry for entry in self.entries if entry.account_id == self.selected_id), None)
-        signature = (entry, self.hidden, self.busy, self._uses_for(entry) if entry else ())
+        credit = self.credits.get(entry.account_id) if entry else None
+        signature = (entry, credit, self.hidden, self.busy, self._uses_for(entry) if entry else ())
         if signature == self._detail_signature:
             return
         self._detail_signature = signature
@@ -317,6 +321,11 @@ class CredentialManager(QWidget):
         if focus_name == "closeCredentialDetails":
             close.setFocus(Qt.OtherFocusReason)
         self.details.addWidget(text_label(self._state(entry)))
+        self.details.addWidget(text_label(credit.display() if credit else "Cota API: saldo e ativação ainda não informados.", "apiCreditState"))
+        if credit:
+            self.details.addWidget(text_label(
+                f"Observado em: {date_text(credit.observed_at)} · vencimento: {date_text(credit.expires_at)}"
+                + ("" if self.hidden else f"\nOrganização: {credit.organization}")))
         self.details.addWidget(text_label(
             f"Plataforma: {entry.provider}\nCadastrada no cofre: {date_text(entry.stored_at)}\n"
             f"Tempo de cadastro: {stored_days(entry)} dias\nCriação no provedor: não informada\n"
@@ -329,6 +338,7 @@ class CredentialManager(QWidget):
                 f"Observação local: {date_text(use.observed_at)}\nÚltima requisição: não observada"
             ))
         for title, name, signal, value in (
+            ("Registrar cota da API", "recordApiCredit", self.credit_requested, entry.account_id),
             ("Configurar uso no app", "connectApiCredential", self.connect_requested, entry.provider),
             ("Cadastrar substituta", "replaceApiCredential", self.replace_requested, entry.provider),
             ("Revogar uso gerenciado", "revokeApiCredentialUse", self.revoke_requested, entry.account_id),

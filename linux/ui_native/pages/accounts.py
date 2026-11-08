@@ -53,6 +53,12 @@ class AccountChannel:
 
 ACCOUNT_CHANNELS = (
     AccountChannel(
+        "openai-api-credit", "OpenAI API · crédito da assinatura",
+        "Pro/Business elegível, benefício ativado e chave de projeto da organização vinculada. Plus não está incluído.",
+        "Ative no faturamento oficial; guarde chave na carteira e registre cota observada. Configurar uso no app seleciona OpenCode.",
+        "Saldo registrado é observação, não consulta automática. Integração OpenCode por requisição exige cliente compatível e teste nativo; nenhum fallback por 9Router.",
+    ),
+    AccountChannel(
         "claude-code", "Claude Code",
         "Claude Code instalado no host; status vem do comando oficial de autenticação.",
         "Sessão gerida dentro do Claude Code; esta tela não inicia login.",
@@ -245,7 +251,7 @@ class _CredentialWorker(QRunnable):
         result: object = None
         error = ""
         try:
-            if self.operation in {"add", "remove"}:
+            if self.operation in {"add", "remove", "credit"}:
                 self.vault.reload_metadata()
             if self.operation == "add":
                 result = self.vault.add(*self.values)
@@ -253,9 +259,20 @@ class _CredentialWorker(QRunnable):
                 result = remove_local_credential(self.vault, self.values[0])
             elif self.operation == "observe":
                 result = observe_managed_uses()
+            elif self.operation == "credit":
+                self.vault.record_api_credit(*self.values)
+                result = True
+            elif self.operation == "opencode-default":
+                from linux.ai.opencode_api import OpenAIConsumer
+                result = OpenAIConsumer(self.vault).configure(*self.values, consented=True)
             elif self.operation == "revoke":
                 from linux.ai.deepseek_harness_manager import revoke_wallet_use
-                result = revoke_wallet_use(self.values[0])
+                entry = next((e for e in self.vault.entries if e.account_id == self.values[0]), None)
+                if entry and entry.provider.casefold() == "openai":
+                    from linux.ai.opencode_api import OpenAIConsumer
+                    result = OpenAIConsumer(self.vault).revoke(entry.account_id)
+                else:
+                    result = revoke_wallet_use(self.values[0])
             else:
                 raise CredentialVaultError("unsupported credential operation")
         except DshError as exc:
@@ -455,6 +472,7 @@ class AccountsPage(BasePage):
         self.credential_manager.revoke_requested.connect(self._revoke_api_credential_use)
         self.credential_manager.connect_requested.connect(self._configure_credential_use)
         self.credential_manager.replace_requested.connect(self._show_add_api_credential)
+        self.credential_manager.credit_requested.connect(self._record_api_credit)
         self._render_credentials()
         self._render_overview()
         self.status_loader.status_ready.connect(self._source_ready)
@@ -502,14 +520,32 @@ class AccountsPage(BasePage):
     def _configure_credential_use(self, provider: str) -> None:
         if provider.strip().casefold() == "deepseek":
             self.request_category("IA & Dev", "deepseek-harness")
+        elif provider.strip().casefold() == "openai":
+            from ..api_credit_dialog import OpenCodeApiDialog
+            dialog = OpenCodeApiDialog(self)
+            if dialog.exec() == QDialog.Accepted:
+                self._start_credential_operation("opencode-default", (self.credential_manager.selected_id, dialog.project.text().strip(), dialog.model.text().strip()))
+            dialog.deleteLater()
         else:
             self._show_channel_catalog()
+
+    def _record_api_credit(self, account_id: str) -> None:
+        if self.credential_vault is None or self._credential_busy:
+            return
+        from ..api_credit_dialog import ApiCreditDialog
+        entry = next((e for e in self.credential_vault.entries if e.account_id == account_id), None)
+        if entry is None:
+            return
+        dialog = ApiCreditDialog(entry.provider, self.credential_vault.api_credit(account_id), self)
+        if dialog.exec() == QDialog.Accepted:
+            self._start_credential_operation("credit", (account_id, dialog.values()))
+        dialog.deleteLater()
 
     def _revoke_api_credential_use(self, account_id: str) -> None:
         if self._credential_busy:
             return
         if QMessageBox.question(self, "Revogar uso gerenciado?",
-                                "Encerra somente o DeepSeek Harness vinculado a esta chave e desfaz a seleção. "
+                                "Encerra o DeepSeek Harness vinculado ou bloqueia novas requisições do OpenCode API vinculado. "
                                 "A cópia local e a chave no provedor são preservadas. Outros apps não são controlados aqui.",
                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
             self._start_credential_operation("revoke", (account_id,))
@@ -563,7 +599,9 @@ class AccountsPage(BasePage):
         self.findChild(QPushButton, "registerApiCredential").setEnabled(self.credential_vault is not None)
         if self._credential_status is not None:
             if error:
-                if operation == "observe":
+                if operation == "opencode-default":
+                    message = f"OpenCode não configurado: {error}"
+                elif operation == "observe":
                     message = "Consulta ao host indisponível. Nenhuma chave alterada; tente atualizar novamente."
                 elif error.startswith("managed-use:"):
                     message = "Não foi possível confirmar o encerramento do uso gerenciado; chave preservada. Verifique o DeepSeek Harness e tente novamente."
@@ -589,6 +627,10 @@ class AccountsPage(BasePage):
                     "Chave guardada no cofre local. Sessão, validade e cota não verificadas; "
                     "nenhum aplicativo autorizado."
                 )
+            elif operation == "opencode-default":
+                message = "OpenAI API selecionada como padrão. Reabra OpenCode para carregar integração; consumo depende do crédito e faturamento do provedor."
+            elif operation == "credit":
+                message = "Cota registrada como observação do usuário. Saldo não foi consultado na API; nenhum consumo autorizado."
             elif operation == "remove" and result is True:
                 message = "Cópia local removida do cofre; a chave do provedor não foi revogada."
             elif operation == "observe":
@@ -605,6 +647,8 @@ class AccountsPage(BasePage):
     def _render_credentials(self) -> None:
         if not hasattr(self, "credential_manager"):
             return
+        self.credential_manager.credits = ({e.account_id: self.credential_vault.api_credit(e.account_id)
+                                           for e in self.credential_vault.entries} if self.credential_vault else {})
         self.credential_manager.set_entries(
             self.credential_vault.entries if self.credential_vault else (),
             hidden=self.preferences.hide_account_identity, busy=self._credential_busy,
@@ -643,7 +687,7 @@ class AccountsPage(BasePage):
             self,
             "Remover cópia local?",
             f"A cópia segura de {label} será apagada deste sistema. "
-            "O uso vinculado no DeepSeek Harness será encerrado antes da remoção. "
+            "Harness vinculado será encerrado; novas requisições do OpenCode API serão bloqueadas antes da remoção. "
             "A chave não será revogada no provedor; uso por outros apps permanece desconhecido.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
