@@ -816,3 +816,91 @@ Windows, novo login/reboot físico, leitor de tela/toque e durabilidade perante
 revogação/cotas futuras seguem gates próprios. Catálogo de práticas sem revisão
 assinada; memória escopada e memorial local usados. Não prometer recuperação de
 limites impostos pelo provedor nem reparo de configurações de dono desconhecido.
+
+### Créditos API da assinatura OpenAI e padrão OpenCode — 2026-11-07
+
+Código revisável `3a5a9c21501035540e109d9b833a4fdee46beae4`, branch
+`codex/openai-api-credits`, sobre `664718e9` de `codex/codex-web-background`
+(PR #135, dependente de #134). Equivalente local `bc49c710` na raiz canônica.
+Não confundir implementação com ativação do benefício ou consumo homologado.
+
+Fonte consultada: [créditos API para assinantes](https://developers.openai.com/api/docs/guides/chatgpt-api-credits).
+Benefício exige Pro/Business elegível, ativação e organização vinculada;
+Plus não está incluído. Concessão inicial pode ser proporcional e vence no
+ciclo. Crédito pertence à organização, não à chave. OpenAI usa promocionais
+antes dos comprados; esse benefício não amplia cota do Codex autenticado e não
+cobre Codex via chave API. Não presumir saldo a partir do preço do plano.
+
+Owner financeiro continua `CredentialVault`: metadados API por organização,
+chaves vinculadas à mesma observação, moeda, origem, ativação, total/saldo e
+vencimento. Registro v1 permanece legível; primeira cota grava schema v2 com
+backup central antes da migração. Segredos continuam no cofre nativo;
+metadados Windows mantêm envelope DPAPI. Não há nova carteira ou banco.
+UI da carteira oferece Registrar cota da API e, para OpenAI, Configurar uso no
+app. Informações manuais ficam marcadas `user_reported`; não viram consulta
+oficial, contador automático ou saldo atual. Renovação exige nova observação.
+Valor desconhecido é distinto de zero e de crédito vencido.
+
+`linux/ai/opencode_api.py` implementa seleção explícita da chave, organização,
+projeto e modelo, com consentimento de consumo API. Antes de alterar padrão,
+confere runtime, lê carteira e consulta `/v1/models` com chave selecionada e
+headers da organização/projeto. Consulta autenticação/modelos, não saldo.
+Modelo Codex é recusado nesse fluxo. Configuração usa provedor próprio
+`phasezero-openai-api`, modelo padrão e política que limita caminho normal de
+provedores; credencial persistida é somente placeholder sem acesso.
+
+Plugin local `linux/ai/assets/opencode-openai-api/` intercepta cada requisição
+HTTP desse provedor. Resolve chave por pipe interno do helper Python isolado,
+reconfere registro/grant/cota e fixa Authorization/organização/projeto. Aceita
+apenas endpoints HTTPS autorizados e modelo selecionado; rejeita redirects e
+WebSocket. Nenhuma chave em argv, configuração OpenCode ou log do adaptador.
+Revogação/remoção bloqueia próxima requisição; requisição já autorizada pode
+estar em andamento. Revogar mantém provedor bloqueado, sem escolher outra
+conta. `disable-openai` restaura backup somente com hashes correspondentes;
+edições posteriores do usuário são preservadas. Guards 9Router permanecem.
+
+Contrato de extensão é experimental e ainda precisa de prova no OpenCode real.
+Referências: [plugins server](https://opencode.ai/docs/build/plugins/server),
+[políticas](https://opencode.ai/docs/policies/) e
+[configuração](https://opencode.ai/docs/config/). Mínimo 2.2.6 é guarda adotada
+pelo adaptador, não homologação de qualquer versão superior. CLI/desktop devem
+estar alinhados. Políticas gerenciadas e código de outros plugins permanecem
+fora da prova das fixtures; não afirmar fechamento geral de PXA-008.
+
+**Bloqueios reais reobservados após reinício:** carteira sem chave OpenAI;
+chave existente no armazenamento nativo do OpenCode recusada com HTTP 401 /
+`invalid_api_key`; CLI instalada 2.0.12. Concessão, organização beneficiada e
+saldo não observados. Tentativa controlada de configurar foi recusada e
+configuração do OpenCode permaneceu byte a byte igual. Nenhuma inferência API,
+compra, recarga, upgrade de plano ou ativação de benefício foi executada.
+Navegador Chrome autenticado não estava acessível pelo conector. Foi solicitado
+ao operador ativar benefício oficial e cadastrar chave da organização no cofre;
+não pedir segredo no chat nem reaproveitar cookies de outra aplicação.
+
+Retomada após crash/reboot informado pelo operador: causa não estabelecida.
+Consulta limitada ao kernel anterior não encontrou OOM/pânico; pstore exigiu
+permissão e não foi lido. Não usar ausência desses registros como diagnóstico.
+Testes retomados em scopes próprios e sequenciais, CPUQuota 75% de um núcleo,
+MemoryMax 512 MiB, MemorySwapMax zero, Nice 10 e IOWeight 10. Amostragem a cada
+dois segundos interrompe somente scope próprio se MemAvailable <4 GiB,
+PSI full memória >=2%, full I/O >=8%, CPU some >=35% ou prazo >180 s.
+Não houve encerramento de processos alheios, reset de rede ou teste de carga.
+
+Validação do artefato Git: **113 passaram, seis jornadas antigas de escala
+deselecionadas**; mínimo disponível do lote 6043 MiB, sem gatilho de pressão.
+Lotes anteriores separados: 82 core e 30 UI; uma regressão adicional cobre
+formulários com texto dobrado. Render Qt dos dois formulários em 100/200% de
+fonte: rolagem vertical, ações acessíveis, sem rolagem horizontal após correção.
+Não equivale a escala física, leitor de tela, conta/consumo ou SDK OpenCode real.
+Gitleaks do commit passou; `bash -n linux/pz` e diff sem whitespace inválido.
+Práticas assinadas indisponíveis (`practices-not-configured`); memorial local e
+memória escopada usados. AGENTS, handoff de host limpo e reparo de touch alheios
+permanecem fora do incremento.
+
+Evidência privada em `~/.cache/phasezero-dev/openai-api-credits/`: recibos dos
+scopes, render dos formulários e `live-readonly-receipt.json`. Driver de
+limitação é temporário dessa validação, não outro monitor residente do host.
+Próximos gates: runtime CLI/desktop compatível, SDK carregado no cliente real,
+concessão e chave válidas da organização, configuração pelo fluxo guiado e
+turno API controlado com observação do faturamento. Não declarar padrão API
+ativo neste host antes dessas provas; não comprar créditos para contornar gate.
