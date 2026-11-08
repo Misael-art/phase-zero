@@ -631,7 +631,7 @@ cmd_ai() {
             case "${1:-status}" in
                 sync|align) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" sync ;;
                 version-status|version) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" version-status ;;
-                status|heal|install|configure|repair|verify|run|rollback)
+                status|openai-credit-status|configure-openai|disable-openai|heal|install|configure|repair|verify|run|rollback)
                     python3 "$PZ_ROOT/linux/ai/opencode_9router_manager.py" "$@"
                     ;;
                 local-model|ollama) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" local-model ;;
@@ -639,7 +639,7 @@ cmd_ai() {
                 install-hook) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" install-hook ;;
                 remove-hook) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" remove-hook ;;
                 setup) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" setup ;;
-                *) pz_error "usage: pz ai opencode (status|heal|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup)"; return 1 ;;
+                *) pz_error "usage: pz ai opencode (status|openai-credit-status|heal|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup)"; return 1 ;;
             esac
             ;;
         deepseek-harness|dsh)
