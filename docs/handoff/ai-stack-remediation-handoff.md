@@ -914,3 +914,81 @@ auth nativa do OpenCode e metadados da carteira mantiveram hashes. Backup:
 Versão nominal 1.22.17, sem release nova. [PR #136 draft](https://github.com/Misael-art/phase-zero/pull/136),
 publicação inicial `677211b2`, confirmada no remoto. CI precisa de observação
 própria; instalação do cadastro não comprova ativação ou consumo da API.
+
+### Retomada do upgrade e chave Pro real — 2026-11-07
+
+Após novos reinícios, inventário confirmou que o upgrade ainda não começara:
+desktop/CLI 2.0.12, chave nova ainda ausente no provedor. Boot atual observado
+`7fb93068-0b66-415e-b394-a4144387e6d9`. Kernel/journal dos boots anteriores não
+estabelecem causa dos travamentos. Não atribuir reinício ao teste de outra
+tarefa ou a um processo apenas porque aparece no fim do journal.
+
+Download automático dos dois pacotes foi autorizado explicitamente. Fontes:
+repositórios Manjaro extra e Chaotic-AUR já configurados; Electron44 44.5.1-1
+e OpenCode desktop 2.2.6-1, total 273.488.097 bytes. SHA256 conferidos contra
+metadados dos repositórios e assinaturas verificadas pelo keyring local; pacman
+concluiu a transação sem alterar outros pacotes. Manifesto e recibos privados
+em `~/.cache/phasezero-dev/openai-api-credits/`. Download sequencial limitado
+a 8 MiB/s, scope de teste sem gatilho, mínimo disponível 6784 MiB.
+
+Antes de abrir o desktop, checkpoint SQLite sem consumidor e reflink central
+preservaram banco de 6.117.539.840 bytes. Backups anterior e posterior ao upgrade
+abrem em modo somente leitura; schema passou de 72 para 85 objetos. Isso não
+equivale a varredura integral do banco ou validação de cada conversa.
+
+Dois impedimentos de alinhamento foram reproduzidos e corrigidos no owner
+`setup-opencode.sh`: desktop novo usa cache `2.2.6-x64`, enquanto helper buscava
+somente `2.2.6`; cache anterior foi removido pelo app, deixando symlink antigo
+quebrado. Helper agora reconhece sufixo da arquitetura e CLI do pacote em
+`/usr/lib/opencode-desktop/opencode-cli`, sempre conferindo versão exata.
+Não exige inicializar GUI para encontrar CLI empacotada nem baixa npm por engano.
+
+Backup legado reutilizava `.pz-bak`; durante execução controlada houve cópia
+física de vários GiB e PSI full de memória chegou a 2,92%. Guarda interrompeu
+somente scope próprio antes do alinhamento, sem reinício do host. Novo helper
+`opencode_database.py` verifica consumidores, mantém lock SQLite exclusivo,
+checkpointa WAL e exige reflink para novo destino no store central. Não
+sobrescreve backup antigo, não tenta cópia física após falha e propaga erro
+antes de mudar symlink. Filesystem sem reflink exige backup planejado; falha
+não significa alinhamento concluído. Parcial próprio de 4,3 GiB foi retirado
+após confirmar backups centrais consistentes e registrar recibo. Retomada real
+alinhou CLI/desktop 2.2.6 em seis segundos, mínimo disponível 6760 MiB.
+
+Desktop real abriu. Encerramento via serviço produziu SIGTRAP no Electron44,
+sem arquivo de core; não foi travamento/reinício do host. KDE moveu app e seu
+servidor para scope próprio `app-ai.opencode.desktop-63359.scope`; limites do
+serviço inicial não cobrem esse scope após a transferência. Somente esse scope
+de validação foi encerrado para liberar banco. Não alegar limite herdado por
+todos os descendentes ou encerramento limpo da GUI. Preferir `--standalone`
+nas provas CLI isoladas e conferir cgroup efetivo.
+
+Conta principal mostrou ChatGPT Pro 100 pago e renovação em 16/11/2026. Nova
+chave restrita criada no Default project: Models read, Responses write, Chat
+Completions request, demais recursos sem permissão. Nome no provedor
+`PhaseZero OpenCode Pro 100`; carteira `OpenAI Pro 100 · OpenCode`, ativa e com
+leitura do cofre confirmada. Segredo passou por stdin privado, sem arquivo de
+chave/argv/log. Conector do navegador não tinha ambiente D-Bus; tentativa
+inicial deixou referência pendente. Após desbloqueio nativo e uso da sessão
+D-Bus correta, referência pendente própria foi reconciliada pelo fluxo do cofre,
+sem nova chave no provedor nem cópia de sessão. Probe autenticado retornou
+96 modelos, incluindo `gpt-6.1-sol`; isso valida chave e escopo, não saldo.
+
+Caminho direto oficial `https://chatgpt.com/settings/billing` expôs benefício
+que não aparecia na observação anterior: US$ 28 proporcionais agora e US$ 100
+na renovação de 16/11. Organização Personal é mesma da chave; API Platform
+antes do resgate tinha US$ 0 e nenhuma concessão. Etapa final informa que
+resgate desativa modelos Codex via todas as chaves API dessa organização,
+inclusive com créditos comprados; uso Codex pela assinatura permanece.
+Consentimento específico a esse efeito foi solicitado e continua pendente
+nesta observação. Checkbox/final de resgate não foram submetidos; não marcar
+crédito ativo nem padrão API configurado enquanto isso permanecer pendente.
+
+Prova adicional no binário 2.2.6, HOME/XDG privados: plugin real carregou e
+registrou hooks; provedor/modelo apareceu. Requisição contra destino local
+deliberadamente não autorizado foi recusada pelo hook antes de qualquer
+leitura de credencial. Sem chamada de inferência externa nessa prova. Recibos
+`native-plugin-probe/loaded.json` e `request.log` privados. Testes focados:
+14 pytest passaram; shell de alinhamento cobre cache com arquitetura,
+ausência de download npm e recusa antes de mudar CLI quando banco está ocupado;
+shellcheck com fontes e diff check passaram. CI da base `fcdf622b` estava
+verde nos checks executados (dois skips), sem merge/release.
