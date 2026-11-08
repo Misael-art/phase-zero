@@ -93,4 +93,36 @@ if [ -e "$PZ_LOCAL_BIN/opencode" ]; then
     exit 1
 fi
 
-echo "opencode lockstep rollback and scoped allow-scripts ok"
+# 4. Architecture-suffixed desktop caches must align without downloading npm.
+case "$(uname -m)" in
+    x86_64) arch=x64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) arch="$(uname -m)" ;;
+esac
+bundled="$XDG_CONFIG_HOME/ai.opencode.desktop/cli/4.0.0-$arch/opencode-cli"
+mkdir -p "$(dirname "$bundled")"
+printf '#!/usr/bin/env bash\necho "opencode v4.0.0"\n' > "$bundled"
+chmod +x "$bundled"
+npm_before="$(wc -l < "$npm_log")"
+PZ_TEST_DESKTOP_VERSION=4.0.0 bash "$ROOT/linux/ai/setup-opencode.sh" sync >/dev/null
+test "$(readlink -f "$PZ_LOCAL_BIN/opencode")" = "$bundled"
+test "$(wc -l < "$npm_log")" = "$npm_before"
+PZ_TEST_DESKTOP_VERSION=4.0.0 bash "$ROOT/linux/ai/setup-opencode.sh" version-status | jq -e '.cliManaged and .inSync' >/dev/null
+
+# 5. An active database must block alignment, including its bundled-CLI path.
+next_bundle="$XDG_CONFIG_HOME/ai.opencode.desktop/cli/5.0.0-$arch/opencode-cli"
+mkdir -p "$(dirname "$next_bundle")"
+printf '#!/usr/bin/env bash\necho "opencode v5.0.0"\n' > "$next_bundle"
+chmod +x "$next_bundle"
+printf 'database owned by running app\n' > "$XDG_DATA_HOME/opencode/opencode.db"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP_ROOT/stub/fuser"
+chmod +x "$TMP_ROOT/stub/fuser"
+if PZ_TEST_DESKTOP_VERSION=5.0.0 bash "$ROOT/linux/ai/setup-opencode.sh" sync >/dev/null 2>&1; then
+    echo "busy database must block CLI alignment" >&2
+    exit 1
+fi
+test "$(readlink -f "$PZ_LOCAL_BIN/opencode")" = "$bundled"
+test "$(cat "$XDG_DATA_HOME/opencode/opencode.db")" = "database owned by running app"
+test "$(wc -l < "$npm_log")" = "$npm_before"
+
+echo "opencode lockstep rollback, desktop cache and scoped allow-scripts ok"

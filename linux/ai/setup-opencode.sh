@@ -74,12 +74,26 @@ opencode_desktop_version() {
 # not carry that version at all (desktop 2.x vs npm 1.x), so it is the
 # preferred lockstep source.
 desktop_bundled_cli() {
-    local version="${1:-}" cli
+    local version="${1:-}" cli arch
     [ -n "$version" ] || return 1
-    cli="${XDG_CONFIG_HOME:-$HOME/.config}/ai.opencode.desktop/cli/$version/opencode-cli"
-    [ -x "$cli" ] || return 1
-    [ "$(version_of "$("$cli" --version 2>/dev/null || true)")" = "$version" ] || return 1
-    printf '%s\n' "$cli"
+    case "$(uname -m)" in
+        x86_64) arch=x64 ;;
+        aarch64|arm64) arch=arm64 ;;
+        *) arch="$(uname -m)" ;;
+    esac
+    # Recent desktops suffix their cache by architecture. The host package also
+    # exposes its CLI before the desktop has ever opened; use that exact build
+    # instead of downloading a different npm distribution or requiring a GUI.
+    for cli in \
+        "${XDG_CONFIG_HOME:-$HOME/.config}/ai.opencode.desktop/cli/$version/opencode-cli" \
+        "${XDG_CONFIG_HOME:-$HOME/.config}/ai.opencode.desktop/cli/$version-$arch/opencode-cli" \
+        /usr/lib/opencode-desktop/opencode-cli; do
+        [ -x "$cli" ] || continue
+        [ "$(version_of "$("$cli" --version 2>/dev/null || true)")" = "$version" ] || continue
+        printf '%s\n' "$cli"
+        return 0
+    done
+    return 1
 }
 
 cli_is_managed() {
@@ -87,7 +101,9 @@ cli_is_managed() {
     [ -n "$cp" ] || return 1
     real="$(readlink -f "$cp" 2>/dev/null)"
     [ "$real" = "$(readlink -f "$NPM_PREFIX/bin/opencode" 2>/dev/null)" ] && return 0
-    case "$real" in "${XDG_CONFIG_HOME:-$HOME/.config}"/ai.opencode.desktop/cli/*/opencode-cli) return 0 ;; esac
+    case "$real" in
+        "${XDG_CONFIG_HOME:-$HOME/.config}"/ai.opencode.desktop/cli/*/opencode-cli|/usr/lib/opencode-desktop/opencode-cli) return 0 ;;
+    esac
     return 1
 }
 
@@ -102,12 +118,9 @@ resolve_cli_target() {
 
 backup_opencode_db() {
     [ -f "$OPENCODE_DB" ] || return 0
-    local bak="${OPENCODE_DB}.pz-bak"
-    # Root is btrfs here: reflink is an instant COW copy that costs no space
-    # until the files diverge. Fall back to a plain copy elsewhere.
-    if cp --reflink=auto -f "$OPENCODE_DB" "$bak" 2>/dev/null || cp -f "$OPENCODE_DB" "$bak" 2>/dev/null; then
-        pz_info "backed up opencode.db -> $bak"
-    fi
+    local bak
+    bak="$(python3 "$PZ_ROOT/linux/ai/opencode_database.py" "$OPENCODE_DB")" || return 1
+    pz_info "backed up opencode.db -> $bak"
 }
 
 # opencode-ai ships a postinstall that fetches the platform-specific binary, so
@@ -158,7 +171,7 @@ align_cli_to() {
 
     local bundled
     if bundled="$(desktop_bundled_cli "$target")"; then
-        backup_opencode_db
+        backup_opencode_db || return 1
         link_managed_bin opencode "$bundled"
         hash -r 2>/dev/null || true
         pz_info "opencode CLI now $target from opencode-desktop's bundled CLI (exact lockstep)"
@@ -166,7 +179,7 @@ align_cli_to() {
     fi
 
     pz_check_deps npm
-    backup_opencode_db
+    backup_opencode_db || return 1
     mkdir -p "$NPM_PREFIX"
     # Remember what worked so a failed upgrade can be undone instead of leaving
     # the host with no usable CLI.
