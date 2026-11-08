@@ -992,3 +992,18 @@ leitura de credencial. Sem chamada de inferência externa nessa prova. Recibos
 ausência de download npm e recusa antes de mudar CLI quando banco está ocupado;
 shellcheck com fontes e diff check passaram. CI da base `fcdf622b` estava
 verde nos checks executados (dois skips), sem merge/release.
+
+Correção acima publicada no PR #136, código/SHA remoto confirmado
+`2db902558f004d73499473fe3b301203190536f2`; equivalente local `85a50c22`.
+Instalador oficial aplicou esse artefato, versão nominal 1.22.17; três módulos
+conferidos byte a byte, backup da instalação anterior
+`~/.local/share/phasezero/backups/1.22.17.20261107225859.136435`.
+Instalação sob guarda terminou em dois segundos, mínimo disponível 6954 MiB.
+Carteira agora registra chave ativa e observação oficial por organização com
+benefício `not-activated`, valores não preenchidos: US$ 28 continua oferta
+pendente, não saldo concedido. `openai-credit-status` instalado confirma uma
+chave, uma organização, padrão não alterado. Chave nativa inválida antiga do
+OpenCode foi preservada; não a reutilizar nem expor ao diagnosticar. Falta
+consentimento ao efeito informado pela OpenAI e submissão final, depois
+observar concessão/validade, configurar chave/projeto exatos e provar turno
+com API real. AGENTS, handoff de host limpo e reparo de touch alheios intactos.
