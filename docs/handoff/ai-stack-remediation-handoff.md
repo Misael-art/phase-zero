@@ -962,11 +962,10 @@ de validação foi encerrado para liberar banco. Não alegar limite herdado por
 todos os descendentes ou encerramento limpo da GUI. Preferir `--standalone`
 nas provas CLI isoladas e conferir cgroup efetivo.
 
-Conta principal mostrou ChatGPT Pro 100 pago e renovação em 16/11/2026. Nova
-chave restrita criada no Default project: Models read, Responses write, Chat
-Completions request, demais recursos sem permissão. Nome no provedor
-`PhaseZero OpenCode Pro 100`; carteira `OpenAI Pro 100 · OpenCode`, ativa e com
-leitura do cofre confirmada. Segredo passou por stdin privado, sem arquivo de
+Conta principal mostrou assinatura Pro válida. Nova chave restrita criada no
+projeto selecionado: Models read, Responses write, Chat Completions request,
+demais recursos sem permissão. Cadastro ativo e leitura do cofre confirmada.
+Identificadores e evidência financeira permanecem no registro privado. Segredo passou por stdin privado, sem arquivo de
 chave/argv/log. Conector do navegador não tinha ambiente D-Bus; tentativa
 inicial deixou referência pendente. Após desbloqueio nativo e uso da sessão
 D-Bus correta, referência pendente própria foi reconciliada pelo fluxo do cofre,
@@ -974,9 +973,9 @@ sem nova chave no provedor nem cópia de sessão. Probe autenticado retornou
 96 modelos, incluindo `gpt-6.1-sol`; isso valida chave e escopo, não saldo.
 
 Caminho direto oficial `https://chatgpt.com/settings/billing` expôs benefício
-que não aparecia na observação anterior: US$ 28 proporcionais agora e US$ 100
-na renovação de 16/11. Organização Personal é mesma da chave; API Platform
-antes do resgate tinha US$ 0 e nenhuma concessão. Etapa final informa que
+que não aparecia na observação anterior: concessão proporcional inicial e
+renovação conforme plano elegível. Organização selecionada é mesma da chave;
+API Platform antes do resgate não mostrava concessão ativa. Etapa final informa que
 resgate desativa modelos Codex via todas as chaves API dessa organização,
 inclusive com créditos comprados; uso Codex pela assinatura permanece.
 Consentimento específico a esse efeito foi solicitado e continua pendente
@@ -1000,8 +999,8 @@ conferidos byte a byte, backup da instalação anterior
 `~/.local/share/phasezero/backups/1.22.17.20261107225859.136435`.
 Instalação sob guarda terminou em dois segundos, mínimo disponível 6954 MiB.
 Carteira agora registra chave ativa e observação oficial por organização com
-benefício `not-activated`, valores não preenchidos: US$ 28 continua oferta
-pendente, não saldo concedido. `openai-credit-status` instalado confirma uma
+benefício `not-activated`, valores não preenchidos: oferta continua pendente,
+não saldo concedido. `openai-credit-status` instalado confirma uma
 chave, uma organização, padrão não alterado. Chave nativa inválida antiga do
 OpenCode foi preservada; não a reutilizar nem expor ao diagnosticar. Falta
 consentimento ao efeito informado pela OpenAI e submissão final, depois
