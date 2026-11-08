@@ -854,6 +854,8 @@ HTTP desse provedor. Resolve chave por pipe interno do helper Python isolado,
 reconfere registro/grant/cota e fixa Authorization/organização/projeto. Aceita
 apenas endpoints HTTPS autorizados e modelo selecionado; rejeita redirects e
 WebSocket. Nenhuma chave em argv, configuração OpenCode ou log do adaptador.
+Modo interno `credential` retorna segredo por pipe; nunca executá-lo em terminal
+capturado ou exibir seu stdout para diagnosticar. Use status sem credenciais.
 Revogação/remoção bloqueia próxima requisição; requisição já autorizada pode
 estar em andamento. Revogar mantém provedor bloqueado, sem escolher outra
 conta. `disable-openai` restaura backup somente com hashes correspondentes;
@@ -904,3 +906,11 @@ Próximos gates: runtime CLI/desktop compatível, SDK carregado no cliente real,
 concessão e chave válidas da organização, configuração pelo fluxo guiado e
 turno API controlado com observação do faturamento. Não declarar padrão API
 ativo neste host antes dessas provas; não comprar créditos para contornar gate.
+
+Aplicação no host: instalador oficial retornou zero sob limite de CPU/RAM;
+11 arquivos instalados conferidos contra o SHA de código acima. Configuração,
+auth nativa do OpenCode e metadados da carteira mantiveram hashes. Backup:
+`~/.local/share/phasezero/backups/1.22.17.20261107214114.101197`.
+Versão nominal 1.22.17, sem release nova. [PR #136 draft](https://github.com/Misael-art/phase-zero/pull/136),
+publicação inicial `677211b2`, confirmada no remoto. CI precisa de observação
+própria; instalação do cadastro não comprova ativação ou consumo da API.
