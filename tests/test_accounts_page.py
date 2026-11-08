@@ -391,13 +391,14 @@ def test_add_connection_lists_supported_channel_requirements_and_maturity(qapp):
                 "accountChannel_login", "accountChannel_maturity",
             }
         ]
-        assert len(channels) == 6
+        assert len(channels) == 7
         copy = " ".join(label.text() for label in dialog.findChildren(QLabel))
         assert "Requisitos:" in copy
         assert "Tipo de login:" in copy
         assert "Maturidade:" in copy
         assert "esta lista não inicia login nem recebe credenciais" in copy
         assert "Provedores no 9Router" in copy
+        assert "OpenAI API" in copy and "Plus não está incluído" in copy
 
         dialog.show()
         qapp.processEvents()

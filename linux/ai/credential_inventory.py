@@ -44,25 +44,34 @@ def needs_review(entry: CredentialEntry, now: datetime | None = None) -> bool:
 def observe_managed_uses() -> tuple[CredentialUse, ...]:
     from . import deepseek_harness_manager as harness
 
-    if not harness.state_file().exists():
-        return ()
-    payload = harness.status_payload()
+    uses = []
+    from .opencode_api import OpenAIConsumer
+    owner = OpenAIConsumer()
+    state = owner.state()
+    if state.get("enabled"):
+        state, entry, credit = owner.selected()
+        uses.append(CredentialUse(entry.account_id, consumer="OpenCode API OpenAI", state="configured"))
+    payload = harness.status_payload() if harness.state_file().exists() else {}
     identity = payload.get("apiCredentialId")
     if payload.get("authRoute") != "api" or not isinstance(identity, str) or not identity:
-        return ()
+        return tuple(uses)
     pid = payload.get("processId")
-    return (CredentialUse(
+    uses.append(CredentialUse(
         identity, state=str(payload.get("runtimeState", "unknown")),
         project=str(payload.get("requestedWorkspace", "")),
         process_id=pid if type(pid) is int and pid > 0 else None,
         observed_at=str(payload.get("observedAt", "")),
-    ),)
+    ))
+    return tuple(uses)
 
 
 def remove_local_credential(vault: CredentialVault, account_id: str) -> bool:
     entry = next((entry for entry in vault.entries if entry.account_id == account_id), None)
     if entry is None:
         return False
+    if entry.provider.strip().casefold() == "openai":
+        from .opencode_api import OpenAIConsumer
+        OpenAIConsumer(vault).revoke(account_id)
     if entry.provider.strip().casefold() == "deepseek":
         from .deepseek_harness_manager import revoke_wallet_use
         return revoke_wallet_use(account_id, lambda: vault.remove(account_id))

@@ -383,6 +383,7 @@ class OpenCodeManager:
                 "health": self.config_health(value, config_error),
             },
             "routerOptional": True,
+            "openaiApi": self.openai_credit_status(),
             "credential": {
                 "path": str(self.router_key),
                 "present": self.router_key.is_file(),
@@ -399,6 +400,34 @@ class OpenCodeManager:
             "bonsaiDirectSupported": False,
             "secretsRedacted": True,
         }
+
+    def openai_credit_status(self) -> dict[str, Any]:
+        """Metadata-only readiness; subscription price never becomes balance."""
+        sys.path.insert(0, str(self.repo_root))
+        from linux.ai.api_credits import OPENAI_CREDITS_URL, OPENAI_BILLING_URL
+        from linux.ai.credential_vault import CredentialVault, credential_vault_path
+        try:
+            vault = CredentialVault(credential_vault_path())
+            entries = [e for e in vault.entries if e.state == "active" and e.provider.casefold() == "openai"]
+            credits = [vault.api_credit(e.account_id) for e in entries]
+            # Deduplicate shared organization observations. No identity in diagnostics.
+            credits = {c.identity: c for c in credits if c}
+            return {"walletAvailable": True, "registeredKeys": len(entries),
+                    "creditOrganizations": len(credits),
+                    "creditStates": sorted(c.state for c in credits.values()),
+                    "balanceVerified": False, "defaultChanged": False,
+                    "requestBindingImplemented": True, "executionVerified": False,
+                    "nativeMinimumVersion": "2.2.6",
+                    "defaultConfigured": str(self._read_config(self.config).get("model") or "").startswith("phasezero-openai-api/"),
+                    "blockedReason": "requires-valid-wallet-key-grant-and-native-validation",
+                    "benefitDocumentation": OPENAI_CREDITS_URL, "billingUrl": OPENAI_BILLING_URL,
+                    "purchasedCreditFallback": "provider-may-use-purchased-balance",
+                    "next": "Ative benefício elegível e cadastre chave da organização na carteira. "
+                            "Alinhe CLI/desktop em versão compatível e use configure-openai com consentimento. "
+                            "Não use 9Router como substituição implícita."}
+        except Exception:
+            return {"walletAvailable": False, "balanceVerified": False, "defaultChanged": False,
+                    "executionSupported": False, "blockedReason": "wallet-unavailable"}
 
     def _sync_cli(self) -> None:
         if os.environ.get("PZ_OPENCODE_SKIP_SYNC") == "1":
@@ -490,6 +519,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pz ai opencode")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("status")
+    sub.add_parser("openai-credit-status", help="cota API cadastrada; sem inferência ou alteração de padrão")
+    sub.add_parser("configure-openai", help="seleção explícita via JSON stdin; nunca recebe chave em argv")
+    sub.add_parser("disable-openai", help="revoga consumidor e restaura padrão anterior quando configuração confere")
     heal = sub.add_parser("heal", aliases=["repair"])
     heal.add_argument("--dry-run", action="store_true")
     install = sub.add_parser("install", aliases=["configure"])
@@ -516,6 +548,18 @@ def main(argv: list[str] | None = None) -> int:
         command = args.command or "status"
         if command == "status":
             result = manager.status()
+        elif command == "openai-credit-status":
+            result = manager.openai_credit_status()
+        elif command in {"configure-openai", "disable-openai"}:
+            sys.path.insert(0, str(manager.repo_root))
+            from linux.ai.opencode_api import OpenAIConsumer
+            owner = OpenAIConsumer()
+            if command == "disable-openai":
+                result = owner.disable()
+            else:
+                payload = json.load(sys.stdin)
+                result = owner.configure(payload["credentialId"], payload["project"],
+                                         payload.get("model", "gpt-6.1-sol"), consented=payload.get("consented") is True)
         elif command in {"heal", "repair"}:
             result = manager.heal(args.dry_run)
         elif command in {"install", "configure"}:
@@ -534,7 +578,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result.get("ok", True) else 1
-    except (RuntimeError, OSError, json.JSONDecodeError) as exc:
+    except (RuntimeError, OSError, ValueError, KeyError) as exc:
         print(
             json.dumps(
                 {"schemaVersion": SCHEMA_VERSION, "status": "error", "error": str(exc), "secretsRedacted": True},
