@@ -158,7 +158,7 @@ Keep this custom line.
 
         [string]$body | Should Match 'degraded'
         [string]$body | Should Match 'rtk missing'
-        [string]$body | Should Match 'ai-memory missing'
+        [string]$body | Should Match 'if ai-memory or catalog verification is unavailable, state what failed'
         [string]$body | Should Match 'Ponytail'
     }
 
