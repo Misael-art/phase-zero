@@ -313,6 +313,33 @@ continuidade para este repositório/SHA; então `git push origin v1.22.12` pelo 
 Workflow oficial valida CI exata e constrói/publica beta com checksums. Conferir assets,
 digests e notas; não promover stable nem instalar pacote no host por esta autorização.
 
+### Bloqueio da tag resolvido com autorização — 2026-11-01
+
+Operador autorizou ajuste da guarda após conferir ausência de duplicação, ambiguidades e
+arquivos órfãos. Guarda central existente ganhou allowlist por projeto, somente
+`refs/tags/v1.22.12` → `5731c5cc5fcff3ae072fb82d4da6b765db3c78d8`. Exige criação de tag
+anotada, versão coerente, anotação sem segredo e commit já contido na branch remota
+registrada. Atualizar/apagar tag ou publicar outra referência continua recusado.
+17 testes da guarda passaram, incluindo negativos; demais registros de projeto iguais.
+Mudanças administrativas: `.workspace/workspace.py`, `test_workspace.py` e entrada
+PhaseZero em `projects.json`, fora do Git público deste produto.
+
+Originais, patch revisado e hashes de antes/depois têm owner/retencão no diretório privado
+já usado para recuperação: `~/.local/share/project-recovery/PhaseZero/release-v1.22.12-guard/`.
+`before.tar.gz`, `approved.patch` e `receipt.json` formam uma única unidade de rollback;
+registro compartilhado não foi publicado nem deve ser restaurado por cima de mudanças
+posteriores sem conferir hashes e preservar entradas alheias. Não há novo checkout,
+branch de trabalho, instalação, serviço ou publisher. Uma worktree canônica confirmada;
+`linux/repairs/reparo-touch-auto.sh` continua alheio e fora da árvore da tag.
+
+Push normal da tag confirmou objeto anotado `86b353b697308f7da4844267ec2fb0221b273d43`,
+peeled commit `5731c5cc5fcff3ae072fb82d4da6b765db3c78d8`. Pipeline oficial de release
+[41301157702](https://github.com/Misael-art/phase-zero/actions/runs/41301157702)
+iniciado sem bypass de CI. CI exata do commit retomada no run `41299324376`, pois push
+documental posterior havia cancelado rodada anterior. Não confundir CI de outra HEAD
+com aceite da tag. 14 testes de coesão/metadata/canal passaram no host. Tag imutável
+contém código/versão; diferenças da branch posteriores à tag são somente handoff.
+
 
 ## Revisão independente e integração DeepSeek Harness — 2026-11-01
 
@@ -739,6 +766,262 @@ orientações antigas. Candidatos de similaridade seguem sujeitos à revisão
 por escopo. A publicação do catálogo compartilhado ainda exige configurar
 a chave pública do curador.
 
+### Verificação de recursos do host — 2026-11-05
+
+Base `f042c43b`. A regra foi aplicada em 20 arquivos `AGENTS.md` locais
+de raízes identificadas na coleção e no ai-memory. A verificação confirmou
+um bloco por arquivo e uma segunda execução sem mudanças. A preferência
+ficou registrada como contexto no ai-memory. O relato de reinícios sob
+pressão orienta a margem operacional. A causa do reinício segue sem
+diagnóstico. Lote documental local.
+
+## Atalhos DeepSeek Harness e Grok Build — 2026-11-06
+
+- Objetivo: abrir ambos os agentes pelo menu PhaseZero e pela página
+  Desenvolvimento, com um único fluxo de instalação e abertura por agente.
+- Base do PR: `origin/main` `8b5920a8`. Incrementos locais `7fd6cb12` e
+  `eef7cbb5`; árvore de revisão publicada em `b7c223b643dd41a70a67d584c3ba6973c41de154`,
+  branch `codex/deepseek-grok-build`, [PR #133](https://github.com/Misael-art/phase-zero/pull/133).
+  Branch de revisão cadastrada no registro local; frente de microfone ficou fora
+  do PR. Hook de publicação verificou o incremento sem achados e o Gitleaks passou.
+- Implementação: `linux/ai/grok_build.py`, atalhos no agrupador canônico,
+  fichas Qt, catálogo, inventário, `pz updates` e instalador de usuário. Grok
+  reusa a instalação oficial, verifica versão e abre terminal na pasta escolhida.
+  Instalação nova Linux x64 valida arquivo manual por tamanho, SHA-256 e versão.
+  O Harness mantém seu runtime pinado e a interface Web.
+- Testes: 166 focais no checkout de implementação, 53 no export final do PR;
+  ShellCheck e diff check. Instalador ensaiado em XDG privado e aplicado do
+  export do SHA publicado. Dois atalhos reais abriram em Xvfb. Interface
+  instalada passou clique/foco/alvo e overflow em 800×600 e 1280×800, claro/escuro.
+  Grok TUI real abriu na pasta de fixture e atualização retornou versão atual
+  1.0.77 stable. DeepSeek 0.2.1-rc.2 iniciou em fixture isolada, abriu página
+  Web no Chrome sem sessão e parou pelo supervisor. Nenhuma inferência executada.
+- Host: runtime de usuário 1.22.16 do SHA de revisão instalado sobre o release
+  local, com backup `1.22.16.20261106195125.707518`. Menu voltou a responder
+  `applied:false` em segunda execução. DeepSeek de produção continua parado
+  aguardando escolha de pasta e conta. Recibos privados em
+  `~/.cache/phasezero-dev/tmp/agent-launchers-publication.lm6zUPsJ/`.
+- Limites e próximo passo: login/conta/cota reais e Windows físico seguem
+  pendentes. Rota Grok pela carteira fica condicionada a provar precedência da
+  chave e interrupção após revogação. Catálogo assinado local sem configuração.
+  Publicação depende de CI verde, merge autorizado, metadata de beta e tag
+  anotada com o SHA elegível registrado. CI estava em andamento na conferência
+  inicial, sem tag ou release criada.
+
+## Investigação passiva dos resets do Steam Deck — 2026-11-07
+
+Investigação em `misael-jupiter`, BigLinux/Manjaro, kernel
+`6.18.49-1-MANJARO`, firmware `F7A0133`, entre aproximadamente 07:29 e
+07:42 -03. Base do checkout `eef7cbb5`, branch `codex/agent-launchers`.
+**Causa dos resets permanece indeterminada.** Nenhum serviço, perfil de
+entrada, driver, parâmetro de boot ou pacote foi alterado. Não houve teste de
+carga, rebind USB, reparo de disco, logout nem reinício. Mudanças anteriores
+do checkout foram preservadas. Esta é evidência de diagnóstico, não aceite
+de estabilidade.
+
+### Cronologia revalidada e limite da retenção
+
+`journalctl --list-boots` disponibilizou somente quatro boots, incluindo o
+atual. `last -x` confirma interrupções, mas seu intervalo até o próximo login
+não determina o instante da falha. O episódio de 05/11 continua descrito no
+handoff do Fôlego; seu journal original não estava entre os boots acessíveis
+nesta rodada, portanto não foi revalidado de forma independente.
+
+| Boot de 06/11 | Último journal / próxima inicialização | Evidência adicional desta rodada |
+|---|---|---|
+| `0bbcc891…`, 23:23:24 | 23:42:51 / 23:50:04 | Sessão SteamZero escolhida às 23:27:59. Às 23:28:34 há pedido explícito de destino `plasma`; Game Mode é encerrado e Plasma sobe. Supervisores param e voltam com a sessão, cerca de 14 minutos antes do corte. Última amostra Fôlego: 23:42:44, ACPI 97 °C, 4,77 GiB disponíveis, 0,72 GiB em swap, `rustc` a 99,4% de um núcleo. |
+| `64c34423…`, 23:50:04 | 23:50:18 / 23:51:25 | Seletor de boot concluiu com sucesso e estado `inactive`; cmdline sem `steamzero.gamemode=1`. SDDM iniciou sessão SteamZero escolhida no greeter. Marcador persistente de início tem esse boot ID; `gamemode-session.json` registra tentativa 1, `starting`, às 23:50:18,560, sem `exitCode`, destino ou fallback. Esse arquivo foi gravado depois da última linha do journal, às 23:50:18,284. |
+| `c325bc6f…`, 23:51:25 | 23:54:37 / 07/11 06:38:36 | Sessão escolhida foi Plasma, às 23:51:53. Última amostra, 23:54:26: ACPI 83 °C, 6,43 GiB disponíveis, swap 16 KiB, PSI CPU 41,63%, I/O 0,86%. `electron` a 134% de um núcleo, sem árvore histórica que identifique qual cliente. Rádio interno emitiu 99 eventos anormais às 23:54:30; houve log normal de zram sete segundos depois. |
+
+O estado `starting` comprova entrada no launcher e chegada à etapa anterior
+à chamada do wrapper Gamescope. Não comprova que o compositor apresentou um
+frame, nem atribui o reset ao SteamZero. `consecutiveFailures=0` é uma guarda
+de início de sessão; não certifica que uma sessão permaneceu saudável.
+O horário 06:38 é a volta do host, não a hora comprovada do terceiro corte.
+
+### Responsabilidades e consumo observado
+
+Leitura Bigsudo autorizada concluiu o exame antes pendente de
+`/usr/local/lib/systemd/system`: havia somente
+`steamzero-gamemode-boot.service`, um oneshot anterior ao display manager.
+Nenhum drop-in gerenciado de autologin SteamZero estava presente no momento
+da inspeção. O runtime instalado era `2.0.0rc1-c58195919b07`.
+
+PhaseZero observa KWin e áudio a cada três segundos; RetroFE reconcilia suas
+leases e a seleção Steam a cada dois segundos; Fôlego mantém política,
+baseline, orçamento e disjuntor próprios. Não há evidência de uma operação
+dos supervisores causando os cortes. No boot de 14 segundos não aparecem
+inícios desses três supervisores. O ledger do Fôlego não tem operações na
+janela 23:23–23:54: última anterior às 22:50:40, próxima às 06:42:51 do novo
+boot. Na sessão atual o Fôlego reportava espera pelo owner PhaseZero, sem
+repetir uma operação desconhecida.
+
+Amostra de 20 segundos encerrada às 07:34:46 -03, somando cgroups distintos
+de launcher, aplicação e auxiliares. PSS divide páginas compartilhadas entre
+processos; o consumo contabilizado pelo cgroup inclui também cache e kernel.
+Os valores incluem a atividade desta investigação e não reconstituem 06/11.
+
+| Consumidor atual | PSS aproximada | Memória dos cgroups | CPU em % de um núcleo |
+|---|---:|---:|---:|
+| Codex Principal e auxiliares | 2,68 GiB | 3,21 GiB | 66,09% |
+| Codex PhaseZero A e auxiliares | 1,15 GiB | 1,35 GiB | 0,92% |
+| Codex PhaseZero B e auxiliares | 1,37 GiB | 1,51 GiB | 2,03% |
+| ChatGPT Web e auxiliares | 0,53 GiB | 0,62 GiB | 0,24% |
+| `phasezero-input-restore` | 4,6 MiB | 7,8 MiB | 12,96% |
+| `folego-accessibility` | 43,2 MiB | 83,6 MiB | 3,06% |
+| `retrofe-input-recovery` | 13,7 MiB | 13,3 MiB | 0,40% |
+
+São três clientes Codex: principal e dois lançados pelo PhaseZero. Na
+medição inicial havia 4,3 GiB de RAM disponíveis, swap ocupada sem tráfego
+sustentado e PSI de memória baixo. Os cgroups medidos apresentavam zero
+`oom` e `oom_kill`. O custo recorrente do watcher PhaseZero merece otimização
+no fluxo existente, preservando entrada e recuperação; não é uma demonstração
+de loop de reparo ou causa de reset. O legado `codex-quota-panel.service`
+segue desativado, com caminho inexistente e sem entradas nos três boots.
+
+### Defeito ICC e proposta mínima, ainda não aplicada
+
+Owner: pacote `biglinux-session-and-themes 26.08.07-2301`. A unit instalada
+permite a conta `sddm`, é puxada por `default.target` e reinicia após falha.
+Seu script chama `kscreen-doctor` sem uma sessão Qt utilizável no greeter.
+Contagem por PID único: 161, 6 e 12 abortos nos três boots; mais 10 no boot
+atual, que continuava operante. Isso confirma o defeito e impede tratar cada
+aborto como reset do host. A definição também aparece no
+[upstream BigLinux](https://github.com/biglinux/biglinux-session-and-themes/blob/main/usr/lib/systemd/user/plasma-big-apply-icc.service).
+
+Proposta: drop-in exclusivo
+`/etc/systemd/user/plasma-big-apply-icc.service.d/10-no-greeter.conf`:
+
+```ini
+[Unit]
+ConditionUser=!sddm
+```
+
+Preserva a condição existente `!root` e o fluxo de perfil do usuário normal.
+Validação descartável: cópia da unit mais drop-in passou
+`systemd-analyze verify --user --man=no`; condições passaram como usuário
+normal e falharam, como esperado, sob UID/GID 949 via `setpriv`. Nenhum script
+ICC foi executado no hardware para esse teste.
+
+Aplicação futura deve preservar qualquer drop-in preexistente e deixar a
+próxima entrada natural no greeter carregar a condição. Aceite físico:
+ausência do ciclo ICC sob UID 949, login normal e perfil do usuário preservado.
+Reversão: retirar somente o drop-in criado para essa correção e recarregar o
+gerenciador de usuário afetado ou usar a próxima sessão natural. Não editar
+arquivos do pacote nem mascarar globalmente o perfil de cor.
+
+### Bluetooth, disco e bateria
+
+`hci0` usa `btusb` no USB interno `3-5`, ID `13d3:3553`, Realtek RTL8822CU,
+firmware carregado `0x2b66d962`. No terceiro boot houve um evento `0x0b` com
+3 bytes onde eram esperados 11 e 98 eventos `0x00`. Não apareceram no primeiro,
+segundo ou boot atual até a leitura. Não foram encontrados reset de GPU,
+ring timeout, OOM ou panic nos journals acessíveis. Mensagens de capacidade
+AER no início e registro de planos DRM com suporte a panic são informativas,
+não relatos de falha. A mensagem DTM TA também existe durante inicializações
+e transições; não demonstra um reset de GPU.
+
+O [handler Linux v6.18](https://github.com/torvalds/linux/blob/v6.18/net/bluetooth/hci_event.c)
+descarta esses eventos inválidos; o caminho consultado não solicita reboot.
+Isso esclarece a mensagem, sem excluir um problema anterior no rádio,
+transporte ou firmware, nem provar a causalidade no kernel Manjaro instalado.
+
+SMART revalidado: `critical_warning=0`, `media_errors=0`, 47 °C, desgaste 11%,
+`unsafe_shutdowns=2757`, tempo em temperatura composta crítica zero. Os
+contadores Btrfs continuam 6.741 em corrupção, demais quatro em zero. Não foi
+executado scrub nem reparo. Contadores históricos não datam cada incidente.
+
+Bateria fora do incidente: 95%, descarregando, 7,694 V e 1,628 A;
+`charge_full/charge_full_design` de 3.828.000/5.200.000 µAh, cerca de 73,6%.
+Essa leitura varia em relação à observação anterior e não comprova queda de
+tensão sob carga. A desconexão do carregador relatada pelo usuário foi
+intencional; não é evidência de defeito do conector.
+
+### Hipóteses e observação decisiva
+
+Confiança abaixo significa força da atribuição causal, não probabilidade
+estatística. Não há causa isolada.
+
+| Hipótese | Evidência favorável | Contrária ou limite | Confiança causal | Observação que falta |
+|---|---|---|---|---|
+| Calor | 97 °C ACPI e compilação antes do primeiro corte | Terceiro termina em 83 °C; sensor não mede especificamente núcleo da CPU | Baixa; pista no primeiro | Pico ou evento térmico do firmware no instante da falha |
+| Energia/bateria | Interrupção sem shutdown é compatível; capacidade reduzida | Desconexão foi voluntária; faltam tensão/corrente no corte | Indeterminada | Queda de tensão/carga correlacionada ou motivo de reset de firmware |
+| Kernel/firmware | Corte abrupto sem encerramento; captura de falha ausente | Nenhuma pilha ou motivo de reset preservado | Indeterminada | Pstore funcional ou captura remota de lockup/panic |
+| GPU/transição SteamZero | Segundo para durante tentativa 1 do launcher | Primeiro chegou ao Plasma e continuou; terceiro iniciou Plasma; sem reset GPU registrado | Baixa; pista específica do segundo | Etapa/saída do Gamescope e erro DRM contemporâneo ao corte |
+| ICC no greeter | Defeito repetível, 179 abortos nos três boots | Também 10 abortos no boot atual operante; não explica sozinho o corte tardio | Alta para defeito; baixa para reset | Observar greeter corrigido e novo incidente com captura útil |
+| Bluetooth/USB interno | 99 eventos inválidos perto do terceiro corte | Journal continuou por sete segundos; demais cortes sem esses eventos | Baixa | Erro de transporte/controlador ou pilha imediatamente antes da interrupção |
+| Memória/armazenamento | Clientes pesados e erros históricos existem | 4,77/6,43 GiB disponíveis; sem OOM, SMART ativo limpo e Btrfs sem delta | Baixa | PSI/oom ou novo erro de I/O correlacionado ao corte |
+| Supervisores de entrada | Compartilham superfícies KWin/Steam/áudio; polling tem custo | Não iniciaram no segundo boot; ledger sem operação na janela dos cortes | Baixa | Operação identificada, efeito e falha causal encadeados |
+
+### Capturar próximo episódio sem induzir falha
+
+Pstore está montado, porém backend `(null)`, `efi_pstore.pstore_disable=Y` e
+`systemd-pstore.service` desativado. Variáveis EFI informaram **77.043 bytes
+livres em 151.464 bytes**. Isso é NVRAM, diferente dos 298 MiB livres da
+partição EFI. Não habilitar pstore EFI só porque a partição tem espaço.
+Configuração do kernel: `CONFIG_EFI_VARS_PSTORE_DEFAULT_DISABLE=y` explica
+o padrão desativado da EFI; `CONFIG_PSTORE_CONSOLE` não foi compilado.
+Há suporte a dumps de panic/oops, mas não à gravação contínua de console
+por esse frontend. Ativar somente um backend não capturaria necessariamente
+um hardlock sem dump. Nenhum módulo alternativo de pstore estava carregado,
+nem havia mensagem de registro de backend no journal do boot atual.
+A [documentação do kernel](https://docs.kernel.org/power/shutdown-debugging.html)
+exige backend adequado; pstore não garante registro quando a energia some
+antes de o kernel escrever. Ramoops requer região reservada válida e retenção
+de RAM; não inventar endereço de memória.
+
+`nowatchdog` e `nosoftlockup` estão no boot atual; `watchdog`,
+`nmi_watchdog` e `soft_watchdog` retornaram zero. `nomce` também está na
+cmdline, e o boot registra `mce: Unable to init MCE device (rc: -5)`.
+O [código x86 Linux v6.18](https://github.com/torvalds/linux/blob/v6.18/arch/x86/kernel/cpu/mce/core.c)
+interpreta `nomce` desabilitando MCA. Esse conjunto é mais uma limitação de
+diagnóstico; ausência de relatos MCE não certifica CPU/RAM saudáveis nem
+constitui evidência de defeito físico. Os
+[detectores de lockup](https://docs.kernel.org/admin-guide/lockup-watchdogs.html)
+introduzem trabalho periódico e podem apenas registrar, mantendo opções de
+panic/reboot desligadas. Mudança de boot precisa de janela, caminho de
+recuperação e baseline; não foi feita nesta investigação.
+
+Próximo incremento recomendado ao owner Fôlego: ampliar o gravador existente
+de 15 s, sem criar outro daemon, com AC/bateria, tensão e corrente quando
+disponíveis, preservando `null` para dado ausente. Manter os limites atuais de
+4 MiB por boot/32 MiB totais, fsync periódico ou por pressão, e incluir IDs de
+boot/relógio monotônico. Consultar deltas Bluetooth/DRM com cursor limitado;
+SMART em baixa frequência por helper de leitura autorizado, sem diálogo
+administrativo periódico. Não consultar SMART a cada amostra.
+
+Journal persistente está limitado a `SystemMaxUse=50M`, com
+`SyncIntervalSec=5m`, e já perdeu acesso aos boots antigos nesta rodada.
+Avaliar em incremento separado retenção limitada de 100–200 MiB e sync de
+30–60 s, medindo o I/O e preservando as evidências anteriores. Isso reduz
+uma lacuna de coleta, sem garantir a última mensagem após corte elétrico.
+Alternativa a EFI é coletor remoto em outro host por transporte comprovado;
+netconsole exige NIC/driver compatível e receptor, não basta presumir Wi-Fi.
+Boot diagnóstico futuro deve preservar entrada original no menu, usar apenas
+mudança temporária validada, manter panic/reboot automático desligados e
+voltar à entrada original se houver regressão. Não gerar panic de teste.
+
+### Continuidade e próximos gates
+
+Evidências privadas, 24 KiB na coleta, com manifesto SHA-256:
+`~/.cache/phasezero-dev/tmp/steamdeck-shutdown-investigation-20261107/`.
+Contêm `boot-evidence.jsonl`, `resources.json`, `host-snapshot.json` e cópia
+descartável da proposta ICC. Preservar até encerrar a investigação; nenhum
+expurgo automático foi instalado. Não publicar logs ou estado privado no Git.
+Achado durável em ai-memory do PhaseZero:
+`gotchas/steamdeck-abrupt-resets-steamzero-greeter-evidence-20261107.md`.
+
+Catálogo assinado indisponível: comando instalado não aceita `practices`;
+CLI do checkout retorna `practices-not-configured`. Memória do projeto foi
+consultada explicitamente em `default/misael-art-phase-zero`, sem aplicar
+práticas não verificadas. Leituras administrativas por Bigsudo funcionaram.
+Validação desta rodada: cronologia por boot, ledger, sensores/SMART/Btrfs,
+medição de cgroups/PSS, condição ICC sob duas identidades e verificação
+sintática descartável. Nenhuma suíte de produto ou build foi necessária.
+Próximos gates: aplicar/observar proposta ICC em entrada natural; implementar
+telemetria no owner existente; definir backend e janela para captura de
+kernel. Correção do ICC não encerra investigação dos resets. Sem alteração
+de código ou publicação de produto nesta rodada.
 
 ## Reparo de estabilidade integrado ao PhaseZero — 2026-11-07
 
