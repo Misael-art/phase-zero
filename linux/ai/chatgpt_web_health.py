@@ -16,6 +16,8 @@ import re
 import time
 import tomllib
 
+STUCK_TURN_SECONDS = 1800
+
 
 MARKER = "# PhaseZero ChatGPT Web recovery\n"
 
@@ -65,6 +67,9 @@ def decisions(observation: dict) -> dict:
                                   "network-unavailable", "upstream-unavailable", "unclassified-error"}
     if observation.get("busy") is not False:
         return {"state": failure if external_failure else "waiting-for-idle", "actions": actions}
+    if observation.get("launcherSetupIncomplete") and observation.get("launcherActive"):
+        # The launcher refused a verification during a turn; rerun it now that it is idle.
+        actions.append("reverify-connector")
     if not observation.get("launcherActive"):
         actions.append("start-launcher")
     elif (not observation.get("daemonListening") or observation.get("orphanTunnels")
@@ -220,6 +225,16 @@ class Recovery:
             observation["starting"] = not owners or bool(ages and min(ages) < 45)
         if (b.upstream_config() or {}).get("mode") == "full":
             observation["tunnelReady"] = b.tunnel_ready()
+        observation["launcherTurns"] = []
+        observation["launcherSetupIncomplete"] = False
+        if active and (b.upstream_config() or {}).get("mode") == "full":
+            launcher = b.launcher_turns()
+            if launcher.get("available"):
+                turns = [t for t in launcher.get("turns", []) if isinstance(t, str)]
+                observation["launcherTurns"] = turns
+                observation["launcherSetupIncomplete"] = launcher.get("setupComplete") is False
+                if turns:
+                    observation["busy"] = True
         if deep:
             package = b.package_state()
             observation["integrity"] = ("verified" if package.get("state") == "verified"
@@ -355,7 +370,14 @@ class Recovery:
             if (observation.get("failure") == "model-compatibility" and observation.get("failureAt")
                     and repaired_failure == observation["failureAt"]):
                 plan = {"state": "awaiting-validation", "actions": []}
+            seen = record.get("turnSeenAt") if isinstance(record.get("turnSeenAt"), dict) else {}
+            seen = {t: seen.get(t, now) for t in observation.get("launcherTurns", [])}
+            stuck = sorted(t for t, at in seen.items() if now - at >= STUCK_TURN_SECONDS)
+            if stuck:
+                plan = {"state": "turn-stuck", "actions": [a for a in plan["actions"]
+                                                         if a in {"restore-shortcuts", "restore-login-entry"}]}
             record = {"observedAt": dt.datetime.now(dt.timezone.utc).isoformat(), "state": plan["state"],
+                      "turnSeenAt": seen, "stuckTurns": stuck,
                       "actions": [], "restartAttempts": attempts, "nextAttemptAt": 0,
                       "repairedFailureAt": repaired_failure, "observation": observation,
                       "lastNotification": record.get("lastNotification", {})}
@@ -398,6 +420,10 @@ class Recovery:
                             raise RuntimeError("reinício do backend não confirmado")
                     elif action == "restore-route":
                         b.route_enable()
+                    elif action == "reverify-connector":
+                        verified = b.connector_verify(wait_seconds=0)
+                        if verified.get("ok") is False:
+                            raise RuntimeError("verificação do conector falhou")
                     record["actions"].append(action)
                     record.pop("pendingAction", None)
                 if record["actions"]:
@@ -415,6 +441,7 @@ class Recovery:
                 record["nextAttemptAt"] = max(record["nextAttemptAt"], now + 60)
             notices = {"login-required": "Renove o login no ChatGPT pelo launcher desta conta.",
                        "permission-required": "Confira a permissão do conector ou o prazo da chave pelo PhaseZero.",
+                       "turn-stuck": "Uma tarefa do Codex parece travada há mais de 30 min. Termine ou feche a aba dela no launcher; a verificação do conector roda sozinha depois.",
                        "circuit-open": "Reparos pausados após falhas repetidas. Abra Diagnosticar no PhaseZero.",
                        "configuration-conflict": "Configuração diferente da gerenciada; preservada. Abra Diagnosticar no PhaseZero."}
             notice = record["lastNotification"]

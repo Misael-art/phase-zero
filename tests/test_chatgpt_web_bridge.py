@@ -78,6 +78,9 @@ class FakeRunner:
         self.tunnels: list[dict] = []
         self.connector = {"ok": True, "connector": "Codex Native2", "permission": "full_access",
                           "detail": "conector ativo e ligado ao túnel"}
+        self.launcher_snapshots: list[dict] = []
+        self.launcher_verify = {"available": True, "ok": True, "failed": []}
+        self.launcher_ui_calls: list[str] = []
 
     def run(self, args, *, env=None, timeout=30, input_text=None):
         self.calls.append(list(args))
@@ -126,6 +129,15 @@ class FakeRunner:
     def notify(self, title, body, critical=False):
         self.notifications.append((title, body, critical))
         return True
+
+    def launcher_ui(self, devtools_file, operation):
+        self.launcher_ui_calls.append(operation)
+        if operation == "verify":
+            return dict(self.launcher_verify)
+        if len(self.launcher_snapshots) > 1:
+            return self.launcher_snapshots.pop(0)
+        return dict(self.launcher_snapshots[0]) if self.launcher_snapshots else {
+            "available": True, "setupComplete": True, "turns": []}
 
     def other_users(self):
         return []
@@ -2248,3 +2260,32 @@ def test_smoke_never_falls_back_from_a_native_model_to_web_or_paid_api(host, mon
         bridge.smoke()
     assert error.value.code == "web-model-required"
     assert not any(call[0].endswith("/codex") for call in runner.calls)
+
+
+def test_connector_verify_waits_for_running_turn_then_verifies(tmp_path, monkeypatch):
+    runner = FakeRunner()
+    bridge = Bridge(env={"HOME": str(tmp_path), "PATH": "/usr/bin"}, runner=runner)
+    monkeypatch.setattr(bridge_module.time, "sleep", lambda _s: None)
+    runner.launcher_snapshots = [{"available": True, "setupComplete": False, "turns": ["abc"]},
+                                 {"available": True, "setupComplete": False, "turns": []}]
+    result = bridge.connector_verify(wait_seconds=60, poll_seconds=1)
+    assert result["ok"] is True and result["waitedForTurn"] is True
+    assert runner.launcher_ui_calls == ["snapshot", "snapshot", "verify"]
+
+
+def test_connector_verify_defers_without_cancelling_active_turn(tmp_path):
+    runner = FakeRunner()
+    bridge = Bridge(env={"HOME": str(tmp_path), "PATH": "/usr/bin"}, runner=runner)
+    runner.launcher_snapshots = [{"available": True, "setupComplete": False, "turns": ["abc"]}]
+    result = bridge.connector_verify(wait_seconds=0)
+    assert result["state"] == "deferred-turn-active" and result["ok"] is None
+    assert result["turns"] == ["abc"] and "verify" not in runner.launcher_ui_calls
+
+
+def test_connector_verify_reports_launcher_failures(tmp_path):
+    runner = FakeRunner()
+    bridge = Bridge(env={"HOME": str(tmp_path), "PATH": "/usr/bin"}, runner=runner)
+    runner.launcher_verify = {"available": True, "ok": False,
+                              "failed": [{"id": "connector", "message": "missing"}]}
+    result = bridge.connector_verify(wait_seconds=0)
+    assert result["ok"] is False and result["failed"][0]["id"] == "connector"

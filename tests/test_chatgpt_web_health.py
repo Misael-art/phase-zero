@@ -71,6 +71,8 @@ def healthy():
     ({"failure": "permission-required"}, "permission-required", []),
     ({"failure": "network-unavailable"}, "network-unavailable", []),
     ({"failure": "upstream-unavailable"}, "upstream-unavailable", []),
+    ({"launcherSetupIncomplete": True}, "repairable", ["reverify-connector"]),
+    ({"launcherSetupIncomplete": True, "busy": True}, "waiting-for-idle", []),
 ])
 def test_fault_matrix_preserves_work_and_external_limits(change, state, actions):
     assert decisions({**healthy(), **change}) == {"state": state, "actions": actions}
@@ -292,3 +294,28 @@ def test_account_shortcut_repair_uses_only_proven_sibling_and_preserves_foreign(
     menu.write_text("foreign")
     assert recovery.restore_account_shortcuts() is False
     assert menu.read_text() == "foreign"
+
+
+def test_idle_launcher_with_incomplete_setup_reverifies_connector(manager, monkeypatch):
+    recovery, bridge, runner, observation = manager
+    observation["launcherSetupIncomplete"] = True
+    original = bridge.connector_verify
+
+    def verify(wait_seconds=0):
+        observation["launcherSetupIncomplete"] = False
+        return original(wait_seconds=wait_seconds)
+
+    monkeypatch.setattr(bridge, "connector_verify", verify)
+    result = recovery.apply()
+    assert result["actions"] == ["reverify-connector"] and result["state"] == "ready"
+    assert "verify" in runner.launcher_ui_calls
+
+
+def test_long_running_turn_is_reported_but_never_cancelled(manager):
+    recovery, bridge, runner, observation = manager
+    observation.update(busy=True, launcherTurns=["abc"])
+    recovery.write({"turnSeenAt": {"abc": time.time() - 3600}})
+    result = recovery.apply()
+    assert result["state"] == "turn-stuck" and result["stuckTurns"] == ["abc"]
+    assert any("travada" in body for _t, body, _c in runner.notifications)
+    assert "verify" not in runner.launcher_ui_calls and not runner.terminated

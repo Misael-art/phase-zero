@@ -150,6 +150,8 @@ PIN_OVERRIDE_FILE = "pin.json"
 RELEASE_VERSION = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
 TUNNEL_READY_WAIT_SECONDS = 120
 CONNECTOR_CHECK_TIMEOUT = 30
+CONNECTOR_TURN_WAIT_SECONDS = 600
+STUCK_TURN_SECONDS = 1800
 
 
 def version_tuple(value: str) -> tuple[int, ...]:
@@ -980,6 +982,44 @@ class Runner:
                 "permission": (active or bound)[0].get("privacy"),
                 "detail": "conector ativo e ligado ao túnel" if active
                 else "conector ligado ao túnel, mas inativo ou sem ações"}
+
+    def launcher_ui(self, devtools_file: Path, operation: str) -> dict[str, Any]:
+        """Run one fixed launcher-UI call (`snapshot` or `verify`) over loopback DevTools.
+
+        Only the launcher's own file:// window exposes `codexWebLauncher`; the
+        call goes through its preload IPC, never through chatgpt.com. The result
+        is reduced in-page to tab status and check outcomes: no tokens, titles or
+        page content leave the launcher.
+        """
+        calls = {
+            "snapshot": ("codexWebLauncher.snapshot().then(s=>({"
+                         "setupComplete:(s.state||{}).mcpSetupComplete===true,"
+                         "turns:(((s.browser||{}).tabs)||[]).filter(t=>t.status==='running')"
+                         ".map(t=>String(t.traceId||''))}))"),
+            "verify": ("codexWebLauncher.verifyMcp().then(r=>({ok:r.ok===true,"
+                       "failed:(r.checks||[]).filter(c=>c.status!=='ok')"
+                       ".map(c=>({id:String(c.id),message:String(c.message||'').slice(0,200)}))}))"),
+        }
+        script = ("(()=>{if(typeof codexWebLauncher!=='object')return {unavailable:true};"
+                  f"return {calls[operation]};}})()")
+        try:
+            port = int(devtools_file.read_text(encoding="utf-8").split()[0])
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as resp:
+                pages = json.loads(resp.read())
+            targets = [page["webSocketDebuggerUrl"] for page in pages
+                       if page.get("type") == "page" and page.get("webSocketDebuggerUrl")
+                       and str(page.get("url", "")).startswith("file://")]
+        except (OSError, ValueError, KeyError, urllib.error.URLError) as error:
+            return {"available": False, "detail": f"launcher inacessível: {error}"}
+        timeout = 180 if operation == "verify" else 10
+        for target in targets:
+            try:
+                value = cdp_evaluate(target, script, timeout)
+            except (OSError, ValueError, KeyError):
+                continue
+            if isinstance(value, dict) and not value.get("unavailable"):
+                return {"available": True, **value}
+        return {"available": False, "detail": "janela do launcher ainda indisponível"}
 
     def other_users(self) -> list[str]:
         if not hasattr(os, "getuid"):
@@ -3727,6 +3767,39 @@ class Bridge:
         return self.runner.connector_status(self.paths.launcher_data / "DevToolsActivePort",
                                             tunnel)
 
+    def launcher_turns(self) -> dict[str, Any]:
+        """Running Codex turns and connector setup flag as the launcher itself sees them."""
+        return self.runner.launcher_ui(self.paths.launcher_data / "DevToolsActivePort", "snapshot")
+
+    def connector_verify(self, wait_seconds: float = CONNECTOR_TURN_WAIT_SECONDS,
+                         poll_seconds: float = 15.0) -> dict[str, Any]:
+        """Run the launcher's own connector verification without colliding with a turn.
+
+        The launcher refuses verification while a Codex turn is running and then
+        marks setup incomplete. Wait (bounded) for the turn to finish instead; never
+        cancel it, since it can be the user's real work.
+        """
+        deadline = time.monotonic() + max(0.0, wait_seconds)
+        waited = False
+        while True:
+            snapshot = self.launcher_turns()
+            if not snapshot.get("available"):
+                return {"ok": None, "state": "launcher-unavailable", "detail": snapshot.get("detail")}
+            turns = snapshot.get("turns") or []
+            if not turns:
+                break
+            if time.monotonic() + poll_seconds > deadline:
+                return {"ok": None, "state": "deferred-turn-active", "turns": turns,
+                        "detail": "tarefa do Codex em andamento; a verificação roda quando ela terminar"}
+            waited = True
+            time.sleep(poll_seconds)
+        result = self.runner.launcher_ui(self.paths.launcher_data / "DevToolsActivePort", "verify")
+        if not result.get("available"):
+            return {"ok": None, "state": "launcher-unavailable", "detail": result.get("detail")}
+        return {"ok": result.get("ok") is True,
+                "state": "verified" if result.get("ok") else "failed",
+                "waitedForTurn": waited, "failed": result.get("failed", [])}
+
     def _reconfigure_upstream(self, args: list[str]) -> tuple[int, str, str]:
         """Run upstream `setup` while no daemon holds the port, then restart for real.
 
@@ -4222,7 +4295,9 @@ def build_parser() -> argparse.ArgumentParser:
     sandbox = sub.add_parser("sandbox", help="sandbox do perfil: herdado (padrão) ou isolado")
     sandbox.add_argument("action", choices=("status", "inherit", "isolated"))
     tools = sub.add_parser("tools", help="ferramentas pelo conector (sandbox somente leitura)")
-    tools.add_argument("action", choices=("status", "check", "enable", "disable"))
+    tools.add_argument("action", choices=("status", "check", "enable", "disable", "verify"))
+    tools.add_argument("--wait", type=float, default=CONNECTOR_TURN_WAIT_SECONDS,
+                       help="segundos para aguardar tarefa do Codex em andamento (verify)")
     tools.add_argument("--tunnel-id", help="túnel OpenAI (só na primeira ativação)")
     codex = sub.add_parser("codex")
     codex.add_argument("args", nargs=argparse.REMAINDER)
@@ -4327,6 +4402,8 @@ def dispatch(bridge: Bridge, args: argparse.Namespace) -> Any:
             return bridge.tools_enable(args.tunnel_id)
         if args.action == "disable":
             return bridge.tools_disable()
+        if args.action == "verify":
+            return bridge.connector_verify(args.wait)
         return bridge.tools_steps() if args.action == "status" else bridge.tools_check()
     raise BridgeError(f"comando desconhecido: {command}", "usage")
 
