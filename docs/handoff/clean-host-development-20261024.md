@@ -1,5 +1,37 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Vibe Code no Linux — 10/11/2026
+
+Branch `codex/vibe-code-profile`, código validado `77e1a8d7`. Início,
+Desenvolvimento e menu PhaseZero abrem o mesmo launcher. Pasta e editor ficam
+em estado privado. IDE, Konsole, Dolphin, Kate e navegador padrão abrem sob
+demanda. Receitas e contas usam as superfícies existentes. Plano e gates em
+[Vibe Code no Linux](../roadmaps/apps-dev-ai-accounts-v1.md#vibe-code-no-linux).
+
+Host BigLinux/Plasma Wayland: runtime de usuário
+`1.22.17+vibe.77e1a8d7` ativado pelo link `current`, mantendo a base
+`1.22.17` recuperável. Deploy composto de seis arquivos de runtime da frente
+Vibe Code sobre a instalação existente, conferidos por conteúdo. Entrada
+gerenciada de menu instalada. Autostart do Plasma ativado, com serviço
+gerado e condição KDE conferidos em diretório descartável. A opção do
+launcher remove seu próprio autostart.
+
+Validação: 63 testes focados, ShellCheck e diff check. Menu abriu janela no
+KWin real. Na jornada de QA Wayland, IDE e terminal abriram na mesma pasta
+com espaços; Konsole confirmou cwd físico e `PWD`; `node --test` passou;
+Brave abriu o preview loopback com perfil e handler de QA; reabertura e
+pasta renomeada passaram. Recibos privados em
+`~/.cache/phasezero-dev/tmp/vibe-code-host.8S3zHQ/`.
+
+Gates: nova entrada no Plasma para observar o autostart. Overlay Hyprland
+0.56 foi aceito por `--verify-config` junto da base do host; sessão e
+bloqueio físicos seguem pendentes. Autologin SDDM, recuperação pelo greeter
+e TTY e comparação de desempenho aguardam teste físico. Catálogo assinado
+`practices-not-configured`; memorial local usado, achados registrados em
+`decisions/vibe-code-plasma-terminal-browser-20261110.md` no ai-memory.
+Push recusado pelo guard local porque a branch Vibe Code está fora da
+continuidade registrada. Incremento preservado na branch local.
+
 ## Contas e conexões: carteira e gestão de chaves — 07/11/2026
 
 Incremento de código `a6e5e06fcd0f16b6f1bbe072ffeed6b8a4c50357`, branch de revisão

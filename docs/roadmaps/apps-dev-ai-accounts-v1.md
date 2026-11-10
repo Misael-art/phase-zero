@@ -102,7 +102,8 @@ atende Plasma Wayland e Hyprland.
 1. **Entrada manual.** Início e Desenvolvimento abrem o launcher nativo.
    O menu PhaseZero usa `phasezero-control-center --vibe-code`. O launcher
    salva pasta e editor no estado privado do usuário e abre ferramentas
-   sob demanda. A escolha de pasta permite substituir um volume ausente.
+   sob demanda. Preview e documentação usam o navegador padrão do desktop.
+   A escolha de pasta permite substituir um volume ausente.
    Receitas, instalação de SDKs e conexões seguem as superfícies existentes.
 2. **Entrada no Plasma.** A opção “Mostrar Vibe Code ao entrar no Plasma”
    registra um autostart de usuário que abre o launcher. Retomar a IDE é uma
