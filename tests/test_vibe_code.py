@@ -8,6 +8,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication
 
 from linux.ui_native import vibe_code
+from linux.ui_native.vibe_apps import AppEntry, Shortcut
 
 
 @pytest.fixture(scope="module")
@@ -119,3 +120,33 @@ def test_preview_uses_desktop_browser_without_a_project(qapp, monkeypatch, tmp_p
     monkeypatch.setattr(vibe_code.QInputDialog, "getText", lambda *_: ("http://localhost:9012/", True))
     dialog._open_browser()
     assert seen == ["http://localhost:9012/"]
+
+
+def test_app_menu_search_and_click_use_the_installed_launcher(qapp, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    calls = []
+
+    class DesktopEntry:
+        def get_icon(self):
+            return None
+
+        def launch(self, files, context):
+            calls.append((files, context))
+            return True
+
+    desktop = AppEntry(Shortcut("Codex Desktop", "Aplicativo principal"), DesktopEntry())
+    missing = AppEntry(Shortcut("Claude Desktop", "Aplicativo principal", product="app.claude-desktop"))
+    monkeypatch.setattr(vibe_code, "read_apps", lambda: ([desktop, missing], [], True))
+    dialog = vibe_code.VibeCodeDialog()
+    assert calls == []
+    dialog.tabs.setCurrentIndex(1)
+    dialog.search.setText("codex")
+    assert dialog.app_list.count() == 1
+    dialog.app_action.click()
+    assert calls == [([], None)]
+    assert "Codex Desktop" in dialog.status.text()
+    products = []
+    dialog.product_requested.connect(products.append)
+    dialog.search.setText("claude")
+    dialog.app_action.click()
+    assert products == ["app.claude-desktop"]

@@ -5,7 +5,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QProcess, QTimer, Qt
 from PySide6.QtGui import QColor, QIcon, QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -61,6 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--light", action="store_true")
     parser.add_argument("--boot-selector", action="store_true")
     parser.add_argument("--vibe-code", action="store_true", help="Abrir o launcher de projetos Vibe Code")
+    parser.add_argument("--product", default="", help="Abrir o detalhe de um aplicativo da Central")
     return parser.parse_args()
 
 
@@ -85,6 +86,11 @@ def main() -> int:
     if args.vibe_code:
         from linux.ui_native.vibe_code import VibeCodeDialog
         window = VibeCodeDialog()
+        window.product_requested.connect(
+            lambda product: QProcess.startDetached(
+                sys.executable, ["-m", "linux.ui_native", "--product", product], str(ROOT)
+            )
+        )
     elif args.boot_selector:
         if current_platform() != "linux":
             parser_message = "Seletor de boot disponível somente no Linux."
@@ -100,6 +106,8 @@ def main() -> int:
     window.show()
     if args.journey and not (args.boot_selector or args.vibe_code):
         window.show_journey("IA & Dev", args.journey)
+    if args.product and not (args.boot_selector or args.vibe_code):
+        window.open_product(args.product)
     if args.smoke_test:
         def finish() -> None:
             if args.screenshot:

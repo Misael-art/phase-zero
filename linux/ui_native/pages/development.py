@@ -146,6 +146,10 @@ class DevelopmentPage(BasePage):
     def _open_vibe_code(self) -> None:
         dialog = VibeCodeDialog(self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        def open_product(product: str) -> None:
+            dialog.accept()
+            self.product_requested.emit(product, "")
+        dialog.product_requested.connect(open_product)
         dialog.open()
 
     def focus_journey(self, focus: str) -> None:

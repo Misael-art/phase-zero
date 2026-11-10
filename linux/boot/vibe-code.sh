@@ -20,7 +20,7 @@ runtime_login=/run/phasezero-vibe-code/login.conf
 system_state=/var/lib/phasezero/vibe-code
 marker='PhaseZero managed: Vibe Code'
 
-packages=(python pyside6 jq git nodejs npm pnpm konsole dolphin kate sddm plasma-workspace
+packages=(python pyside6 python-gobject jq git nodejs npm pnpm konsole dolphin kate sddm plasma-workspace
           plasma-desktop kwin xdg-utils xdg-desktop-portal-kde xorg-xwayland
           pipewire pipewire-pulse wireplumber grub)
 
@@ -61,6 +61,44 @@ ensure_browser_default() {
     return 1
 }
 
+ai_apps() {
+    local apply="${1:-}" binary installer status=0
+    local -a requirements=(
+        'codex|setup-codex.sh'
+        'claude|setup-claude-code.sh'
+        'opencode|setup-opencode.sh'
+        'claude-desktop|desktop-apps.sh install-claude'
+        'qwen-code-desktop|desktop-apps.sh install-qwen'
+        'codex-desktop|'
+        'opencode-desktop|'
+    )
+    local entry file step
+    for entry in "${requirements[@]}"; do
+        IFS='|' read -r binary installer <<< "$entry"
+        if command -v "$binary" >/dev/null || [ -x "${XDG_BIN_HOME:-$HOME/.local/bin}/$binary" ]; then
+            printf 'Disponível: %s\n' "$binary"
+            continue
+        fi
+        if [ "$apply" = --yes ] && [ -n "$installer" ]; then
+            read -r file step <<< "$installer"
+            if ! PZ_DESKTOP_DOWNLOAD_MAX_BYTES=70000000 bash "$PZ_ROOT/linux/ai/$file" ${step:+"$step"}; then
+                status=1
+            fi
+        else
+            status=1
+        fi
+        if command -v "$binary" >/dev/null || [ -x "${XDG_BIN_HOME:-$HOME/.local/bin}/$binary" ]; then
+            printf 'Disponível: %s\n' "$binary"
+        elif [ -n "$installer" ]; then
+            printf 'Preparação pendente: %s (%s)\n' "$binary" "$installer"
+            status=1
+        else
+            printf 'Instalação de origem necessária: %s. Use o pacote aprovado da distribuição.\n' "$binary"
+        fi
+    done
+    return "$status"
+}
+
 install_packages() {
     local transaction package pending
     package_plan
@@ -91,6 +129,7 @@ verify_tools() {
         [ -x "$command" ] || { error "arquivo de ferramenta ausente: $command"; return 1; }
     done
     /usr/bin/python3 -c 'from PySide6.QtWidgets import QApplication'
+    /usr/bin/python3 -c 'from gi.repository import Gio'
     browser_package || { error "navegador nativo ausente"; return 1; }
     /usr/bin/node --version
     /usr/bin/pnpm --version
@@ -283,6 +322,10 @@ boot_transaction() (
 command -v pacman >/dev/null || { error "instalador suportado em Arch/Manjaro/BigLinux"; exit 69; }
 
 case "$action" in
+    apps)
+        [ "$EUID" -ne 0 ] || { error "execute como usuário da sessão"; exit 77; }
+        ai_apps "${1:-}"
+        ;;
     plan|status)
         describe
         if [ -f "$root_config" ] && [ -f "$unit" ]; then
@@ -321,6 +364,9 @@ case "$action" in
         "$launcher" --help | grep -F -- --vibe-code >/dev/null
         pz_admin_run /usr/bin/bash "$0" _install "$owner" "$launcher"
         ensure_browser_default
+        if ! ai_apps --yes; then
+            printf '%s\n' 'Alguns aplicativos ainda precisam de preparação. Use pz boot vibe-code apps para conferir.'
+        fi
         printf '%s\n' 'No próximo boot, selecione PhaseZero Vibe Code (Plasma). BigLinux continua no menu.'
         ;;
     _packages)
@@ -340,7 +386,7 @@ case "$action" in
         boot_transaction 1
         ;;
     *)
-        error "uso: pz boot vibe-code (plan|status|install --yes|verify|remove --yes)"
+        error "uso: pz boot vibe-code (plan|status|install --yes|apps [--yes]|verify|remove --yes)"
         exit 64
         ;;
 esac

@@ -5,15 +5,17 @@ import os
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QIODevice, QProcess, QSaveFile, Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QIODevice, QProcess, QSaveFile, QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout, QLabel, QPushButton,
-    QInputDialog, QLineEdit, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QInputDialog, QLineEdit, QListWidget, QListWidgetItem, QScrollArea,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .a11y_events import announce_accessible
 from .platform import secure_file, state_dir
+from .vibe_apps import AppEntry, read_apps
 from .widgets import SectionHeader
 
 
@@ -26,21 +28,53 @@ AUTOSTART_MARKER = "X-PhaseZero-Vibe-Code-Autostart=true"
 
 
 class VibeCodeDialog(QDialog):
-    """Open tools on a project selected by the user, without running its tasks."""
+    """Resume a project or open an app through its normal desktop entry."""
+
+    product_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Vibe Code · PhaseZero")
+        area = self.screen().availableGeometry()
+        self.resize(min(850, area.width() - 24), min(660, area.height() - 40))
         self.state = state_dir() / "vibe-code.json"
         self.project: Path | None = None
         layout = QVBoxLayout(self)
-        layout.addWidget(SectionHeader("Vibe Code", "Abra suas ferramentas na pasta do projeto."))
+        layout.setContentsMargins(16, 14, 16, 12)
+        layout.addWidget(SectionHeader("Vibe Code", "Retome seu projeto e abra os aplicativos que precisa usar."))
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs, 1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        overview = QWidget()
+        overview_layout = QVBoxLayout(overview)
+        overview_layout.setContentsMargins(2, 12, 8, 4)
+        overview_layout.setSpacing(12)
+        scroll.setWidget(overview)
+        self.tabs.addTab(scroll, "Início")
+        overview_layout.addWidget(SectionHeader("Aplicativos principais", "Abra um aplicativo para começar."))
+        self.shortcuts = QGridLayout()
+        self.shortcut_cards: list[QFrame] = []
+        self.shortcut_columns = 0
+        overview_layout.addLayout(self.shortcuts)
+        more = QPushButton("Ver todos os aplicativos")
+        more.clicked.connect(lambda: self.tabs.setCurrentIndex(1))
+        overview_layout.addWidget(more, 0, Qt.AlignmentFlag.AlignLeft)
+
+        project = QFrame()
+        project.setObjectName("settingsCard")
+        project_layout = QVBoxLayout(project)
+        project_title = QLabel("Projeto")
+        project_title.setObjectName("serviceTitle")
+        project_layout.addWidget(project_title)
+        overview_layout.addWidget(project)
 
         self.folder = QLabel()
         self.folder.setTextFormat(Qt.TextFormat.PlainText)
         self.folder.setWordWrap(True)
         self.folder.setAccessibleName("Pasta do projeto")
-        layout.addWidget(self.folder)
+        project_layout.addWidget(self.folder)
 
         form = QFormLayout()
         self.editor = QComboBox()
@@ -48,18 +82,22 @@ class VibeCodeDialog(QDialog):
         for executable, label in EDITORS:
             self.editor.addItem(label, executable)
         form.addRow("Editor", self.editor)
-        layout.addLayout(form)
+        project_layout.addLayout(form)
 
         self.open_editor = QPushButton("Retomar projeto")
         self.open_editor.setObjectName("vibeResumeProject")
         self.open_editor.setMinimumHeight(42)
         self.open_editor.clicked.connect(self._open_editor)
-        layout.addWidget(self.open_editor)
 
         self.choose_folder = QPushButton("Escolher pasta…")
         self.choose_folder.setObjectName("vibeChooseFolder")
         self.choose_folder.clicked.connect(self._choose)
-        layout.addWidget(self.choose_folder)
+        project_actions = QHBoxLayout()
+        project_actions.addWidget(self.open_editor, 1)
+        project_actions.addWidget(self.choose_folder)
+        project_layout.addLayout(project_actions)
+
+        overview_layout.addWidget(SectionHeader("Ferramentas do projeto", "Arquivos, edição rápida e preview."))
 
         tools = QGridLayout()
         self.project_tools: list[QPushButton] = []
@@ -74,16 +112,160 @@ class VibeCodeDialog(QDialog):
         browser = QPushButton("Navegador")
         browser.clicked.connect(self._open_browser)
         tools.addWidget(browser, 1, 1)
-        layout.addLayout(tools)
+        overview_layout.addLayout(tools)
+        self._build_autostart(overview_layout)
+        overview_layout.addStretch()
+
+        self._build_apps()
 
         self.status = QLabel()
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.status)
-        self._build_autostart(layout)
         self._restore()
         self._refresh()
+        self._reload_apps()
         self.editor.currentIndexChanged.connect(self._remember_selection)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "shortcut_cards"):
+            self._arrange_shortcuts()
+
+    def _arrange_shortcuts(self) -> None:
+        columns = 3 if self.width() >= 660 else 1
+        if columns == self.shortcut_columns:
+            return
+        self.shortcut_columns = columns
+        for index in range(3):
+            self.shortcuts.setColumnStretch(index, int(index < columns))
+        for index, card in enumerate(self.shortcut_cards):
+            self.shortcuts.removeWidget(card)
+            self.shortcuts.addWidget(card, index // columns, index % columns)
+
+    def _build_apps(self) -> None:
+        page = QWidget()
+        body = QVBoxLayout(page)
+        body.setContentsMargins(2, 12, 2, 4)
+        row = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Buscar no menu de aplicativos…")
+        self.search.setAccessibleName("Buscar aplicativos")
+        self.search.textChanged.connect(self._filter_apps)
+        row.addWidget(self.search, 1)
+        reload_button = QPushButton("Atualizar")
+        reload_button.clicked.connect(self._reload_apps)
+        row.addWidget(reload_button)
+        body.addLayout(row)
+        self.app_list = QListWidget()
+        self.app_list.setAccessibleName("Aplicativos")
+        self.app_list.setSpacing(2)
+        self.app_list.currentItemChanged.connect(self._describe_app)
+        self.app_list.itemActivated.connect(lambda item: self._launch_app(item.data(Qt.ItemDataRole.UserRole)))
+        body.addWidget(self.app_list, 1)
+        self.app_detail = QLabel()
+        self.app_detail.setWordWrap(True)
+        self.app_detail.setTextFormat(Qt.TextFormat.PlainText)
+        body.addWidget(self.app_detail)
+        self.app_action = QPushButton("Abrir aplicativo")
+        self.app_action.clicked.connect(self._open_selected_app)
+        body.addWidget(self.app_action)
+        self.tabs.addTab(page, "Aplicativos")
+
+    def _reload_apps(self) -> None:
+        self.featured, menu, self.menu_available = read_apps()
+        self.apps = [*self.featured, *menu]
+        while self.shortcuts.count():
+            self.shortcuts.takeAt(0).widget().deleteLater()
+        self.shortcut_cards.clear()
+        for entry in self.featured[:3]:
+            card = QFrame()
+            card.setObjectName("settingsCard")
+            body = QVBoxLayout(card)
+            body.setContentsMargins(12, 10, 12, 10)
+            title = QLabel(entry.shortcut.name)
+            title.setObjectName("sectionTitle")
+            title.setWordWrap(True)
+            body.addWidget(title)
+            detail = QLabel("Atalho disponível" if entry.ready else "Preparação necessária")
+            detail.setObjectName("cardDescription")
+            detail.setWordWrap(True)
+            body.addWidget(detail)
+            body.addStretch()
+            launch = QPushButton("Abrir" if entry.ready else "Preparar")
+            launch.setAccessibleName(f"{launch.text()} {entry.shortcut.name}")
+            launch.clicked.connect(lambda _checked=False, app=entry: self._launch_app(app))
+            body.addWidget(launch)
+            self.shortcut_cards.append(card)
+        self.shortcut_columns = 0
+        self._arrange_shortcuts()
+        self._filter_apps()
+
+    def _filter_apps(self) -> None:
+        previous = self.app_list.currentItem()
+        selected = previous.data(Qt.ItemDataRole.UserRole).shortcut.name if previous else ""
+        self.app_list.clear()
+        terms = self.search.text().casefold().split()
+        for entry in self.apps:
+            name = entry.shortcut.name
+            if not all(term in f"{name} {entry.shortcut.detail}".casefold() for term in terms):
+                continue
+            suffix = " · Central" if entry.catalog_only else (" · Preparação necessária" if not entry.ready else "")
+            item = QListWidgetItem(name + suffix)
+            item.setSizeHint(QSize(0, 32))
+            item.setData(Qt.ItemDataRole.UserRole, entry)
+            if entry.desktop is not None:
+                icon = entry.desktop.get_icon()
+                if icon:
+                    if hasattr(icon, "get_file"):
+                        item.setIcon(QIcon(icon.get_file().get_path() or ""))
+                    elif hasattr(icon, "get_names"):
+                        names = icon.get_names()
+                        if names:
+                            item.setIcon(QIcon.fromTheme(names[0]))
+            self.app_list.addItem(item)
+            if name == selected:
+                self.app_list.setCurrentItem(item)
+        if self.app_list.count() and self.app_list.currentRow() < 0:
+            self.app_list.setCurrentRow(0)
+        self._describe_app(self.app_list.currentItem())
+
+    def _describe_app(self, item: QListWidgetItem | None) -> None:
+        entry = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if entry is None:
+            text = "Nenhum aplicativo encontrado." if self.menu_available else "Menu do sistema indisponível. Verifique o pacote python-gobject."
+            self.app_detail.setText(text)
+            self.app_action.setEnabled(False)
+            return
+        self.app_detail.setText(entry.shortcut.detail)
+        action = "Ver na Central" if entry.catalog_only else ("Abrir aplicativo" if entry.ready else "Abrir preparação")
+        self.app_action.setText(action)
+        self.app_action.setEnabled(entry.ready or bool(entry.shortcut.product))
+
+    def _open_selected_app(self) -> None:
+        item = self.app_list.currentItem()
+        if item is not None:
+            self._launch_app(item.data(Qt.ItemDataRole.UserRole))
+
+    def _launch_app(self, entry: AppEntry) -> None:
+        name = entry.shortcut.name
+        if entry.desktop is not None:
+            try:
+                launched = entry.desktop.launch([], None)
+            except Exception:
+                launched = False
+            self._report(f"Abertura solicitada · {name}" if launched else f"Falha ao abrir {name}. Atualize a lista e revise o atalho instalado.")
+        elif entry.command:
+            if not self._folder_available():
+                self.tabs.setCurrentIndex(0)
+                self.choose_folder.setFocus()
+                self._report(f"Escolha a pasta para abrir {name} no terminal do projeto.")
+                return
+            self._open_tool("konsole", [entry.command])
+        elif entry.shortcut.product:
+            self.product_requested.emit(entry.shortcut.product)
+        else:
+            self._report(f"{name} indisponível. Prepare o aplicativo pelo seu instalador.")
 
     def _build_autostart(self, layout: QVBoxLayout) -> None:
         data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
@@ -209,13 +391,15 @@ class VibeCodeDialog(QDialog):
         else:
             self._report("Falha ao abrir. Confira o navegador padrão nas configurações do desktop.")
 
-    def _open_tool(self, program: str) -> None:
+    def _open_tool(self, program: str, terminal_command: list[str] | None = None) -> None:
         if not self._folder_available():
             self._refresh()
             return
         working_directory = str(self.project)
         if program == "konsole":
             args = ["--separate", "--workdir", working_directory]
+            if terminal_command:
+                args += ["-e", *terminal_command]
         elif program == "kate":
             file, _filter = QFileDialog.getOpenFileName(self, "Editar arquivo", working_directory)
             if not file:
