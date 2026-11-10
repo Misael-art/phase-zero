@@ -82,6 +82,10 @@ def test_managed_shortcuts_group_and_preserve_other_owner(monkeypatch, tmp_path)
         assert entry.name in menu
         assert f'Exec="{launcher}" --journey {name}' in entry.read_text()
         assert "X-PhaseZero-MenuGroup=web.ai" in entry.read_text()
+    vibe = targets / "phasezero-vibe-code.desktop"
+    assert vibe.name in menu
+    assert f'Exec="{launcher}" --vibe-code' in vibe.read_text()
+    assert "X-PhaseZero-MenuGroup=system.tools" in vibe.read_text()
     result = subprocess.run(command, check=True, capture_output=True, text=True)
     assert '"applied": false' in result.stdout
     entry.write_text("[Desktop Entry]\nName=Existing shortcut\n")

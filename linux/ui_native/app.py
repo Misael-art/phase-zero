@@ -13,14 +13,12 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from linux.ui_native import __version__
     from linux.ui_native.boot_selector import BootSelectorWindow
-    from linux.ui_native.main_window import MainWindow
     from linux.ui_native.tokens import font_scale, is_light, render_qss, tokens_for
     from linux.ui_native.platform import current_platform
     from linux.ui_native.preferences import UiPreferences, resolve_theme
 else:
     from . import __version__
     from .boot_selector import BootSelectorWindow
-    from .main_window import MainWindow
     from .tokens import font_scale, is_light, render_qss, tokens_for
     from .platform import current_platform
     from .preferences import UiPreferences, resolve_theme
@@ -62,12 +60,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--screenshot", default="")
     parser.add_argument("--light", action="store_true")
     parser.add_argument("--boot-selector", action="store_true")
+    parser.add_argument("--vibe-code", action="store_true", help="Abrir o launcher de projetos Vibe Code")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    if not args.smoke_test:
+    if not args.smoke_test and not args.vibe_code:
         from linux.repairs.manager import install_shortcuts
         try:
             install_shortcuts()
@@ -78,24 +77,28 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("PhaseZero")
     app.setOrganizationName("PhaseZero")
-    app.setDesktopFileName("io.phasezero.ControlCenter")
+    app.setDesktopFileName("phasezero-vibe-code" if args.vibe_code else "io.phasezero.ControlCenter")
     app.setQuitOnLastWindowClosed(True)
     # LUX-021: preferência salva (padrão: seguir o desktop); --light força.
     theme = "light" if args.light else resolve_theme(UiPreferences().theme)
     apply_theme(app, theme)
-    if args.boot_selector:
+    if args.vibe_code:
+        from linux.ui_native.vibe_code import VibeCodeDialog
+        window = VibeCodeDialog()
+    elif args.boot_selector:
         if current_platform() != "linux":
             parser_message = "Seletor de boot disponível somente no Linux."
             print(parser_message, file=sys.stderr)
             return 2
         window = BootSelectorWindow(ROOT, smoke_test=args.smoke_test)
     else:
+        from linux.ui_native.main_window import MainWindow
         window = MainWindow(ROOT, initial_category=args.category)
         window.dark_theme = not is_light(tokens_for(theme))
         window.theme_id = theme
         window.theme_changed.connect(lambda theme: apply_theme(app, theme))
     window.show()
-    if args.journey and not args.boot_selector:
+    if args.journey and not (args.boot_selector or args.vibe_code):
         window.show_journey("IA & Dev", args.journey)
     if args.smoke_test:
         def finish() -> None:

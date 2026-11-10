@@ -126,6 +126,11 @@ class DashboardPage(BasePage):
         subtitle.setWordWrap(True)
         host_layout.addWidget(subtitle)
 
+        vibe = QPushButton("Abrir Vibe Code")
+        vibe.setObjectName("dashboardVibeCode")
+        vibe.clicked.connect(lambda: self.request_category("Desenvolvimento", "vibe-code"))
+        host_layout.addWidget(vibe)
+
         if self.first_use:
             onboarding = self._build_onboarding()
             if onboarding is not None:

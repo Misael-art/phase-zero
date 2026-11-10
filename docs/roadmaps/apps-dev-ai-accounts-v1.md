@@ -93,6 +93,36 @@ runtime ainda usado por outra receita ou pacote preexistente. Em Windows, escolh
 por pacote e detectar duplicidade entre winget/Chocolatey; não unificar seus executores com
 `linux/pz`. Arch limpo e Windows limpo exigem aceites separados.
 
+### Vibe Code no Linux
+
+Objetivo: escolher ou retomar a pasta do projeto, abrir editor e console,
+executar a receita, conferir o resultado e voltar depois. O mesmo launcher
+atende Plasma Wayland e Hyprland.
+
+1. **Entrada manual.** Início e Desenvolvimento abrem o launcher nativo.
+   O menu PhaseZero usa `phasezero-control-center --vibe-code`. O launcher
+   salva pasta e editor no estado privado do usuário e abre ferramentas
+   sob demanda. A escolha de pasta permite substituir um volume ausente.
+   Receitas, instalação de SDKs e conexões seguem as superfícies existentes.
+2. **Entrada no Plasma.** A opção “Mostrar Vibe Code ao entrar no Plasma”
+   registra um autostart de usuário que abre o launcher. Retomar a IDE é uma
+   ação explícita. Testar também a remoção do autostart e pasta indisponível.
+3. **Hyprland Foco.** `assets/vibe-code/hyprland.lua` é um overlay para Hyprland
+   0.56+. Importar após a configuração base em uma configuração candidata.
+   Verificar com `Hyprland --verify-config -c <arquivo-candidato.lua>`. O
+   atalho Super+Shift+Enter abre a entrada gerenciada via `gtk-launch`.
+   Validar a sessão manual no SDDM, portais, escala, bloqueio, entrada física,
+   monitor externo e retorno ao Plasma antes de promover o preset.
+4. **Login automático.** Gate separado em Boot Direto. Confirmar usuário,
+   precedência do SDDM, opção de saída para o greeter e recuperação via TTY.
+   Para Vibe Code, a escolha proposta é `Relogin=false`. A ativação depende
+   da validação física dos passos anteriores e do desbloqueio separado do cofre.
+
+Aceite no host: abrir pelo menu, editar e testar um projeto, fechar, reabrir e
+trocar de pasta. Repetir com rede indisponível e a pasta anterior ausente.
+Comparar boot até primeiro input, editor utilizável, RAM e pressão durante a
+mesma carga antes de escolher Hyprland como padrão.
+
 ### Modo simples e avançado
 
 Simples padrão: estado, recomendação explicada, próximo passo e ação principal. Opções

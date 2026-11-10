@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QVBoxLayout, QWidget,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from ..a11y_events import announce_accessible
 from ..command_runner import CommandRunner
 from ..models import ActionSpec, OperationResult
+from ..vibe_code import VibeCodeDialog
 from ..widgets import SectionHeader
 from .base import BasePage
 
@@ -61,6 +62,11 @@ class DevelopmentPage(BasePage):
         layout = QVBoxLayout(inner)
         layout.setContentsMargins(2, 2, 8, 12)
         layout.setSpacing(12)
+        layout.addWidget(SectionHeader("Vibe Code", "Retome um projeto ou escolha a pasta para abrir suas ferramentas."))
+        vibe = QPushButton("Abrir Vibe Code")
+        vibe.setObjectName("openVibeCode")
+        vibe.clicked.connect(self._open_vibe_code)
+        layout.addWidget(vibe)
         layout.addWidget(SectionHeader(
             "Preparar desenvolvimento",
             "Escolha um objetivo, revise o plano e valide antes de abrir as ferramentas.",
@@ -136,6 +142,17 @@ class DevelopmentPage(BasePage):
         scroll.setWidget(inner)
         self._layout.addWidget(scroll, 1)
         self._update_objective(0)
+
+    def _open_vibe_code(self) -> None:
+        dialog = VibeCodeDialog(self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
+
+    def focus_journey(self, focus: str) -> None:
+        if focus == "vibe-code":
+            self._open_vibe_code()
+        else:
+            super().focus_journey(focus)
 
     def _objective(self) -> tuple[str, str, str, str]:
         assert self.objective is not None
