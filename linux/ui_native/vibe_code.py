@@ -251,7 +251,11 @@ class VibeCodeDialog(QDialog):
         name = entry.shortcut.name
         if entry.desktop is not None:
             try:
-                launched = entry.desktop.launch([], None)
+                if entry.shortcut.action:
+                    entry.desktop.launch_action(entry.shortcut.action, None)
+                    launched = True
+                else:
+                    launched = entry.desktop.launch([], None)
             except Exception:
                 launched = False
             self._report(f"Abertura solicitada · {name}" if launched else f"Falha ao abrir {name}. Atualize a lista e revise o atalho instalado.")

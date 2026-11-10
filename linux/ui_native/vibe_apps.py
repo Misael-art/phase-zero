@@ -15,12 +15,14 @@ class Shortcut:
     command: str = ""
     product: str = ""
     menu_name: str = ""
+    action: str = ""
 
 
 SHORTCUTS = (
     Shortcut("OpenCode Desktop", "Interface de desenvolvimento", ("opencode-desktop.desktop", "ai.opencode.desktop.desktop"), product="app.opencode"),
     Shortcut("Codex Desktop", "Projetos e tarefas do Codex", ("codex-desktop.desktop",), product="app.codex-desktop"),
     Shortcut("Claude Desktop", "Claude e sessões Claude Code", ("claude-desktop.desktop",), product="app.claude-desktop"),
+    Shortcut("Claude Code Desktop", "Nova sessão de código no Claude Desktop", ("claude-desktop.desktop",), product="app.claude-desktop", action="NewCode"),
     Shortcut("Codex CLI", "Terminal na pasta do projeto", command="codex", product="app.codex"),
     Shortcut("Claude Code", "Terminal na pasta do projeto", command="claude", product="app.claude-code"),
     Shortcut("OpenCode CLI", "Terminal na pasta do projeto", command="opencode", product="app.opencode"),
@@ -63,7 +65,9 @@ def read_apps() -> tuple[list[AppEntry], list[AppEntry], bool]:
         if Gio:
             for entry_id in shortcut.desktop_ids:
                 item = by_id.get(entry_id)
-                if item is not None and not item.get_is_hidden() and shutil.which(item.get_executable() or ""):
+                if item is not None and not item.get_is_hidden() and shutil.which(item.get_executable() or "") and (
+                    not shortcut.action or shortcut.action in item.list_actions()
+                ):
                     desktop = item
                     break
             if desktop is None and shortcut.menu_name:
