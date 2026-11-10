@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +46,17 @@ class AppEntry:
     def ready(self) -> bool:
         return self.desktop is not None or bool(self.command)
 
+def desktop_available(item: Any) -> bool:
+    if shutil.which(item.get_executable() or ""):
+        return True
+    # Gio may return a quoted token from Exec, including the quote characters.
+    # Resolve the token for display only. Gio still owns the actual launch.
+    try:
+        command = shlex.split(item.get_commandline() or "")
+    except ValueError:
+        return False
+    return bool(command and shutil.which(command[0]))
+
 
 def read_apps() -> tuple[list[AppEntry], list[AppEntry], bool]:
     """Use the desktop's XDG inventory, including its precedence and visibility."""
@@ -65,7 +77,7 @@ def read_apps() -> tuple[list[AppEntry], list[AppEntry], bool]:
         if Gio:
             for entry_id in shortcut.desktop_ids:
                 item = by_id.get(entry_id)
-                if item is not None and not item.get_is_hidden() and shutil.which(item.get_executable() or "") and (
+                if item is not None and not item.get_is_hidden() and desktop_available(item) and (
                     not shortcut.action or shortcut.action in item.list_actions()
                 ):
                     desktop = item
@@ -74,7 +86,7 @@ def read_apps() -> tuple[list[AppEntry], list[AppEntry], bool]:
                 desktop = next((
                     item for item in visible
                     if item.get_name().startswith(shortcut.menu_name)
-                    and shutil.which(item.get_executable() or "")
+                    and desktop_available(item)
                 ), None)
         if desktop is not None:
             assigned.update(shortcut.desktop_ids)

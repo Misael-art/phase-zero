@@ -8,7 +8,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication
 
 from linux.ui_native import vibe_code
-from linux.ui_native.vibe_apps import AppEntry, Shortcut
+from linux.ui_native.vibe_apps import AppEntry, Shortcut, desktop_available
 
 
 @pytest.fixture(scope="module")
@@ -150,3 +150,19 @@ def test_app_menu_search_and_click_use_the_installed_launcher(qapp, monkeypatch,
     dialog.search.setText("claude")
     dialog.app_action.click()
     assert products == ["app.claude-desktop"]
+
+
+def test_desktop_probe_accepts_quoted_executable(tmp_path):
+    executable = tmp_path / "atalho com espaços"
+    executable.touch(mode=0o755)
+
+    class DesktopEntry:
+        def get_executable(self):
+            return f'"{executable}"'
+
+        def get_commandline(self):
+            return f'"{executable}" --journey grok-build'
+
+    assert desktop_available(DesktopEntry())
+    executable.unlink()
+    assert not desktop_available(DesktopEntry())
