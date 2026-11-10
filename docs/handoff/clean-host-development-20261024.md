@@ -16,10 +16,14 @@ O helper confere launcher e sessão Plasma e usa `Relogin=false`.
 
 Validação local: 67 pytest focados, smoke `linux-boot-recovery.sh` e ShellCheck.
 Bigsudo confirmou leitura das entradas existentes e ausência de autologin
-local conflitante. Na última checagem, a janela Bigsudo da instalação ainda
-aguardava o operador. `pnpm` permanecia ausente e o alvo de boot ainda não
-estava registrado. Aguardar o resultado de `install --yes` antes de reiniciar
-para o perfil. Base do boot normal capturada com `systemd-analyze` em
+local conflitante. Instalação privilegiada concluída em 10/11 às 16:02 (-03).
+Pacman instalou somente `pnpm 12.9.1-1`; o executável informou `11.28.4`.
+`grub.cfg` ativo passou no validador e na comparação do conteúdo fora
+do bloco Vibe Code. Backup em `/var/lib/phasezero/vibe-code/backup.L8qLXt`.
+Alvo dedicado carregado; SDDM ativo com a preparação ordenada antes dele.
+O operador pode reiniciar e selecionar **PhaseZero Vibe Code (Plasma)**.
+**BigLinux** continua como entrada de recuperação. Base do boot normal
+capturada com `systemd-analyze` em
 29,932 s até a inicialização do sistema. O número não mede prontidão do
 launcher. Próximo gate é medir no boot selecionado, verificar logout e retorno
 ao SDDM e confirmar abertura das ferramentas. Recibo privado do lote em
