@@ -38,7 +38,7 @@ def test_select_launch_and_resume_project_without_shell(qapp, monkeypatch, tmp_p
     first.project_tools[0].click()
     assert calls == [
         ("/mock/codium", [str(project)], str(project)),
-        ("/mock/konsole", ["--workdir", str(project)], str(project)),
+        ("/usr/bin/env", [f"PWD={project}", "/mock/konsole", "--separate", "--workdir", str(project)], str(project)),
     ]
     assert first.state.stat().st_mode & 0o777 == 0o600
     first.close()

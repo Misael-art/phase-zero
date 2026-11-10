@@ -199,7 +199,7 @@ class VibeCodeDialog(QDialog):
                 return
             working_directory = str(self.project)
             if program == "konsole":
-                args = ["--workdir", working_directory]
+                args = ["--separate", "--workdir", working_directory]
             elif program == "kate":
                 file, _filter = QFileDialog.getOpenFileName(self, "Editar arquivo", working_directory)
                 if not file:
@@ -217,5 +217,9 @@ class VibeCodeDialog(QDialog):
         if not executable:
             self._report(f"{program} indisponível. Prepare a ferramenta em Desenvolvimento ou escolha outro editor.")
             return
+        if program == "konsole":
+            # Konsole starts the shell in --workdir but can forward the launcher's PWD.
+            args = [f"PWD={working_directory}", executable, *args]
+            executable = "/usr/bin/env"
         started, _pid = QProcess.startDetached(executable, args, working_directory)
         self._report("Abertura solicitada." if started else f"Falha ao iniciar {program}. Tente novamente.")
