@@ -1,5 +1,30 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Instalador e boot Vibe Code — 10/11/2026
+
+Código `627ba19a`. `pz boot vibe-code` no checkout e no runtime de usuário
+`1.22.17+vibe.627ba19a`. O plano neste BigLinux detecta somente `pnpm`
+ausente. A resolução pacman previa só `pnpm 12.9.1-1`; o instalador recusa
+atualizações implícitas de dependências existentes. Receita e recuperação em
+[Vibe Code no Linux](../roadmaps/apps-dev-ai-accounts-v1.md#vibe-code-no-linux).
+
+GRUB deriva kernel, initramfs e argumentos de `10_linux`. A transação faz
+backup, valida a sintaxe e acrescenta somente o próprio bloco à configuração
+ativa. O alvo systemd dedicado pede SDDM, que recebe configuração transitória
+de login automático apenas quando o boot contém `phasezero.vibe=1`.
+O helper confere launcher e sessão Plasma e usa `Relogin=false`.
+
+Validação local: 67 pytest focados, smoke `linux-boot-recovery.sh` e ShellCheck.
+Bigsudo confirmou leitura das entradas existentes e ausência de autologin
+local conflitante. Na última checagem, a janela Bigsudo da instalação ainda
+aguardava o operador. `pnpm` permanecia ausente e o alvo de boot ainda não
+estava registrado. Aguardar o resultado de `install --yes` antes de reiniciar
+para o perfil. Base do boot normal capturada com `systemd-analyze` em
+29,932 s até a inicialização do sistema. O número não mede prontidão do
+launcher. Próximo gate é medir no boot selecionado, verificar logout e retorno
+ao SDDM e confirmar abertura das ferramentas. Recibo privado do lote em
+`~/.cache/phasezero-dev/tmp/vibe-boot.WPeFnp/`.
+
 ## Vibe Code no Linux — 10/11/2026
 
 Branch `codex/vibe-code-profile`, código validado `77e1a8d7`. Início,

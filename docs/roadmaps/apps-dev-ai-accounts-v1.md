@@ -114,10 +114,19 @@ atende Plasma Wayland e Hyprland.
    atalho Super+Shift+Enter abre a entrada gerenciada via `gtk-launch`.
    Validar a sessão manual no SDDM, portais, escala, bloqueio, entrada física,
    monitor externo e retorno ao Plasma antes de promover o preset.
-4. **Login automático.** Gate separado em Boot Direto. Confirmar usuário,
-   precedência do SDDM, opção de saída para o greeter e recuperação via TTY.
-   Para Vibe Code, a escolha proposta é `Relogin=false`. A ativação depende
-   da validação física dos passos anteriores e do desbloqueio separado do cofre.
+4. **Instalação e boot dedicado.** Em Arch/Manjaro/BigLinux com GRUB
+   funcional, use `pz boot vibe-code plan` e `pz boot vibe-code install --yes`
+   como usuário da sessão. O script detecta ferramentas nativas, instala o
+   que falta pelo pacman e prepara o runtime PhaseZero se partir do checkout.
+   Uma transação que exigiria atualizar dependências instaladas é recusada
+   com instrução para atualizar pelo fluxo normal da distribuição.
+5. **Entrada GRUB.** Selecione **PhaseZero Vibe Code (Plasma)**. A entrada
+   usa kernel e initramfs da distro, sobe o Plasma via SDDM e permite uma
+   tentativa de login automático (`Relogin=false`). Falha ao preparar o
+   launcher deixa o SDDM disponível. A entrada normal continua acessível.
+   `pz boot vibe-code verify` verifica pacotes, unidade e GRUB. Para retirar
+   a entrada e seus arquivos, use `pz boot vibe-code remove --yes`.
+   Desbloqueio do disco, cofre e autenticação de provedores são independentes.
 
 Aceite no host: abrir pelo menu, editar e testar um projeto, fechar, reabrir e
 trocar de pasta. Repetir com rede indisponível e a pasta anterior ausente.
