@@ -105,3 +105,17 @@ def test_autostart_owns_only_its_plasma_entry(qapp, monkeypatch, tmp_path):
     reopened.autostart.click()
     assert not reopened.autostart.isChecked()
     assert reopened.autostart_path.read_text() == "existing custom entry\n"
+
+
+def test_preview_uses_desktop_browser_without_a_project(qapp, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    dialog = vibe_code.VibeCodeDialog()
+    seen = []
+    monkeypatch.setattr(vibe_code.QDesktopServices, "openUrl", lambda url: seen.append(url.toString()) or True)
+    monkeypatch.setattr(vibe_code.QInputDialog, "getText", lambda *_: ("file:///etc/passwd", True))
+    dialog._open_browser()
+    assert seen == []
+    assert "endereço completo" in dialog.status.text()
+    monkeypatch.setattr(vibe_code.QInputDialog, "getText", lambda *_: ("http://localhost:9012/", True))
+    dialog._open_browser()
+    assert seen == ["http://localhost:9012/"]

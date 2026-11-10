@@ -5,10 +5,11 @@ import os
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QIODevice, QProcess, QSaveFile, Qt
+from PySide6.QtCore import QIODevice, QProcess, QSaveFile, Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout, QLabel, QPushButton,
-    QVBoxLayout, QWidget,
+    QInputDialog, QLineEdit, QVBoxLayout, QWidget,
 )
 
 from .a11y_events import announce_accessible
@@ -64,13 +65,15 @@ class VibeCodeDialog(QDialog):
         self.project_tools: list[QPushButton] = []
         for index, (label, program) in enumerate((
             ("Terminal", "konsole"), ("Arquivos", "dolphin"),
-            ("Editor de texto", "kate"), ("Navegador", "firefox"),
+            ("Editor de texto", "kate"),
         )):
             button = QPushButton(label)
             button.clicked.connect(lambda _checked=False, name=program: self._open_tool(name))
             tools.addWidget(button, index // 2, index % 2)
-            if program != "firefox":
-                self.project_tools.append(button)
+            self.project_tools.append(button)
+        browser = QPushButton("Navegador")
+        browser.clicked.connect(self._open_browser)
+        tools.addWidget(browser, 1, 1)
         layout.addLayout(tools)
 
         self.status = QLabel()
@@ -190,23 +193,36 @@ class VibeCodeDialog(QDialog):
     def _open_editor(self) -> None:
         self._open_tool(self.editor.currentData())
 
+    def _open_browser(self) -> None:
+        text, accepted = QInputDialog.getText(
+            self, "Abrir no navegador", "Endereço do preview ou da documentação",
+            QLineEdit.EchoMode.Normal, "http://localhost:3000",
+        )
+        if not accepted:
+            return
+        url = QUrl(text.strip(), QUrl.ParsingMode.StrictMode)
+        if not url.isValid() or url.scheme() not in {"http", "https"} or not url.host():
+            self._report("Digite um endereço completo começando com http:// ou https://.")
+            return
+        if QDesktopServices.openUrl(url):
+            self._report("Abertura solicitada ao navegador padrão.")
+        else:
+            self._report("Falha ao abrir. Confira o navegador padrão nas configurações do desktop.")
+
     def _open_tool(self, program: str) -> None:
-        args: list[str] = []
-        working_directory = str(Path.home())
-        if program != "firefox":
-            if not self._folder_available():
-                self._refresh()
+        if not self._folder_available():
+            self._refresh()
+            return
+        working_directory = str(self.project)
+        if program == "konsole":
+            args = ["--separate", "--workdir", working_directory]
+        elif program == "kate":
+            file, _filter = QFileDialog.getOpenFileName(self, "Editar arquivo", working_directory)
+            if not file:
                 return
-            working_directory = str(self.project)
-            if program == "konsole":
-                args = ["--separate", "--workdir", working_directory]
-            elif program == "kate":
-                file, _filter = QFileDialog.getOpenFileName(self, "Editar arquivo", working_directory)
-                if not file:
-                    return
-                args = [file]
-            else:
-                args = [working_directory]
+            args = [file]
+        else:
+            args = [working_directory]
         executable = shutil.which(program)
         if not executable and program == "codium":
             data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
