@@ -1,5 +1,42 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Correção do autologin e central Vibe Code — 10/11/2026
+
+O boot físico selecionado confirmou `phasezero.vibe=1` e o alvo dedicado.
+O journal mostrou `runuser` abrindo PAM durante a preparação. A unidade
+atingiu o timeout antes de gravar o drop-in transitório. O SDDM apresentou o
+greeter e o operador entrou manualmente. Fôlego iniciou pelo autostart
+próprio nessa sessão.
+
+Correção `6dcf9e14`: validar o launcher com `setpriv` no UID e grupos
+do operador, sem abrir PAM. Bigsudo ensaiou o helper real com o cmdline
+do boot selecionado e diretório descartável. Gerou `Session=plasma.desktop`
+e `Relogin=false`, validou o vínculo do SDDM e substituiu o helper de forma
+atômica. Backup
+`/var/lib/phasezero/vibe-code/session-before-pam-fix.J5UJE0`.
+Entrada BigLinux do GRUB continua disponível. Novo boot físico pendente.
+
+Runtime de usuário `1.22.17+vibe.ff03b8d9` ativo. Janela em duas abas e
+layout adaptável com OpenCode Desktop, Codex Desktop e Claude Desktop em
+destaque. Busca reúne atalhos XDG e detalhes canônicos da Central.
+Atalho Claude Code Desktop chama a ação `NewCode` publicada pelo
+aplicativo. Atalhos CLI usam a pasta do projeto. GIO permanece responsável
+pelo lançamento, inclusive quando `Exec` contém caminho entre aspas.
+
+Wayland real: abertura pelo menu, largura lógica aproximada de 850 px,
+capturas ampla e compacta. OpenCode e Claude abriram janelas novas. Codex
+aceitou o lançamento e manteve uma única janela. Codex CLI, Claude Code e
+OpenCode CLI responderam à consulta de versão. Fôlego, OpenClaw, Grok Build
+e DeepSeek Harness foram encontrados no menu. Atalho disponível não atesta
+conta autenticada ou inferência. Passaram 69 testes focados e os smokes de
+recuperação de boot e do gerenciador de desktops IA. Recibos e capturas privados em
+`~/.cache/phasezero-dev/tmp/vibe-correction.luC9wP/`.
+
+`pz boot vibe-code apps --yes` preparou o inventário. Qwen Code Desktop
+permanece pendente porque o AppImage oficial excede 70 MB. O comando informa
+origem, destino e SHA-256 para depósito manual verificado. OpenClaw local
+aparece via seu AppImage; serviço gerenciado continua sujeito aos grants.
+
 ## Instalador e boot Vibe Code — 10/11/2026
 
 Código `627ba19a`. `pz boot vibe-code` no checkout e no runtime de usuário

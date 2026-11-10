@@ -101,10 +101,12 @@ atende Plasma Wayland e Hyprland.
 
 1. **Entrada manual.** Início e Desenvolvimento abrem o launcher nativo.
    O menu PhaseZero usa `phasezero-control-center --vibe-code`. O launcher
-   salva pasta e editor no estado privado do usuário e abre ferramentas
-   sob demanda. Preview e documentação usam o navegador padrão do desktop.
-   A escolha de pasta permite substituir um volume ausente.
-   Receitas, instalação de SDKs e conexões seguem as superfícies existentes.
+   destaca OpenCode Desktop, Codex Desktop e Claude Desktop. A aba Aplicativos
+   pesquisa atalhos XDG visíveis e produtos da Central. A ação Claude Code
+   Desktop usa o atalho da sessão de código publicado pelo Claude. Codex CLI,
+   Claude Code e OpenCode CLI usam Konsole na pasta explícita do projeto.
+   Pasta e editor ficam no estado privado. Preview e documentação usam o
+   navegador padrão do desktop. SDKs e conexões mantêm seus fluxos atuais.
 2. **Entrada no Plasma.** A opção “Mostrar Vibe Code ao entrar no Plasma”
    registra um autostart de usuário que abre o launcher. Retomar a IDE é uma
    ação explícita. Testar também a remoção do autostart e pasta indisponível.
@@ -120,9 +122,15 @@ atende Plasma Wayland e Hyprland.
    que falta pelo pacman e prepara o runtime PhaseZero se partir do checkout.
    Uma transação que exigiria atualizar dependências instaladas é recusada
    com instrução para atualizar pelo fluxo normal da distribuição.
+   `pz boot vibe-code apps --yes` usa os instaladores responsáveis pelos
+   clientes IA ausentes. Desktop sem origem automática validada e pacote
+   acima de 70 MB exigem mídia manual. O catálogo encaminha a preparação
+   para a ação canônica. Serviços e acesso a contas seguem os grants atuais.
 5. **Entrada GRUB.** Selecione **PhaseZero Vibe Code (Plasma)**. A entrada
    usa kernel e initramfs da distro, sobe o Plasma via SDDM e permite uma
-   tentativa de login automático (`Relogin=false`). Falha ao preparar o
+   tentativa de login automático (`Relogin=false`). A checagem pré-SDDM usa
+   `setpriv` para validar o launcher sob o UID real sem iniciar PAM.
+   O Fôlego reaproveita seu autostart. Falha ao preparar o
    launcher deixa o SDDM disponível. A entrada normal continua acessível.
    `pz boot vibe-code verify` verifica pacotes, unidade e GRUB. Para retirar
    a entrada e seus arquivos, use `pz boot vibe-code remove --yes`.
