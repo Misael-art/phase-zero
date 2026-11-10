@@ -4,7 +4,7 @@ set -euo pipefail
 
 VERSION="1.0.0"
 SELF="$(realpath "${BASH_SOURCE[0]}")"
-PZ_REPO="${PZ_REPO:-https://github.com/anomalyco/PhaseZero.git}"
+PZ_REPO="${PZ_REPO:-https://github.com/Misael-art/phase-zero.git}"
 PZ_DIR="${PZ_DIR:-$HOME/PhaseZero}"
 DRY_RUN=0
 SKIP_DEPS=0
@@ -538,7 +538,7 @@ Opcoes:
   --help, -h         Mostra esta mensagem
 
 Uso tipico:
-  curl -fsSL https://raw.githubusercontent.com/anomalyco/PhaseZero/main/zero_script.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Misael-art/phase-zero/main/zero_script.sh | bash
   # ou apos clonar:
   ./zero_script.sh
 EOF
