@@ -54,16 +54,19 @@ def test_sddm_prepares_one_login_and_falls_back_on_missing_launcher(tmp_path):
     runtime.mkdir()
     commands = tmp_path / "bin"
     commands.mkdir()
-    runuser = commands / "runuser"
-    runuser.write_text('#!/bin/sh\nshift 3\nexec "$@"\n')
-    runuser.chmod(0o755)
+    getent = commands / "getent"
+    getent.write_text("#!/bin/sh\nprintf 'fixture:x:1000:1000::/fixture:/bin/bash\\n'\n")
+    getent.chmod(0o755)
+    setpriv = commands / "setpriv"
+    setpriv.write_text('#!/bin/sh\n[ "$*" = "--reuid 1000 --regid 1000 --init-groups -- /usr/bin/test -x $VIBE_TEST_LAUNCHER" ] || exit 1\nshift 6\nexec "$@"\n')
+    setpriv.chmod(0o755)
     launcher = tmp_path / "launcher with spaces"
     launcher.touch(mode=0o755)
     settings = tmp_path / "config"
     settings.write_text(f"# PhaseZero managed: Vibe Code\nfixture\n{launcher}\n")
     cmdline = tmp_path / "cmdline"
     login = runtime / "login.conf"
-    env = {**os.environ, "PATH": f"{commands}:{os.environ['PATH']}"}
+    env = {**os.environ, "PATH": f"{commands}:{os.environ['PATH']}", "VIBE_TEST_LAUNCHER": str(launcher)}
     command = ["bash", BOOT / "vibe-code-session.sh", "prepare", settings, cmdline, session_dir, runtime]
 
     cmdline.write_text("root=UUID=test phasezero.vibe=1\n")

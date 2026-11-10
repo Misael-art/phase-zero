@@ -30,8 +30,12 @@ launcher="${settings[2]:-}"
 
 case "$mode" in
     prepare)
+        account="$(getent passwd "$owner")"
+        IFS=: read -r _ _ uid gid _ _ _ <<< "$account"
+        # runuser opens a PAM session and can wait on graphical user services.
+        # This boot-time check only needs the user's filesystem permissions.
         if ! [ -f "$session_dir/plasma.desktop" ] ||
-            ! runuser -u "$owner" -- test -x "$launcher"; then
+            ! setpriv --reuid "$uid" --regid "$gid" --init-groups -- /usr/bin/test -x "$launcher"; then
             echo "Vibe Code incompleto. SDDM seguirá para o login normal." >&2
             exit 0
         fi
@@ -40,10 +44,16 @@ case "$mode" in
         printf '[Autologin]\nUser=%s\nSession=plasma.desktop\nRelogin=false\n' "$owner" > "$temp"
         chmod 0644 "$temp"
         mv -Tf -- "$temp" "$runtime/login.conf"
+        echo "Vibe Code: autologin Plasma preparado para uma tentativa."
         ;;
     launch)
         [ "$(id -un)" = "$owner" ] || exit 0
-        personal="${XDG_CONFIG_HOME:-$HOME/.config}/autostart/phasezero-vibe-code.desktop"
+        autostart_dir="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+        if [ ! -f "$autostart_dir/folego.desktop" ] && command -v gio >/dev/null; then
+            folego_entry="${XDG_DATA_HOME:-$HOME/.local/share}/applications/folego.desktop"
+            if [ -f "$folego_entry" ]; then gio launch "$folego_entry" || true; fi
+        fi
+        personal="$autostart_dir/phasezero-vibe-code.desktop"
         if [ -f "$personal" ] && grep -Fxq 'X-PhaseZero-Vibe-Code-Autostart=true' "$personal" &&
             ! grep -Eiq '^Hidden[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$personal"; then
             exit 0
