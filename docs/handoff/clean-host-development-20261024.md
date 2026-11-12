@@ -1236,3 +1236,9 @@ histórico privado depende da chave de recuperação do domínio criptografado.
 O comando de práticas do checkout retornou
 practices-not-configured. Checkout, roadmap e este handoff sustentam a
 continuidade desta rodada.
+
+A ação **Instalar Codex Desktop e Claude Code** autoriza os downloads pelo
+próprio botão e executa a instalação. O recibo conserva essa autorização.
+As quatro jornadas atuais cobrem instalação dos aplicativos, preparação da
+memória, falha do processo filho e falha de abertura, com os efeitos substituídos
+por fixtures. A janela informa os downloads na descrição da tarefa.

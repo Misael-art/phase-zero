@@ -11,7 +11,6 @@ $env:WINDIR = [IO.Path]::GetTempPath()
 $window = [pscustomobject]@{ hidden = $false }
 $window | Add-Member -MemberType ScriptMethod -Name Hide -Value { $this.hidden = $true }
 $window | Add-Member -MemberType ScriptMethod -Name Show -Value { $this.hidden = $false }
-$downloadConsent = [pscustomobject]@{ IsChecked = $false }
 $operationStatus = [pscustomobject]@{ Text = '' }
 $hostScript = Join-Path ([IO.Path]::GetTempPath()) 'path with spaces/prepare-host.ps1'
 $setupLogRoot = Join-Path ([IO.Path]::GetTempPath()) 'phasezero-host-preparation-fixture'
@@ -29,15 +28,14 @@ Set-Item Function:Start-Process -Value {
 $run = ${function:Invoke-PhaseZeroHostPreparationAction}
 try {
     & $run 'InstallApps'
-    if ($launches.Count -ne 1 -or $launches[0].arguments -match '-AllowLargeDownloads') { throw 'Default transfer authorization changed' }
+    if ($launches.Count -ne 1 -or $launches[0].arguments -notmatch '-AllowLargeDownloads') { throw 'Install action did not authorize its downloads' }
     if (-not $launches[0].arguments.Contains('-File "' + $hostScript + '"')) { throw 'Preparation path with spaces changed' }
-    if ($operationStatus.Text -notmatch 'instalacao manual') { throw 'Manual download presented as installed' }
+    if (-not $receipts[0].value.downloadsAuthorized) { throw 'Install authorization missing from receipt' }
     if ($window.hidden) { throw 'Launcher did not reopen' }
-    $downloadConsent.IsChecked = $true
-    & $run 'InstallApps'
-    if ($launches[1].arguments -notmatch '-AllowLargeDownloads' -or -not $launches[1].wait -or -not $launches[1].passThru) { throw 'Authorized install not awaited and verified' }
+    & $run 'InstallMemory'
+    if ($launches[1].arguments -match '-AllowLargeDownloads' -or -not $launches[1].wait -or -not $launches[1].passThru) { throw 'Memory action arguments or process verification changed' }
     if ($receipts.Count -ne 2 -or $receipts[1].value.exitCode -ne 0) { throw 'Action result not retained' }
-    if ($receipts[1].path -ne (Join-Path $setupLogRoot 'prepare-host-InstallApps.json')) { throw 'Action receipt destination changed' }
+    if ($receipts[1].path -ne (Join-Path $setupLogRoot 'prepare-host-InstallMemory.json')) { throw 'Action receipt destination changed' }
     $outcome.ExitCode = 42
     & $run 'InstallMemory'
     if ($operationStatus.Text -notmatch 'falhou' -or $receipts[2].value.exitCode -ne 42 -or $window.hidden) { throw 'Child failure hidden' }

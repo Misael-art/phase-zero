@@ -102,16 +102,9 @@ $scroll.VerticalScrollBarVisibility = 'Auto'
 $panel = New-Object System.Windows.Controls.StackPanel
 $panel.Margin = '22'; $scroll.Content = $panel; $window.Content = $scroll
 $description = New-Object System.Windows.Controls.TextBlock
-$description.Text = "Prepare os aplicativos e a memoria em etapas, uma por vez. Depois importe sua chave de recuperacao e restaure o backup Linux pela janela Memoria. Entre nas contas dos aplicativos e no GitHub pelo navegador."
+$description.Text = "Prepare os aplicativos e a memoria em etapas, uma por vez. Instalar baixa os aplicativos e dependencias. Depois importe sua chave de recuperacao e restaure o backup Linux pela janela Memoria. Entre nas contas dos aplicativos e no GitHub pelo navegador."
 $description.TextWrapping = 'Wrap'; $description.FontSize = 17; $description.Margin = '0,0,0,15'
 $panel.Children.Add($description) | Out-Null
-$downloadConsent = New-Object System.Windows.Controls.CheckBox
-$consentText = New-Object System.Windows.Controls.TextBlock
-$consentText.Text = 'Autorizar downloads dos aplicativos e dependencias, inclusive acima de 70 MB'
-$consentText.TextWrapping = 'Wrap'; $consentText.Foreground = '#F0F3F7'
-$downloadConsent.Content = $consentText
-$downloadConsent.Margin = '0,0,0,15'; $downloadConsent.FontSize = 14
-$panel.Children.Add($downloadConsent) | Out-Null
 $operationStatus = New-Object System.Windows.Controls.TextBlock
 $operationStatus.TextWrapping = 'Wrap'; $operationStatus.Margin = '0,0,0,12'; $operationStatus.FontSize = 15
 $panel.Children.Add($operationStatus) | Out-Null
@@ -131,15 +124,13 @@ function Invoke-PhaseZeroHostPreparationAction {
     $window.Hide()
     try {
         $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $hostScript + '" -Action ' + $SelectedAction
-        if ($SelectedAction -eq 'InstallApps' -and $downloadConsent.IsChecked) { $arguments += ' -AllowLargeDownloads' }
+        if ($SelectedAction -eq 'InstallApps') { $arguments += ' -AllowLargeDownloads' }
         $exe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru -ErrorAction Stop
         $receipt = Join-Path $setupLogRoot ('prepare-host-' + $SelectedAction + '.json')
-        & $writeReceipt -Path $receipt -Value @{ action = $SelectedAction; exitCode = $process.ExitCode; at = (Get-Date).ToString('o') }
+        & $writeReceipt -Path $receipt -Value @{ action = $SelectedAction; exitCode = $process.ExitCode; downloadsAuthorized = ($SelectedAction -eq 'InstallApps'); at = (Get-Date).ToString('o') }
         if ($process.ExitCode -ne 0) {
             $operationStatus.Text = 'A etapa falhou. Confira a mensagem da janela e o diagnostico de sessao do Windows. Registro: ' + $receipt
-        } elseif ($SelectedAction -eq 'InstallApps' -and -not $downloadConsent.IsChecked) {
-            $operationStatus.Text = 'Fontes oficiais abertas. Conclua a instalacao manual. Para instalar pelo painel, marque a autorizacao de downloads e execute novamente.'
         } else { $operationStatus.Text = 'Etapa encerrada. Confira o estado e teste os aplicativos instalados.' }
     } catch {
         $operationStatus.Text = [string]$_
@@ -147,7 +138,7 @@ function Invoke-PhaseZeroHostPreparationAction {
 }
 $run = ${function:Invoke-PhaseZeroHostPreparationAction}
 Add-PhaseZeroHostButton '1. Instalar / reparar memoria e dependencias' { & $run 'InstallMemory' }.GetNewClosure()
-Add-PhaseZeroHostButton '2. Codex Desktop e Claude Code - instalar / download manual' { & $run 'InstallApps' }.GetNewClosure()
+Add-PhaseZeroHostButton '2. Instalar Codex Desktop e Claude Code' { & $run 'InstallApps' }.GetNewClosure()
 Add-PhaseZeroHostButton '3. Entrar no GitHub' { & $run 'GitHub' }.GetNewClosure()
 Add-PhaseZeroHostButton '4. Memoria - recuperar, GitHub e sincronizacao' {
     Show-PhaseZeroMemoryWindow -Owner $window -RepoRoot $repoRoot
