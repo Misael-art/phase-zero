@@ -23,6 +23,11 @@ não é satisfeito por encontrar o CLI. Downloads grandes permanecem manuais;
 `-Action InstallApps -AllowLargeDownloads` exige autorização explícita para
 essa exceção. O modo padrão abre as fontes oficiais para instalação manual.
 
+A janela oferece uma autorização explícita de downloads antes da instalação
+dos aplicativos. Cada ação aguarda o processo, conserva seu código de saída
+em `ai-tools/logs/prepare-host-<acao>.json` e mostra o resultado ao reabrir.
+A ação manual indica que a instalação continua pendente nas fontes oficiais.
+
 Em outra instalação, importe a recuperação antes de cadastrar GitHub/escopos.
 Restaure somente pelo plano verificado da janela Memória. Acesso ao GitHub não
 substitui a chave de criptografia. Registre as pastas reais desse Windows,

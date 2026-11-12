@@ -1192,3 +1192,26 @@ Próximo gate de publicação: reconciliar este incremento
 com a continuidade registrada sem carregar mudanças alheias. Prompts entregues
 separam instrumentação Gamescope (SteamZero) de telemetria passiva (Fôlego);
 nenhum agente dessas frentes foi iniciado nesta tarefa.
+
+
+## Preparação Windows no cartão após teste físico — 12/11/2026
+
+O preparador Windows apontou falhas de início de instalador por arquivo/pasta
+corrompido, e os eventos do Windows registraram corrupção de estado AppX.
+A recuperação do volume pertence ao projeto Windows11_SteamDeck_preparo.
+O owner PhaseZero conserva instalação dos agentes, ai-memory e recuperação.
+
+A janela de preparação agora expõe autorização de downloads, aguarda o código
+de saída de cada ação e mantém resultado visível ao reabrir. A modalidade de
+download manual apresenta instalação pendente. O registro por ação usa o writer
+atômico existente em ai-tools/logs. Quatro jornadas de regressão exercitam
+instalação manual, autorização, falha do filho e falha ao iniciar o processo,
+com processos e gravação substituídos por fixtures. O workflow Windows executa
+essas jornadas junto do ensaio WPF e do lifecycle nativo já existente.
+
+Host Linux com limites de CPU e RAM. As quatro jornadas passaram no PowerShell
+local. WPF e PowerShell 5.1 aguardam o novo run nativo antes do fechamento.
+Instalação/login no Deck e recuperação do histórico privado continuam como
+gates físicos. O comando de práticas do checkout retornou
+practices-not-configured. Checkout, roadmap e este handoff sustentam a
+continuidade desta rodada.

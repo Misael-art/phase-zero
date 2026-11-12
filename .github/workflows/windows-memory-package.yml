@@ -13,6 +13,7 @@ on:
       - 'assets/ai/host-resource-policy.md'
       - 'tests/test_windows_memory_package.py'
       - 'tests/windows-memory-package.ps1'
+      - 'tests/Invoke-WindowsHostPreparationSmoke.ps1'
 permissions:
   contents: read
 jobs:
@@ -29,6 +30,8 @@ jobs:
         run: |
           & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$env:RUNNER_TEMP/memory-runtime/windows/ai/prepare-host.ps1" -UiProbe
           if ($LASTEXITCODE) { throw 'Native UI probe failed' }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/Invoke-WindowsHostPreparationSmoke.ps1
+          if ($LASTEXITCODE) { throw 'Host preparation journeys failed' }
       - name: Build official pinned companion outside the handheld
         shell: pwsh
         run: |
