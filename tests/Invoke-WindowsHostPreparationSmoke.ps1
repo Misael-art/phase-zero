@@ -18,9 +18,10 @@ $setupLogRoot = Join-Path ([IO.Path]::GetTempPath()) 'phasezero-host-preparation
 $receipts = New-Object 'Collections.Generic.List[object]'
 $launches = New-Object 'Collections.Generic.List[object]'
 $outcome = [pscustomobject]@{ ExitCode = 0; FailLaunch = $false }
-$writeReceipt = { param($Path, $Value) $receipts.Add(@{ path = $Path; value = $Value }) }.GetNewClosure()
+$script:writeReceipt = { param($Path, $Value) $receipts.Add(@{ path = $Path; value = $Value }) }.GetNewClosure()
 Set-Item Function:Start-Process -Value {
-    param($FilePath, $ArgumentList, [switch]$Wait, [switch]$PassThru, $ErrorAction)
+    [CmdletBinding()]
+    param($FilePath, $ArgumentList, [switch]$Wait, [switch]$PassThru)
     if ($outcome.FailLaunch) { throw 'fixture-start-failure' }
     $launches.Add(@{ file = $FilePath; arguments = $ArgumentList; wait = $Wait; passThru = $PassThru })
     return [pscustomobject]@{ ExitCode = $outcome.ExitCode }
@@ -29,12 +30,14 @@ $run = ${function:Invoke-PhaseZeroHostPreparationAction}
 try {
     & $run 'InstallApps'
     if ($launches.Count -ne 1 -or $launches[0].arguments -match '-AllowLargeDownloads') { throw 'Default transfer authorization changed' }
+    if (-not $launches[0].arguments.Contains('-File "' + $hostScript + '"')) { throw 'Preparation path with spaces changed' }
     if ($operationStatus.Text -notmatch 'instalacao manual') { throw 'Manual download presented as installed' }
     if ($window.hidden) { throw 'Launcher did not reopen' }
     $downloadConsent.IsChecked = $true
     & $run 'InstallApps'
     if ($launches[1].arguments -notmatch '-AllowLargeDownloads' -or -not $launches[1].wait -or -not $launches[1].passThru) { throw 'Authorized install not awaited and verified' }
     if ($receipts.Count -ne 2 -or $receipts[1].value.exitCode -ne 0) { throw 'Action result not retained' }
+    if ($receipts[1].path -ne (Join-Path $setupLogRoot 'prepare-host-InstallApps.json')) { throw 'Action receipt destination changed' }
     $outcome.ExitCode = 42
     & $run 'InstallMemory'
     if ($operationStatus.Text -notmatch 'falhou' -or $receipts[2].value.exitCode -ne 42 -or $window.hidden) { throw 'Child failure hidden' }

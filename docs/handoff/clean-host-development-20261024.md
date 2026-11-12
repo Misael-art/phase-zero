@@ -1210,7 +1210,19 @@ com processos e gravação substituídos por fixtures. O workflow Windows execut
 essas jornadas junto do ensaio WPF e do lifecycle nativo já existente.
 
 Host Linux com limites de CPU e RAM. As quatro jornadas passaram no PowerShell
-local. WPF e PowerShell 5.1 aguardam o novo run nativo antes do fechamento.
+local. O [ensaio nativo em ef033ba](https://github.com/Misael-art/phase-zero/actions/runs/43247289736)
+passou com PowerShell 5.1, renderização WPF, quatro jornadas, companion e
+lifecycle de memória com backup/restauração em base descartável. O pacote
+desse código foi reconstruído e seus 105 arquivos foram conferidos por hash
+no cartão.
+
+O Pester geral nesse SHA registrou 809 testes aprovados, uma falha e dois
+ignorados. A falha foi o orçamento do PSScriptAnalyzer, com 926 avisos diante
+do limite 921. O incremento de teste trata os quatro avisos da nova fixture
+com parâmetros comuns reais, escopo explícito do writer e verificações de
+caminho/recibo. O retry de saúde no ensaio nativo conserva o último erro para
+diagnóstico. O limite do gate foi preservado e o novo resultado deve ser
+conferido no SHA publicado.
 Instalação/login no Deck e recuperação do histórico privado continuam como
 gates físicos. O comando de práticas do checkout retornou
 practices-not-configured. Checkout, roadmap e este handoff sustentam a

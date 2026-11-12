@@ -61,13 +61,14 @@ try {
     if ($task.status -notin @('registered','created','configured')) { throw 'Server task registration failed' }
     Start-ScheduledTask -TaskName 'BootstrapTools-AiMemoryServer'
     $ready = $false
+    $lastHealthError = ''
     for ($attempt=0; $attempt -lt 15; $attempt++) {
         try {
             if ((Invoke-WebRequest 'http://127.0.0.1:49374/healthz' -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { $ready=$true; break }
-        } catch { }
+        } catch { $lastHealthError = [string]$_ }
         Start-Sleep -Seconds 1
     }
-    if (-not $ready) { throw 'Scheduled native server did not answer' }
+    if (-not $ready) { throw ('Scheduled native server did not answer. ' + $lastHealthError) }
     & $binary --data-dir $env:AI_MEMORY_DATA_DIR backup --to (Join-Path $sandbox 'consistent.tar.gz')
     if ($LASTEXITCODE) { throw 'Native online backup failed' }
 } finally {
