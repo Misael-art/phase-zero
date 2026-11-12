@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param([ValidateSet('Menu','InstallMemory','InstallApps','GitHub','Status')][string]$Action = 'Menu', [switch]$AllowLargeDownloads)
+param([ValidateSet('Menu','InstallMemory','InstallApps','GitHub','Status')][string]$Action = 'Menu', [switch]$AllowLargeDownloads, [switch]$UiProbe)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Execute este preparador dentro do Windows.' }
@@ -57,7 +57,11 @@ if ($Action -ne 'Menu') {
                 Ensure-ClaudeCode -WingetPath $winget
             } else {
                 # Large payloads remain manual unless the caller explicitly authorizes them.
-                Start-Process 'https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi'
+                $desktopInstaller = Join-Path $packages 'ChatGPTInstaller.exe'
+                if (Test-Path -LiteralPath $desktopInstaller) {
+                    if ((Get-AuthenticodeSignature -LiteralPath $desktopInstaller).Status -ne 'Valid') { throw 'Assinatura do instalador Microsoft Store invalida; baixe novamente da fonte oficial.' }
+                    Start-Process -FilePath $desktopInstaller -Wait
+                } else { Start-Process 'https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi' }
                 Start-Process 'https://code.claude.com/docs/en/setup#install-on-native-windows'
                 Write-Output 'Instale Codex Desktop pela Microsoft Store. Para Claude Code, siga a instalacao nativa oficial. Depois execute Instalar/reparar memoria para conferir os dois clientes.'
             }
@@ -126,4 +130,16 @@ Add-PhaseZeroHostButton 'Estado da memoria' { & $run 'Status' }.GetNewClosure()
 Add-PhaseZeroHostButton 'Guia e destino de recuperacao' {
     Start-Process notepad.exe -ArgumentList ('"' + (Join-Path $repoRoot 'LEIA-ME.txt') + '"')
 }.GetNewClosure()
+if ($UiProbe) {
+    $script:probeRendered = $false
+    $window.Add_ContentRendered({ $script:probeRendered = $true })
+    $probeTimer = New-Object Windows.Threading.DispatcherTimer
+    $probeTimer.Interval = [TimeSpan]::FromSeconds(3)
+    $probeTimer.Add_Tick({ $probeTimer.Stop(); $window.Close() }.GetNewClosure())
+    $probeTimer.Start()
+}
 [void]$window.ShowDialog()
+if ($UiProbe) {
+    if (-not $script:probeRendered) { throw 'Native preparation window was not rendered.' }
+    Write-Output 'PASS: native WPF preparation window rendered.'
+}

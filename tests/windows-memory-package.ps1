@@ -82,12 +82,3 @@ $configHash = (Get-FileHash $config).Hash
 if ($LASTEXITCODE -or (Get-FileHash $config).Hash -ne $configHash) { throw 'Native restore/config preservation failed' }
 if (-not (Test-Path (Join-Path $env:CODEX_HOME 'config.toml'))) { throw 'Codex config missing' }
 Write-Output 'PASS: native Windows 5.1 init, MCP/hooks for both clients, backup and rejected corrupt companion.'
-$ui = Start-Process powershell.exe -ArgumentList ('-NoProfile -STA -ExecutionPolicy Bypass -File "' + (Join-Path $repoRoot 'windows/ai/prepare-host.ps1') + '"') -PassThru
-try {
-    Start-Sleep -Seconds 8
-    $ui.Refresh()
-    if ($ui.HasExited -or $ui.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Native preparation window did not open' }
-    Write-Output 'PASS: native WPF preparation window opened.'
-    $null = $ui.CloseMainWindow()
-    $null = $ui.WaitForExit(5000)
-} finally { if (-not $ui.HasExited) { Stop-Process -Id $ui.Id -Force } }

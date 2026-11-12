@@ -21,6 +21,14 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+      - name: Package the installed memory runtime
+        shell: pwsh
+        run: python tools/package-memory-windows.py --output "$env:RUNNER_TEMP/memory-runtime"
+      - name: Verify native preparation window
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$env:RUNNER_TEMP/memory-runtime/windows/ai/prepare-host.ps1" -UiProbe
+          if ($LASTEXITCODE) { throw 'Native UI probe failed' }
       - name: Build official pinned companion outside the handheld
         shell: pwsh
         run: |
@@ -43,9 +51,6 @@ jobs:
           } | ConvertTo-Json | Set-Content "$work/packages/wikisync-package.json" -Encoding utf8NoBOM
           & "$work/packages/ai-memory-wikisync.exe" --help
           if ($LASTEXITCODE) { throw 'Companion probe failed' }
-      - name: Package the installed memory runtime
-        shell: pwsh
-        run: python tools/package-memory-windows.py --output "$env:RUNNER_TEMP/memory-runtime"
       - name: Verify native Windows package and MCP wiring
         shell: powershell
         run: ./tests/windows-memory-package.ps1 -PackageDirectory "$env:RUNNER_TEMP/memory-package/packages" -RuntimeRoot "$env:RUNNER_TEMP/memory-runtime"

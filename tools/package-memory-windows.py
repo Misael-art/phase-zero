@@ -76,6 +76,8 @@ def build(destination: Path, packages: Path | None = None, model_cache: Path | N
         (destination / "packages").mkdir()
         for name in (core.name, "ai-memory-wikisync.exe", "wikisync-package.json"):
             shutil.copyfile(packages / name, destination / "packages" / name)
+        if (packages / "ChatGPTInstaller.exe").is_file():
+            shutil.copyfile(packages / "ChatGPTInstaller.exe", destination / "packages/ChatGPTInstaller.exe")
         if model_cache:
             relative = Path("models") / pins["localModel"]["directory"]
             (destination / "packages" / relative).mkdir(parents=True)
