@@ -275,6 +275,8 @@ boot_transaction() (
         if [ -e "$path" ] || [ -L "$path" ]; then cp -a -- "$path" "$backup/$index"; fi
         index=$((index + 1))
     done
+    # Callback invoked by this subshell's EXIT trap below.
+    # shellcheck disable=SC2329
     rollback() {
         rc=$?
         if [ "$rc" -ne 0 ]; then

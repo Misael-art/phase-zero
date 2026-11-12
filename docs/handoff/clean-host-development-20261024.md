@@ -1,5 +1,37 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Preparação de memória no Windows — 12/11/2026
+
+Código `c6d9ab6922fbf54b53025c0cbe225e46b6ecd6ce`. Runtime de memória
+empacotado pelo checkout canônico e preparado no cartão, em
+`Program Files\PhaseZero`, com entrada no menu Steam Deck. Não é outro
+checkout nem outro banco. `INICIAR.cmd` abre o preparador nativo; o owner
+continua sendo `linux/ai/memory_manager.py`, chamado pelo adaptador Windows.
+
+Release ai-memory 3.3.1 verificada, companion oficial compilado em CI com um
+job e cache semântico local conferido pelos hashes do upstream. O servidor
+recebe `RAYON_NUM_THREADS=1` e `OMP_NUM_THREADS=1`. A preparação local usou
+CPUQuota 50%, MemoryMax 768 MiB e cópia serial limitada a 4 MiB/s. Nenhuma VM
+ou compilação Rust foi iniciada no host físico.
+
+Passaram cinco contratos PowerShell e dois testes Python do runtime instalado.
+O [ensaio Windows nativo](https://github.com/Misael-art/phase-zero/actions/runs/43185528162)
+passou com PowerShell 5.1: janela WPF renderizada, regras nos arquivos globais,
+MCP/hooks para Codex e Claude Code, task de servidor, backup online,
+restauração com configuração preservada e rejeição de companion alterado.
+
+O pacote prepara a instalação; ainda é necessário executar o preparador dentro
+do Windows, entrar nas contas e recuperar o histórico privado com a chave
+existente. Não foram transportados tokens, cookies, banco SQLite ativo,
+hostId ou referências do cofre Linux. O destino privado existente consta
+somente do inventário de preparação; não é publicado nas instruções.
+
+Próximo gate: boot físico, instalar pelos fluxos oficiais, importar recuperação,
+verificar/restaurar o backup, escolher as pastas reais deste Windows e validar
+uma consulta MCP em cada aplicativo e a sincronização autenticada. Downloads
+grandes permanecem manuais sem autorização explícita. Não tratar o ensaio
+de CI como aceite do hardware, das contas ou da transferência do histórico.
+
 ## Correção do autologin e central Vibe Code — 10/11/2026
 
 O boot físico selecionado confirmou `phasezero.vibe=1` e o alvo dedicado.

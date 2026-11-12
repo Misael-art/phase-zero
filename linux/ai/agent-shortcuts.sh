@@ -24,14 +24,14 @@ for agent in deepseek-harness grok-build vibe-code; do
 done
 
 write_shortcut() {
-    local agent="$1" label="$2" description="$3" icon="$4" args="$5" group="$6" content target
+    local agent="$1" label="$2" description="$3" icon="$4" launcher_args="$5" group="$6" content target
     target="$PZ_APPLICATIONS_DIR/phasezero-$agent.desktop"
     content="$(cat <<EOF
 [Desktop Entry]
 Type=Application
 Name=$label
 Comment=$description
-Exec="$launcher" $args
+Exec="$launcher" $launcher_args
 Icon=$icon
 Terminal=false
 Categories=X-PhaseZero;
