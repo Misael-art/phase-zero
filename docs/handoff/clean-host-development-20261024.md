@@ -1221,9 +1221,18 @@ ignorados. A falha foi o orçamento do PSScriptAnalyzer, com 926 avisos diante
 do limite 921. O incremento de teste trata os quatro avisos da nova fixture
 com parâmetros comuns reais, escopo explícito do writer e verificações de
 caminho/recibo. O retry de saúde no ensaio nativo conserva o último erro para
-diagnóstico. O limite do gate foi preservado e o novo resultado deve ser
-conferido no SHA publicado.
-Instalação/login no Deck e recuperação do histórico privado continuam como
-gates físicos. O comando de práticas do checkout retornou
+diagnóstico. O limite do gate foi preservado.
+
+O fechamento em `263e2d7b87dff0f82256e7cc790269e38de8090d` teve 38 checks
+aprovados e um ignorado. Pester registrou 810 aprovados, zero falhas e dois
+ignorados. PSScriptAnalyzer voltou a 921 avisos. O
+[ensaio Windows do pacote](https://github.com/Misael-art/phase-zero/actions/runs/43265888542)
+também passou nesse SHA. O runtime instalado conserva `ef033ba`, com o mesmo
+código de produto, e os 105 hashes conferidos. O delta seguinte trata fixtures
+e evidência de validação.
+
+Instalação/login no Deck dependem do Windows nativo. A transferência do
+histórico privado depende da chave de recuperação do domínio criptografado.
+O comando de práticas do checkout retornou
 practices-not-configured. Checkout, roadmap e este handoff sustentam a
 continuidade desta rodada.
