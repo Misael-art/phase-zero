@@ -72,6 +72,16 @@ try {
     $configured = Set-BootstrapAiMemoryConfig -InstallRoot $installRoot -ManagedLifecycle
     if ($configured.serverTask.status -notin @('registered','created','configured')) { throw 'Memory server startup task failed.' }
     Start-ScheduledTask -TaskName 'BootstrapTools-AiMemoryServer' -ErrorAction Stop
+    $ready = $false
+    $healthUrl = (Get-BootstrapAiMemoryServerUrl).TrimEnd('/') + '/healthz'
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        try {
+            $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
+            if ($response.StatusCode -eq 200) { $ready = $true; break }
+        } catch { }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $ready) { throw 'Memory server did not become ready; inspect its own task and logs.' }
     if (-not (Test-Path (Join-Path (Get-BootstrapAiMemoryInstallDir -InstallRoot $installRoot) 'wikisync/bin/ai-memory-wikisync.exe'))) {
         if (-not (Install-PhaseZeroMemoryCompanionPackage -PackageDirectory $env:PZ_MEMORY_PACKAGES -InstallRoot $installRoot)) {
             & (Join-Path $PSScriptRoot 'memory.ps1') -Action install-sync -InstallRoot $installRoot

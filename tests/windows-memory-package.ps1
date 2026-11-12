@@ -52,8 +52,34 @@ if (@($wiring | Where-Object { $_.status -eq 'failed' }).Count) {
     }
     throw 'Native MCP/hook wiring failed'
 }
-& $binary --data-dir $env:AI_MEMORY_DATA_DIR backup --to (Join-Path $sandbox 'consistent.tar.gz')
-if ($LASTEXITCODE) { throw 'Native backup failed' }
+# Exercise the actual startup owner, with embeddings disabled only in this empty fixture.
+$config = Join-Path $env:AI_MEMORY_DATA_DIR 'config.toml'
+[IO.File]::WriteAllText($config, "embedding_provider = `"none`"`r`n" + [IO.File]::ReadAllText($config), (New-Object Text.UTF8Encoding($false)))
+if (Get-ScheduledTask -TaskName 'BootstrapTools-AiMemoryServer' -ErrorAction SilentlyContinue) { throw 'Existing task preserved' }
+$task = Ensure-BootstrapAiMemoryServerTask -ExePath $binary
+try {
+    if ($task.status -notin @('registered','created','configured')) { throw 'Server task registration failed' }
+    Start-ScheduledTask -TaskName 'BootstrapTools-AiMemoryServer'
+    $ready = $false
+    for ($attempt=0; $attempt -lt 15; $attempt++) {
+        try {
+            if ((Invoke-WebRequest 'http://127.0.0.1:49374/healthz' -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { $ready=$true; break }
+        } catch { }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $ready) { throw 'Scheduled native server did not answer' }
+    & $binary --data-dir $env:AI_MEMORY_DATA_DIR backup --to (Join-Path $sandbox 'consistent.tar.gz')
+    if ($LASTEXITCODE) { throw 'Native online backup failed' }
+} finally {
+    Stop-ScheduledTask -TaskName 'BootstrapTools-AiMemoryServer' -ErrorAction SilentlyContinue
+    Get-CimInstance Win32_Process -Filter "Name='ai-memory.exe'" | Where-Object {
+        $_.ExecutablePath -eq $binary -and $_.CommandLine -match [regex]::Escape($env:AI_MEMORY_DATA_DIR)
+    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Unregister-ScheduledTask -TaskName 'BootstrapTools-AiMemoryServer' -Confirm:$false -ErrorAction SilentlyContinue
+}
+$configHash = (Get-FileHash $config).Hash
+& $binary --data-dir $env:AI_MEMORY_DATA_DIR restore --from (Join-Path $sandbox 'consistent.tar.gz') --force
+if ($LASTEXITCODE -or (Get-FileHash $config).Hash -ne $configHash) { throw 'Native restore/config preservation failed' }
 if (-not (Test-Path (Join-Path $env:CODEX_HOME 'config.toml'))) { throw 'Codex config missing' }
 Write-Output 'PASS: native Windows 5.1 init, MCP/hooks for both clients, backup and rejected corrupt companion.'
 $ui = Start-Process powershell.exe -ArgumentList ('-NoProfile -STA -ExecutionPolicy Bypass -File "' + (Join-Path $repoRoot 'windows/ai/prepare-host.ps1') + '"') -PassThru

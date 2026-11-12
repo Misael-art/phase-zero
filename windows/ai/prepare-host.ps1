@@ -85,7 +85,12 @@ foreach ($key in @('DarkReadonly','DarkInput')) {
     $style.Setters.Add((New-Object System.Windows.Setter([Windows.Controls.Control]::ForegroundProperty, [Windows.Media.Brushes]::Black)))
     $window.Resources.Add($key, $style)
 }
-foreach ($key in @('PrimaryBtn','GhostBtn')) { $window.Resources.Add($key, (New-Object System.Windows.Style([Windows.Controls.Button]))) }
+foreach ($key in @('PrimaryBtn','GhostBtn')) {
+    $style = New-Object System.Windows.Style([Windows.Controls.Button])
+    $style.Setters.Add((New-Object System.Windows.Setter([Windows.Controls.Control]::BackgroundProperty, [Windows.Media.Brushes]::LightGray)))
+    $style.Setters.Add((New-Object System.Windows.Setter([Windows.Controls.Control]::ForegroundProperty, [Windows.Media.Brushes]::Black)))
+    $window.Resources.Add($key, $style)
+}
 $scroll = New-Object System.Windows.Controls.ScrollViewer
 $scroll.VerticalScrollBarVisibility = 'Auto'
 $panel = New-Object System.Windows.Controls.StackPanel
@@ -98,6 +103,7 @@ function Add-PhaseZeroHostButton {
     param([string]$Text, [scriptblock]$Handler)
     $button = New-Object System.Windows.Controls.Button
     $button.Content = $Text; $button.MinHeight = 48; $button.Margin = '0,0,0,10'; $button.FontSize = 16
+    $button.Style = $window.FindResource('PrimaryBtn')
     $button.Add_Click($Handler); $panel.Children.Add($button) | Out-Null
 }
 $hostScript = $PSCommandPath
