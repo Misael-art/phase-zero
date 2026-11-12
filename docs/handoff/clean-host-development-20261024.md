@@ -1227,8 +1227,8 @@ O fechamento em `263e2d7b87dff0f82256e7cc790269e38de8090d` teve 38 checks
 aprovados e um ignorado. Pester registrou 810 aprovados, zero falhas e dois
 ignorados. PSScriptAnalyzer voltou a 921 avisos. O
 [ensaio Windows do pacote](https://github.com/Misael-art/phase-zero/actions/runs/43265888542)
-também passou nesse SHA. O runtime instalado conserva `ef033ba`, com o mesmo
-código de produto, e os 105 hashes conferidos. O delta seguinte trata fixtures
+também passou nesse SHA. Naquele fechamento o runtime conservava `ef033ba`,
+com o mesmo código de produto e os 105 hashes conferidos. O delta seguinte trata fixtures
 e evidência de validação.
 
 Instalação/login no Deck dependem do Windows nativo. A transferência do
@@ -1250,3 +1250,18 @@ dentro do prazo original de oito segundos, conservando as duas asserções.
 O teste focal passou em 1,39 s no ambiente Python gerenciado, com temporários
 privados em disco. A raiz temporária ausente da primeira invocação foi criada
 antes do ensaio válido. A VM própria ficou pausada durante o teste e foi retomada.
+
+O fechamento de código em `61eb775b1120d5564249000e3af74076d5700548` teve
+37 checks aprovados e um ignorado, incluindo os dois jobs Pester e Python.
+O runtime foi reconstruído pelo empacotador canônico e atualizado no cartão,
+com os 105 arquivos conferidos por SHA-256 e cópia dos arquivos substituídos
+no destino de recuperação. O produto usa o fluxo de instalação ensaiado
+nativamente em `4d67050`. [CI da branch](https://github.com/Misael-art/phase-zero/actions/runs/43292255819),
+[CI do PR](https://github.com/Misael-art/phase-zero/actions/runs/43292265763),
+[ensaio Windows](https://github.com/Misael-art/phase-zero/actions/runs/43288210494).
+
+O cofre Linux estava aberto, mas a chave de memória configurada continuou
+indisponível. O serviço de origem estava inativo. O histórico aguarda a chave
+desse domínio ou o arquivo de recuperação criptografado existente, solicitado
+ao operador. Instalação, autenticação, consulta MCP pelos dois clientes e
+sincronização permanecem sujeitos ao aceite no Windows físico.
