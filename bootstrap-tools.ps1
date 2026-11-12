@@ -7201,7 +7201,6 @@ function Ensure-NpmGlobalPackage {
 function Ensure-ClaudeCode {
     param([Parameter(Mandatory = $true)][string]$WingetPath)
 
-    $null = $WingetPath
     $claudeExe = Resolve-CommandPath -Name 'claude'
     if ($claudeExe) {
         $ver = ((& $claudeExe --version) 2>&1 | Select-Object -First 1)
@@ -7209,12 +7208,11 @@ function Ensure-ClaudeCode {
         return
     }
 
-    $npmCmd = Get-BootstrapNpmCommandForAiTools
-    Ensure-NpmGlobalPackage -NpmCmd $npmCmd -Package '@anthropic-ai/claude-code' -DisplayName 'Claude Code (Anthropic)' -CommandNames @('claude') -VersionArgs @('--version')
+    Ensure-WingetPackage -WingetPath $WingetPath -Id 'Anthropic.ClaudeCode' -DisplayName 'Claude Code (Anthropic)' -AllowFailureWhenNotAdmin $true
     Refresh-SessionPath
 
     $claudeExe = Resolve-CommandPath -Name 'claude'
-    if (-not $claudeExe) { throw 'Claude Code instalado via npm, mas o comando claude nao foi encontrado no PATH.' }
+    if (-not $claudeExe) { throw 'Claude Code ainda nao foi encontrado no PATH; conclua a instalacao nativa e tente novamente.' }
     $ver = ((& $claudeExe --version) 2>&1 | Select-Object -First 1)
     Write-Log "claude instalado: $ver ($claudeExe)"
 }
@@ -7222,40 +7220,14 @@ function Ensure-ClaudeCode {
 function Ensure-CodexInstaller {
     param([Parameter(Mandatory = $true)][string]$WingetPath)
 
-    $id = 'OpenAI.Codex'
-    $codexCmdDefault = Join-Path (Join-Path $env:APPDATA 'npm') 'codex.cmd'
-    if (Test-Path $codexCmdDefault) {
-        Write-Log "Codex CLI já presente via npm ($codexCmdDefault). Pulando instalação via winget ($id)."
+    # Desktop and CLI are independent products. A CLI shim cannot satisfy this.
+    if ((Get-BootstrapCodexDesktopPackageInfo)['installed']) {
+        Write-Log 'Codex Desktop ja instalado (pacote do usuario).'
         return
     }
-    $npmCmd = Get-NpmCmd
-    if ($npmCmd) {
-        $npmPrefix = $null
-        try {
-            $npmPrefix = (& $npmCmd prefix -g 2>$null | Select-Object -First 1)
-            if ($npmPrefix) { $npmPrefix = $npmPrefix.Trim() }
-        } catch {
-            $npmPrefix = $null
-        }
-        if ($npmPrefix) {
-            $codexCmdFromPrefix = Join-Path $npmPrefix 'codex.cmd'
-            if (Test-Path $codexCmdFromPrefix) {
-                Write-Log "Codex CLI já presente via npm ($codexCmdFromPrefix). Pulando instalação via winget ($id)."
-                return
-            }
-        }
-    }
-
-    if (Test-WingetPackageInstalled -WingetPath $WingetPath -Id $id) {
-        Write-Log "Codex Installer ($id) já instalado (winget)."
-        return
-    }
-
-    try {
-        Ensure-WingetPackage -WingetPath $WingetPath -Id $id -DisplayName "Codex Installer ($id)" -AllowFailureWhenNotAdmin $true
-    } catch {
-        Write-Log ("Falha ao instalar Codex Installer via winget. Continuando. " + $_.Exception.Message) 'WARN'
-    }
+    & $WingetPath install --id '9PLM9XGG6VKS' --exact --source msstore --interactive --accept-source-agreements --accept-package-agreements --disable-interactivity
+    if ($LASTEXITCODE -ne 0) { throw "Codex Desktop: instalacao interrompida (exit=$LASTEXITCODE)." }
+    if (-not (Get-BootstrapCodexDesktopPackageInfo)['installed']) { throw 'Conclua a instalacao do Codex Desktop pela Microsoft Store.' }
 }
 
 function Get-BootstrapUserProfileRoot {
@@ -21901,6 +21873,9 @@ function Get-BootstrapAiMemoryDetectedAgents {
         }
         if (-not [string]::IsNullOrWhiteSpace($path)) { $agents.Add([string]$item.Id) | Out-Null }
     }
+    if (-not $agents.Contains('codex') -and (Get-BootstrapCodexDesktopPackageInfo)['installed']) {
+        $agents.Add('codex') | Out-Null
+    }
     if (Resolve-CommandPath -Name 'qwen') { $agents.Add('qwen-code') | Out-Null }
     return @($agents.ToArray())
 }
@@ -22055,7 +22030,12 @@ function Install-BootstrapAiMemoryViaRelease {
     $url = ("https://github.com/{0}/releases/download/{1}/{2}" -f [string]$CatalogEntry['GitHubRepo'], $tag, $assetName)
 
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $url -OutFile $assetPath -UseBasicParsing -Headers @{ 'User-Agent' = 'PhaseZero-Bootstrap' } -ErrorAction Stop
+    if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_RELEASE_ARCHIVE)) {
+        $assetPath = $env:AI_MEMORY_RELEASE_ARCHIVE
+        if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) { throw 'Arquivo local ai-memory ausente.' }
+    } elseif (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
+        Invoke-WebRequest -Uri $url -OutFile $assetPath -UseBasicParsing -Headers @{ 'User-Agent' = 'PhaseZero-Bootstrap' } -ErrorAction Stop
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($expected)) {
         $actual = (Get-BootstrapFileSha256 -Path $assetPath).ToLowerInvariant()

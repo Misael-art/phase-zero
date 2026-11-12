@@ -4,8 +4,11 @@ param([ValidateSet('install','repair','install-sync')][string]$Action = 'repair'
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $repoRoot 'bootstrap-tools.ps1')
+. (Join-Path $PSScriptRoot 'memory-packages.ps1')
 
 if ($Action -eq 'install-sync') {
+    $installRoot = Get-BootstrapAiInstallRoot -InstallRoot $InstallRoot
+    if (Install-PhaseZeroMemoryCompanionPackage -PackageDirectory $env:PZ_MEMORY_PACKAGES -InstallRoot $installRoot) { exit 0 }
     $cargo = Get-Command cargo -ErrorAction SilentlyContinue
     if (-not $cargo) { throw 'Rust toolchain required for the official ai-memory-wikisync companion.' }
     $pins = Get-Content (Join-Path $repoRoot 'packaging/ai-memory/pins.json') -Raw | ConvertFrom-Json
@@ -69,8 +72,10 @@ try {
     if ($configured.serverTask.status -notin @('registered','created','configured')) { throw 'Memory server startup task failed.' }
     Start-ScheduledTask -TaskName 'BootstrapTools-AiMemoryServer' -ErrorAction Stop
     if (-not (Test-Path (Join-Path (Get-BootstrapAiMemoryInstallDir -InstallRoot $installRoot) 'wikisync/bin/ai-memory-wikisync.exe'))) {
-        & (Join-Path $PSScriptRoot 'memory.ps1') -Action install-sync -InstallRoot $installRoot
-        if ($LASTEXITCODE -ne 0) { throw 'Memory sync companion unavailable.' }
+        if (-not (Install-PhaseZeroMemoryCompanionPackage -PackageDirectory $env:PZ_MEMORY_PACKAGES -InstallRoot $installRoot)) {
+            & (Join-Path $PSScriptRoot 'memory.ps1') -Action install-sync -InstallRoot $installRoot
+            if ($LASTEXITCODE -ne 0) { throw 'Memory sync companion unavailable.' }
+        }
     }
 } catch {
     if ($backup) {

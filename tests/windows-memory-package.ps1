@@ -1,0 +1,42 @@
+#Requires -Version 5.1
+param([Parameter(Mandatory = $true)][string]$PackageDirectory)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $repoRoot 'bootstrap-tools.ps1') -BootstrapUiLibraryMode
+. (Join-Path $repoRoot 'windows/ai/memory-packages.ps1')
+$sandbox = Join-Path $env:TEMP ('phasezero-memory-test-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($sandbox)
+$env:USERPROFILE = Join-Path $sandbox 'user'
+$env:HOME = $env:USERPROFILE
+$env:LOCALAPPDATA = Join-Path $sandbox 'local'
+$env:APPDATA = Join-Path $sandbox 'roaming'
+$env:CODEX_HOME = Join-Path $env:USERPROFILE '.codex'
+$env:CLAUDE_CONFIG_DIR = Join-Path $env:USERPROFILE '.claude'
+$env:AI_MEMORY_DATA_DIR = Join-Path $sandbox 'data'
+[void][IO.Directory]::CreateDirectory($env:USERPROFILE)
+$installRoot = Join-Path $sandbox 'tools'
+if (-not (Install-PhaseZeroMemoryCompanionPackage -PackageDirectory $PackageDirectory -InstallRoot $installRoot)) { throw 'Missing package' }
+$metadata = Join-Path $PackageDirectory 'wikisync-package.json'
+$original = [IO.File]::ReadAllBytes($metadata)
+try {
+    $bad = Get-Content $metadata -Raw | ConvertFrom-Json
+    $bad.sha256 = '0' * 64
+    $bad | ConvertTo-Json | Set-Content $metadata -Encoding UTF8
+    $rejected = $false
+    try { Install-PhaseZeroMemoryCompanionPackage -PackageDirectory $PackageDirectory -InstallRoot $installRoot | Out-Null }
+    catch { $rejected = $true }
+    if (-not $rejected) { throw 'Corrupted companion was accepted' }
+} finally { [IO.File]::WriteAllBytes($metadata, $original) }
+$catalog = Get-BootstrapAiToolCatalog
+$result = Install-BootstrapAiMemoryViaRelease -CatalogEntry $catalog['ai-memory'] -InstallRoot $installRoot
+if ($result.status -ne 'installed') { throw 'Native package not installed' }
+$binary = Get-BootstrapAiMemoryExePath -InstallRoot $installRoot
+& $binary --data-dir $env:AI_MEMORY_DATA_DIR init
+if ($LASTEXITCODE) { throw 'Native init failed' }
+$wiring = @(Invoke-BootstrapAiMemoryWiring -ExePath $binary -Agents @('codex','claude-code'))
+if (@($wiring | Where-Object { $_.status -eq 'failed' }).Count) { throw 'Native MCP/hook wiring failed' }
+& $binary --data-dir $env:AI_MEMORY_DATA_DIR backup --to (Join-Path $sandbox 'consistent.tar.gz')
+if ($LASTEXITCODE) { throw 'Native backup failed' }
+if (-not (Test-Path (Join-Path $env:CODEX_HOME 'config.toml'))) { throw 'Codex config missing' }
+Write-Output 'PASS: native Windows 5.1 init, MCP/hooks for both clients, backup and rejected corrupt companion.'

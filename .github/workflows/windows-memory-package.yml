@@ -1,0 +1,47 @@
+name: Windows memory package
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/windows-memory-package.yml'
+      - 'packaging/ai-memory/pins.json'
+      - 'windows/ai/memory*.ps1'
+      - 'tests/windows-memory-package.ps1'
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build official pinned companion outside the handheld
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pins = Get-Content packaging/ai-memory/pins.json -Raw | ConvertFrom-Json
+          $work = Join-Path $env:RUNNER_TEMP 'memory-package'
+          New-Item $work -ItemType Directory | Out-Null
+          Invoke-WebRequest $pins.source.url -OutFile "$work/source.tar.gz"
+          if ((Get-FileHash "$work/source.tar.gz").Hash.ToLowerInvariant() -ne $pins.source.sha256) { throw 'Source hash differs' }
+          tar -xzf "$work/source.tar.gz" -C $work ("ai-memory-" + $pins.version + '/companions/ai-memory-wikisync')
+          if ($LASTEXITCODE) { throw 'Source extraction failed' }
+          $env:CARGO_BUILD_JOBS = '1'
+          cargo install --locked --path "$work/ai-memory-$($pins.version)/companions/ai-memory-wikisync" --root "$work/companion" --jobs 1
+          if ($LASTEXITCODE) { throw 'Companion build failed' }
+          New-Item "$work/packages" -ItemType Directory | Out-Null
+          Copy-Item "$work/companion/bin/ai-memory-wikisync.exe" "$work/packages/"
+          @{ schemaVersion=1; version=$pins.version; sourceSha256=$pins.source.sha256
+             sha256=(Get-FileHash "$work/packages/ai-memory-wikisync.exe").Hash.ToLowerInvariant()
+             sourceCommit=$env:GITHUB_SHA; workflowRun=$env:GITHUB_RUN_ID
+          } | ConvertTo-Json | Set-Content "$work/packages/wikisync-package.json" -Encoding utf8NoBOM
+          & "$work/packages/ai-memory-wikisync.exe" --help
+          if ($LASTEXITCODE) { throw 'Companion probe failed' }
+      - name: Verify native Windows package and MCP wiring
+        shell: powershell
+        run: ./tests/windows-memory-package.ps1 -PackageDirectory "$env:RUNNER_TEMP/memory-package/packages"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ai-memory-wikisync-windows
+          path: ${{ runner.temp }}/memory-package/packages/
+          retention-days: 14
