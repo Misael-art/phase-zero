@@ -1,5 +1,27 @@
 #Requires -Version 5.1
 # Verified, local packages for the existing memory lifecycle; no separate store.
+function Install-PhaseZeroMemoryModelCache {
+    param([string]$PackageDirectory, [string]$DataDirectory)
+    if (-not $PackageDirectory) { return }
+    $pins = Get-Content (Join-Path $repoRoot 'packaging/ai-memory/pins.json') -Raw | ConvertFrom-Json
+    $relative = 'models/' + $pins.localModel.directory
+    $sourceRoot = Join-Path $PackageDirectory $relative
+    # The native default fetches ~87 MiB. Prepared hosts must reuse the verified cache.
+    foreach ($item in $pins.localModel.files.PSObject.Properties) {
+        $source = Join-Path $sourceRoot $item.Name
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw 'Modelo local ausente no pacote; prepare o cache verificado antes de iniciar o servidor.' }
+        if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $item.Value) { throw 'Checksum do modelo local invalido.' }
+    }
+    $destination = Join-Path $DataDirectory $relative
+    [void][IO.Directory]::CreateDirectory($destination)
+    foreach ($item in $pins.localModel.files.PSObject.Properties) {
+        $target = Join-Path $destination $item.Name
+        if (Test-Path -LiteralPath $target) {
+            if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -ne $item.Value) { throw 'Cache existente divergente preservado; revise a instalacao.' }
+        } else { Copy-Item -LiteralPath (Join-Path $sourceRoot $item.Name) -Destination $target }
+    }
+}
+
 function Install-PhaseZeroMemoryCompanionPackage {
     param([string]$PackageDirectory, [string]$InstallRoot)
     if ([string]::IsNullOrWhiteSpace($PackageDirectory)) { return $false }

@@ -5,6 +5,30 @@ Owner: adaptadores IA, catálogo e UI existentes. Contrato de criptografia:
 `packaging/ai-memory/pins.json`. Baseline de implementação: `69a471cd`;
 branch de continuidade `codex/clean-host-dev-bootstrap`, PR #129.
 
+## Preparação nativa para Windows
+
+`tools/package-memory-windows.py --output <destino-vazio> --packages <pacotes>`
+empacota o owner existente, seus adaptadores e a janela de memória. O pacote
+não contém banco, sessões, tokens nem configuração de outro host. O build
+Windows do workflow `Windows memory package` compila o companion da fonte
+fixada e testa o runtime instalado com PowerShell 5.1. Não exige Rust no Deck.
+
+`INICIAR.cmd` abre `windows/ai/prepare-host.ps1`. A instalação usa o lifecycle
+canônico; MCP/hooks são preparados para Codex Desktop e Claude Code no mesmo
+servidor. O ZIP nativo local continua sujeito ao SHA-256 fixado. O companion
+local exige versão, hash de fonte e hash do executável correspondentes.
+
+Os aplicativos têm instalação e autenticação próprias no Windows. O Desktop
+não é satisfeito por encontrar o CLI. Downloads grandes permanecem manuais;
+`-Action InstallApps -AllowLargeDownloads` exige autorização explícita para
+essa exceção. O modo padrão abre as fontes oficiais para instalação manual.
+
+Em outra instalação, importe a recuperação antes de cadastrar GitHub/escopos.
+Restaure somente pelo plano verificado da janela Memória. Acesso ao GitHub não
+substitui a chave de criptografia. Registre as pastas reais desse Windows,
+mantendo hostId e referências WinCred próprios. Preparação offline, ensaio
+nativo em CI, instalação no Deck e login são evidências distintas.
+
 ## Escopo e contratos
 
 - MEM-001: remover espelhamento destrutivo Windows. Não copiar SQLite ativo,

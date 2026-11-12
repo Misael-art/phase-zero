@@ -61,6 +61,7 @@ if ($existing) {
     }
 }
 try {
+    Install-PhaseZeroMemoryModelCache -PackageDirectory $env:PZ_MEMORY_PACKAGES -DataDirectory $dataDir
     if ($needsInstall) {
         $installed = Install-BootstrapAiMemoryViaRelease -CatalogEntry $catalog['ai-memory'] -InstallRoot $installRoot
         if ($installed.status -notin @('installed','present')) { throw 'Native memory installation did not complete.' }

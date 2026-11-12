@@ -21933,7 +21933,7 @@ function Ensure-BootstrapAiMemoryServerTask {
     if ($hidden) {
         $launcherDir = Split-Path -Parent $ExePath
         $vbsPath = Join-Path $launcherDir 'ai-memory-serve-hidden.vbs'
-        $vbsBody = 'CreateObject("WScript.Shell").Run "' + $nativeCommand.Replace('"', '""') + '", 0, False'
+        $vbsBody = "Set shell = CreateObject(""WScript.Shell"")`r`nshell.Environment(""Process"")(""RAYON_NUM_THREADS"") = ""1""`r`nshell.Environment(""Process"")(""OMP_NUM_THREADS"") = ""1""`r`nshell.Run """ + $nativeCommand.Replace('"', '""') + '", 0, False'
         $wscriptExe = Join-Path $env:SystemRoot 'System32/wscript.exe'
         $taskCommand = ('"{0}" "{1}"' -f $wscriptExe, $vbsPath)
     } else {

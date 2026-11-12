@@ -6,6 +6,12 @@ on:
       - '.github/workflows/windows-memory-package.yml'
       - 'packaging/ai-memory/pins.json'
       - 'windows/ai/memory*.ps1'
+      - 'windows/ai/prepare-host.ps1'
+      - 'tools/package-memory-windows.py'
+      - 'bootstrap-tools.ps1'
+      - 'windows/ai/host-instructions.ps1'
+      - 'assets/ai/host-resource-policy.md'
+      - 'tests/test_windows_memory_package.py'
       - 'tests/windows-memory-package.ps1'
 permissions:
   contents: read
@@ -37,9 +43,12 @@ jobs:
           } | ConvertTo-Json | Set-Content "$work/packages/wikisync-package.json" -Encoding utf8NoBOM
           & "$work/packages/ai-memory-wikisync.exe" --help
           if ($LASTEXITCODE) { throw 'Companion probe failed' }
+      - name: Package the installed memory runtime
+        shell: pwsh
+        run: python tools/package-memory-windows.py --output "$env:RUNNER_TEMP/memory-runtime"
       - name: Verify native Windows package and MCP wiring
         shell: powershell
-        run: ./tests/windows-memory-package.ps1 -PackageDirectory "$env:RUNNER_TEMP/memory-package/packages"
+        run: ./tests/windows-memory-package.ps1 -PackageDirectory "$env:RUNNER_TEMP/memory-package/packages" -RuntimeRoot "$env:RUNNER_TEMP/memory-runtime"
       - uses: actions/upload-artifact@v7
         with:
           name: ai-memory-wikisync-windows
