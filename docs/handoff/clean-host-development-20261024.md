@@ -1242,3 +1242,11 @@ próprio botão e executa a instalação. O recibo conserva essa autorização.
 As quatro jornadas atuais cobrem instalação dos aplicativos, preparação da
 memória, falha do processo filho e falha de abertura, com os efeitos substituídos
 por fixtures. A janela informa os downloads na descrição da tarefa.
+
+O CI de `4d67050` passou no ensaio Windows do pacote e encontrou uma corrida
+no teste Python de SIGTERM. O supervisor fecha a porta, aguarda o leitor e
+publica o estado final. O teste agora aguarda porta fechada e estado stopped
+dentro do prazo original de oito segundos, conservando as duas asserções.
+O teste focal passou em 1,39 s no ambiente Python gerenciado, com temporários
+privados em disco. A raiz temporária ausente da primeira invocação foi criada
+antes do ensaio válido. A VM própria ficou pausada durante o teste e foi retomada.

@@ -217,7 +217,10 @@ def test_supervisor_sigterm_closes_its_runtime_port(dsh_root, tmp_path):
     try:
         os.kill(report["processId"], signal.SIGTERM)
         deadline = time.monotonic() + 8
-        while manager._port_in_use(manager._port()) and time.monotonic() < deadline:
+        while time.monotonic() < deadline and (
+            manager._port_in_use(manager._port())
+            or manager._load_json(manager.state_file(), {}).get("state") != "stopped"
+        ):
             time.sleep(.05)
         assert not manager._port_in_use(manager._port())
         assert manager._load_json(manager.state_file())["state"] == "stopped"
