@@ -4,7 +4,9 @@ param([ValidateSet('Menu','InstallMemory','InstallApps','GitHub','Status')][stri
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Execute este preparador dentro do Windows.' }
-. (Join-Path $repoRoot 'bootstrap-tools.ps1') -BootstrapUiLibraryMode
+# PS 5.1 clones variable validation attributes into UI closures. The library's
+# empty rotation default is not in its ValidateSet; use its valid no-op value.
+. (Join-Path $repoRoot 'bootstrap-tools.ps1') -BootstrapUiLibraryMode -RotateSecretsSchedule none
 . (Join-Path $PSScriptRoot 'host-instructions.ps1')
 $packages = Join-Path $repoRoot 'packages'
 $env:PZ_MEMORY_PACKAGES = $packages
