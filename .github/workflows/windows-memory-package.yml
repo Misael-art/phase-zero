@@ -44,7 +44,8 @@ jobs:
           if ($LASTEXITCODE) { throw 'Dependency smoke failed' }
           $json = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $entry -Action DependencyStatus
           if ($LASTEXITCODE) { throw 'Dependency inventory failed' }
-          $report = $json | Out-String | ConvertFrom-Json
+          try { $report = $json | Out-String | ConvertFrom-Json }
+          catch { throw "Invalid dependency JSON. First line: $($json | Select-Object -First 1)" }
           if ($report.schemaVersion -ne 1 -or -not $report.target.windowsId -or $report.items.Count -lt 5) { throw 'Invalid native dependency inventory' }
           foreach ($attempt in 1,2) {
             & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $entry -Action Dependencies -UiProbe

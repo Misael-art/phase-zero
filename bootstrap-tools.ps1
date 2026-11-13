@@ -16135,7 +16135,7 @@ function Get-BootstrapWindowsDependencyStatus {
             'msvc' {
                 $vswhere = Get-BootstrapVsWherePath
                 if ($vswhere) {
-                    $query = Invoke-NativeCaptureWithLog -Exe $vswhere -Args @('-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath') -TimeoutMs 5000
+                    $query = Invoke-BootstrapAiNativeCommand -Exe $vswhere -Args @('-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath') -TimeoutMs 5000
                     if ($query.ExitCode -ne 0) { throw "vswhere falhou (exit=$($query.ExitCode))." }
                     $result.evidence = @(foreach ($path in ($query.StdOut -split '\r?\n' | Where-Object { $_.Trim() })) {
                         $root = Join-Path $path.Trim() 'VC\Tools\MSVC'
