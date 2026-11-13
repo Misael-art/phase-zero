@@ -121,6 +121,9 @@ try {
     Set-Content -LiteralPath $project -Value '{"sdk":{"version":"10.0.400","rollForward":"latestPatch"}}'
     $requirements = Resolve-PhaseZeroDependencyRequirements -RequirementFile $project -Definitions $catalog
     Assert-Equal $requirements['dotnet-sdk-10-x64'].policy 'sdk-band' 'global.json policy'
+    Set-Content -LiteralPath $project -Value '{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}'
+    $requirements = Resolve-PhaseZeroDependencyRequirements -RequirementFile $project -Definitions $catalog
+    Assert-Equal $requirements['dotnet-sdk-10-x64'].policy 'minimum' 'global.json feature roll-forward'
     $app = Join-Path $fixture 'app.runtimeconfig.json'
     Set-Content -LiteralPath $app -Value '{"runtimeOptions":{"framework":{"name":"Microsoft.WindowsDesktop.App","version":"10.0.4"}}}'
     $requirements = Resolve-PhaseZeroDependencyRequirements -RequirementFile $app -Definitions $catalog -ApplicationArchitecture x86

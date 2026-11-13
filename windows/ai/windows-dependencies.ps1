@@ -74,8 +74,11 @@ function Resolve-PhaseZeroDependencyRequirements {
         $id = "dotnet-sdk-$($version.Major)-$arch"
         if (-not $Definitions.Contains($id)) { throw "SDK $($version.Major) ($arch) fora do catalogo." }
         $roll = $sdk.Value.PSObject.Properties['rollForward']
-        # Exact match is sufficient for every policy. Patch/latestPatch also allow later builds in the same band.
-        $policy = if (-not $roll -or $roll.Value -in @('patch','latestPatch')) { 'sdk-band' } else { 'exact' }
+        # Broader policies accept compatible SDKs in the requested major/minor.
+        $policy = if (-not $roll -or $roll.Value -in @('patch','latestPatch')) { 'sdk-band' }
+            elseif ($roll.Value -eq 'disable') { 'exact' }
+            elseif ($roll.Value -in @('feature','latestFeature','minor','latestMinor','major','latestMajor')) { 'minimum' }
+            else { throw "Politica rollForward desconhecida: $($roll.Value)." }
         $requirements[$id] = @{ version = [string]$sdk.Value.version; policy = $policy }
     } elseif ($file.Name -like '*.runtimeconfig.json') {
         $options = $document.PSObject.Properties['runtimeOptions']

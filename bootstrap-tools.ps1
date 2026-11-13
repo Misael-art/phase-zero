@@ -16171,7 +16171,7 @@ function Get-BootstrapWindowsDependencyStatus {
         $satisfying = @($versions | Where-Object {
             if ($ExactVersion) { $_ -eq $minimum }
             elseif ($SdkBand) { $_ -ge $minimum -and $_.Minor -eq $minimum.Minor -and [Math]::Floor($_.Build / 100) -eq [Math]::Floor($minimum.Build / 100) }
-            else { -not $minimum -or $_ -ge $minimum }
+            else { -not $minimum -or ($_ -ge $minimum -and ($probe -notin @('sdk','runtime','desktop') -or $_.Minor -eq $minimum.Minor)) }
         })
         if ($satisfying.Count -and -not ($probe -eq 'vc' -and $incomplete)) {
             $result.version = $satisfying[0].ToString()
@@ -16263,6 +16263,8 @@ function Ensure-BootstrapWindowsDependency {
         $exitCode = Invoke-NativeWithLog -Exe $WingetPath -Args $arguments
         $after = Get-BootstrapWindowsDependencyStatus @probeArgs
         Assert-BootstrapDependencyInstallerResult -ExitCode $exitCode -After $after
+        $restart = @(Get-BootstrapPendingRebootReasons)
+        if ($restart.Count) { throw (New-BootstrapBlockedException -Kind 'pending-reboot-msi' -Action 'restart-required' -Message 'A instalacao deixou um reinicio pendente. Reinicie e verifique novamente.' -Reasons $restart) }
         return $after
     } finally {
         if ($locked) { $mutex.ReleaseMutex() }
