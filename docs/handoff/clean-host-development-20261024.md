@@ -1,5 +1,39 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Dependências do Windows portátil — 13/11/2026
+
+Runtime `f573d408fb9efea1f4bc4adf457641e10db0eb7b` no WindowsSD, revisão
+[PR #137](https://github.com/Misael-art/phase-zero/pull/137). Pacote reconstruído
+pelo empacotador canônico. Sete arquivos atualizados e 108 hashes conferidos
+no cartão. Sete arquivos de instaladores/modelo já verificados foram preservados.
+O inventário existente registra a intervenção em
+`ai_windows.dependency_preparation`. A recuperação privada contém o manifesto
+anterior, os arquivos substituídos e o inventário anterior.
+
+**Dependências de aplicativos e projetos** verifica Visual C++ x86/x64,
+DirectX legado Win32, .NET Framework, .NET Runtime, Desktop Runtime, SDKs,
+WebView2 e MSVC. O mesmo inventário informa frameworks Store por conta.
+DirectX Win32 usa o instalador EXE WinGet e exige DLLs legadas por arquitetura.
+Codex Desktop resolve Visual C++ também pelo caminho simplificado. A interface
+separa consulta de instalação, grava o resultado e verifica os componentes ao
+reabrir. O [contrato do preparador e do Autofix](../roadmaps/ai-memory-portability-v1.md#contrato-para-preparador-e-autofix)
+documenta as ações de inventário, janela e fila.
+
+O [ensaio Windows do pacote](https://github.com/Misael-art/phase-zero/actions/runs/43528916652)
+passou a etapa de dependências em PowerShell 5.1. WPF abriu duas vezes, o JSON
+usou inventário do runner, e fixtures verificaram os resultados do instalador,
+reinício, interrupção, reabertura e repetição. No Jupiter, passaram os dois
+smokes PowerShell 7.6.6 e dois testes Python. A atualização foi serial e
+limitada a cerca de 2 MiB de arquivos de runtime, após baixar a pressão de
+memória. A amostra anterior à cópia mostrou cerca de 6,1 GiB disponíveis, sem
+swap-in/out nas amostras de um segundo, 61 °C e trip passivo de 100 °C.
+
+Próximo aceite: boot físico do cartão, execução dos instaladores selecionados,
+teste dos aplicativos e nova consulta após reinício. O Autofix tem contrato
+disponível para consumir. A gravação ai-memory continua pendente porque a
+unidade está mascarada/inativa e a conexão local foi recusada. O registro
+privado da auditoria preserva o corpo original e o complemento de implementação.
+
 ## Preparação de memória no Windows — 12/11/2026
 
 Código `c6d9ab6922fbf54b53025c0cbe225e46b6ecd6ce`. Runtime de memória
