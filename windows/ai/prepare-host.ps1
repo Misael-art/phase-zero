@@ -3,7 +3,7 @@
 param(
     [ValidateSet('Menu','InstallMemory','InstallApps','GitHub','Status','Dependencies','DependencyStatus','InstallDependencies')][string]$Action = 'Menu',
     [switch]$AllowLargeDownloads, [switch]$UiProbe, [string]$DependencyIds, [string]$RequirementFile,
-    [ValidateSet('x64','x86','arm64')][string]$ApplicationArchitecture, [switch]$OnlyRequired,
+    [ValidateSet('','x64','x86','arm64')][string]$ApplicationArchitecture = '', [switch]$OnlyRequired,
     [string]$ExpectedTarget, [string]$ExpectedCaller, [string]$ExpectedRequirementHash
 )
 $ErrorActionPreference = 'Stop'
