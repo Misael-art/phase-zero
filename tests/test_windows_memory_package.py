@@ -23,6 +23,7 @@ def test_installed_runtime_runs_canonical_plan_and_excludes_private_state(tmp_pa
     assert "windows/ai/dependencies-ui.ps1" in manifest["files"]
     assert "windows/ai/host-instructions.ps1" in manifest["files"]
     assert "assets/ai/host-resource-policy.md" in manifest["files"]
+    assert "assets/agent-skills/token-economy.json" in manifest["files"]
     assert "linux/ai/windows_credential_store.py" in manifest["files"]
     assert not any(name.startswith((".git/", ".bootstrap-tools/", ".codex/")) for name in manifest["files"])
     assert not any(Path(name).name in ("portability.json", "auth.json", "memory.db") for name in manifest["files"])

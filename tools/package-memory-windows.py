@@ -10,7 +10,10 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ("bootstrap-tools.ps1", "windows/pz.ps1", "version.json", "LICENSE")
+FILES = (
+    "bootstrap-tools.ps1", "windows/pz.ps1", "version.json", "LICENSE",
+    "assets/agent-skills/token-economy.json",
+)
 TREES = ("windows/ai", "linux/ai", "linux/lib", "assets/ai", "packaging/ai-memory")
 
 
