@@ -68,6 +68,8 @@ def build(destination: Path, packages: Path | None = None, model_cache: Path | N
         "O servidor e unico, em 127.0.0.1:49374, com task BootstrapTools-AiMemoryServer. "
         "Os agentes compartilham MCP e hooks nativos; suas contas e tokens nao sao copiados do Linux. "
         "Caminhos, hostId e referencias do cofre sao gerados neste Windows.\n"
+        "Dependencias de aplicativos e projetos verifica runtimes e permite instalar/reparar a selecao.\n"
+        "Use o Windows em execucao no cartao. Registros ficam em logs do PhaseZero da conta.\n"
         "Git for Windows habilita os recursos de Git dos aplicativos; instale pelo fluxo oficial se necessario.\n"
         "PROTOCOLO.md acompanha o procedimento canonico. A preparacao offline nao comprova instalacao/login no Windows.\n",
         encoding="utf-8-sig")

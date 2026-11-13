@@ -34,6 +34,68 @@ substitui a chave de criptografia. Registre as pastas reais desse Windows,
 mantendo hostId e referências WinCred próprios. Preparação offline, ensaio
 nativo em CI, instalação no Deck e login são evidências distintas.
 
+### Dependências de aplicativos e projetos
+
+No Windows em execução, abra **Dependências de aplicativos e projetos** no
+preparador PhaseZero. Confira a unidade e a arquitetura, verifique os itens e
+selecione os que deseja instalar ou reparar. Escolha a arquitetura do aplicativo
+ao abrir requisitos de um programa x86 em Windows x64. SDKs e MSVC exigem
+seleção explícita. A janela recupera o último resultado da conta e confere
+novamente a instalação atual. Se o computador mudou, a janela informa a mudança.
+
+O inventário identifica o Visual C++ v14 Win32 por arquitetura, registro, versão
+e DLLs compartilhadas. DirectX legado exige as DLLs D3DX9/10/11, XInput 1.3,
+XAudio 2.7 e XACT 3.7 nas arquiteturas aplicáveis. VCLibs, .NET Native e DirectX
+Store são observações da conta atual. Os pacotes Store seguem pelo aplicativo
+que os declara. O .NET Framework usa o valor Release e oferece a fonte oficial.
+WebView2 verifica registros Evergreen da máquina e da conta.
+
+.NET 10 LTS e .NET 11 STS oferecem Runtime, Desktop Runtime e SDK pelo catálogo
+WinGet. Séries 6–9 aparecem quando detectadas ou explicitamente requeridas,
+com fonte oficial e aviso de fim de suporte. O componente histórico
+`dotnet-core` mantém SDK 8 para os perfis que dependem dele. Consulte a
+[política oficial de suporte .NET](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core)
+e o [catálogo oficial WinGet](https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/Microsoft/DotNet).
+
+A fila usa o resolvedor e o executor do bootstrap, com verificação posterior e
+registros em `%LOCALAPPDATA%\PhaseZero\ai-tools\logs`. Downloads grandes pedem
+autorização explícita. Se WinGet faltar, atualize o Instalador de Aplicativos
+pela Store. Em caso de rede indisponível ou MSI ocupado, corrija a condição e
+selecione novamente os itens. Após reinício, a fila verifica os itens antes de
+repetir. Uma consulta inconclusiva fica desconhecida e impede o reparo
+automático. A fila instala no Windows em execução, a partir da cópia local do
+PhaseZero. Um cartão anexado a outro Windows requer boot no cartão.
+
+#### Contrato para preparador e Autofix
+
+Resolva o launcher sob a pasta conhecida `ProgramFiles` do Windows em execução,
+`PhaseZero\windows\ai\prepare-host.ps1`. Use PowerShell 5.1, `-NoProfile` e
+`-File`. `-Action Dependencies` abre a janela (use `-STA`).
+`-Action DependencyStatus` devolve JSON `schemaVersion: 1` sem iniciar
+instalações. O relatório contém `target`, `targetError`, `items`, `store`,
+`previousRun` e `receiptError`. Cada item traz ID, arquitetura, versão,
+requisito, estado, detalhe e evidências. Trate saída indisponível ou consulta
+falha como desconhecida. Estados dos itens são `satisfied`, `missing`,
+`partial`, `insufficient`, `unknown` e `not-applicable`. Use `store.status` e
+`store.packages` para os frameworks da conta. O Autofix pode incorporar esse
+resultado ao próprio relatório e oferecer a ação interativa.
+
+O parâmetro `-RequirementFile` aceita `global.json`, `*.runtimeconfig.json`,
+`*.vcxproj` ou um JSON como
+`{"schemaVersion":1,"requirements":[{"id":"vcpp-redist-x86","minimumVersion":"14.44.0"}]}`.
+Use `-ApplicationArchitecture x86` quando indicado e `-OnlyRequired` para
+consultar só os requisitos declarados. O `.vcxproj` seleciona o MSVC x86/x64
+geral. Requisitos de toolset específicos podem declarar versão mínima no
+manifesto. Políticas de roll-forward são avaliadas conservadoramente dentro
+da série catalogada. Confira o SDK final com o comando do projeto.
+
+`-Action InstallDependencies -DependencyIds vcpp-redist,vcpp-redist-x86`
+processa a seleção na conta elevada. A interface vincula a execução ao
+Windows, à conta e ao hash de requisitos observados. Retorno 0 indica fila
+verificada, 2 indica pendências com recibo, e 1 indica falha de entrada ou de
+execução. `previousRun` mantém a última fila associada à instalação. Leia o
+inventário atual para obter a situação das dependências após a execução.
+
 ## Escopo e contratos
 
 - MEM-001: remover espelhamento destrutivo Windows. Não copiar SQLite ativo,

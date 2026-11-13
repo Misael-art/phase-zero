@@ -1443,7 +1443,7 @@ function Invoke-BootstrapAuditMode {
 
                 $detailParts = New-Object System.Collections.Generic.List[string]
                 $detailParts.Add(("MSIX {0}" -f [string]$pkg['version']))
-                if (-not [bool]$runtime['present']) {
+                if (-not [bool]$runtime['present'] -and -not [bool]$runtime['probeSkipped']) {
                     $detailParts.Add(("VC++ runtime ausente: {0}" -f (@($runtime['missing']) -join ', ')))
                 }
                 if (-not [string]::IsNullOrWhiteSpace([string]$latestLog['exitCode'])) {
@@ -1818,7 +1818,15 @@ function Invoke-BootstrapAuditMode {
             }
         }
 
-        if ($status -eq 'Unknown' -and -not $probeTimedOut) {
+        if ($def.Kind -eq 'windows-dependency') {
+            $dependency = Get-BootstrapWindowsDependencyStatus -Definition $def
+            $status = @{ satisfied = 'Healthy'; missing = 'Missing'; partial = 'Unhealthy'; insufficient = 'Unhealthy'; unknown = 'Unknown'; 'not-applicable' = 'NotApplicable' }[$dependency.status]
+            $detail = $dependency.detail
+            $probeSource = 'windows-dependency'
+            if ($dependency.status -in @('missing', 'partial', 'insufficient')) { $howToFix = 'Abra Dependencias de aplicativos e projetos no preparador PhaseZero.' }
+        }
+
+        if ($status -eq 'Unknown' -and -not $probeTimedOut -and $def.Kind -ne 'windows-dependency') {
             $status = 'UnsupportedAudit'
             $detail = ('Sem heuristica de auditoria para Kind={0}.' -f [string]$def.Kind)
             $howToFix = 'Nenhuma correcao automatica sugerida para este tipo de componente; valide manualmente ou adicione heuristica de auditoria ao catalogo.'
@@ -1827,7 +1835,8 @@ function Invoke-BootstrapAuditMode {
         $logDetail = if ([string]::IsNullOrWhiteSpace($howToFix)) { $detail } else { "$detail | Como corrigir: $howToFix" }
         Write-Log ("Audit: Componente {0} -> {1} ({2})" -f $comp, $status, $logDetail)
 
-        if ($Repair -and $status -ne 'Healthy' -and $State) {
+        if ($Repair -and $status -ne 'Healthy' -and $State -and
+            ($def.Kind -ne 'windows-dependency' -or ($dependency.packageId -and -not $dependency.largeDownload -and $dependency.status -in @('missing', 'partial', 'insufficient')))) {
             Write-Log ("Repair: Tentando reinstalar {0}..." -f $comp) 'WARN'
             try {
                 Invoke-BootstrapComponent -Name $comp -State $State
@@ -5688,7 +5697,7 @@ function Ensure-WslUi {
     }
 
     $null = Ensure-WindowsOptionalFeatureEnabled -FeatureName 'Microsoft-Windows-Subsystem-Linux' -DisplayName 'Microsoft-Windows-Subsystem-Linux (WSL)'
-    Ensure-WingetPackage -WingetPath $WingetPath -Id 'Microsoft.EdgeWebView2Runtime' -DisplayName 'Microsoft Edge WebView2 Runtime'
+    Ensure-BootstrapWindowsDependency -Definition ((Get-BootstrapComponentCatalog)['webview2-runtime']) -WingetPath $WingetPath | Out-Null
 
     try {
         Ensure-WingetPackage -WingetPath $WingetPath -Id $id -DisplayName $name -PreferUserScope $false
@@ -6034,7 +6043,8 @@ function Get-BootstrapItemStatus {
         [string[]]$CommandNames = @(),
         [string]$WingetId = '',
         [switch]$ErrorFlag,
-        [hashtable]$Cache
+        [hashtable]$Cache,
+        $ComponentDefinition
     )
 
     if (-not $Cache) { $Cache = Read-BootstrapItemStatusCache }
@@ -6043,6 +6053,19 @@ function Get-BootstrapItemStatus {
     if ($Cache.ContainsKey($key)) {
         $entry = ConvertTo-BootstrapHashtable -InputObject $Cache[$key]
         if ($entry.ContainsKey('status')) { $cachedStatus = [string]$entry['status'] }
+    }
+
+    # Shared runtimes use authoritative probes even if a previous attempt failed.
+    if ($Kind -eq 'app' -and -not $ComponentDefinition -and $Id -match '^(vcpp-redist(-x86)?|directx-runtime|webview2-runtime|dotnet-(runtime|desktop|sdk)-)') {
+        $ComponentDefinition = (Get-BootstrapComponentCatalog)[$Id]
+    }
+    if ($ComponentDefinition -and $ComponentDefinition.Kind -eq 'windows-dependency') {
+        $dependency = Get-BootstrapWindowsDependencyStatus -Definition $ComponentDefinition
+        switch ($dependency.status) {
+            'satisfied' { return 'installed-unconfigured' }
+            { $_ -in @('missing', 'not-applicable') } { return 'not-installed' }
+            default { return 'error' }
+        }
     }
 
     # Erro tem prioridade (vale mesmo se o binario sumiu).
@@ -6080,7 +6103,7 @@ function Get-BootstrapComponentStatusMap {
         $probe = @()
         if ($def.PSObject.Properties.Name -contains 'ProbePaths') { $probe = @($def.ProbePaths) }
         $wid = if ($def.PSObject.Properties.Name -contains 'Id') { [string]$def.Id } else { '' }
-        $map[[string]$name] = Get-BootstrapItemStatus -Kind 'app' -Id ([string]$def.Name) -ProbePaths $probe -WingetId $wid -Cache $cache
+        $map[[string]$name] = Get-BootstrapItemStatus -Kind 'app' -Id ([string]$def.Name) -ProbePaths $probe -WingetId $wid -Cache $cache -ComponentDefinition $def
     }
     return $map
 }
@@ -7220,6 +7243,9 @@ function Ensure-ClaudeCode {
 function Ensure-CodexInstaller {
     param([Parameter(Mandatory = $true)][string]$WingetPath)
 
+    $runtime = Get-BootstrapCodexRuntimeComponent
+    Ensure-BootstrapWindowsDependency -Definition $runtime -WingetPath $WingetPath | Out-Null
+
     # Desktop and CLI are independent products. A CLI shim cannot satisfy this.
     if ((Get-BootstrapCodexDesktopPackageInfo)['installed']) {
         Write-Log 'Codex Desktop ja instalado (pacote do usuario).'
@@ -7402,68 +7428,33 @@ function Get-BootstrapCodexDesktopLatestLog {
 }
 
 function Get-BootstrapVcppRuntimeStatus {
-    $required = @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll')
-    $system32 = Join-BootstrapKnownFolderPath -Base $env:WINDIR -ChildPath 'System32'
-    if ([string]::IsNullOrWhiteSpace($system32) -or -not (Test-Path -LiteralPath $system32)) {
-        # Sem System32 nao ha o que sondar. Reportar 'present' evita que um probe impossivel vire
-        # "runtime ausente" e dispare reinstalacao do VCRedist sem motivo.
-        return [ordered]@{
-            present = $true
-            missing = @()
-            found = @()
-            probeRoot = $system32
-            probeSkipped = $true
-            reason = 'system32-unavailable'
-            wingetId = 'Microsoft.VCRedist.2015+.x64'
-        }
-    }
-
-    $missing = @()
-    $present = @()
-    foreach ($dll in @($required)) {
-        $path = Join-Path $system32 $dll
-        if (Test-Path -LiteralPath $path) {
-            $present += @($dll)
-        } else {
-            $missing += @($dll)
-        }
-    }
-
+    $definition = Get-BootstrapCodexRuntimeComponent
+    $runtime = Get-BootstrapWindowsDependencyStatus -Definition $definition
+    $files = @($runtime.evidence | Where-Object { $_.PSObject.Properties['path'] })
     return [ordered]@{
-        present = ($missing.Count -eq 0)
-        missing = @($missing)
-        found = @($present)
-        probeRoot = $system32
-        probeSkipped = $false
-        wingetId = 'Microsoft.VCRedist.2015+.x64'
+        present = ($runtime.status -eq 'satisfied')
+        missing = @($files | Where-Object { -not $_.present } | ForEach-Object { [IO.Path]::GetFileName($_.path) })
+        found = @($files | Where-Object present | ForEach-Object { [IO.Path]::GetFileName($_.path) })
+        probeRoot = if ($files.Count) { Split-Path -Parent $files[0].path } else { '' }
+        probeSkipped = ($runtime.status -eq 'unknown')
+        reason = $runtime.detail
+        version = $runtime.version
+        status = $runtime.status
+        wingetId = $runtime.packageId
     }
 }
 
 function Ensure-BootstrapCodexDesktopVcppRuntime {
     $before = Get-BootstrapVcppRuntimeStatus
-    if ([bool]$before['present']) {
+    if ($before['present']) {
         return [ordered]@{ status = 'healthy'; reason = 'vcpp-runtime-present'; before = $before; after = $before }
     }
-
-    $winget = Get-Winget
-    if (-not $winget) {
-        return [ordered]@{ status = 'failed'; reason = 'winget-ausente'; before = $before; after = $before }
-    }
-
     try {
-        Ensure-WingetPackage -WingetPath $winget -Id 'Microsoft.VCRedist.2015+.x64' -DisplayName 'Microsoft Visual C++ Redistributable 2015+ x64' -AllowFailureWhenNotAdmin $true
+        $null = Ensure-BootstrapWindowsDependency -Definition (Get-BootstrapCodexRuntimeComponent)
     } catch {
-        $afterFailure = Get-BootstrapVcppRuntimeStatus
-        return [ordered]@{ status = 'failed'; reason = $_.Exception.Message; before = $before; after = $afterFailure }
+        return [ordered]@{ status = 'failed'; reason = $_.Exception.Message; before = $before; after = (Get-BootstrapVcppRuntimeStatus) }
     }
-
-    $after = Get-BootstrapVcppRuntimeStatus
-    return [ordered]@{
-        status = if ([bool]$after['present']) { 'installed' } else { 'attempted' }
-        reason = if ([bool]$after['present']) { 'vcpp-runtime-installed' } else { 'vcpp-runtime-still-missing' }
-        before = $before
-        after = $after
-    }
+    return [ordered]@{ status = 'installed'; reason = 'vcpp-runtime-installed'; before = $before; after = (Get-BootstrapVcppRuntimeStatus) }
 }
 
 function Get-BootstrapCodexDesktopStateSummary {
@@ -15913,6 +15904,372 @@ function Get-BootstrapSwitchEmulationTuningRecommendation {
     }
 }
 
+function Add-BootstrapWindowsDependencyComponents {
+    param($Catalog)
+
+    $definitions = @(
+        @{ Name = 'vcpp-redist'; Label = 'Visual C++ v14 (x64)'; Probe = 'vc'; Arch = 'x64'; Min = '14.20.0'; Id = 'Microsoft.VCRedist.2015+.x64'; Size = 0.1; Url = 'https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist' }
+        @{ Name = 'vcpp-redist-x86'; Label = 'Visual C++ v14 (x86)'; Probe = 'vc'; Arch = 'x86'; Min = '14.0.24212'; Id = 'Microsoft.VCRedist.2015+.x86'; Size = 0.1; Url = 'https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist' }
+        @{ Name = 'directx-runtime'; Label = 'DirectX legado (Win32)'; Probe = 'directx'; Id = 'Microsoft.DirectX'; InstallerType = 'exe'; Size = 0.2; Url = 'https://www.microsoft.com/download/details.aspx?id=8109' }
+        @{ Name = 'webview2-runtime'; Label = 'WebView2 Evergreen'; Probe = 'webview'; Min = '1.0.0'; Id = 'Microsoft.EdgeWebView2Runtime'; Size = 0.5; Large = $true; Url = 'https://developer.microsoft.com/microsoft-edge/webview2/' }
+        @{ Name = 'dotnet-framework'; Label = '.NET Framework'; Probe = 'framework'; Min = '4.8'; Url = 'https://dotnet.microsoft.com/download/dotnet-framework' }
+    )
+    foreach ($major in 11, 10, 9, 8, 7, 6) {
+        foreach ($arch in 'x64', 'x86', 'arm64') {
+            foreach ($family in 'runtime', 'desktop', 'sdk') {
+                $name = "dotnet-$family-$major-$arch"
+                $package = @{ runtime = 'Runtime'; desktop = 'DesktopRuntime'; sdk = 'SDK' }[$family]
+                $label = @{ runtime = 'Runtime'; desktop = 'Desktop Runtime'; sdk = 'SDK' }[$family]
+                $item = @{ Name = $name; Label = ".NET $major $label ($arch)"; Probe = $family; Arch = $arch; Min = "$major.0.0"; Major = $major }
+                if ($major -ge 10) {
+                    $item.Id = "Microsoft.DotNet.$package.$major"
+                    $item.Size = if ($family -eq 'sdk') { 1.5 } else { 0.5 }
+                    $item.Large = ($family -ne 'runtime')
+                    $item.InstallerArchitecture = $arch
+                } else {
+                    $item.Label += ' - sem suporte'
+                }
+                $item.Url = "https://dotnet.microsoft.com/download/dotnet/$major.0"
+                $definitions += $item
+            }
+        }
+    }
+    foreach ($item in $definitions) {
+        $data = @{
+            DisplayName = $item['Label']; DependencyProbe = $item['Probe']; DependencyArchitecture = [string]$item['Arch']
+            MinimumVersion = [string]$item['Min']; DependencyMajor = [int]$item['Major']; OfficialUrl = [string]$item['Url']
+            LargeDownload = [bool]$item['Large']; InstallerArchitecture = [string]$item['InstallerArchitecture']
+            InstallerType = [string]$item['InstallerType']; Stage = 'payload'
+        }
+        $prerequisites = @()
+        if ($item['Id']) {
+            $data.Id = $item['Id']
+            $prerequisites = @('system-core')
+            if ($item['Probe'] -eq 'desktop') { $prerequisites += "dotnet-runtime-$($item['Major'])-$($item['Arch'])" }
+        }
+        $Catalog[$item['Name']] = New-BootstrapComponentDefinition -Name $item['Name'] -Description $item['Label'] -DependsOn $prerequisites -Kind 'windows-dependency' -Data $data -RequiresNetwork:([bool]$item['Id']) -EstimatedSizeGB ([double]$item['Size'])
+    }
+}
+
+function Get-BootstrapWindowsArchitecture {
+    $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    switch ($architecture) {
+        'AMD64' { return 'x64' }
+        'ARM64' { return 'arm64' }
+        'x86' { return 'x86' }
+        default { return 'unknown' }
+    }
+}
+
+function Read-BootstrapDependencyRegistry {
+    param([string]$Key, [string]$View = 'Registry32', [string]$Hive = 'LocalMachine', [string[]]$Names)
+
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($Hive, $View)
+    try {
+        $entry = $base.OpenSubKey($Key)
+        if ($null -eq $entry) { return $null }
+        try {
+            $values = @{}
+            foreach ($name in $Names) { $values[$name] = $entry.GetValue($name) }
+            return $values
+        } finally { $entry.Dispose() }
+    } finally { $base.Dispose() }
+}
+
+function Get-BootstrapDependencySystemDirectory {
+    param([string]$Architecture, [string]$WindowsArchitecture)
+    if ($Architecture -eq 'x86' -and $WindowsArchitecture -ne 'x86') {
+        return (Join-Path $env:WINDIR 'SysWOW64')
+    }
+    if (-not [Environment]::Is64BitProcess -and $WindowsArchitecture -ne 'x86') {
+        return (Join-Path $env:WINDIR 'Sysnative')
+    }
+    return (Join-Path $env:WINDIR 'System32')
+}
+
+function Get-BootstrapDependencyFile {
+    param([string]$Path)
+    try { return (Get-Item -LiteralPath $Path -ErrorAction Stop) }
+    catch [Management.Automation.ItemNotFoundException] { return $null }
+    catch [IO.FileNotFoundException] { return $null }
+    catch [IO.DirectoryNotFoundException] { return $null }
+}
+
+function ConvertTo-BootstrapDependencyVersion {
+    param([AllowNull()][string]$Text)
+    if ($Text -notmatch '^[vV]?(\d+\.\d+(?:\.\d+){0,2})$') { return $null }
+    $version = [version]$Matches[1]
+    return [version]::new($version.Major, $version.Minor, [Math]::Max(0, $version.Build), [Math]::Max(0, $version.Revision))
+}
+
+function Get-BootstrapDotNetDependencyEvidence {
+    param($Definition, [string]$WindowsArchitecture)
+
+    $architecture = $Definition.DependencyArchitecture
+    $view = if ($architecture -eq 'x86') { 'Registry32' } else { 'Registry64' }
+    $registration = Read-BootstrapDependencyRegistry -Key "SOFTWARE\dotnet\Setup\InstalledVersions\$architecture" -View $view -Names InstallLocation
+    $programFiles = if ($architecture -eq 'x86' -and $WindowsArchitecture -ne 'x86') { ${env:ProgramFiles(x86)} }
+        elseif ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+    $defaultRoot = Join-Path $programFiles 'dotnet'
+    if ($WindowsArchitecture -eq 'arm64' -and $architecture -eq 'x64') { $defaultRoot = Join-Path $defaultRoot 'x64' }
+    $locations = @($defaultRoot)
+    if ($registration -and $registration.InstallLocation) { $locations += [string]$registration.InstallLocation }
+    $relativePath = @{ sdk = 'sdk'; desktop = 'shared\Microsoft.WindowsDesktop.App'; runtime = 'shared\Microsoft.NETCore.App' }[$Definition.DependencyProbe]
+    $artifact = @{ sdk = 'dotnet.dll'; desktop = 'Microsoft.WindowsDesktop.App.deps.json'; runtime = 'coreclr.dll' }[$Definition.DependencyProbe]
+
+    foreach ($root in ($locations | Select-Object -Unique)) {
+        $directory = Join-Path $root $relativePath
+        if (-not (Get-BootstrapDependencyFile -Path $directory)) { continue }
+        foreach ($item in Get-ChildItem -LiteralPath $directory -Directory -ErrorAction Stop) {
+            $version = ConvertTo-BootstrapDependencyVersion $item.Name
+            if (-not $version -or $version.Major -ne $Definition.DependencyMajor) { continue }
+            $files = @((Join-Path $root 'dotnet.exe'), (Join-Path $item.FullName $artifact))
+            if ($Definition.DependencyProbe -eq 'desktop') { $files += (Join-Path $item.FullName 'PresentationFramework.dll') }
+            $missing = @($files | Where-Object { -not (Get-BootstrapDependencyFile -Path $_) })
+            [pscustomobject]@{ version = $version; complete = ($missing.Count -eq 0); path = $item.FullName; missing = $missing }
+        }
+    }
+}
+
+function Get-BootstrapWindowsDependencyStatus {
+    param($Definition, [string]$MinimumVersion, [switch]$ExactVersion, [switch]$SdkBand)
+
+    $arch = Get-BootstrapWindowsArchitecture
+    $minimum = ConvertTo-BootstrapDependencyVersion $MinimumVersion
+    $baseline = ConvertTo-BootstrapDependencyVersion $Definition.MinimumVersion
+    if ($MinimumVersion -and -not $minimum) { throw "Versao invalida: $MinimumVersion" }
+    if (-not $minimum) { $minimum = $baseline }
+    if ($minimum -and $Definition.PSObject.Properties['DependencyMajor'] -and $Definition.DependencyMajor -gt 0 -and $minimum.Major -ne $Definition.DependencyMajor) {
+        throw "Versao $minimum nao pertence a $($Definition.DisplayName)."
+    }
+    if ($minimum -and $baseline -and $minimum -lt $baseline -and -not ($ExactVersion -or $SdkBand)) { $minimum = $baseline }
+    $probe = $Definition.DependencyProbe
+    $target = $Definition.DependencyArchitecture
+    $result = [pscustomobject]@{
+        id = $Definition.Name; label = $Definition.DisplayName; architecture = $target; kind = $probe
+        status = 'unknown'; minimumVersion = if ($minimum) { $minimum.ToString() } else { '' }; version = ''
+        detail = ''; evidence = @(); packageId = [string]($Definition | Select-Object -ExpandProperty Id -ErrorAction SilentlyContinue)
+        largeDownload = $Definition.LargeDownload; officialUrl = $Definition.OfficialUrl
+    }
+    if ($arch -eq 'unknown') { $result.detail = 'Arquitetura do Windows indisponivel.'; return $result }
+    if (($target -eq 'arm64' -and $arch -ne 'arm64') -or ($target -eq 'x64' -and $arch -eq 'x86') -or
+        ($probe -eq 'vc' -and $target -eq 'x64' -and $arch -eq 'arm64') -or ($probe -in @('directx', 'msvc') -and $arch -eq 'arm64')) {
+        $result.status = 'not-applicable'; $result.detail = 'Este componente nao se aplica a esta arquitetura.'; return $result
+    }
+
+    try {
+        $versions = @()
+        $incomplete = $false
+        switch ($probe) {
+            'directx' {
+                $architectures = if ($arch -eq 'x64') { @('x64', 'x86') } else { @('x86') }
+                $result.evidence = @(foreach ($cpu in $architectures) {
+                    $directory = Get-BootstrapDependencySystemDirectory $cpu $arch
+                    foreach ($dll in @('d3dx9_43.dll', 'd3dx10_43.dll', 'd3dx11_43.dll', 'xinput1_3.dll', 'xaudio2_7.dll', 'xactengine3_7.dll')) {
+                        $path = Join-Path $directory $dll
+                        [pscustomobject]@{ architecture = $cpu; path = $path; present = [bool](Get-BootstrapDependencyFile $path) }
+                    }
+                })
+                $missing = @($result.evidence | Where-Object { -not $_.present })
+                $result.status = if (-not $missing.Count) { 'satisfied' } elseif ($missing.Count -eq $result.evidence.Count) { 'missing' } else { 'partial' }
+                $result.detail = if ($missing.Count) { 'DLLs legadas ausentes (' + $missing.Count + '/' + $result.evidence.Count + '): ' + (($missing | ForEach-Object { $_.architecture + ' ' + [IO.Path]::GetFileName($_.path) }) -join ', ') } else { 'DLLs legadas verificadas nas arquiteturas aplicaveis.' }
+                return $result
+            }
+            'vc' {
+                $key = "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\$target"
+                $views = if ($arch -eq 'x86') { @('Registry32') } elseif ($target -eq 'x64') { @('Registry64', 'Registry32') } else { @('Registry32', 'Registry64') }
+                $registrations = @(foreach ($view in $views) {
+                    $registration = Read-BootstrapDependencyRegistry -Key $key -View $view -Names @('Installed', 'Version', 'Major', 'Minor', 'Bld', 'Rbld')
+                    if ($registration -and $registration.Installed -eq 1) {
+                        $version = ConvertTo-BootstrapDependencyVersion $registration.Version
+                        if (-not $version -and $null -ne $registration.Major -and $null -ne $registration.Bld) {
+                            $version = ConvertTo-BootstrapDependencyVersion ("{0}.{1}.{2}.{3}" -f $registration.Major, $registration.Minor, $registration.Bld, $registration.Rbld)
+                        }
+                        [pscustomobject]@{ registryView = $view; version = $version; installed = $true }
+                    }
+                })
+                $registeredVersions = @($registrations | Where-Object version | ForEach-Object { $_.version } | Sort-Object -Descending)
+                $directory = Get-BootstrapDependencySystemDirectory $target $arch
+                $dlls = @('vcruntime140.dll', 'msvcp140.dll')
+                if ($target -eq 'x64') { $dlls += 'vcruntime140_1.dll' }
+                $files = @(foreach ($dll in $dlls) {
+                    $path = Join-Path $directory $dll
+                    $file = Get-BootstrapDependencyFile $path
+                    $version = if ($file) { ConvertTo-BootstrapDependencyVersion ([string]$file.VersionInfo.FileVersionRaw) }
+                    [pscustomobject]@{ path = $path; present = [bool]$file; version = $version }
+                })
+                $result.evidence = $registrations + $files
+                $present = @($files | Where-Object present)
+                $incomplete = (($registrations.Count -gt 0 -or $present.Count -gt 0) -and
+                    ($registeredVersions.Count -eq 0 -or $present.Count -lt $files.Count))
+                if ($registeredVersions.Count) { $versions = @($registeredVersions[0]) }
+                if (-not $incomplete -and $registeredVersions.Count) {
+                    $fileVersions = @($files | Where-Object version | ForEach-Object { $_.version })
+                    if ($fileVersions.Count -ne $files.Count) { throw 'Versao de DLL do Visual C++ indisponivel.' }
+                    $effective = @($fileVersions + $registeredVersions[0] | Sort-Object)[0]
+                    $versions = @($effective)
+                }
+            }
+            'framework' {
+                $key = 'SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full'
+                $entry = Read-BootstrapDependencyRegistry -Key $key -Names Release
+                if ($entry) {
+                    if ($null -eq $entry.Release) { throw 'Registro .NET Framework sem valor Release.' }
+                    $result.evidence = @([pscustomobject]@{ release = $entry.Release })
+                    $releases = [ordered]@{'533320'='4.8.1'; '528040'='4.8'; '461808'='4.7.2'; '461308'='4.7.1'; '460798'='4.7'; '394802'='4.6.2'; '394254'='4.6.1'; '393295'='4.6'; '379893'='4.5.2'; '378675'='4.5.1'; '378389'='4.5'}
+                    foreach ($release in $releases.Keys) {
+                        if ([int]$entry.Release -ge [int]$release) { $versions = @(ConvertTo-BootstrapDependencyVersion $releases[$release]); break }
+                    }
+                    if (-not $versions.Count) { throw 'Valor Release do .NET Framework fora da faixa reconhecida.' }
+                }
+            }
+            'webview' {
+                $key = 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+                $result.evidence = @(foreach ($hive in 'LocalMachine', 'CurrentUser') {
+                    $entry = Read-BootstrapDependencyRegistry -Key $key -Hive $hive -Names pv
+                    if ($entry) { [pscustomobject]@{ scope = $hive; version = (ConvertTo-BootstrapDependencyVersion $entry.pv) } }
+                })
+                $versions = @($result.evidence | Where-Object { $_.version -gt [version]'0.0.0.0' } | ForEach-Object { $_.version } | Sort-Object -Descending)
+                $incomplete = ($result.evidence.Count -gt 0 -and $versions.Count -eq 0)
+            }
+            'msvc' {
+                $vswhere = Get-BootstrapVsWherePath
+                if ($vswhere) {
+                    $query = Invoke-NativeCaptureWithLog -Exe $vswhere -Args @('-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath') -TimeoutMs 5000
+                    if ($query.ExitCode -ne 0) { throw "vswhere falhou (exit=$($query.ExitCode))." }
+                    $result.evidence = @(foreach ($path in ($query.StdOut -split '\r?\n' | Where-Object { $_.Trim() })) {
+                        $root = Join-Path $path.Trim() 'VC\Tools\MSVC'
+                        if (-not (Get-BootstrapDependencyFile $root)) { $incomplete = $true; continue }
+                        foreach ($toolset in Get-ChildItem -LiteralPath $root -Directory -ErrorAction Stop) {
+                            $version = ConvertTo-BootstrapDependencyVersion $toolset.Name
+                            if (-not $version) { continue }
+                            $bin = Join-Path $toolset.FullName 'bin\Hostx64'
+                            $complete = ([bool](Get-BootstrapDependencyFile (Join-Path $bin 'x64\cl.exe')) -and
+                                [bool](Get-BootstrapDependencyFile (Join-Path $bin 'x86\cl.exe')))
+                            [pscustomobject]@{ version = $version; complete = $complete; path = $toolset.FullName }
+                        }
+                    })
+                }
+                $versions = @($result.evidence | Where-Object complete | ForEach-Object { $_.version } | Sort-Object -Descending)
+                $incomplete = $incomplete -or ($result.evidence.Count -gt 0 -and -not $versions.Count)
+            }
+            default {
+                $result.evidence = @(Get-BootstrapDotNetDependencyEvidence -Definition $Definition -WindowsArchitecture $arch)
+                if ($probe -eq 'desktop') {
+                    $runtime = [pscustomobject]@{ DependencyProbe = 'runtime'; DependencyArchitecture = $target; DependencyMajor = $Definition.DependencyMajor }
+                    $core = @(Get-BootstrapDotNetDependencyEvidence -Definition $runtime -WindowsArchitecture $arch | Where-Object complete)
+                    foreach ($item in $result.evidence) {
+                        if (-not @($core | Where-Object { $_.version -eq $item.version }).Count) { $item.complete = $false; $item.missing += 'Microsoft.NETCore.App' }
+                    }
+                }
+                $versions = @($result.evidence | Where-Object complete | ForEach-Object { $_.version } | Sort-Object -Descending)
+                $incomplete = ($result.evidence.Count -gt 0 -and $versions.Count -eq 0)
+                if ($minimum -and @($result.evidence | Where-Object { -not $_.complete -and $_.version -ge $minimum }).Count) { $incomplete = $true }
+            }
+        }
+        if ($versions.Count) { $result.version = $versions[0].ToString() }
+        $satisfying = @($versions | Where-Object {
+            if ($ExactVersion) { $_ -eq $minimum }
+            elseif ($SdkBand) { $_ -ge $minimum -and $_.Minor -eq $minimum.Minor -and [Math]::Floor($_.Build / 100) -eq [Math]::Floor($minimum.Build / 100) }
+            else { -not $minimum -or $_ -ge $minimum }
+        })
+        if ($satisfying.Count -and -not ($probe -eq 'vc' -and $incomplete)) {
+            $result.version = $satisfying[0].ToString()
+            $result.status = 'satisfied'; $result.detail = 'Evidencia local atende ao requisito.'
+        } elseif ($incomplete) {
+            $result.status = 'partial'; $result.detail = 'Registro ou arquivos presentes, mas a instalacao esta incompleta. Veja as evidencias.'
+        } elseif ($versions.Count) {
+            $result.status = 'insufficient'; $result.detail = "Versao $($result.version) encontrada. Requisito: $($result.minimumVersion)."
+        } else {
+            $result.status = 'missing'; $result.detail = 'Componente compartilhado ausente.'
+        }
+    } catch {
+        $result.status = 'unknown'; $result.detail = "Consulta inconclusiva: $($_.Exception.Message)"
+    }
+    return $result
+}
+
+function Get-BootstrapCodexRuntimeComponent {
+    $catalog = Get-BootstrapComponentCatalog
+    $name = @($catalog['codex-installer'].DependsOn | Where-Object { $catalog[$_].Kind -eq 'windows-dependency' })[0]
+    return $catalog[$name]
+}
+
+function Assert-BootstrapDependencyInstallerResult {
+    param([int]$ExitCode, $After)
+
+    $hex = '{0:X8}' -f [int]$exitCode
+    $reason = ''; $action = 'retry'; $message = ''
+    switch ($hex) {
+        { $_ -in @('00000BC2', '00000669', '8A150109', '8A15010A', '8A15010B') } {
+            $reason = 'pending-reboot-msi'; $action = 'restart-required'; $message = 'Instalador pediu reinicio. Reinicie e confira o requisito.'; break
+        }
+        { $_ -in @('00000652', '8A150102') } { $reason = 'winget-msi-busy'; $message = 'MSI ocupado. Aguarde o outro instalador.'; break }
+        { $_ -in @('8A150008', '8A150107', '80072EE7', '80072EFD', '800704CF') } { $reason = 'download-unavailable'; $message = 'Download indisponivel. Confira conexao e acesso ao WinGet.'; break }
+        { $_ -in @('000004C7', '00000642', '8A15010C') } { $reason = 'cancelled'; $message = 'Instalacao cancelada.'; break }
+        '0000007C' { $reason = 'installer-timeout'; $message = 'Instalador excedeu o tempo. Confira os processos antes de retomar.'; break }
+    }
+    if (-not $reason -and $exitCode -ne 0 -and $hex -notin @('8A150061', '8A15010D')) {
+        $reason = 'installer-failed'; $message = 'Falha no instalador. Confira o log do PhaseZero e do WinGet.'
+    }
+    if (-not $reason -and $After -and $After.status -ne 'satisfied') {
+        $reason = 'post-install-unverified'; $action = 'scan-again'; $message = 'O instalador encerrou, mas o requisito continua sem confirmacao.'
+    }
+    if ($reason) {
+        $detail = if ($After) { $After.detail } else { '' }
+        $exception = New-BootstrapBlockedException -Kind $reason -Action $action -Message "$message ($hex) $detail"
+        $exception.Data['DependencyExitCode'] = $exitCode
+        throw $exception
+    }
+}
+
+function Ensure-BootstrapWindowsDependency {
+    param($Definition, [string]$WingetPath, [string]$MinimumVersion, [switch]$ExactVersion, [switch]$SdkBand)
+
+    $mutex = [Threading.Mutex]::new($false, 'Global\PhaseZeroWindowsDependencies')
+    $locked = $false
+    try {
+        try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
+        if (-not $locked) { throw (New-BootstrapBlockedException -Kind 'winget-msi-busy' -Action 'retry' -Message 'Outra fila de dependencias do PhaseZero esta em execucao.') }
+        $probeArgs = @{ Definition = $Definition; MinimumVersion = $MinimumVersion; ExactVersion = $ExactVersion; SdkBand = $SdkBand }
+        $before = Get-BootstrapWindowsDependencyStatus @probeArgs
+        if ($before.status -eq 'satisfied') { return $before }
+        if ($before.status -eq 'not-applicable') { throw $before.detail }
+        if ($before.status -eq 'unknown') { throw (New-BootstrapBlockedException -Kind 'dependency-unknown' -Action 'scan-again' -Message $before.detail) }
+        if (-not $before.packageId -and $Definition.DependencyProbe -ne 'msvc') { throw (New-BootstrapBlockedException -Kind 'manual-requirement' -Action 'official-installation' -Message ("Use a fonte oficial: " + $before.officialUrl)) }
+        if (-not (Test-IsAdmin)) { throw (New-BootstrapBlockedException -Kind 'elevation-required' -Action 'rerun-elevated' -Message 'A instalacao compartilhada requer permissao de administrador.') }
+        $restart = @(Get-BootstrapPendingRebootReasons)
+        if ($restart.Count) { throw (New-BootstrapBlockedException -Kind 'pending-reboot-msi' -Action 'restart-required' -Message 'Reinicie o Windows e repita a verificacao.' -Reasons $restart) }
+        if (-not $WingetPath) { $WingetPath = Resolve-CommandPath -Name winget }
+        if (-not $WingetPath) { throw (New-BootstrapBlockedException -Kind 'winget-missing' -Action 'install-app-installer' -Message 'Atualize o Instalador de Aplicativos da Microsoft Store e tente novamente.') }
+        if (-not (Wait-BootstrapWingetMsiIdle -TimeoutSeconds 10 -HeartbeatSeconds 10)) {
+            throw (New-BootstrapBlockedException -Kind 'winget-msi-busy' -Action 'restart-or-close-installers' -Message 'Outra instalacao esta em andamento. Aguarde e tente novamente.')
+        }
+        if ($Definition.DependencyProbe -eq 'msvc') {
+            Assert-BootstrapDiskSpace -RequiredGB 8
+            $null = Ensure-BootstrapMsvcBuildEnv -State @{ Winget = $WingetPath; DryRun = $false; DependencyInstallAuthorized = $true }
+            $after = Get-BootstrapWindowsDependencyStatus @probeArgs
+            if ($after.status -ne 'satisfied') { throw $after.detail }
+            return $after
+        }
+        # Force runs the vendor installer again for incomplete registrations without uninstalling any runtime.
+        $arguments = @('install', '--id', $before.packageId, '--exact', '--source', 'winget', '--silent',
+            '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity', '--force')
+        if ($Definition.InstallerArchitecture) { $arguments += @('--architecture', $Definition.InstallerArchitecture) }
+        if ($Definition.InstallerType) { $arguments += @('--installer-type', $Definition.InstallerType) }
+        if ($Definition.DependencyProbe -ne 'directx') { $arguments += @('--scope', 'machine') }
+        if (($ExactVersion -or $SdkBand) -and $Definition.DependencyMajor) { $arguments += @('--version', ([version]$MinimumVersion).ToString(3)) }
+        Write-Log ("Windows dependency {0}: {1}, running {2}" -f $before.id, $before.status, $before.packageId)
+        $exitCode = Invoke-NativeWithLog -Exe $WingetPath -Args $arguments
+        $after = Get-BootstrapWindowsDependencyStatus @probeArgs
+        Assert-BootstrapDependencyInstallerResult -ExitCode $exitCode -After $after
+        return $after
+    } finally {
+        if ($locked) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
 function Get-BootstrapComponentCatalog {
     $catalog = [ordered]@{}
 
@@ -15923,7 +16280,7 @@ function Get-BootstrapComponentCatalog {
     $catalog['python-core'] = New-BootstrapComponentDefinition -Name 'python-core' -Description 'Python 3.13, PATH e uv.' -DependsOn @('system-core') -Optional $false -Kind 'python-core' -EstimatedSizeGB 1.5 -RequiresNetwork $true -VersionCheckCommand 'python --version'
     $catalog['go-core'] = New-BootstrapComponentDefinition -Name 'go-core' -Description 'Go toolchain para proxies locais em Go.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; PreferUserScope = $false; Id = 'GoLang.Go'; DisplayName = 'Go'; ProbePaths = @("$env:ProgramFiles\Go\bin\go.exe", "${env:LOCALAPPDATA}\Programs\Go\bin\go.exe") } -EstimatedSizeGB 0.8 -RequiresNetwork $true -VersionCheckCommand 'go version'
     $catalog['java-core'] = New-BootstrapComponentDefinition -Name 'java-core' -Description 'Temurin JDK 17.' -DependsOn @('system-core') -Optional $false -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'EclipseAdoptium.Temurin.17.JDK'; DisplayName = 'Java JDK (Temurin 17)'; ProbePaths = @("$env:ProgramFiles\Eclipse Adoptium\jdk-17*\bin\java.exe") } -EstimatedSizeGB 2.0 -RequiresNetwork $true -VersionCheckCommand 'java -version'
-    $catalog['dotnet-core'] = New-BootstrapComponentDefinition -Name 'dotnet-core' -Description 'Microsoft .NET SDK 8 (LTS), PATH e verificacao dotnet --list-sdks. Palavras-chave na busca da UI: dotnet, dotnet core, net8, sdk8, winget Microsoft.DotNet.SDK.8.' -DependsOn @('system-core') -Optional $false -Kind 'dotnet-core' -EstimatedSizeGB 1.2 -RequiresNetwork $true -VersionCheckCommand 'dotnet --list-sdks'
+    $catalog['dotnet-core'] = New-BootstrapComponentDefinition -Name 'dotnet-core' -Description 'Microsoft .NET SDK 8 (compatibilidade), PATH e verificacao dotnet --list-sdks. Palavras-chave na busca da UI: dotnet, dotnet core, net8, sdk8, winget Microsoft.DotNet.SDK.8.' -DependsOn @('system-core') -Optional $false -Kind 'dotnet-core' -EstimatedSizeGB 1.2 -RequiresNetwork $true -VersionCheckCommand 'dotnet --list-sdks'
     $catalog['imagemagick'] = New-BootstrapComponentDefinition -Name 'imagemagick' -Description 'ImageMagick.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'ImageMagick.ImageMagick'; DisplayName = 'ImageMagick'; ProbePaths = @("$env:ProgramFiles\ImageMagick-*\magick.exe", "$env:ProgramFiles\ImageMagick\magick.exe") }
     $catalog['sevenzip'] = New-BootstrapComponentDefinition -Name 'sevenzip' -Description '7-Zip e ajuste de PATH.' -DependsOn @('system-core') -Kind 'sevenzip' -Data @{ ProbePaths = @("$env:ProgramFiles\7-Zip\7z.exe", "${env:ProgramFiles(x86)}\7-Zip\7z.exe") }
     $catalog['powershell'] = New-BootstrapComponentDefinition -Name 'powershell' -Description 'PowerShell 7.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'Microsoft.PowerShell'; DisplayName = 'PowerShell 7'; AppxPackageNames = @('Microsoft.PowerShell'); ProbePaths = @("$env:ProgramFiles\PowerShell\7\pwsh.exe", "${env:ProgramFiles(x86)}\PowerShell\7\pwsh.exe") }
@@ -16102,7 +16459,7 @@ function Get-BootstrapComponentCatalog {
     # --- Emulacao compartilhada com o HOME do Steam Deck (Btrfs) -------------------------------
     $catalog['steamdeck-home-detect'] = New-BootstrapComponentDefinition -Name 'steamdeck-home-detect' -Description 'Descobre e valida (read-only) o HOME do Steam Deck montado via WinBtrfs e expoe o root de emulacao.' -Optional $true -DependsOn @('winbtrfs') -Kind 'builtin' -Data @{ Stage = 'verify'; Provisioning = 'builtin'; ValueReason = 'Permite reusar ROMs/BIOS/midia/saves do SteamOS sem duplicar no Windows.'; sharingPolicy = 'deck-home-source-of-truth'; riskLevel = 'safe' }
     $catalog['emulation-deck-shared-media'] = New-BootstrapComponentDefinition -Name 'emulation-deck-shared-media' -Description 'Canonicaliza a midia de scraping (storage/downloaded_media) e cria links de compatibilidade, de forma nao-destrutiva.' -Optional $true -DependsOn @('steamdeck-home-detect') -Kind 'builtin' -Data @{ Stage = 'config'; Provisioning = 'builtin'; ValueReason = 'Maximiza compatibilidade de scrapers entre frontends sem mover/apagar a midia existente.'; sharingPolicy = 'canonical-media-with-compat-links'; riskLevel = 'safe' }
-    $catalog['msvc-build-env'] = New-BootstrapComponentDefinition -Name 'msvc-build-env' -Description 'Toolchain de build MSVC (cl.exe via vcvars64): localiza por vswhere, instala VS Build Tools (VC.Tools.x86.x64) se ausente e ativa o ambiente para builds nativos (ex.: wheels do aider).' -Optional $true -DependsOn @('system-core') -Kind 'builtin' -RequiresNetwork $true -Data @{ Stage = 'payload'; Provisioning = 'builtin'; ValueReason = 'Habilita compilacao de dependencias nativas (cl.exe/INCLUDE/LIB) para uv tool/pip; corrige aider e afins que falham sem o compilador.'; riskLevel = 'safe' }
+    $catalog['msvc-build-env'] = New-BootstrapComponentDefinition -Name 'msvc-build-env' -Description 'Toolchain de build MSVC (cl.exe via vcvars64): localiza por vswhere, instala VS Build Tools (VC.Tools.x86.x64) se ausente e ativa o ambiente para builds nativos (ex.: wheels do aider).' -Optional $true -DependsOn @('system-core') -Kind 'builtin' -RequiresNetwork $true -Data @{ Stage = 'payload'; Provisioning = 'builtin'; ValueReason = 'Habilita compilacao de dependencias nativas (cl.exe/INCLUDE/LIB) para uv tool/pip; corrige aider e afins que falham sem o compilador.'; riskLevel = 'safe'; DisplayName = 'MSVC Build Tools (x86/x64)'; DependencyProbe = 'msvc'; DependencyArchitecture = 'x64'; MinimumVersion = '14.0'; LargeDownload = $true; OfficialUrl = 'https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio'; Id = 'Microsoft.VisualStudio.2022.BuildTools'; InstallerArchitecture = ''; InstallerType = '' }
     $catalog['emulation-frontend-pointing'] = New-BootstrapComponentDefinition -Name 'emulation-frontend-pointing' -Description 'Aponta ES-DE/Pegasus/Playnite para os roots compartilhados (Deck ou local), sem duplicar dados.' -Optional $true -DependsOn @('steamdeck-home-detect') -Kind 'builtin' -Data @{ Stage = 'config'; Provisioning = 'builtin'; ValueReason = 'Os frontends Windows leem ROMs/midia do HOME do Deck, sem copia.'; sharingPolicy = 'pointer-only'; riskLevel = 'safe' }
     $catalog['emulation-desktop-shortcuts'] = New-BootstrapComponentDefinition -Name 'emulation-desktop-shortcuts' -Description 'Cria a pasta "Emulacao" no Desktop com atalhos para emuladores/frontends instalados e icone proprio.' -Optional $true -DependsOn @('steamdeck-home-detect') -Kind 'builtin' -Data @{ Stage = 'verify'; Provisioning = 'builtin'; ValueReason = 'Acesso rapido a toda a stack de emulacao do perfil.'; riskLevel = 'safe' }
 
@@ -16143,8 +16500,7 @@ function Get-BootstrapComponentCatalog {
     # vcpp-redist: o runtime VC++ instala as DLLs em System32 (Side-by-Side merge), NAO em Program Files.
     # ProbePaths apontando para Program Files causava ghost-recovery destrutiva (uninstall) de um runtime
     # critico do sistema. Mesmas DLLs sao validadas em Get-BootstrapVcppRuntimeStatus.
-    $catalog['vcpp-redist'] = New-BootstrapComponentDefinition -Name 'vcpp-redist' -Description 'Visual C++ Redistributable 2015+ x64.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'Microsoft.VCRedist.2015+.x64'; DisplayName = 'Microsoft Visual C++ Redistributable 2015+ x64'; Stage = 'payload'; Provisioning = 'winget'; ValueReason = 'Evita falhas por runtime ausente em launchers, overlays e jogos.'; ProbePaths = @("$env:SystemRoot\System32\vcruntime140.dll", "$env:SystemRoot\System32\vcruntime140_1.dll", "$env:SystemRoot\System32\msvcp140.dll") }
-    $catalog['directx-runtime'] = New-BootstrapComponentDefinition -Name 'directx-runtime' -Description 'DirectX runtime legado para jogos e ferramentas.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'Microsoft.DirectX'; DisplayName = 'Microsoft DirectX Runtime'; Stage = 'payload'; Provisioning = 'winget'; ValueReason = 'Fecha dependencias comuns de jogos Windows em instalacoes novas.'; ProbePaths = @("$env:SystemRoot\System32\d3d12.dll", "$env:SystemRoot\System32\d3d11.dll") }
+    Add-BootstrapWindowsDependencyComponents -Catalog $catalog
     $catalog['sunshine'] = New-BootstrapComponentDefinition -Name 'sunshine' -Description 'Servidor de game streaming.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'LizardByte.Sunshine'; DisplayName = 'Sunshine'; Stage = 'payload'; Provisioning = 'winget'; ValueReason = 'Transforma o Deck dockado em host de streaming sem abrir portas manualmente.'; ProbePaths = @("${env:ProgramFiles(x86)}\Sunshine\gamesunshine.exe", "$env:ProgramFiles\Sunshine\gamesunshine.exe") }
     $catalog['moonlight'] = New-BootstrapComponentDefinition -Name 'moonlight' -Description 'Cliente para streaming Sunshine/GameStream.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'MoonlightGameStreamingProject.Moonlight'; DisplayName = 'Moonlight'; Stage = 'payload'; Provisioning = 'winget'; ValueReason = 'Facilita testes e acesso remoto ao ecossistema do Deck.'; ProbePaths = @("${env:LOCALAPPDATA}\Programs\Moonlight Game Streaming Project\Moonlight\Moonlight.exe", "$env:ProgramFiles\Moonlight Game Streaming Project\Moonlight\Moonlight.exe") }
     $catalog['tailscale'] = New-BootstrapComponentDefinition -Name 'tailscale' -Description 'VPN mesh para acesso remoto seguro.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'Tailscale.Tailscale'; DisplayName = 'Tailscale'; Stage = 'payload'; Provisioning = 'winget'; ValueReason = 'Conecta o Deck remotamente sem expor servicos publicamente.'; ProbePaths = @("$env:ProgramFiles\Tailscale\tailscale.exe", "${env:LOCALAPPDATA}\Programs\Tailscale\tailscale.exe") }
@@ -16251,7 +16607,7 @@ function Get-BootstrapProfileCatalog {
     # midia/saves do SteamOS sem duplicar, aponta os frontends Windows e cria a pasta de atalhos.
     # Opt-in; nunca entra em steamdeck-recommended/steamdeck-full por padrao.
     $catalog['emulation-steamdeck-shared'] = New-BootstrapProfileDefinition -Name 'emulation-steamdeck-shared' -Description 'Emulacao Windows reusando o HOME do Steam Deck (Btrfs): deteccao, midia canonica, frontends apontados e atalhos no Desktop.' -Items @('winbtrfs', 'steamdeck-home-detect', 'emulation-deck-shared-media', 'emulation-shared', 'emulation-frontend-pointing', 'emulation-desktop-shortcuts')
-    $catalog['steamdeck-essentials'] = New-BootstrapProfileDefinition -Name 'steamdeck-essentials' -Description 'Base handheld do Steam Deck em Windows.' -Items @('base', 'steam', 'playnite', 'heroic', 'rtss', 'special-k', 'vcpp-redist', 'directx-runtime', 'vigembus-runtime', 'steamdeck-tools-runtime', 'steamdeck-tools', 'autohotkey-runtime')
+    $catalog['steamdeck-essentials'] = New-BootstrapProfileDefinition -Name 'steamdeck-essentials' -Description 'Base handheld do Steam Deck em Windows.' -Items @('base', 'steam', 'playnite', 'heroic', 'rtss', 'special-k', 'vcpp-redist', 'vcpp-redist-x86', 'directx-runtime', 'vigembus-runtime', 'steamdeck-tools-runtime', 'steamdeck-tools', 'autohotkey-runtime')
     $catalog['steamdeck-input'] = New-BootstrapProfileDefinition -Name 'steamdeck-input' -Description 'Perfis de input, hotkeys e automacao de controle.' -Items @('steamdeck-settings', 'steamdeck-automation', 'steamdeck-tweaks', 'console-session-manager', 'dev-session-manager', 'display-classifier', 'recovery-hotkeys', 'steamdeck-input-conflict-audit', 'console-readiness-audit')
     $catalog['steamdeck-input-advanced'] = New-BootstrapProfileDefinition -Name 'steamdeck-input-advanced' -Description 'Stacks alternativos opt-in: Handheld Companion e GlosSI.' -Items @('handheld-companion', 'glossi', 'steamdeck-input-conflict-audit')
     $catalog['steamdeck-power'] = New-BootstrapProfileDefinition -Name 'steamdeck-power' -Description 'Gestao de energia e tuning para bateria/dock.' -Items @('powertoys', 'quickcpu', 'fan-control', 'mem-reduct')
@@ -32467,7 +32823,12 @@ function Invoke-BootstrapComponent {
         [Parameter(Mandatory = $true)][hashtable]$State
     )
 
-    if ($State.Completed.ContainsKey($Name)) { return }
+    if ($State.Completed.ContainsKey($Name)) {
+        $completedDefinition = (Get-BootstrapComponentCatalog)[$Name]
+        if (-not $completedDefinition -or $completedDefinition.Kind -ne 'windows-dependency') { return }
+        if (-not $State.ContainsKey('DependencyRequirements') -and (Get-BootstrapWindowsDependencyStatus -Definition $completedDefinition).status -eq 'satisfied') { return }
+        [void]$State.Completed.Remove($Name)
+    }
 
     $catalog = Get-BootstrapComponentCatalog
     $componentDef = $catalog[$Name]
@@ -32504,6 +32865,14 @@ function Invoke-BootstrapComponent {
             Ensure-BootstrapSystemCore -State $State
             Ensure-WingetPackage -WingetPath $State.Winget -Id '7zip.7zip' -DisplayName '7-Zip' -AllowFailureWhenNotAdmin $true
             Ensure-7ZipOnPath
+        }
+        'windows-dependency' {
+            $options = @{}
+            if ($State.ContainsKey('DependencyRequirements') -and $State.DependencyRequirements.ContainsKey($Name)) {
+                $requirement = $State.DependencyRequirements[$Name]
+                $options = @{ MinimumVersion = $requirement.version; ExactVersion = ($requirement.policy -eq 'exact'); SdkBand = ($requirement.policy -eq 'sdk-band') }
+            }
+            Ensure-BootstrapWindowsDependency -Definition $componentDef -WingetPath ([string]$State.Winget) @options | Out-Null
         }
         'winget' {
             Ensure-BootstrapSystemCore -State $State
@@ -34804,7 +35173,8 @@ function Ensure-BootstrapMsvcBuildEnv {
 
     $installPath = Get-BootstrapMsvcInstallationPath
     $installedNow = $false
-    if ([string]::IsNullOrWhiteSpace($installPath)) {
+    $assisted = $State.ContainsKey('DependencyInstallAuthorized') -and $State.DependencyInstallAuthorized
+    if ([string]::IsNullOrWhiteSpace($installPath) -or $assisted) {
         if ([bool]$State.DryRun) {
             Write-Log 'msvc-build-env: (dry-run) instalaria Microsoft.VisualStudio.2022.BuildTools (VC.Tools.x86.x64) e importaria vcvars64.'
             return [ordered]@{ status = 'planned'; toolsetPath = ''; installedNow = $false; envImported = $false; dryRun = $true }
@@ -34812,7 +35182,7 @@ function Ensure-BootstrapMsvcBuildEnv {
         # SEGURANCA: a instalacao do VS Build Tools e pesada (varios GB) e muta o host. NUNCA roda em
         # library mode (testes) e so roda quando explicitamente liberada via PHASEZERO_ALLOW_MSVC_BUILDTOOLS_INSTALL.
         # Sem opt-in, reporta guia acionavel em vez de instalar sozinho.
-        $allowInstall = (-not $BootstrapUiLibraryMode) -and ('1','true','yes' -contains ([string]$env:PHASEZERO_ALLOW_MSVC_BUILDTOOLS_INSTALL).ToLowerInvariant())
+        $allowInstall = $assisted -or ((-not $BootstrapUiLibraryMode) -and ('1','true','yes' -contains ([string]$env:PHASEZERO_ALLOW_MSVC_BUILDTOOLS_INSTALL).ToLowerInvariant()))
         if (-not $allowInstall) {
             $cmd = 'winget install -e --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --includeRecommended"'
             Write-Log ("msvc-build-env: toolset VC ausente. Instalacao automatica desligada por seguranca; defina PHASEZERO_ALLOW_MSVC_BUILDTOOLS_INSTALL=1 para liberar, ou rode manualmente: {0}" -f $cmd) 'WARN'
@@ -34825,7 +35195,9 @@ function Ensure-BootstrapMsvcBuildEnv {
             Write-Log 'msvc-build-env: toolset VC ausente; instalando Microsoft.VisualStudio.2022.BuildTools (VC.Tools.x86.x64) (opt-in liberado)...'
             $override = '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --includeRecommended'
             $wingetArgs = @('install', '-e', '--id', 'Microsoft.VisualStudio.2022.BuildTools', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity', '--override', $override)
-            $exit = Invoke-NativeWithRetry -Exe $winget -Args $wingetArgs -OperationName 'VS Build Tools (VC.Tools) via winget' -MaxAttempts 2 -InitialDelaySeconds 3 -SoftSuccessExitCodes $script:WingetSoftSuccessExitCodes
+            if ($assisted) { $wingetArgs += @('--source', 'winget', '--force') }
+            $exit = Invoke-NativeWithRetry -Exe $winget -Args $wingetArgs -OperationName 'VS Build Tools (VC.Tools) via winget' -MaxAttempts 2 -InitialDelaySeconds 3 -SoftSuccessExitCodes $script:WingetSoftSuccessExitCodes -NonRetryableExitCodes @(3010, 1641, 1618, 1602, 124, -1978334967, -1978334974)
+            if ($assisted -and $exit -ne 0) { Assert-BootstrapDependencyInstallerResult -ExitCode $exit }
             $installedNow = ($exit -eq 0)
             if ($State.ContainsKey('Changes')) {
                 try { Register-BootstrapChange -State $State -Type Package -Target 'Microsoft.VisualStudio.2022.BuildTools' -Name 'VS Build Tools (VC.Tools.x86.x64)' -OldValue $null -NewValue @{ Source = 'winget' } -Operation 'winget-install' -RollbackAction 'winget-uninstall' -Reversible 'partial' -Component 'msvc-build-env' } catch { Write-Verbose $_.Exception.Message }
@@ -36071,6 +36443,12 @@ function Invoke-BootstrapProfileMode {
     Save-BootstrapChangeManifest -State $state
 
     # Preencher componentes ja concluidos se estiver em modo Resume
+    $resumeCatalog = Get-BootstrapComponentCatalog
+    $completedFromCheckpoint = @($completedFromCheckpoint | Where-Object {
+        $definition = $resumeCatalog[[string]$_]
+        $definition -and ($definition.Kind -ne 'windows-dependency' -or
+            (Get-BootstrapWindowsDependencyStatus -Definition $definition).status -eq 'satisfied')
+    })
     foreach ($comp in $completedFromCheckpoint) {
         $state.Completed[$comp] = @{ Status = 'Resumed'; Timestamp = (Get-Date).ToString('o') }
     }

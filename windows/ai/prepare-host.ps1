@@ -1,13 +1,21 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 [CmdletBinding()]
-param([ValidateSet('Menu','InstallMemory','InstallApps','GitHub','Status')][string]$Action = 'Menu', [switch]$AllowLargeDownloads, [switch]$UiProbe)
+param(
+    [ValidateSet('Menu','InstallMemory','InstallApps','GitHub','Status','Dependencies','DependencyStatus','InstallDependencies')][string]$Action = 'Menu',
+    [switch]$AllowLargeDownloads, [switch]$UiProbe, [string]$DependencyIds, [string]$RequirementFile,
+    [ValidateSet('x64','x86','arm64')][string]$ApplicationArchitecture, [switch]$OnlyRequired,
+    [string]$ExpectedTarget, [string]$ExpectedCaller, [string]$ExpectedRequirementHash
+)
 $ErrorActionPreference = 'Stop'
+$dependencyAction = $Action
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Execute este preparador dentro do Windows.' }
 # PS 5.1 clones variable validation attributes into UI closures. The library's
 # empty rotation default is not in its ValidateSet; use its valid no-op value.
 . (Join-Path $repoRoot 'bootstrap-tools.ps1') -BootstrapUiLibraryMode -RotateSecretsSchedule none
 . (Join-Path $PSScriptRoot 'host-instructions.ps1')
+. (Join-Path $PSScriptRoot 'windows-dependencies.ps1')
+$Action = $dependencyAction
 $packages = Join-Path $repoRoot 'packages'
 $env:PZ_MEMORY_PACKAGES = $packages
 $archive = Join-Path $packages 'ai-memory-windows-x86_64.zip'
@@ -19,11 +27,17 @@ function Update-PhaseZeroHostPath {
         if ((Test-Path -LiteralPath $directory) -and $env:PATH.Split(';') -notcontains $directory) { $env:PATH = $directory + ';' + $env:PATH }
     }
 }
-Update-PhaseZeroHostPath
+if ($Action -notin @('DependencyStatus','Dependencies','InstallDependencies')) { Update-PhaseZeroHostPath }
 
-if ($Action -ne 'Menu') {
+if ($Action -notin @('Menu','Dependencies')) {
     try {
-        if ($Action -eq 'InstallMemory') {
+        if ($Action -eq 'DependencyStatus') {
+            Get-PhaseZeroDependencyReport -RequirementFile $RequirementFile -ApplicationArchitecture $ApplicationArchitecture -OnlyRequired:$OnlyRequired | ConvertTo-Json -Depth 12
+        } elseif ($Action -eq 'InstallDependencies') {
+            $receipt = Invoke-PhaseZeroDependencySelection -Selected @($DependencyIds -split ',' | Where-Object { $_ }) -RequirementFile $RequirementFile -ApplicationArchitecture $ApplicationArchitecture -AllowLargeDownloads:$AllowLargeDownloads -ExpectedTarget $ExpectedTarget -ExpectedCaller $ExpectedCaller -ExpectedRequirementHash $ExpectedRequirementHash
+            $receipt | ConvertTo-Json -Depth 12
+            if ($receipt.state -ne 'verified') { exit 2 }
+        } elseif ($Action -eq 'InstallMemory') {
             Set-PhaseZeroHostInstructions | Out-Null
             $winget = Resolve-CommandPath -Name winget
             if (-not $winget) { throw 'Atualize o Instalador de Aplicativos pela Microsoft Store para obter o WinGet.' }
@@ -58,6 +72,9 @@ if ($Action -ne 'Menu') {
                 Ensure-CodexInstaller -WingetPath $winget
                 Ensure-ClaudeCode -WingetPath $winget
             } else {
+                $runtime = Get-BootstrapCodexRuntimeComponent
+                $dependency = Get-BootstrapWindowsDependencyStatus -Definition $runtime
+                if ($dependency.status -ne 'satisfied') { throw ('Codex Desktop requer ' + $dependency.label + '. Abra Dependencias de aplicativos e projetos. ' + $dependency.detail) }
                 # Large payloads remain manual unless the caller explicitly authorizes them.
                 $desktopInstaller = Join-Path $packages 'ChatGPTInstaller.exe'
                 if (Test-Path -LiteralPath $desktopInstaller) {
@@ -81,6 +98,11 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 . (Join-Path $PSScriptRoot 'memory-ui.ps1')
+. (Join-Path $PSScriptRoot 'dependencies-ui.ps1')
+if ($Action -eq 'Dependencies') {
+    Show-PhaseZeroDependenciesWindow -EntryPoint $PSCommandPath -UiProbe:$UiProbe
+    return
+}
 $window = New-Object System.Windows.Window
 $window.Title = 'PhaseZero - Codex, Claude e memoria'
 $window.Width = 650; $window.Height = 590; $window.MinWidth = 480; $window.MinHeight = 460
@@ -142,6 +164,9 @@ Add-PhaseZeroHostButton '2. Instalar Codex Desktop e Claude Code' { & $run 'Inst
 Add-PhaseZeroHostButton '3. Entrar no GitHub' { & $run 'GitHub' }.GetNewClosure()
 Add-PhaseZeroHostButton '4. Memoria - recuperar, GitHub e sincronizacao' {
     Show-PhaseZeroMemoryWindow -Owner $window -RepoRoot $repoRoot
+}.GetNewClosure()
+Add-PhaseZeroHostButton 'Dependências de aplicativos e projetos' {
+    Show-PhaseZeroDependenciesWindow -Owner $window -EntryPoint $hostScript
 }.GetNewClosure()
 Add-PhaseZeroHostButton 'Estado da memoria' { & $run 'Status' }.GetNewClosure()
 Add-PhaseZeroHostButton 'Guia e destino de recuperacao' {

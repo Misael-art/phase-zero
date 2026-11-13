@@ -19,6 +19,8 @@ def test_installed_runtime_runs_canonical_plan_and_excludes_private_state(tmp_pa
     package.build(output)
     manifest = json.loads((output / "runtime-manifest.json").read_text())
     assert "windows/ai/prepare-host.ps1" in manifest["files"]
+    assert "windows/ai/windows-dependencies.ps1" in manifest["files"]
+    assert "windows/ai/dependencies-ui.ps1" in manifest["files"]
     assert "windows/ai/host-instructions.ps1" in manifest["files"]
     assert "assets/ai/host-resource-policy.md" in manifest["files"]
     assert "linux/ai/windows_credential_store.py" in manifest["files"]
