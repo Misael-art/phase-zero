@@ -158,8 +158,12 @@ try {
         if ((Get-BootstrapWindowsDependencyStatus $vc64).status -ne 'satisfied') { throw 'Codex checked before its redistributable' }
         return @{ installed = $true }
     }
+    Ensure-PhaseZeroHostCodexRuntime
     Ensure-CodexInstaller -WingetPath 'fixture-winget'
-    Assert-Equal $script:fixtureState.Runs.Count ($runs + 1) 'simplified Codex installs its dependency'
+    Assert-Equal $script:fixtureState.Runs.Count ($runs + 1) 'simplified Codex installs its dependency exactly once'
+    $script:fixtureState.Files.Remove((Join-Path (Join-Path $fixture x64) 'vcruntime140_1.dll'))
+    Ensure-CodexInstaller -WingetPath 'fixture-winget'
+    Assert-Equal $script:fixtureState.Runs.Count ($runs + 2) 'direct Codex entry also repairs its dependency'
     Write-Output "PASS: Windows dependency probes, requirements, installers and recovery (PowerShell $($PSVersionTable.PSVersion))."
 } finally {
     $env:WINDIR = $oldWindows

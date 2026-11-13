@@ -204,7 +204,8 @@ function Invoke-PhaseZeroDependencySelection {
                     if ($definition.Kind -eq 'windows-dependency') {
                         Invoke-BootstrapComponent -Name $name -State $state
                     } else {
-                        $null = Ensure-BootstrapWindowsDependency -Definition $definition -WingetPath $state.Winget
+                        $requiredVersion = if ($requirements.ContainsKey($name)) { $requirements[$name].version } else { '' }
+                        $null = Ensure-BootstrapWindowsDependency -Definition $definition -WingetPath $state.Winget -MinimumVersion $requiredVersion
                     }
                 }
                 $after = Get-PhaseZeroDependencyStatus -Definition $definition -Requirements $requirements
@@ -228,4 +229,47 @@ function Invoke-PhaseZeroDependencySelection {
         if ($locked) { $mutex.ReleaseMutex() }
         $mutex.Dispose()
     }
+}
+
+function Start-PhaseZeroDependencyWorker {
+    param([string]$EntryPoint, [string[]]$Selected, $Report, [switch]$AllowLargeDownloads)
+
+    $ids = $Selected -join ','
+    if ($ids -notmatch '^[a-z0-9-]+(,[a-z0-9-]+)*$') { throw 'Selecao invalida.' }
+    $target = $Report.target
+    if (-not $target -or -not $target.windowsId) { throw 'Identidade do Windows indisponivel. Verifique novamente.' }
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $EntryPoint + '" -Action InstallDependencies -DependencyIds ' + $ids +
+        ' -ExpectedTarget ' + $target.windowsId + ' -ExpectedCaller ' + $target.caller
+    if ($Report.requirementFile) { $arguments += ' -RequirementFile "' + $Report.requirementFile + '"' }
+    if ($Report.applicationArchitecture) { $arguments += ' -ApplicationArchitecture ' + $Report.applicationArchitecture }
+    if ($Report.requirementHash) { $arguments += ' -ExpectedRequirementHash ' + $Report.requirementHash }
+    if ($AllowLargeDownloads) { $arguments += ' -AllowLargeDownloads' }
+    $exe = Join-Path (Get-BootstrapDependencySystemDirectory (Get-BootstrapWindowsArchitecture) (Get-BootstrapWindowsArchitecture)) 'WindowsPowerShell\v1.0\powershell.exe'
+    $start = @{ FilePath = $exe; ArgumentList = $arguments; PassThru = $true; ErrorAction = 'Stop' }
+    if (-not (Test-IsAdmin)) { $start.Verb = 'RunAs' }
+    try { return (Start-Process @start) }
+    catch [ComponentModel.Win32Exception] {
+        if ($_.Exception.NativeErrorCode -eq 1223) { throw 'Permissao administrativa cancelada. A selecao continua pendente.' }
+        throw
+    }
+}
+
+function Ensure-PhaseZeroHostCodexRuntime {
+    $runtime = Get-BootstrapCodexRuntimeComponent
+    $dependency = Get-BootstrapWindowsDependencyStatus -Definition $runtime
+    if ($dependency.status -eq 'satisfied') { return }
+    if ($dependency.status -notin @('missing', 'partial', 'insufficient')) { throw $dependency.detail }
+    if (Test-IsAdmin) {
+        $null = Invoke-PhaseZeroDependencySelection -Selected @($runtime.Name)
+    } else {
+        $target = Get-PhaseZeroDependencyTarget
+        $request = @{ target = $target; requirementFile = ''; applicationArchitecture = ''; requirementHash = '' }
+        $child = Start-PhaseZeroDependencyWorker -EntryPoint (Join-Path $repoRoot 'windows/ai/prepare-host.ps1') -Selected @($runtime.Name) -Report $request
+        try {
+            $child.WaitForExit()
+            if ($child.ExitCode -ne 0) { throw 'Visual C++ continua pendente. Confira o resultado em Dependencias de aplicativos e projetos.' }
+        } finally { $child.Dispose() }
+    }
+    $verified = Get-BootstrapWindowsDependencyStatus -Definition $runtime
+    if ($verified.status -ne 'satisfied') { throw $verified.detail }
 }

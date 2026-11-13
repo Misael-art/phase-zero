@@ -1,23 +1,4 @@
-﻿function Start-PhaseZeroDependencyWorker {
-    param([string]$EntryPoint, [string[]]$Selected, $Report, [switch]$AllowLargeDownloads)
-
-    $ids = $Selected -join ','
-    if ($ids -notmatch '^[a-z0-9-]+(,[a-z0-9-]+)*$') { throw 'Selecao invalida.' }
-    $target = $Report.target
-    if (-not $target -or -not $target.windowsId) { throw 'Identidade do Windows indisponivel. Verifique novamente.' }
-    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $EntryPoint + '" -Action InstallDependencies -DependencyIds ' + $ids +
-        ' -ExpectedTarget ' + $target.windowsId + ' -ExpectedCaller ' + $target.caller
-    if ($Report.requirementFile) { $arguments += ' -RequirementFile "' + $Report.requirementFile + '"' }
-    if ($Report.applicationArchitecture) { $arguments += ' -ApplicationArchitecture ' + $Report.applicationArchitecture }
-    if ($Report.requirementHash) { $arguments += ' -ExpectedRequirementHash ' + $Report.requirementHash }
-    if ($AllowLargeDownloads) { $arguments += ' -AllowLargeDownloads' }
-    $exe = Join-Path (Get-BootstrapDependencySystemDirectory (Get-BootstrapWindowsArchitecture) (Get-BootstrapWindowsArchitecture)) 'WindowsPowerShell\v1.0\powershell.exe'
-    $start = @{ FilePath = $exe; ArgumentList = $arguments; PassThru = $true; ErrorAction = 'Stop' }
-    if (-not (Test-IsAdmin)) { $start.Verb = 'RunAs' }
-    return (Start-Process @start)
-}
-
-function Show-PhaseZeroDependenciesWindow {
+﻿function Show-PhaseZeroDependenciesWindow {
     param($Owner, [string]$EntryPoint, [switch]$UiProbe)
 
     [xml]$layout = @'

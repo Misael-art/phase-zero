@@ -66,15 +66,13 @@ if ($Action -notin @('Menu','Dependencies')) {
             if (@($wiring | Where-Object { $_.status -eq 'failed' }).Count) { throw 'Integracao MCP/hooks incompleta.' }
             Write-Output 'Memoria local instalada. Importe a recuperacao antes de cadastrar GitHub/projetos e restaurar o historico.'
         } elseif ($Action -eq 'InstallApps') {
+            Ensure-PhaseZeroHostCodexRuntime
             if ($AllowLargeDownloads) {
                 $winget = Resolve-CommandPath -Name winget
                 if (-not $winget) { throw 'WinGet ausente.' }
                 Ensure-CodexInstaller -WingetPath $winget
                 Ensure-ClaudeCode -WingetPath $winget
             } else {
-                $runtime = Get-BootstrapCodexRuntimeComponent
-                $dependency = Get-BootstrapWindowsDependencyStatus -Definition $runtime
-                if ($dependency.status -ne 'satisfied') { throw ('Codex Desktop requer ' + $dependency.label + '. Abra Dependencias de aplicativos e projetos. ' + $dependency.detail) }
                 # Large payloads remain manual unless the caller explicitly authorizes them.
                 $desktopInstaller = Join-Path $packages 'ChatGPTInstaller.exe'
                 if (Test-Path -LiteralPath $desktopInstaller) {
