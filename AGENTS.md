@@ -40,6 +40,13 @@ Conflict rules:
 
 O [memorial de produção](assets/agent-skills/memorial.md) detalha os critérios de design e UX usados no PhaseZero. Use o memorial do checkout como referência local quando a revisão assinada estiver indisponível.
 
+<!-- BEGIN HOST RESOURCE CHECK -->
+## Capacidade do host antes de operações pesadas
+
+- Antes de builds, testes longos, instalações, extrações, cópias grandes ou VMs, meça carga de CPU, RAM disponível, atividade de swap, pressão de I/O e espaço livre no destino e nos temporários. Confira os processos concorrentes e estime o pico de RAM, o volume de entrada e saída e o paralelismo da sua ação.
+- Prossiga quando houver margem para a carga prevista. Se houver pressão sustentada ou pouca margem, espere e meça de novo ou reduza o lote e os jobs. Em host com histórico de reinícios sob pressão de RAM ou disco, reserve margem maior e reavalie durante a execução. Se a pressão aumentar, pause trabalho próprio quando for seguro e preserve os processos das outras tarefas.
+<!-- END HOST RESOURCE CHECK -->
+
 ## Active roadmaps
 
 - Contributor on clean host: read `docs/handoff/clean-host-development-20261024.md`
@@ -233,7 +240,7 @@ fixtures with backup; preserve live locks, ambiguous locks and current fixtures.
 - Política comum: [../AGENTS.md](../AGENTS.md), especialmente autonomia, testes, GitHub e recursos (§§5–10); raiz/branch em [registro central](../.workspace/projects.json). A orientação atual de raiz única substitui recomendações históricas de criar worktrees/clones por tarefa; os contratos técnicos e gates deste projeto permanecem obrigatórios. Em outro host, preserve este mesmo método em um único checkout registrado, sem recriar caminhos antigos.
 - Antes de implementar, leia `docs/handoff/clean-host-development-20261024.md`, a auditoria de status e o roadmap da frente afetada, identifique causa, owner, dependências e aceite. Procure a solução oficial existente e integre nela; não introduza soluções concorrentes, aliases ambíguos ou refatorações fora do pedido. Neste host, a única raiz é `/home/misael/Projects/PhaseZero`.
 - Execute o lote até implementar, testar, revisar e preservar a continuidade. Resolva decisões reversíveis pelo contexto; não pare em planos nem peça confirmação para editar/testar o que já está autorizado. Comunique descobertas, bloqueios e entrega, sem narrar cada comando ou pequeno avanço.
-- Antes de operações pesadas, confira espaço do destino, RAM e carga; estime saídas e retenção. Reutilize ferramentas/ambientes compatíveis, limite jobs e encerre somente processos temporários próprios. Não mate trabalhos alheios, limpe caches compartilhados ou apague evidência para obter um gate verde.
+- Planeje a retenção das saídas. Reutilize ferramentas/ambientes compatíveis, limite jobs e encerre somente processos temporários próprios. Não mate trabalhos alheios, limpe caches compartilhados ou apague evidência para obter um gate verde.
 - Use o wrapper `tools/dev-bootstrap.sh` e o ambiente já provisionado, sem instalar o produto, serviços ou VMs para testar código por conveniência. TMPDIR/pytest ficam em disco persistente próprio, fora de `/run/user`; preserve exportações HOME/XDG separadas. Não crie outro banco, gateway, gerenciador de contas ou fluxo paralelo.
 - Faça os checks pertinentes a toda alteração; para documentos, revise diff, referências e coerência. Para código, cubra comportamento/regressão e execute os gates aplicáveis, sem desativá-los. Execute checks e o fluxo afetado no host disponível, isolando efeitos. Fixtures e CI não homologam login, cotas, provedores, Homelab, boot ou Windows VM. Gates físicos continuam sujeitos ao ambiente e escopo autorizados. `.mimosa`, `uber-defesa-privada`, Ai-memory, credenciais e estado compartilhado permanecem protegidos; não publicar nem limpar pelo nome PhaseZero.
 - Reutilize a autenticação válida e os helpers existentes. Nunca peça senha/token no chat, copie sessões ou grave credenciais em código/log. Se faltar acesso indispensável, solicite uma única ação pelo fluxo oficial, preserve o estado e avance no trabalho independente; não repita permissões já concedidas.
@@ -259,3 +266,12 @@ If memory fails or resolves another project, report degraded state and use nativ
 Use rg/scoped reads and existing native skills/tool discovery on demand. Preserve lockfiles and diagnostics.
 When RTK is available, use supported filtered commands for human-readable output. rtk proxy does not filter. Use raw output for machine contracts, exact diffs and missing diagnostics.
 <!-- END PHASEZERO TOKEN ECONOMY opencode -->
+
+<!-- BEGIN PHASEZERO TOKEN ECONOMY deepseek-harness -->
+Token profile for DeepSeek Harness only: basic. Other clients keep their own profile.
+Preserve user/project instructions, account, model, permissions and all acceptance checks.
+ai-memory stays connected in every profile. Search relevant memory before non-trivial work; retrieve a few relevant pages, never the entire store. Record durable learnings; lifecycle owns routine capture.
+If memory fails or resolves another project, report degraded state and use native ai-memory from this project directory. Never invent recall or create a second memory store.
+Use rg/scoped reads and existing native skills/tool discovery on demand. Preserve lockfiles and diagnostics.
+When RTK is available, use supported filtered commands for human-readable output. rtk proxy does not filter. Use raw output for machine contracts, exact diffs and missing diagnostics.
+<!-- END PHASEZERO TOKEN ECONOMY deepseek-harness -->

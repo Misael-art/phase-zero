@@ -122,6 +122,22 @@ def test_apply_removes_entries_from_global_categories(host_sandbox):
     assert "Game;Emulator;" not in content, "atalho continua solto na categoria Jogos"
 
 
+@pytest.mark.parametrize("owner", ["codex-profiles", "chatgpt-web", ""])
+def test_grouping_preserves_the_launcher_owner_for_repair(host_sandbox, owner):
+    target = host_sandbox.home / ".local/share/applications/phasezero-chatgpt-web.desktop"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "[Desktop Entry]\nType=Application\nName=Codex Web Principal\n"
+        "Exec=/usr/bin/true\nCategories=Development;\n"
+        f"X-PhaseZero-Managed={owner}\n")
+    menu(host_sandbox, "apply")
+    menu(host_sandbox, "apply")  # repeat must retain the same owner
+    content = target.read_text()
+    assert f"X-PhaseZero-Managed={owner or 'true'}\n" in content
+    assert content.count("X-PhaseZero-Managed=") == 1
+    assert "Categories=X-PhaseZero;" in content
+
+
 def test_apply_builds_a_single_root_with_sub_areas(host_sandbox):
     write_entry(
         host_sandbox, "phasezero-emu.desktop", "games.emulators",

@@ -366,10 +366,13 @@ def _isolated_desktop(path: Path, menu_group: str, *, suppressed_by: str = "") -
     else:
         content = content.rstrip() + "\n" + category + "\n"
     managed = "X-PhaseZero-Managed=true"
-    if re.search(r"(?m)^X-PhaseZero-Managed=.*$", content):
-        content = re.sub(r"(?m)^X-PhaseZero-Managed=.*$", managed, content, count=1)
-    else:
+    # Component owners use this field for integrity checks and safe repair.
+    # Grouping a launcher must not erase e.g. codex-profiles/chatgpt-web.
+    owner = re.search(r"(?m)^X-PhaseZero-Managed=(.*)$", content)
+    if owner is None:
         content = content.rstrip() + "\n" + managed + "\n"
+    elif not owner.group(1).strip():
+        content = content[:owner.start()] + managed + content[owner.end():]
     group_line = f"X-PhaseZero-MenuGroup={menu_group}"
     if re.search(r"(?m)^X-PhaseZero-MenuGroup=.*$", content):
         content = re.sub(r"(?m)^X-PhaseZero-MenuGroup=.*$", group_line, content, count=1)

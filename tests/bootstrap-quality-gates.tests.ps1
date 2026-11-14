@@ -33,6 +33,10 @@ Describe 'Bootstrap quality gates' {
                 Write-Host ("  {0,5}  {1}" -f $_.Count, $_.Name)
             }
         }
+        if ($warnings.Count -gt 921) {
+            # Preserve actionable locations when the unchanged budget blocks CI.
+            $warnings | Select-Object ScriptName, Line, RuleName, Message | Format-Table -AutoSize | Out-String -Width 240 | Write-Information -InformationAction Continue
+        }
         # Baseline medida com PSScriptAnalyzer 1.25.0: 921 warnings no Windows
         # Server 2025 runner atual. Errors continuam em 0; qualquer warning novo
         # precisa atualizar o baseline com evidencia e revisao do delta.

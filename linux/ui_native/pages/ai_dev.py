@@ -91,6 +91,8 @@ _QUOTA_STATUS_ID = "ai.quota.status"
 _DESKTOP_STATUS_ID = "ai.desktop.status"
 _CLAUDE_CHECK_ID = "ai.desktop.claude.check"
 _HARNESS_STATUS_ID = "ai.deepseek-harness-status"
+_GROK_STATUS_ID = "ai.grok-build.status"
+_GROK_CHECK_ID = "ai.grok-build.check"
 _HARNESS_ACTIONS = ("status", "plan", "install", "update", "start", "open", "login", "stop", "doctor", "uninstall")
 _LEVEL_STATES = {"green": "success", "yellow": "warning", "red": "error"}
 _BRIDGE_STATUS_ID = "private.chatgpt-web.status"
@@ -114,13 +116,20 @@ _BRIDGE_BUTTONS = (
      "volta sozinho ao modo Web se algo falhar. O Codex segue no sandbox somente leitura."),
     ("chatgptWebToolsOff", "Desligar ferramentas", ("tools", "disable"), True,
      "Volta ao modo Web e encerra o túnel. O ~/.codex do seu Codex normal não é alterado."),
-    ("chatgptWebSmoke", "Testar modelo (1 mensagem)", ("smoke",), True,
-     "Envia um turno real pelo bridge. Gasta uma mensagem da sua conta ChatGPT."),
+    ("chatgptWebSmoke", "Testar (1 mensagem)", ("smoke",), True,
+     "Envia um turno real pelo modelo Web selecionado. Gasta uma mensagem da sua conta ChatGPT."),
     ("chatgptWebUpdate", "Atualizar app", ("update",), True,
      "Baixa a versão mais nova do Codex Web GPT, confere o SHA-256 publicado na release, "
      "migra a integração e religa o launcher isolado. Feche somente o Codex do perfil Web "
      "antes; login e preferências são mantidos. Se uma atualização ficou incompleta, "
      "conclui com o pacote local já conferido; clique novamente para retomar."),
+    ("chatgptWebDiagnosis", "Diagnosticar", ("recovery", "status", "--deep"), False,
+     "Verifica modelo, serviço, túnel, permissões e integridade sem enviar mensagens."),
+    ("chatgptWebRecoveryOn", "Ativar autorreparo", ("recovery", "enable"), True,
+     "Monitora esta conta em segundo plano e recupera falhas locais quando seguro. "
+     "Não envia mensagens, troca conta, altera permissões nem renova limites externos."),
+    ("chatgptWebRecoveryOff", "Pausar autorreparo", ("recovery", "disable"), True,
+     "Desliga o monitor desta conta; preserva a janela, a sessão e a configuração."),
     ("chatgptWebDisable", "Desligar", ("disable",), True,
      "Restaura a rota do perfil dedicado e encerra o launcher. O ~/.codex do seu Codex "
      "normal não é alterado; o login do ChatGPT no launcher é mantido."),
@@ -161,6 +170,8 @@ class AiDevPage(BasePage):
         self._quota_rows: list[QWidget] = []
         self._harness_payload: dict | None = None
         self._harness_buttons: dict[str, QPushButton] = {}
+        self._grok_payload: dict = {}
+        self._grok_buttons: dict[str, QPushButton] = {}
 
     def build(self) -> None:
         for action_id in _PRIMARY_IDS | _REPRESENTED_ELSEWHERE | {
@@ -228,6 +239,7 @@ class AiDevPage(BasePage):
         self.memory_card = MemoryCard(self)
         layout.addWidget(self.memory_card)
         layout.addWidget(self._build_harness_card())
+        layout.addWidget(self._build_grok_card())
         layout.addWidget(self._build_desktop_apps_card())
         layout.addWidget(self._build_bonsai_card())
         layout.addWidget(self._build_bridge_card())
@@ -326,6 +338,93 @@ class AiDevPage(BasePage):
         if action is not None:
             self.status_loader.fetch_action(action)
 
+    def _build_grok_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        card.setProperty("cardRole", "grokBuild")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        layout.addWidget(SectionHeader("Grok Build", "Agente de desenvolvimento no terminal"))
+        self.grok_state = QLabel("● Verificando instalação…")
+        self.grok_state.setWordWrap(True)
+        self.grok_state.setAccessibleName("Estado do Grok Build")
+        layout.addWidget(self.grok_state)
+        self.grok_detail = QLabel()
+        self.grok_detail.setWordWrap(True)
+        self.grok_detail.setOpenExternalLinks(True)
+        self.grok_detail.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        layout.addWidget(self.grok_detail)
+        for name, label in (
+            ("open", "Abrir projeto"), ("install", "Instalar arquivo baixado"),
+            ("login", "Entrar pelo navegador"), ("check", "Verificar versão"),
+            ("update", "Atualizar"),
+        ):
+            button = self._action_button(
+                f"ai.grok-build.{name}", label, primary=name in {"open", "install", "update"}, direct=True,
+            )
+            if button is not None:
+                self._grok_buttons[name] = button
+                layout.addWidget(button, 0, Qt.AlignLeft)
+        if "check" in self._grok_buttons:
+            self._grok_buttons["check"].clicked.disconnect()
+            self._grok_buttons["check"].clicked.connect(self._check_grok)
+        self._apply_grok_buttons()
+        return card
+
+    def _check_grok(self) -> None:
+        action = self.by_id.get(_GROK_CHECK_ID)
+        if action and not self.status_loader.running(_GROK_CHECK_ID):
+            self.grok_detail.setText("Consultando o atualizador oficial…")
+            self.status_loader.fetch_action(action)
+            self._apply_grok_buttons()
+
+    def _apply_grok_buttons(self) -> None:
+        installed = self._grok_payload.get("installed")
+        availability = {
+            "open": installed is True, "login": installed is True,
+            "install": installed is False and self._grok_payload.get("supportedInstall") is True,
+            "check": installed is True,
+            "update": installed is True and self._grok_payload.get("downloadMode") == "upstream",
+        }
+        for name, button in self._grok_buttons.items():
+            button.setVisible(availability[name])
+            button.setEnabled(not self._operation_running and availability[name]
+                              and (name != "check" or not self.status_loader.running(_GROK_CHECK_ID)))
+
+    def _on_grok_status(self, action_id: str, payload: dict) -> None:
+        if payload.get("ok") is False:
+            if action_id == _GROK_STATUS_ID:
+                self._grok_payload = {}
+                self._set_label_state(self.grok_state, "● Instalação indisponível", "warning")
+            self.grok_detail.setText(payload.get("reason") or "Não foi possível consultar o Grok Build.")
+            self._apply_grok_buttons()
+            return
+        if action_id == _GROK_STATUS_ID and payload.get("version") == self._grok_payload.get("version"):
+            payload = {**self._grok_payload, **payload}
+        self._grok_payload = payload
+        if payload.get("installed"):
+            installed = payload["version"]
+            self._set_label_state(self.grok_state, f"● Grok Build {installed} instalado", "success")
+            detail = "Escolha a pasta para abrir. O Grok solicita login quando necessário."
+            if payload.get("updateAvailable") is False:
+                detail = "Versão atual no canal consultado."
+            elif payload.get("updateAvailable") is True:
+                latest = payload["latestVersion"]
+                detail = f"Versão {latest} disponível."
+                if payload.get("downloadMode") == "manual":
+                    detail += " Para atualizar manualmente, execute grok update no terminal e verifique de novo."
+        else:
+            self._set_label_state(self.grok_state, "● Grok Build não instalado", "info")
+            detail = "Instalação pelo PhaseZero disponível para Linux x64."
+            if payload.get("supportedInstall"):
+                artifact = payload["artifact"]
+                size = artifact["size"] / 1_000_000
+                detail = (f'Baixe o <a href="{artifact["url"]}">binário oficial Linux x64</a>'
+                          f' ({size:.1f} MB) e selecione o arquivo abaixo.')
+        self.grok_detail.setText(detail)
+        self._apply_grok_buttons()
+
     def focus_journey(self, key: str) -> None:
         if key.startswith("economy"):
             agent = key.partition(":")[2]
@@ -346,12 +445,14 @@ class AiDevPage(BasePage):
                     button.setFocus()
                     break
             return
-        if key == "deepseek-harness":
+        if key in {"deepseek-harness", "grok-build"}:
+            state = self.harness_state if key == "deepseek-harness" else self.grok_state
+            buttons = self._harness_buttons if key == "deepseek-harness" else self._grok_buttons
             scroll = self.findChild(QScrollArea)
             if scroll is not None:
-                scroll.ensureWidgetVisible(self.harness_state, 8, 8)
+                scroll.ensureWidgetVisible(state, 8, 8)
             for name in ("install", "start", "open", "doctor"):
-                button = self._harness_buttons.get(name)
+                button = buttons.get(name)
                 if button is not None and button.isEnabled() and not button.isHidden():
                     button.setFocus()
                     break
@@ -880,6 +981,12 @@ class AiDevPage(BasePage):
         self.bridge_policy.setObjectName("chatgptWebPolicy")
         self.bridge_policy.setWordWrap(True)
         layout.addWidget(self.bridge_policy)
+        self.bridge_recovery = QLabel("")
+        self.bridge_recovery.setObjectName("cardDescription")
+        self.bridge_recovery.setProperty("bridgeRole", "recovery")
+        self.bridge_recovery.setWordWrap(True)
+        self.bridge_recovery.setAccessibleName("Autorreparo e limites do Codex Web")
+        layout.addWidget(self.bridge_recovery)
         self.bridge_next = QLabel("")
         self.bridge_next.setObjectName("cardDescription")
         self.bridge_next.setProperty("bridgeRole", "next")
@@ -943,7 +1050,7 @@ class AiDevPage(BasePage):
                    else " pela preferência desta conta.")
                 + " Ajuste em Contas e conexões → Contas Codex.")
         starting = {"chatgptWebOpen", "chatgptWebSetup", "chatgptWebToolsOn",
-                    "chatgptWebSmoke", "chatgptWebUpdate"}
+                    "chatgptWebSmoke", "chatgptWebUpdate", "chatgptWebRecoveryOn"}
         for name, button in self._bridge_buttons.items():
             button.setEnabled(not running and (enabled or name not in starting)
                               and (name != "chatgptWebOpen" or self._bridge_ready))
@@ -963,6 +1070,28 @@ class AiDevPage(BasePage):
         running = bool(node("launcher").get("active") and node("route").get("active")
                        and payload.get("daemonListening"))
         self._bridge_ready = running
+        recovery = node("recovery")
+        recovery_text = ("Autorreparo ativo." if recovery.get("enabled") and recovery.get("timerActive")
+                         else "Monitor precisa de verificação." if recovery.get("enabled")
+                         else "Autorreparo desligado.")
+        recovery_states = {
+            "ready": "Serviço Web disponível.", "waiting-for-idle": "Aguarda tarefa terminar para reparar.",
+            "waiting-for-resources": "Aguarda recursos do computador.",
+            "waiting-for-startup": "Aguarda inicialização do serviço.",
+            "circuit-open": "Reparos pausados após falhas repetidas; use Diagnosticar.",
+            "model-compatibility": "Compatibilidade do seletor precisa de reparo.",
+            "awaiting-validation": "Compatibilidade reparada; aguarda nova mensagem para confirmar.",
+            "login-required": "Login no ChatGPT precisa ser renovado.",
+            "permission-required": "Permissão do conector precisa de verificação.",
+            "rate-limited": "ChatGPT Web pediu uma pausa; mensagens não serão reenviadas.",
+            "quota-exhausted": "Limite informado pelo provedor; aguarda renovação.",
+            "network-unavailable": "Rede indisponível; aguarda conexão.",
+            "upstream-unavailable": "Serviço externo indisponível; aguarda recuperação.",
+            "configuration-conflict": "Configuração alterada; preservada para revisão.",
+            "repair-failed": "Reparo não confirmado; veja Diagnosticar.",
+        }
+        self.bridge_recovery.setText(recovery_text + " " + recovery_states.get(recovery.get("state"), "")
+            + " O aviso de cota do Codex normal não mede o limite do ChatGPT Web.")
         self._bridge_buttons["chatgptWebSetup"].setText(
             "Reparar" if running else "Preparar ou reparar")
         login = {"enabled": "inicia com o login", "off": "início no login desligado",
@@ -1087,6 +1216,9 @@ class AiDevPage(BasePage):
         self.status_loader.fetch("private.bonsai.status", ["ai", "claude", "bonsai-status"])
         self._fetch_quota()
         self._fetch_harness()
+        grok_status = self.by_id.get(_GROK_STATUS_ID)
+        if grok_status is not None:
+            self.status_loader.fetch_action(grok_status)
         self.memory_card.fetch()
         self.economy_card.fetch()
         if not self.status_loader.running(_DESKTOP_STATUS_ID):
@@ -1113,6 +1245,9 @@ class AiDevPage(BasePage):
             return
         if action_id == _HARNESS_STATUS_ID and isinstance(parsed, dict):
             self._on_harness_status(parsed)
+            return
+        if action_id in {_GROK_STATUS_ID, _GROK_CHECK_ID}:
+            self._on_grok_status(action_id, parsed if isinstance(parsed, dict) else {"ok": False})
             return
         if action_id == _QUOTA_STATUS_ID and isinstance(parsed, dict):
             self._on_quota_status(parsed)
@@ -1252,6 +1387,9 @@ class AiDevPage(BasePage):
 
     def _on_status_failed(self, action_id: str, message: str) -> None:
         self.overview.update_status(action_id, None)
+        if action_id in {_GROK_STATUS_ID, _GROK_CHECK_ID}:
+            self._on_grok_status(action_id, {"ok": False})
+            return
         if action_id == ECONOMY_STATUS_ID:
             self.economy_card.failed()
             return
@@ -1286,6 +1424,7 @@ class AiDevPage(BasePage):
         if action_id == _BRIDGE_STATUS_ID:
             self._set_bridge_state("● Não foi possível ler o estado. Use Atualizar.", "warning")
             self.bridge_tools.setText("Estado das ferramentas indisponível.")
+            self.bridge_recovery.setText("Estado do autorreparo indisponível. Use Atualizar ou Diagnosticar.")
             self.bridge_account.setText("")
             self.bridge_next.setText("")
             self.bridge_next.hide()
@@ -1314,6 +1453,7 @@ class AiDevPage(BasePage):
         self.memory_card.apply_buttons()
         self.economy_card.render()
         self._apply_harness_buttons()
+        self._apply_grok_buttons()
         self.refresh_button.setEnabled(not running)
         self.repair_button.setEnabled(not running)
         self._apply_bridge_buttons()

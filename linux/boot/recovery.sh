@@ -592,8 +592,12 @@ case "$ACTION" in
     kde-login|kde-autologin)
         exec bash "$KDE_LOGIN" "${@:2}"
         ;;
+    vibe-code)
+        pz_boot_require_current_root_target
+        exec bash "$PZ_ROOT/linux/boot/vibe-code.sh" "${@:2}"
+        ;;
     selector|visual-selector|gui) cmd_selector ;;
     menu|choices|select) cmd_menu ;;
     choose|next) shift || true; cmd_choose "$@" ;;
-    *) pz_error "usage: linux/pz boot (status|menu|selector|choose|kde-login|iso|usb|grubfm|safe-menu|install-safe-menu|card|install-card|install-efi-fallback [--active] [--fallback]|emergency-shell)"; exit 1 ;;
+    *) pz_error "usage: linux/pz boot (status|menu|selector|choose|kde-login|vibe-code|iso|usb|grubfm|safe-menu|install-safe-menu|card|install-card|install-efi-fallback [--active] [--fallback]|emergency-shell)"; exit 1 ;;
 esac

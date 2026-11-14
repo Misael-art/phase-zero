@@ -14,12 +14,13 @@ import stat
 import tempfile
 import threading
 import unicodedata
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .account_contract import Account, public_account
+from .api_credits import ApiCredit
 from .secret_store import (
     SecretStoreUnavailable,
     default_secret_store,
@@ -151,6 +152,8 @@ class CredentialVault:
         self._metadata_protector = metadata_protector
         self._lock = threading.RLock()
         self._entries: dict[str, CredentialEntry] = {}
+        self._credit_accounts: dict[str, ApiCredit] = {}
+        self._credit_bindings: dict[str, str] = {}
         if self.path.exists():
             self._load()
 
@@ -165,6 +168,25 @@ class CredentialVault:
         if entry is None or entry.state != "active" or entry.provider.casefold() != provider.casefold():
             raise CredentialVaultError("selected provider credential is unavailable")
         return entry
+
+    def api_credit(self, account_id: str) -> ApiCredit | None:
+        return self._credit_accounts.get(self._credit_bindings.get(account_id, ""))
+
+    def record_api_credit(self, account_id: str, credit: ApiCredit) -> None:
+        """One observation per provider organization; multiple keys share it."""
+        self.selected_entry(account_id, provider=credit.provider)
+        with self._lock:
+            previous = (self._credit_accounts.copy(), self._credit_bindings.copy())
+            if self.path.exists() and not self._credit_accounts:
+                from linux.lib.pz_hostbackup import backup_file
+                backup_file(self.path, module="ai-credential-credit-schema")
+            self._credit_accounts[credit.identity] = credit
+            self._credit_bindings[account_id] = credit.identity
+            try:
+                self._save()
+            except Exception:
+                self._credit_accounts, self._credit_bindings = previous
+                raise
 
     def selected_secret(self, account_id: str, *, provider: str) -> str:
         entry = self.selected_entry(account_id, provider=provider)
@@ -253,6 +275,18 @@ class CredentialVault:
                     "secure store failed; cleanup reference remains pending",
                 ) from None
 
+    def reload_metadata(self) -> None:
+        """Refresh the canonical registry without looking up secure values.
+
+        A failed read leaves the previous snapshot intact for recovery; callers
+        must present the error rather than treating that snapshot as current.
+        """
+        with self._lock:
+            fresh = CredentialVault(self.path, self.secret_store, self._metadata_protector)
+            self._entries = {entry.account_id: entry for entry in fresh.entries}
+            self._credit_accounts = fresh._credit_accounts
+            self._credit_bindings = fresh._credit_bindings
+
     def remove(self, account_id: str) -> bool:
         with self._lock:
             entry = self._entries.get(account_id)
@@ -320,9 +354,9 @@ class CredentialVault:
                 os.close(fd)
         if (
             not isinstance(raw, dict)
-            or set(raw) != {"schemaVersion", "credentials"}
+            or set(raw) != ({"schemaVersion", "credentials", "apiCredits"} if raw.get("schemaVersion") == 2 else {"schemaVersion", "credentials"})
             or type(raw.get("schemaVersion")) is not int
-            or raw["schemaVersion"] != _SCHEMA_VERSION
+            or raw["schemaVersion"] not in {1, 2}
             or not isinstance(raw.get("credentials"), list)
         ):
             raise CredentialVaultError("unsupported credential registry schema")
@@ -348,6 +382,24 @@ class CredentialVault:
                 raise CredentialVaultError("duplicate secure-store reference")
             self._entries[entry.account_id] = entry
 
+        if raw["schemaVersion"] == 2:
+            try:
+                credits = raw["apiCredits"]
+                if set(credits) != {"accounts", "bindings"}:
+                    raise ValueError()
+                for identity, value in credits["accounts"].items():
+                    credit = ApiCredit(**value)
+                    if identity != credit.identity:
+                        raise ValueError()
+                    self._credit_accounts[identity] = credit
+                for identity, binding in credits["bindings"].items():
+                    credit = self._credit_accounts[binding]
+                    if self._entries[identity].provider.casefold() != credit.provider.casefold():
+                        raise ValueError()
+                    self._credit_bindings[identity] = binding
+            except (ValueError, KeyError, TypeError, AttributeError):
+                raise CredentialVaultError("invalid API credit metadata") from None
+
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         if _IS_WINDOWS:
@@ -368,6 +420,12 @@ class CredentialVault:
                 for entry in self.entries
             ],
         }
+        if self._credit_accounts:
+            payload["schemaVersion"] = 2
+            payload["apiCredits"] = {
+                "accounts": {key: asdict(value) for key, value in self._credit_accounts.items()},
+                "bindings": {key: value for key, value in self._credit_bindings.items() if key in self._entries},
+            }
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         if _IS_WINDOWS:
             encoded = self._protect_metadata(encoded)

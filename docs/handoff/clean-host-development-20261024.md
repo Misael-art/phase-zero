@@ -1,5 +1,219 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Dependências do Windows portátil — 13/11/2026
+
+Runtime `f573d408fb9efea1f4bc4adf457641e10db0eb7b` no WindowsSD, revisão
+[PR #137](https://github.com/Misael-art/phase-zero/pull/137). Pacote reconstruído
+pelo empacotador canônico. Sete arquivos atualizados e 108 hashes conferidos
+no cartão. Sete arquivos de instaladores/modelo já verificados foram preservados.
+O inventário existente registra a intervenção em
+`ai_windows.dependency_preparation`. A recuperação privada contém o manifesto
+anterior, os arquivos substituídos e o inventário anterior.
+
+**Dependências de aplicativos e projetos** verifica Visual C++ x86/x64,
+DirectX legado Win32, .NET Framework, .NET Runtime, Desktop Runtime, SDKs,
+WebView2 e MSVC. O mesmo inventário informa frameworks Store por conta.
+DirectX Win32 usa o instalador EXE WinGet e exige DLLs legadas por arquitetura.
+Codex Desktop resolve Visual C++ também pelo caminho simplificado. A interface
+separa consulta de instalação, grava o resultado e verifica os componentes ao
+reabrir. O [contrato do preparador e do Autofix](../roadmaps/ai-memory-portability-v1.md#contrato-para-preparador-e-autofix)
+documenta as ações de inventário, janela e fila.
+
+O [ensaio Windows do pacote](https://github.com/Misael-art/phase-zero/actions/runs/43528916652)
+passou a etapa de dependências em PowerShell 5.1. WPF abriu duas vezes, o JSON
+usou inventário do runner, e fixtures verificaram os resultados do instalador,
+reinício, interrupção, reabertura e repetição. No Jupiter, passaram os dois
+smokes PowerShell 7.6.6 e dois testes Python. A atualização foi serial e
+limitada a cerca de 2 MiB de arquivos de runtime, após baixar a pressão de
+memória. A amostra anterior à cópia mostrou cerca de 6,1 GiB disponíveis, sem
+swap-in/out nas amostras de um segundo, 61 °C e trip passivo de 100 °C.
+
+Próximo aceite: boot físico do cartão, execução dos instaladores selecionados,
+teste dos aplicativos e nova consulta após reinício. O Autofix tem contrato
+disponível para consumir. A gravação ai-memory continua pendente porque a
+unidade está mascarada/inativa e a conexão local foi recusada. O registro
+privado da auditoria preserva o corpo original e o complemento de implementação.
+
+## Preparação de memória no Windows — 12/11/2026
+
+Código `c6d9ab6922fbf54b53025c0cbe225e46b6ecd6ce`. Runtime de memória
+empacotado pelo checkout canônico e preparado no cartão, em
+`Program Files\PhaseZero`, com entrada no menu Steam Deck. Não é outro
+checkout nem outro banco. `INICIAR.cmd` abre o preparador nativo; o owner
+continua sendo `linux/ai/memory_manager.py`, chamado pelo adaptador Windows.
+
+Release ai-memory 3.3.1 verificada, companion oficial compilado em CI com um
+job e cache semântico local conferido pelos hashes do upstream. O servidor
+recebe `RAYON_NUM_THREADS=1` e `OMP_NUM_THREADS=1`. A preparação local usou
+CPUQuota 50%, MemoryMax 768 MiB e cópia serial limitada a 4 MiB/s. Nenhuma VM
+ou compilação Rust foi iniciada no host físico.
+
+Passaram cinco contratos PowerShell e dois testes Python do runtime instalado.
+O [ensaio Windows nativo](https://github.com/Misael-art/phase-zero/actions/runs/43185528162)
+passou com PowerShell 5.1: janela WPF renderizada, regras nos arquivos globais,
+MCP/hooks para Codex e Claude Code, task de servidor, backup online,
+restauração com configuração preservada e rejeição de companion alterado.
+
+O pacote prepara a instalação; ainda é necessário executar o preparador dentro
+do Windows, entrar nas contas e recuperar o histórico privado com a chave
+existente. Não foram transportados tokens, cookies, banco SQLite ativo,
+hostId ou referências do cofre Linux. O destino privado existente consta
+somente do inventário de preparação; não é publicado nas instruções.
+
+Próximo gate: boot físico, instalar pelos fluxos oficiais, importar recuperação,
+verificar/restaurar o backup, escolher as pastas reais deste Windows e validar
+uma consulta MCP em cada aplicativo e a sincronização autenticada. Downloads
+grandes permanecem manuais sem autorização explícita. Não tratar o ensaio
+de CI como aceite do hardware, das contas ou da transferência do histórico.
+
+## Correção do autologin e central Vibe Code — 10/11/2026
+
+O boot físico selecionado confirmou `phasezero.vibe=1` e o alvo dedicado.
+O journal mostrou `runuser` abrindo PAM durante a preparação. A unidade
+atingiu o timeout antes de gravar o drop-in transitório. O SDDM apresentou o
+greeter e o operador entrou manualmente. Fôlego iniciou pelo autostart
+próprio nessa sessão.
+
+Correção `6dcf9e14`: validar o launcher com `setpriv` no UID e grupos
+do operador, sem abrir PAM. Bigsudo ensaiou o helper real com o cmdline
+do boot selecionado e diretório descartável. Gerou `Session=plasma.desktop`
+e `Relogin=false`, validou o vínculo do SDDM e substituiu o helper de forma
+atômica. Backup
+`/var/lib/phasezero/vibe-code/session-before-pam-fix.J5UJE0`.
+Entrada BigLinux do GRUB continua disponível. Novo boot físico pendente.
+
+Runtime de usuário `1.22.17+vibe.ff03b8d9` ativo. Janela em duas abas e
+layout adaptável com OpenCode Desktop, Codex Desktop e Claude Desktop em
+destaque. Busca reúne atalhos XDG e detalhes canônicos da Central.
+Atalho Claude Code Desktop chama a ação `NewCode` publicada pelo
+aplicativo. Atalhos CLI usam a pasta do projeto. GIO permanece responsável
+pelo lançamento, inclusive quando `Exec` contém caminho entre aspas.
+
+Wayland real: abertura pelo menu, largura lógica aproximada de 850 px,
+capturas ampla e compacta. OpenCode e Claude abriram janelas novas. Codex
+aceitou o lançamento e manteve uma única janela. Codex CLI, Claude Code e
+OpenCode CLI responderam à consulta de versão. Fôlego, OpenClaw, Grok Build
+e DeepSeek Harness foram encontrados no menu. Atalho disponível não atesta
+conta autenticada ou inferência. Passaram 69 testes focados e os smokes de
+recuperação de boot e do gerenciador de desktops IA. Recibos e capturas privados em
+`~/.cache/phasezero-dev/tmp/vibe-correction.luC9wP/`.
+
+`pz boot vibe-code apps --yes` preparou o inventário. Qwen Code Desktop
+permanece pendente porque o AppImage oficial excede 70 MB. O comando informa
+origem, destino e SHA-256 para depósito manual verificado. OpenClaw local
+aparece via seu AppImage; serviço gerenciado continua sujeito aos grants.
+
+## Instalador e boot Vibe Code — 10/11/2026
+
+Código `627ba19a`. `pz boot vibe-code` no checkout e no runtime de usuário
+`1.22.17+vibe.627ba19a`. O plano neste BigLinux detecta somente `pnpm`
+ausente. A resolução pacman previa só `pnpm 12.9.1-1`; o instalador recusa
+atualizações implícitas de dependências existentes. Receita e recuperação em
+[Vibe Code no Linux](../roadmaps/apps-dev-ai-accounts-v1.md#vibe-code-no-linux).
+
+GRUB deriva kernel, initramfs e argumentos de `10_linux`. A transação faz
+backup, valida a sintaxe e acrescenta somente o próprio bloco à configuração
+ativa. O alvo systemd dedicado pede SDDM, que recebe configuração transitória
+de login automático apenas quando o boot contém `phasezero.vibe=1`.
+O helper confere launcher e sessão Plasma e usa `Relogin=false`.
+
+Validação local: 67 pytest focados, smoke `linux-boot-recovery.sh` e ShellCheck.
+Bigsudo confirmou leitura das entradas existentes e ausência de autologin
+local conflitante. Instalação privilegiada concluída em 10/11 às 16:02 (-03).
+Pacman instalou somente `pnpm 12.9.1-1`; o executável informou `11.28.4`.
+`grub.cfg` ativo passou no validador e na comparação do conteúdo fora
+do bloco Vibe Code. Backup em `/var/lib/phasezero/vibe-code/backup.L8qLXt`.
+Alvo dedicado carregado; SDDM ativo com a preparação ordenada antes dele.
+O operador pode reiniciar e selecionar **PhaseZero Vibe Code (Plasma)**.
+**BigLinux** continua como entrada de recuperação. Base do boot normal
+capturada com `systemd-analyze` em
+29,932 s até a inicialização do sistema. O número não mede prontidão do
+launcher. Próximo gate é medir no boot selecionado, verificar logout e retorno
+ao SDDM e confirmar abertura das ferramentas. Recibo privado do lote em
+`~/.cache/phasezero-dev/tmp/vibe-boot.WPeFnp/`.
+
+## Vibe Code no Linux — 10/11/2026
+
+Branch `codex/vibe-code-profile`, código validado `77e1a8d7`. Início,
+Desenvolvimento e menu PhaseZero abrem o mesmo launcher. Pasta e editor ficam
+em estado privado. IDE, Konsole, Dolphin, Kate e navegador padrão abrem sob
+demanda. Receitas e contas usam as superfícies existentes. Plano e gates em
+[Vibe Code no Linux](../roadmaps/apps-dev-ai-accounts-v1.md#vibe-code-no-linux).
+
+Host BigLinux/Plasma Wayland: runtime de usuário
+`1.22.17+vibe.77e1a8d7` ativado pelo link `current`, mantendo a base
+`1.22.17` recuperável. Deploy composto de seis arquivos de runtime da frente
+Vibe Code sobre a instalação existente, conferidos por conteúdo. Entrada
+gerenciada de menu instalada. Autostart do Plasma ativado, com serviço
+gerado e condição KDE conferidos em diretório descartável. A opção do
+launcher remove seu próprio autostart.
+
+Validação: 63 testes focados, ShellCheck e diff check. Menu abriu janela no
+KWin real. Na jornada de QA Wayland, IDE e terminal abriram na mesma pasta
+com espaços; Konsole confirmou cwd físico e `PWD`; `node --test` passou;
+Brave abriu o preview loopback com perfil e handler de QA; reabertura e
+pasta renomeada passaram. Recibos privados em
+`~/.cache/phasezero-dev/tmp/vibe-code-host.8S3zHQ/`.
+
+Gates: nova entrada no Plasma para observar o autostart. Overlay Hyprland
+0.56 foi aceito por `--verify-config` junto da base do host; sessão e
+bloqueio físicos seguem pendentes. Autologin SDDM, recuperação pelo greeter
+e TTY e comparação de desempenho aguardam teste físico. Catálogo assinado
+`practices-not-configured`; memorial local usado, achados registrados em
+`decisions/vibe-code-plasma-terminal-browser-20261110.md` no ai-memory.
+Push recusado pelo guard local porque a branch Vibe Code está fora da
+continuidade registrada. Incremento preservado na branch local.
+
+## Contas e conexões: carteira e gestão de chaves — 07/11/2026
+
+Incremento de código `a6e5e06fcd0f16b6f1bbe072ffeed6b8a4c50357`, branch de revisão
+`codex/accounts-key-manager`, sobre `b7c223b643dd41a70a67d584c3ba6973c41de154`
+(PR #133). O commit local equivalente é `0495c9c703638c49cecb779d2dc31b0a8fb8667b`.
+Essa base preserva os launchers Grok/DeepSeek já instalados, sem publicar os
+commits de outras frentes da branch local. AGENTS, alterações anteriores deste
+handoff e reparo de touch permaneceram fora do incremento.
+
+Contas agora separa sessões observadas, registros/perfis locais, plataformas e
+chaves. Perfis não comprovam identidades distintas. Cotas preservam unidade,
+fonte e horário; renovação aparece quando informada. Ver todas as contas mantém
+Codex e os consentimentos existentes. Gerenciar chaves abre busca, filtros,
+ordenação e detalhe por chave com cadastro/idade, origem e vínculos gerenciados.
+A carteira continua CredentialVault/cofre nativo, sem novo banco ou segredo na
+listagem. Criação no provedor, validade, expiração, saldo e última requisição
+permanecem desconhecidos quando faltam dados. Revisão de cadastro após 90 dias
+é lembrete local, não prova de comprometimento. Lista usa acesso da sessão local;
+autorização/desbloqueio do cofre continua nas operações nativas, sem falso gate.
+
+Cobertura de uso: DeepSeek Harness selecionado por referência exata, com estado,
+pasta sugerida, supervisor e horário da observação. Uso externo segue desconhecido.
+Revogar uso encerra e desfaz somente esse vínculo. Remoção segura serializa
+encerramento e exclusão local com a trava do próprio manager; falha ao parar
+preserva a chave. Substituição cadastra outra chave e exige seleção/consentimento
+no consumidor. Nenhuma revogação no provedor ou grant de proxy é presumida.
+
+Validação: 203 pytest focados passaram em 59,27 s; jornadas claro/escuro em
+100/150/200%, 800×600 e 1280×800, teclado, privacidade, filtros e reabertura.
+Qt/Xvfb exercitado no host. Secret Service real com chave inválida própria e
+Harness real 0.2.1-rc.2/Node privado existente passaram: cadastro pela UI,
+observação, revogação, reinício explicitamente selecionado e parada antes da
+remoção. Recibo privado: `~/.cache/phasezero-dev/accounts-host.PdF0J4/receipt.json`.
+Sem login de operador ou inferência. Venv de testes não contém PyGObject; o teste
+nativo usou Python do launcher, sem trocar backend por arquivo.
+
+Smoke do pacote instalado em raiz descartável passou. Instalador oficial de
+usuário aplicou fonte imutável do SHA de código acima; versão nominal continua
+1.22.16, sem tag/release nova. Backup anterior:
+`~/.local/share/phasezero/backups/1.22.16.20261107085718.600230`.
+Os sete arquivos Linux alterados coincidiram byte a byte com esse SHA. Launcher
+instalado abriu Contas e conexões em Xvfb e encerrou pelo smoke normal; evidência
+privada em `~/.cache/phasezero-dev/accounts-installed.WHyvxm/accounts.png`.
+
+Próximo gate: CI do SHA de revisão e integração do PR #133 antes deste incremento.
+Na consulta da base, python-test estava vermelho; demais checks executados
+passaram. Windows, conta/cota reais, uso externo, leitor de tela e toque físico
+não foram homologados. Não houve merge/release. Catálogo assinado de práticas
+retornou practices-not-configured; memória local e memorial do checkout usados.
+
 ## Preferência de microfone após deriva de perfil — 06/11/2026
 
 Código `154225b3e4b7dcf4a21331e297eefe893a08b588` na branch de
@@ -262,6 +476,33 @@ Próximo passo exato: operador liberar `refs/tags/v1.22.12` no mecanismo central
 continuidade para este repositório/SHA; então `git push origin v1.22.12` pelo fluxo normal.
 Workflow oficial valida CI exata e constrói/publica beta com checksums. Conferir assets,
 digests e notas; não promover stable nem instalar pacote no host por esta autorização.
+
+### Bloqueio da tag resolvido com autorização — 2026-11-01
+
+Operador autorizou ajuste da guarda após conferir ausência de duplicação, ambiguidades e
+arquivos órfãos. Guarda central existente ganhou allowlist por projeto, somente
+`refs/tags/v1.22.12` → `5731c5cc5fcff3ae072fb82d4da6b765db3c78d8`. Exige criação de tag
+anotada, versão coerente, anotação sem segredo e commit já contido na branch remota
+registrada. Atualizar/apagar tag ou publicar outra referência continua recusado.
+17 testes da guarda passaram, incluindo negativos; demais registros de projeto iguais.
+Mudanças administrativas: `.workspace/workspace.py`, `test_workspace.py` e entrada
+PhaseZero em `projects.json`, fora do Git público deste produto.
+
+Originais, patch revisado e hashes de antes/depois têm owner/retencão no diretório privado
+já usado para recuperação: `~/.local/share/project-recovery/PhaseZero/release-v1.22.12-guard/`.
+`before.tar.gz`, `approved.patch` e `receipt.json` formam uma única unidade de rollback;
+registro compartilhado não foi publicado nem deve ser restaurado por cima de mudanças
+posteriores sem conferir hashes e preservar entradas alheias. Não há novo checkout,
+branch de trabalho, instalação, serviço ou publisher. Uma worktree canônica confirmada;
+`linux/repairs/reparo-touch-auto.sh` continua alheio e fora da árvore da tag.
+
+Push normal da tag confirmou objeto anotado `86b353b697308f7da4844267ec2fb0221b273d43`,
+peeled commit `5731c5cc5fcff3ae072fb82d4da6b765db3c78d8`. Pipeline oficial de release
+[41301157702](https://github.com/Misael-art/phase-zero/actions/runs/41301157702)
+iniciado sem bypass de CI. CI exata do commit retomada no run `41299324376`, pois push
+documental posterior havia cancelado rodada anterior. Não confundir CI de outra HEAD
+com aceite da tag. 14 testes de coesão/metadata/canal passaram no host. Tag imutável
+contém código/versão; diferenças da branch posteriores à tag são somente handoff.
 
 
 ## Revisão independente e integração DeepSeek Harness — 2026-11-01
@@ -688,3 +929,481 @@ A releitura confirmou as revisões e o lint deixou de sinalizar as duas
 orientações antigas. Candidatos de similaridade seguem sujeitos à revisão
 por escopo. A publicação do catálogo compartilhado ainda exige configurar
 a chave pública do curador.
+
+### Verificação de recursos do host — 2026-11-05
+
+Base `f042c43b`. A regra foi aplicada em 20 arquivos `AGENTS.md` locais
+de raízes identificadas na coleção e no ai-memory. A verificação confirmou
+um bloco por arquivo e uma segunda execução sem mudanças. A preferência
+ficou registrada como contexto no ai-memory. O relato de reinícios sob
+pressão orienta a margem operacional. A causa do reinício segue sem
+diagnóstico. Lote documental local.
+
+## Atalhos DeepSeek Harness e Grok Build — 2026-11-06
+
+- Objetivo: abrir ambos os agentes pelo menu PhaseZero e pela página
+  Desenvolvimento, com um único fluxo de instalação e abertura por agente.
+- Base do PR: `origin/main` `8b5920a8`. Incrementos locais `7fd6cb12` e
+  `eef7cbb5`; árvore de revisão publicada em `b7c223b643dd41a70a67d584c3ba6973c41de154`,
+  branch `codex/deepseek-grok-build`, [PR #133](https://github.com/Misael-art/phase-zero/pull/133).
+  Branch de revisão cadastrada no registro local; frente de microfone ficou fora
+  do PR. Hook de publicação verificou o incremento sem achados e o Gitleaks passou.
+- Implementação: `linux/ai/grok_build.py`, atalhos no agrupador canônico,
+  fichas Qt, catálogo, inventário, `pz updates` e instalador de usuário. Grok
+  reusa a instalação oficial, verifica versão e abre terminal na pasta escolhida.
+  Instalação nova Linux x64 valida arquivo manual por tamanho, SHA-256 e versão.
+  O Harness mantém seu runtime pinado e a interface Web.
+- Testes: 166 focais no checkout de implementação, 53 no export final do PR;
+  ShellCheck e diff check. Instalador ensaiado em XDG privado e aplicado do
+  export do SHA publicado. Dois atalhos reais abriram em Xvfb. Interface
+  instalada passou clique/foco/alvo e overflow em 800×600 e 1280×800, claro/escuro.
+  Grok TUI real abriu na pasta de fixture e atualização retornou versão atual
+  1.0.77 stable. DeepSeek 0.2.1-rc.2 iniciou em fixture isolada, abriu página
+  Web no Chrome sem sessão e parou pelo supervisor. Nenhuma inferência executada.
+- Host: runtime de usuário 1.22.16 do SHA de revisão instalado sobre o release
+  local, com backup `1.22.16.20261106195125.707518`. Menu voltou a responder
+  `applied:false` em segunda execução. DeepSeek de produção continua parado
+  aguardando escolha de pasta e conta. Recibos privados em
+  `~/.cache/phasezero-dev/tmp/agent-launchers-publication.lm6zUPsJ/`.
+- Limites e próximo passo: login/conta/cota reais e Windows físico seguem
+  pendentes. Rota Grok pela carteira fica condicionada a provar precedência da
+  chave e interrupção após revogação. Catálogo assinado local sem configuração.
+  Publicação depende de CI verde, merge autorizado, metadata de beta e tag
+  anotada com o SHA elegível registrado. CI estava em andamento na conferência
+  inicial, sem tag ou release criada.
+
+## Investigação passiva dos resets do Steam Deck — 2026-11-07
+
+Investigação em `misael-jupiter`, BigLinux/Manjaro, kernel
+`6.18.49-1-MANJARO`, firmware `F7A0133`, entre aproximadamente 07:29 e
+07:42 -03. Base do checkout `eef7cbb5`, branch `codex/agent-launchers`.
+**Causa dos resets permanece indeterminada.** Nenhum serviço, perfil de
+entrada, driver, parâmetro de boot ou pacote foi alterado. Não houve teste de
+carga, rebind USB, reparo de disco, logout nem reinício. Mudanças anteriores
+do checkout foram preservadas. Esta é evidência de diagnóstico, não aceite
+de estabilidade.
+
+### Cronologia revalidada e limite da retenção
+
+`journalctl --list-boots` disponibilizou somente quatro boots, incluindo o
+atual. `last -x` confirma interrupções, mas seu intervalo até o próximo login
+não determina o instante da falha. O episódio de 05/11 continua descrito no
+handoff do Fôlego; seu journal original não estava entre os boots acessíveis
+nesta rodada, portanto não foi revalidado de forma independente.
+
+| Boot de 06/11 | Último journal / próxima inicialização | Evidência adicional desta rodada |
+|---|---|---|
+| `0bbcc891…`, 23:23:24 | 23:42:51 / 23:50:04 | Sessão SteamZero escolhida às 23:27:59. Às 23:28:34 há pedido explícito de destino `plasma`; Game Mode é encerrado e Plasma sobe. Supervisores param e voltam com a sessão, cerca de 14 minutos antes do corte. Última amostra Fôlego: 23:42:44, ACPI 97 °C, 4,77 GiB disponíveis, 0,72 GiB em swap, `rustc` a 99,4% de um núcleo. |
+| `64c34423…`, 23:50:04 | 23:50:18 / 23:51:25 | Seletor de boot concluiu com sucesso e estado `inactive`; cmdline sem `steamzero.gamemode=1`. SDDM iniciou sessão SteamZero escolhida no greeter. Marcador persistente de início tem esse boot ID; `gamemode-session.json` registra tentativa 1, `starting`, às 23:50:18,560, sem `exitCode`, destino ou fallback. Esse arquivo foi gravado depois da última linha do journal, às 23:50:18,284. |
+| `c325bc6f…`, 23:51:25 | 23:54:37 / 07/11 06:38:36 | Sessão escolhida foi Plasma, às 23:51:53. Última amostra, 23:54:26: ACPI 83 °C, 6,43 GiB disponíveis, swap 16 KiB, PSI CPU 41,63%, I/O 0,86%. `electron` a 134% de um núcleo, sem árvore histórica que identifique qual cliente. Rádio interno emitiu 99 eventos anormais às 23:54:30; houve log normal de zram sete segundos depois. |
+
+O estado `starting` comprova entrada no launcher e chegada à etapa anterior
+à chamada do wrapper Gamescope. Não comprova que o compositor apresentou um
+frame, nem atribui o reset ao SteamZero. `consecutiveFailures=0` é uma guarda
+de início de sessão; não certifica que uma sessão permaneceu saudável.
+O horário 06:38 é a volta do host, não a hora comprovada do terceiro corte.
+
+### Responsabilidades e consumo observado
+
+Leitura Bigsudo autorizada concluiu o exame antes pendente de
+`/usr/local/lib/systemd/system`: havia somente
+`steamzero-gamemode-boot.service`, um oneshot anterior ao display manager.
+Nenhum drop-in gerenciado de autologin SteamZero estava presente no momento
+da inspeção. O runtime instalado era `2.0.0rc1-c58195919b07`.
+
+PhaseZero observa KWin e áudio a cada três segundos; RetroFE reconcilia suas
+leases e a seleção Steam a cada dois segundos; Fôlego mantém política,
+baseline, orçamento e disjuntor próprios. Não há evidência de uma operação
+dos supervisores causando os cortes. No boot de 14 segundos não aparecem
+inícios desses três supervisores. O ledger do Fôlego não tem operações na
+janela 23:23–23:54: última anterior às 22:50:40, próxima às 06:42:51 do novo
+boot. Na sessão atual o Fôlego reportava espera pelo owner PhaseZero, sem
+repetir uma operação desconhecida.
+
+Amostra de 20 segundos encerrada às 07:34:46 -03, somando cgroups distintos
+de launcher, aplicação e auxiliares. PSS divide páginas compartilhadas entre
+processos; o consumo contabilizado pelo cgroup inclui também cache e kernel.
+Os valores incluem a atividade desta investigação e não reconstituem 06/11.
+
+| Consumidor atual | PSS aproximada | Memória dos cgroups | CPU em % de um núcleo |
+|---|---:|---:|---:|
+| Codex Principal e auxiliares | 2,68 GiB | 3,21 GiB | 66,09% |
+| Codex PhaseZero A e auxiliares | 1,15 GiB | 1,35 GiB | 0,92% |
+| Codex PhaseZero B e auxiliares | 1,37 GiB | 1,51 GiB | 2,03% |
+| ChatGPT Web e auxiliares | 0,53 GiB | 0,62 GiB | 0,24% |
+| `phasezero-input-restore` | 4,6 MiB | 7,8 MiB | 12,96% |
+| `folego-accessibility` | 43,2 MiB | 83,6 MiB | 3,06% |
+| `retrofe-input-recovery` | 13,7 MiB | 13,3 MiB | 0,40% |
+
+São três clientes Codex: principal e dois lançados pelo PhaseZero. Na
+medição inicial havia 4,3 GiB de RAM disponíveis, swap ocupada sem tráfego
+sustentado e PSI de memória baixo. Os cgroups medidos apresentavam zero
+`oom` e `oom_kill`. O custo recorrente do watcher PhaseZero merece otimização
+no fluxo existente, preservando entrada e recuperação; não é uma demonstração
+de loop de reparo ou causa de reset. O legado `codex-quota-panel.service`
+segue desativado, com caminho inexistente e sem entradas nos três boots.
+
+### Defeito ICC e proposta mínima, ainda não aplicada
+
+Owner: pacote `biglinux-session-and-themes 26.08.07-2301`. A unit instalada
+permite a conta `sddm`, é puxada por `default.target` e reinicia após falha.
+Seu script chama `kscreen-doctor` sem uma sessão Qt utilizável no greeter.
+Contagem por PID único: 161, 6 e 12 abortos nos três boots; mais 10 no boot
+atual, que continuava operante. Isso confirma o defeito e impede tratar cada
+aborto como reset do host. A definição também aparece no
+[upstream BigLinux](https://github.com/biglinux/biglinux-session-and-themes/blob/main/usr/lib/systemd/user/plasma-big-apply-icc.service).
+
+Proposta: drop-in exclusivo
+`/etc/systemd/user/plasma-big-apply-icc.service.d/10-no-greeter.conf`:
+
+```ini
+[Unit]
+ConditionUser=!sddm
+```
+
+Preserva a condição existente `!root` e o fluxo de perfil do usuário normal.
+Validação descartável: cópia da unit mais drop-in passou
+`systemd-analyze verify --user --man=no`; condições passaram como usuário
+normal e falharam, como esperado, sob UID/GID 949 via `setpriv`. Nenhum script
+ICC foi executado no hardware para esse teste.
+
+Aplicação futura deve preservar qualquer drop-in preexistente e deixar a
+próxima entrada natural no greeter carregar a condição. Aceite físico:
+ausência do ciclo ICC sob UID 949, login normal e perfil do usuário preservado.
+Reversão: retirar somente o drop-in criado para essa correção e recarregar o
+gerenciador de usuário afetado ou usar a próxima sessão natural. Não editar
+arquivos do pacote nem mascarar globalmente o perfil de cor.
+
+### Bluetooth, disco e bateria
+
+`hci0` usa `btusb` no USB interno `3-5`, ID `13d3:3553`, Realtek RTL8822CU,
+firmware carregado `0x2b66d962`. No terceiro boot houve um evento `0x0b` com
+3 bytes onde eram esperados 11 e 98 eventos `0x00`. Não apareceram no primeiro,
+segundo ou boot atual até a leitura. Não foram encontrados reset de GPU,
+ring timeout, OOM ou panic nos journals acessíveis. Mensagens de capacidade
+AER no início e registro de planos DRM com suporte a panic são informativas,
+não relatos de falha. A mensagem DTM TA também existe durante inicializações
+e transições; não demonstra um reset de GPU.
+
+O [handler Linux v6.18](https://github.com/torvalds/linux/blob/v6.18/net/bluetooth/hci_event.c)
+descarta esses eventos inválidos; o caminho consultado não solicita reboot.
+Isso esclarece a mensagem, sem excluir um problema anterior no rádio,
+transporte ou firmware, nem provar a causalidade no kernel Manjaro instalado.
+
+SMART revalidado: `critical_warning=0`, `media_errors=0`, 47 °C, desgaste 11%,
+`unsafe_shutdowns=2757`, tempo em temperatura composta crítica zero. Os
+contadores Btrfs continuam 6.741 em corrupção, demais quatro em zero. Não foi
+executado scrub nem reparo. Contadores históricos não datam cada incidente.
+
+Bateria fora do incidente: 95%, descarregando, 7,694 V e 1,628 A;
+`charge_full/charge_full_design` de 3.828.000/5.200.000 µAh, cerca de 73,6%.
+Essa leitura varia em relação à observação anterior e não comprova queda de
+tensão sob carga. A desconexão do carregador relatada pelo usuário foi
+intencional; não é evidência de defeito do conector.
+
+### Hipóteses e observação decisiva
+
+Confiança abaixo significa força da atribuição causal, não probabilidade
+estatística. Não há causa isolada.
+
+| Hipótese | Evidência favorável | Contrária ou limite | Confiança causal | Observação que falta |
+|---|---|---|---|---|
+| Calor | 97 °C ACPI e compilação antes do primeiro corte | Terceiro termina em 83 °C; sensor não mede especificamente núcleo da CPU | Baixa; pista no primeiro | Pico ou evento térmico do firmware no instante da falha |
+| Energia/bateria | Interrupção sem shutdown é compatível; capacidade reduzida | Desconexão foi voluntária; faltam tensão/corrente no corte | Indeterminada | Queda de tensão/carga correlacionada ou motivo de reset de firmware |
+| Kernel/firmware | Corte abrupto sem encerramento; captura de falha ausente | Nenhuma pilha ou motivo de reset preservado | Indeterminada | Pstore funcional ou captura remota de lockup/panic |
+| GPU/transição SteamZero | Segundo para durante tentativa 1 do launcher | Primeiro chegou ao Plasma e continuou; terceiro iniciou Plasma; sem reset GPU registrado | Baixa; pista específica do segundo | Etapa/saída do Gamescope e erro DRM contemporâneo ao corte |
+| ICC no greeter | Defeito repetível, 179 abortos nos três boots | Também 10 abortos no boot atual operante; não explica sozinho o corte tardio | Alta para defeito; baixa para reset | Observar greeter corrigido e novo incidente com captura útil |
+| Bluetooth/USB interno | 99 eventos inválidos perto do terceiro corte | Journal continuou por sete segundos; demais cortes sem esses eventos | Baixa | Erro de transporte/controlador ou pilha imediatamente antes da interrupção |
+| Memória/armazenamento | Clientes pesados e erros históricos existem | 4,77/6,43 GiB disponíveis; sem OOM, SMART ativo limpo e Btrfs sem delta | Baixa | PSI/oom ou novo erro de I/O correlacionado ao corte |
+| Supervisores de entrada | Compartilham superfícies KWin/Steam/áudio; polling tem custo | Não iniciaram no segundo boot; ledger sem operação na janela dos cortes | Baixa | Operação identificada, efeito e falha causal encadeados |
+
+### Capturar próximo episódio sem induzir falha
+
+Pstore está montado, porém backend `(null)`, `efi_pstore.pstore_disable=Y` e
+`systemd-pstore.service` desativado. Variáveis EFI informaram **77.043 bytes
+livres em 151.464 bytes**. Isso é NVRAM, diferente dos 298 MiB livres da
+partição EFI. Não habilitar pstore EFI só porque a partição tem espaço.
+Configuração do kernel: `CONFIG_EFI_VARS_PSTORE_DEFAULT_DISABLE=y` explica
+o padrão desativado da EFI; `CONFIG_PSTORE_CONSOLE` não foi compilado.
+Há suporte a dumps de panic/oops, mas não à gravação contínua de console
+por esse frontend. Ativar somente um backend não capturaria necessariamente
+um hardlock sem dump. Nenhum módulo alternativo de pstore estava carregado,
+nem havia mensagem de registro de backend no journal do boot atual.
+A [documentação do kernel](https://docs.kernel.org/power/shutdown-debugging.html)
+exige backend adequado; pstore não garante registro quando a energia some
+antes de o kernel escrever. Ramoops requer região reservada válida e retenção
+de RAM; não inventar endereço de memória.
+
+`nowatchdog` e `nosoftlockup` estão no boot atual; `watchdog`,
+`nmi_watchdog` e `soft_watchdog` retornaram zero. `nomce` também está na
+cmdline, e o boot registra `mce: Unable to init MCE device (rc: -5)`.
+O [código x86 Linux v6.18](https://github.com/torvalds/linux/blob/v6.18/arch/x86/kernel/cpu/mce/core.c)
+interpreta `nomce` desabilitando MCA. Esse conjunto é mais uma limitação de
+diagnóstico; ausência de relatos MCE não certifica CPU/RAM saudáveis nem
+constitui evidência de defeito físico. Os
+[detectores de lockup](https://docs.kernel.org/admin-guide/lockup-watchdogs.html)
+introduzem trabalho periódico e podem apenas registrar, mantendo opções de
+panic/reboot desligadas. Mudança de boot precisa de janela, caminho de
+recuperação e baseline; não foi feita nesta investigação.
+
+Próximo incremento recomendado ao owner Fôlego: ampliar o gravador existente
+de 15 s, sem criar outro daemon, com AC/bateria, tensão e corrente quando
+disponíveis, preservando `null` para dado ausente. Manter os limites atuais de
+4 MiB por boot/32 MiB totais, fsync periódico ou por pressão, e incluir IDs de
+boot/relógio monotônico. Consultar deltas Bluetooth/DRM com cursor limitado;
+SMART em baixa frequência por helper de leitura autorizado, sem diálogo
+administrativo periódico. Não consultar SMART a cada amostra.
+
+Journal persistente está limitado a `SystemMaxUse=50M`, com
+`SyncIntervalSec=5m`, e já perdeu acesso aos boots antigos nesta rodada.
+Avaliar em incremento separado retenção limitada de 100–200 MiB e sync de
+30–60 s, medindo o I/O e preservando as evidências anteriores. Isso reduz
+uma lacuna de coleta, sem garantir a última mensagem após corte elétrico.
+Alternativa a EFI é coletor remoto em outro host por transporte comprovado;
+netconsole exige NIC/driver compatível e receptor, não basta presumir Wi-Fi.
+Boot diagnóstico futuro deve preservar entrada original no menu, usar apenas
+mudança temporária validada, manter panic/reboot automático desligados e
+voltar à entrada original se houver regressão. Não gerar panic de teste.
+
+### Continuidade e próximos gates
+
+Evidências privadas, 24 KiB na coleta, com manifesto SHA-256:
+`~/.cache/phasezero-dev/tmp/steamdeck-shutdown-investigation-20261107/`.
+Contêm `boot-evidence.jsonl`, `resources.json`, `host-snapshot.json` e cópia
+descartável da proposta ICC. Preservar até encerrar a investigação; nenhum
+expurgo automático foi instalado. Não publicar logs ou estado privado no Git.
+Achado durável em ai-memory do PhaseZero:
+`gotchas/steamdeck-abrupt-resets-steamzero-greeter-evidence-20261107.md`.
+
+Catálogo assinado indisponível: comando instalado não aceita `practices`;
+CLI do checkout retorna `practices-not-configured`. Memória do projeto foi
+consultada explicitamente em `default/misael-art-phase-zero`, sem aplicar
+práticas não verificadas. Leituras administrativas por Bigsudo funcionaram.
+Validação desta rodada: cronologia por boot, ledger, sensores/SMART/Btrfs,
+medição de cgroups/PSS, condição ICC sob duas identidades e verificação
+sintática descartável. Nenhuma suíte de produto ou build foi necessária.
+Próximos gates: aplicar/observar proposta ICC em entrada natural; implementar
+telemetria no owner existente; definir backend e janela para captura de
+kernel. Correção do ICC não encerra investigação dos resets. Sem alteração
+de código ou publicação de produto nesta rodada.
+
+## Reparo de estabilidade integrado ao PhaseZero — 2026-11-07
+
+Código em `9c1701588fefacf2ed14ecd35d8eacba034a602f`, branch local
+`codex/agent-launchers`. `linux/pz repair stability` usa o gerenciador de
+reparos existente, com `status`, `plan`, `apply --yes` e `rollback --yes`.
+Contrato e uso em [host-stability.md](../troubleshooting/host-stability.md).
+
+Aplicação no host às 07:55 -03 criou dois drop-ins gerenciados: exclusão de
+`sddm` no autoaplicador ICC e journal persistente com limite de 150 MiB e
+sync de 60 s. Configuração efetiva conferida; journald ativo. Mesma identidade
+de boot, sem reinício da sessão, SDDM, drivers, firmware ou mudança de cmdline.
+Entrada natural no greeter e preservação física do perfil de cor permanecem
+gates. Backend pstore e detectores continuam sem ativação; causa dos resets
+não foi isolada.
+
+Recibo com intenção, hashes e fase em
+`/var/lib/phasezero/repairs/stability/state.json`. Arquivos originais não são
+sobrescritos. Configuração pessoal, symlink, recibo desconhecido, alteração
+posterior e redução de uma política já mais forte bloqueiam a operação.
+Falha parcial/timeout exige verificação ou reversão explícita, sem retry cego.
+Nenhum daemon, coleta paralela ou limpeza de logs foi instalado.
+
+Validação: 26 testes focais passaram em 0,72 s com Python 3.14.7/pytest já
+provisionados pelo Fôlego, temporários próprios em disco. Incluem aplicação,
+idempotência, rollback, falha parcial, timeout, precedência e proteção de
+arquivos. Primeiro ensaio falhou na preparação do diretório temporário; corrigido
+antes da rodada válida. ShellCheck de `linux/pz` passou com as opções oficiais
+do CI; verificação de diff passou. PR #133 já apresentava falha de
+`python-test` no SHA anterior de outra frente; não atribuir esse CI ao reparo.
+
+Push normal recusado pela guarda: branch atual fora da continuidade registrada.
+Não houve bypass, novo PR, merge ou release. Recuperação identificada no destino
+privado já registrado `~/.local/share/project-recovery/PhaseZero/`, com patch
+Git verificado e manifesto. Bundle adicional preservado, mas sua verificação
+recusou a conectividade do pré-requisito; não é recuperação certificada.
+Próximo gate de publicação: reconciliar este incremento
+com a continuidade registrada sem carregar mudanças alheias. Prompts entregues
+separam instrumentação Gamescope (SteamZero) de telemetria passiva (Fôlego);
+nenhum agente dessas frentes foi iniciado nesta tarefa.
+
+
+## Preparação Windows no cartão após teste físico — 12/11/2026
+
+O preparador Windows apontou falhas de início de instalador por arquivo/pasta
+corrompido, e os eventos do Windows registraram corrupção de estado AppX.
+A recuperação do volume pertence ao projeto Windows11_SteamDeck_preparo.
+O owner PhaseZero conserva instalação dos agentes, ai-memory e recuperação.
+
+A janela de preparação agora expõe autorização de downloads, aguarda o código
+de saída de cada ação e mantém resultado visível ao reabrir. A modalidade de
+download manual apresenta instalação pendente. O registro por ação usa o writer
+atômico existente em ai-tools/logs. Quatro jornadas de regressão exercitam
+instalação manual, autorização, falha do filho e falha ao iniciar o processo,
+com processos e gravação substituídos por fixtures. O workflow Windows executa
+essas jornadas junto do ensaio WPF e do lifecycle nativo já existente.
+
+Host Linux com limites de CPU e RAM. As quatro jornadas passaram no PowerShell
+local. O [ensaio nativo em ef033ba](https://github.com/Misael-art/phase-zero/actions/runs/43247289736)
+passou com PowerShell 5.1, renderização WPF, quatro jornadas, companion e
+lifecycle de memória com backup/restauração em base descartável. O pacote
+desse código foi reconstruído e seus 105 arquivos foram conferidos por hash
+no cartão.
+
+O Pester geral nesse SHA registrou 809 testes aprovados, uma falha e dois
+ignorados. A falha foi o orçamento do PSScriptAnalyzer, com 926 avisos diante
+do limite 921. O incremento de teste trata os quatro avisos da nova fixture
+com parâmetros comuns reais, escopo explícito do writer e verificações de
+caminho/recibo. O retry de saúde no ensaio nativo conserva o último erro para
+diagnóstico. O limite do gate foi preservado.
+
+O fechamento em `263e2d7b87dff0f82256e7cc790269e38de8090d` teve 38 checks
+aprovados e um ignorado. Pester registrou 810 aprovados, zero falhas e dois
+ignorados. PSScriptAnalyzer voltou a 921 avisos. O
+[ensaio Windows do pacote](https://github.com/Misael-art/phase-zero/actions/runs/43265888542)
+também passou nesse SHA. Naquele fechamento o runtime conservava `ef033ba`,
+com o mesmo código de produto e os 105 hashes conferidos. O delta seguinte trata fixtures
+e evidência de validação.
+
+Instalação/login no Deck dependem do Windows nativo. A transferência do
+histórico privado depende da chave de recuperação do domínio criptografado.
+O comando de práticas do checkout retornou
+practices-not-configured. Checkout, roadmap e este handoff sustentam a
+continuidade desta rodada.
+
+A ação **Instalar Codex Desktop e Claude Code** autoriza os downloads pelo
+próprio botão e executa a instalação. O recibo conserva essa autorização.
+As quatro jornadas atuais cobrem instalação dos aplicativos, preparação da
+memória, falha do processo filho e falha de abertura, com os efeitos substituídos
+por fixtures. A janela informa os downloads na descrição da tarefa.
+
+O CI de `4d67050` passou no ensaio Windows do pacote e encontrou uma corrida
+no teste Python de SIGTERM. O supervisor fecha a porta, aguarda o leitor e
+publica o estado final. O teste agora aguarda porta fechada e estado stopped
+dentro do prazo original de oito segundos, conservando as duas asserções.
+O teste focal passou em 1,39 s no ambiente Python gerenciado, com temporários
+privados em disco. A raiz temporária ausente da primeira invocação foi criada
+antes do ensaio válido. A VM própria ficou pausada durante o teste e foi retomada.
+
+O fechamento de código em `61eb775b1120d5564249000e3af74076d5700548` teve
+37 checks aprovados e um ignorado, incluindo os dois jobs Pester e Python.
+O runtime foi reconstruído pelo empacotador canônico e atualizado no cartão,
+com os 105 arquivos conferidos por SHA-256 e cópia dos arquivos substituídos
+no destino de recuperação. O produto usa o fluxo de instalação ensaiado
+nativamente em `4d67050`. [CI da branch](https://github.com/Misael-art/phase-zero/actions/runs/43292255819),
+[CI do PR](https://github.com/Misael-art/phase-zero/actions/runs/43292265763),
+[ensaio Windows](https://github.com/Misael-art/phase-zero/actions/runs/43288210494).
+
+O cofre Linux estava aberto, mas a chave de memória configurada continuou
+indisponível. O serviço de origem estava inativo. O histórico aguarda a chave
+desse domínio ou o arquivo de recuperação criptografado existente, solicitado
+ao operador. Instalação, autenticação, consulta MCP pelos dois clientes e
+sincronização permanecem sujeitos ao aceite no Windows físico.
+
+
+## Clientes Windows pelo cache preparado — 14/11/2026
+
+O preparador do microSD já possui os payloads fixados de Codex CLI, Claude Code
+e Claude Desktop. O owner PhaseZero passa a expor InstallCachedApps e
+CachedAppStatus em prepare-host.ps1, com cache explícito e sem rede/WinGet.
+O novo módulo cached-apps.ps1 preserva o inventário ai-tools, vincula Windows e
+SID, confere bytes contra o payload original e conserva o pacote Codex inteiro.
+Nenhuma consulta elevada executa os clientes. Abertura, login e memória privada
+continuam gates distintos. A janela oferece essa ação quando recebe OfflineCache
+e conserva a identidade do usuário na elevação.
+
+No Jupiter Linux, o ambiente gerenciado ui estava pronto. Sob execução serial,
+as fixtures passaram: 40 checks do cache, cinco jornadas da janela e dois
+testes pytest do empacotador. A conferência inicial do PSScriptAnalyzer foi revista: a rodada completa
+identificou dois avisos novos nos construtores de fixture e um aviso existente
+na atualização do PATH. Os três agora têm ShouldProcess efetivo; o orçamento
+global 921 permanece. A análise final deve ser conferida no SHA publicado.
+As fixtures substituem processos, registro, rede e AppX. O workflow Windows
+renderiza também a janela com cache; ainda é necessário observar seu resultado
+no SHA publicado e ensaiar os clientes reais no Windows descartável. O preparador
+Windows fará a ponte para esse contrato, sem copiar sua implementação.
+
+As práticas continuam practices-not-configured, e o servidor ai-memory de origem
+está indisponível. O cofre não forneceu a chave configurada; nenhum banco, cofre
+ou chave foi recriado. Esta entrada conserva a descoberta até a memória voltar.
+A distribuição oficial offline OpenAI foi localizada com MSIX e licença pública
+própria; sua aquisição e identidade estão em validação pelo preparador antes de
+expandir os três adaptadores atuais. Não há instalação física ou recuperação
+de histórico privado nova nesta rodada. O cartão e o overlay antigo permanecem
+sob o contrato de recuperação do owner Windows11_SteamDeck_preparo.
+
+A referência PowerShell 5.1 revelou que a fixture ZIP precisava carregar
+System.IO.Compression explicitamente antes do enum ZipArchiveMode. O ajuste
+`e415e67c7fbc5914b5bf06dc721cd9ada51066b8` passou no
+[ensaio Windows completo](https://github.com/Misael-art/phase-zero/actions/runs/43588457553),
+incluindo WPF, cinco jornadas, 40 checks do cache e lifecycle de memória.
+O incremento seguinte acrescenta o quarto cliente: OpenAI MSIX com licença
+pública fixada, provisionamento licenciado e registro da família na mesma conta.
+As fixtures locais passaram em 52 checks, sem execução real dos clientes.
+Assinatura/identidade/licença de origem foram conferidas pelo preparador em
+[referência Windows descartável](https://github.com/Misael-art/Windows11_SteamDeck_preparo/actions/runs/43587914719).
+A instalação real desse quarto adaptador e o aceite físico continuam separados.
+
+O código `18ce8d88192fab63525182f89127b38f5d225d23` passou no
+[empacotamento/lifecycle Windows](https://github.com/Misael-art/phase-zero/actions/runs/43590184221).
+O preparador confirmou instalações reais de Codex CLI, Claude Code e Claude
+Desktop em referência Windows, com versões CLI executadas sem saída de rede.
+O ensaio OpenAI no executor privado de 8 GiB foi interrompido pela reserva de
+recursos durante o provisionamento. Os três recibos anteriores permanecem
+válidos para seu escopo; não há recibo de aceite OpenAI daquela tentativa.
+
+O ensaio de provisionamento OpenAI passa ao workflow do próprio owner público,
+cujo executor padrão dispõe de 16 GiB. Mantém reserva de 4 GiB/25%, pico
+estimado de 1 GiB e 10 GiB além da saída estimada de 8 GiB. Fixtures contêm
+somente URLs/hashes públicos fixados; MSIX/licença não entram no Git nem nos
+artifacts de recibos. GITHUB_ACTIONS, hosted runner, repositório, identidade,
+privilégio e destino temporário são conferidos antes dos efeitos. A instalação
+usa a entrada normal, vinculada a Windows/SID, com prazo e supervisão serial.
+A reserva não foi reduzida para obter aprovação. Registro/provisionamento
+nativos ainda não comprovam abertura/login, isolamento de rede de todo o SO
+ou Windows 11 físico.
+
+A primeira referência OpenAI pública encontrou estreitamento numérico no
+PowerShell 5.1: Math.Max escolhia Int32 a partir do literal 512MB, mas 25% de
+16 GiB excedia Int32. O orçamento usa agora ambos os operandos double,
+preservando os mesmos limites. Uma fixture executa a aritmética real com
+leituras sintéticas de 16 GiB. Não houve falta de RAM nessa falha nem
+provisionamento OpenAI aprovado; a referência deve ser repetida no novo SHA.
+
+O [ensaio OpenAI em d2ac48b5](https://github.com/Misael-art/phase-zero/actions/runs/43603433097)
+passou, incluindo o provisionamento com a licença pública e o registro para a
+conta vinculada. O mesmo workflow passou o lifecycle de memória e suas fixtures.
+A revisão d2ac48b5 tem 54 checks locais do cache, incluindo os limites
+proporcionais em 16/32 GiB. Nenhum login privado ou Windows físico foi aprovado.
+
+A CI geral encontrou três regressões de ProbePaths do VC e orçamento de análise
+936/921. A migração anterior para windows-dependency descartou o campo público
+de diagnóstico; ele volta a listar System32/SysWOW64 e suas DLLs, sem substituir
+a consulta nativa obrigatória de registro, versão, arquitetura e todos os arquivos.
+A fixture verifica os caminhos e continua recusando o runtime parcial. Nomes de
+helpers internos de dependências passam a verbos aprovados e substantivos
+singulares, com os chamadores atualizados. A API pública JSON da janela continua
+igual. Mocks usam injeção explícita; o worker da janela conserva seu EntryPoint
+no contexto da closure. O limite 921 permanece, e a falha agora mostra locais
+acionáveis de todos os avisos. A análise e as regressões devem ser conferidas
+no SHA seguinte antes de reconstruir o runtime final.
+
+A fixture de dependências passou localmente após restaurar os caminhos e
+renomear os primeiros helpers. A rodada serial seguinte (dependências/cache/
+janela), limitada a um núcleo, 192 MiB e sem swap, terminou por SIGTERM sem
+recibo final. Não é aprovação. O host voltou a aproximadamente 4 GiB disponíveis
+e pressão crescente; novos testes locais ficam adiados. O próximo incremento
+será validado pela CI Windows, mantendo o orçamento 921 e todos os checks.
+O trabalho não inclui o reparador de toque não rastreado de outra tarefa.
+
+A referência Windows do código 92aefb7f passou seu pacote/lifecycle e o
+provisionamento OpenAI. O Pester geral chegou a 809 aprovados, uma falha e
+dois ignorados: as três regressões VC foram resolvidas, e restaram 927/921
+avisos. O diagnóstico mostrou três mocks AppX declarados como cmdlets no
+Windows, dois parâmetros do mock de log sem uso e o Write-Host novo do próprio
+diagnóstico. Os mocks agora usam injeção explícita, o log registra seus dois
+argumentos e o diagnóstico usa Write-Information. Isso remove seis avisos sem
+alterar o limite 921 nem excluir regras. A próxima CI deve confirmar o delta.
+O job homelab-shell-test da mesma rodada falhou por tar informar arquivo
+modificado durante backup de fixture; essa frente não foi alterada por este
+incremento Windows.

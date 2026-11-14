@@ -857,6 +857,31 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
         )
     )
 
+    grok_status = ("ai", "grok-build", "status")
+    actions.extend((
+        _a("ai.grok-build.status", "IA & Dev", "Status Grok Build",
+           "Detecta o CLI e sua versão local.", grok_status, "system-search",
+           status_args=grok_status),
+        _a("ai.grok-build.install", "IA & Dev", "Instalar Grok Build",
+           "Selecione o binário oficial Linux x64 baixado. O PhaseZero verifica tamanho e SHA-256.",
+           ("ai", "grok-build", "install", "--artifact", "{artifact}"), "system-software-install",
+           mutable=True, preview=("ai", "grok-build", "plan"),
+           parameters=(_p("artifact", "Binário oficial", "file"),), status_args=grok_status),
+        _a("ai.grok-build.open", "IA & Dev", "Abrir projeto no Grok Build",
+           "Abre o Grok Build em um terminal na pasta escolhida.",
+           ("ai", "grok-build", "open", "--workspace", "{workspace}"), "utilities-terminal",
+           parameters=(_p("workspace", "Pasta de trabalho", "path"),)),
+        _a("ai.grok-build.login", "IA & Dev", "Entrar no Grok Build",
+           "Inicia a autorização oficial no navegador a partir do terminal.",
+           ("ai", "grok-build", "login"), "internet-web-browser", mutable=True, preview=grok_status),
+        _a("ai.grok-build.check", "IA & Dev", "Verificar atualização do Grok Build",
+           "Consulta o atualizador oficial.", ("ai", "grok-build", "update-plan"), "system-search"),
+        _a("ai.grok-build.update", "IA & Dev", "Atualizar Grok Build",
+           "Usa o atualizador oficial. Pacotes acima do limite exigem download manual.",
+           ("ai", "grok-build", "update"), "system-software-update",
+           mutable=True, preview=("ai", "grok-build", "update-plan"), status_args=grok_status),
+    ))
+
     # Official DeepSeek Harness is its own experimental app, not the legacy
     # browser proxy and not a DeepSeek model selection.
     actions.extend([

@@ -17,3 +17,8 @@ b623574efeea3c27bdf3fe3231062cf2923a6c54:linux/steamdeck/plasmoid/org.phasezero.
 # Inventário da auditoria visual: SHA-256 dos arquivos-fonte capturados,
 # não credencial. generic-api-key casa a chave "tokens.py" + hex longo.
 17a13fef952b10c6e30c351b754e0bc6016f13c3:docs/audits/visual-system-20261102/inventory.json:generic-api-key:153
+
+# SHA-256 público do tokenizer MiniLM, não credencial. Conferido na fonte
+# fixada v3.3.1: crates/ai-memory-llm/src/local.rs (MODEL_FILES).
+# generic-api-key associa o nome do arquivo ao checksum de alta entropia.
+5532ee775ffa5848dfb3a2268d79c78aaf4097c9:packaging/ai-memory/pins.json:generic-api-key:13

@@ -78,6 +78,9 @@ class FakeRunner:
         self.tunnels: list[dict] = []
         self.connector = {"ok": True, "connector": "Codex Native2", "permission": "full_access",
                           "detail": "conector ativo e ligado ao túnel"}
+        self.launcher_snapshots: list[dict] = []
+        self.launcher_verify = {"available": True, "ok": True, "failed": []}
+        self.launcher_ui_calls: list[str] = []
 
     def run(self, args, *, env=None, timeout=30, input_text=None):
         self.calls.append(list(args))
@@ -86,6 +89,8 @@ class FakeRunner:
         if args[:3] == ["systemctl", "--user", "stop"]:
             self.unit_active = False
             return 0, "", ""
+        if args[:3] == ["systemctl", "--user", "restart"]:
+            return 4, "", "Unit not found"
         if args[0] == "unsquashfs":
             dest = Path(args[args.index("-d") + 1])
             dest.mkdir(parents=True, exist_ok=True)
@@ -124,6 +129,15 @@ class FakeRunner:
     def notify(self, title, body, critical=False):
         self.notifications.append((title, body, critical))
         return True
+
+    def launcher_ui(self, devtools_file, operation):
+        self.launcher_ui_calls.append(operation)
+        if operation == "verify":
+            return dict(self.launcher_verify)
+        if len(self.launcher_snapshots) > 1:
+            return self.launcher_snapshots.pop(0)
+        return dict(self.launcher_snapshots[0]) if self.launcher_snapshots else {
+            "available": True, "setupComplete": True, "turns": []}
 
     def other_users(self):
         return []
@@ -1832,6 +1846,15 @@ def test_launch_migrates_before_new_launcher_can_upgrade_the_same_journals(host,
     monkeypatch.setattr(runner, "run", run)
     assert bridge.launch()["launcher"] == "started"
     assert bridge.load_state()["updatePending"]["to"] == PINNED
+    launch = next(call for call in runner.calls if call[0] == "systemd-run"
+                  and f"--unit={bridge.paths.unit_name}" in call)
+    assert launch[-1] == "--hidden"
+    assert "Restart=on-failure" in launch and "RestartSec=5" in launch
+    assert "StartLimitBurst=5" in launch and "StartLimitIntervalSec=300" in launch
+    post = next(arg for arg in launch if arg.startswith("ExecStartPost="))
+    assert str(bridge.paths.manager_script) in post and "dom-compat-start" in post
+    assert any(arg.startswith("ExecStartPre=:") and "launcher-prepare" in arg for arg in launch)
+    assert bridge.paths.manager_script.is_file()
 
 
 @pytest.mark.parametrize("conflict", ["divergent", "foreign-hook", "active", "tampered", "outside-manifest"])
@@ -1938,7 +1961,8 @@ def test_update_records_setup_failure_and_retry_finishes_same_release(host, monk
         bridge_module.load_pin(bridge.paths.pin_root)
 
 
-@pytest.mark.parametrize("case", ["reused", "same-process", "unknown-identity", "other-profile", "changing-pid", "locked"])
+@pytest.mark.parametrize("case", ["reused", "idle-desktop", "prestart", "live-launcher", "same-process",
+                                 "unknown-identity", "other-profile", "changing-pid", "locked"])
 def test_tunnel_pid_recovery_preserves_other_aliases_and_never_signals(host, monkeypatch, case):
     bridge, runner, home = host
     configure(bridge, runner, route_active=False)
@@ -1967,10 +1991,14 @@ def test_tunnel_pid_recovery_preserves_other_aliases_and_never_signals(host, mon
     registry = root / "processes.yaml"
     registry.write_text(json.dumps(entries))
     before = registry.read_bytes()
+    runner.codex_pids = [5678] if case == "idle-desktop" else []
+    runner.unit_active = case in {"prestart", "live-launcher"}
     original_run = runner.run
     def run(args, **kwargs):
         if args[0] == str(binary):
             return 0, json.dumps({"state_root": str(root)}), ""
+        if args[:3] == ["systemctl", "--user", "show"]:
+            return 0, "0\n" if case == "prestart" else "5678\n", ""
         return original_run(args, **kwargs)
     monkeypatch.setattr(runner, "run", run)
     ticks = iter(["222", "333"] if case == "changing-pid" else ["111", "111"] if case == "same-process" else ["222", "222"])
@@ -1979,11 +2007,16 @@ def test_tunnel_pid_recovery_preserves_other_aliases_and_never_signals(host, mon
     with lock.open("r+b") as stream:
         if case == "locked":
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        assert bridge.repair_stale_tunnel_pid() is (case == "reused")
+        if case == "live-launcher":
+            with pytest.raises(BridgeError, match="encerre o launcher"):
+                bridge.repair_stale_tunnel_pid(allow_starting=True)
+        else:
+            assert bridge.repair_stale_tunnel_pid(allow_starting=case == "prestart") is (
+                case in {"reused", "idle-desktop", "prestart"})
     assert runner.terminated == []
     after = json.loads(registry.read_text())
     assert after["unrelated"] == entries["unrelated"]
-    if case == "reused":
+    if case in {"reused", "idle-desktop", "prestart"}:
         assert after["codex-chatgpt-web"]["mode"] == "stopped"
         assert after["codex-chatgpt-web"]["pid"] == 0
         assert after["codex-chatgpt-web"]["custom"] == "preserve"
@@ -2043,6 +2076,8 @@ def test_composer_compat_unit_is_bound_to_the_launcher(host):
     call = next(call for call in runner.calls if call[0] == "systemd-run")
     assert f"--unit={bridge.paths.compat_unit_name}" in call
     assert f"BindsTo={bridge.paths.unit_name}" in call
+    assert "--no-block" in call  # ExecStartPost must not deadlock on After=launcher
+    assert str(bridge.paths.manager_script) in call
     assert call[-3:-1] == ["dom-compat", "--devtools-file"]
     assert call[-1] == str(bridge.paths.launcher_data / "DevToolsActivePort")
 
@@ -2052,6 +2087,7 @@ def test_composer_compat_pass_targets_only_chatgpt_pages(tmp_path, monkeypatch):
     devtools.write_text("9222\n/devtools/browser/x\n")
     pages = [{"type": "page", "url": "https://chatgpt.com/", "webSocketDebuggerUrl": "ws://127.0.0.1:9222/a"},
              {"type": "page", "url": "file:///app/index.html", "webSocketDebuggerUrl": "ws://127.0.0.1:9222/b"},
+             {"type": "page", "url": "https://chatgpt.com.evil/", "webSocketDebuggerUrl": "ws://127.0.0.1:9222/e"},
              {"type": "iframe", "url": "https://chatgpt.com/x", "webSocketDebuggerUrl": "ws://127.0.0.1:9222/c"},
              {"type": "page", "url": "https://chatgpt.com/c/1", "webSocketDebuggerUrl": "ws://127.0.0.1:9222/d"}]
 
@@ -2071,3 +2107,185 @@ def test_composer_compat_pass_targets_only_chatgpt_pages(tmp_path, monkeypatch):
 
     assert bridge_module.dom_compat_pass(devtools) == 1
     assert seen == ["ws://127.0.0.1:9222/a", "ws://127.0.0.1:9222/d"]
+
+
+def test_crash_recovery_reuses_the_helper_that_is_still_stopping(host, monkeypatch):
+    bridge, runner, _ = host
+    runner.unit_active = True
+    original = runner.run
+
+    def run(args, **kwargs):
+        if args[:3] == ["systemctl", "--user", "restart"]:
+            runner.calls.append(args)
+            return 0, "", ""  # existing transient unit, queued after old stop
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(runner, "run", run)
+    assert bridge.ensure_dom_compat(restart=True) == "restarted"
+    assert ["systemctl", "--user", "restart", "--no-block", bridge.paths.compat_unit_name] in runner.calls
+    assert not any(call[0] == "systemd-run" for call in runner.calls)
+
+
+def test_start_post_can_schedule_compat_while_systemd_reports_activating(host, monkeypatch):
+    bridge, runner, _ = host
+    original = runner.run
+
+    def run(args, **kwargs):
+        if args[:3] == ["systemctl", "--user", "is-active"]:
+            return (3, "activating\n", "") if args[-1] == bridge.paths.unit_name else (3, "inactive\n", "")
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(runner, "run", run)
+    assert bridge.launcher_active() is True
+    assert bridge.ensure_dom_compat(restart=True) == "started"
+    assert any(f"--unit={bridge.paths.compat_unit_name}" in call and "--no-block" in call
+               for call in runner.calls)
+
+
+@pytest.mark.parametrize("matching", [True, False])
+def test_tunnel_identity_uses_exact_profile_when_proc_exe_is_inaccessible(tmp_path, monkeypatch, matching):
+    runner = Runner()
+    runner.proc_dir = tmp_path / "proc"
+    entry = runner.proc_dir / "123"
+    entry.mkdir(parents=True)
+    binary = tmp_path / "core-home/bin/tunnel-client"
+    profile = binary.parent.parent / ("tunnel/profiles" if matching else "another-account/profiles")
+    (entry / "cmdline").write_bytes(os.fsencode(binary) + b"\0--profile-dir\0" + os.fsencode(profile) + b"\0")
+    (entry / "cgroup").write_text("0::/app.slice/app-codex-web-gpt-launcher-99.scope\n")
+    monkeypatch.setattr(runner, "process_start_ticks", lambda pid: "12345")
+    assert runner.tunnel_clients(binary) == ([{"pid": 123, "scopePid": 99}] if matching else [])
+
+
+def test_tunnel_identity_rejects_pid_reuse_during_inspection(tmp_path, monkeypatch):
+    runner = Runner()
+    runner.proc_dir = tmp_path / "proc"
+    entry = runner.proc_dir / "123"
+    entry.mkdir(parents=True)
+    binary = tmp_path / "core-home/bin/tunnel-client"
+    (entry / "exe").symlink_to(binary)
+    (entry / "cgroup").write_text("0::/app.slice/app-codex-web-gpt-launcher-99.scope\n")
+    ticks = iter(["12345", "54321"])
+    monkeypatch.setattr(runner, "process_start_ticks", lambda pid: next(ticks))
+    assert runner.tunnel_clients(binary) == []
+
+
+def test_login_repairs_the_missing_composer_helper_without_opening_a_desktop(host, monkeypatch):
+    bridge, runner, _ = host
+    configure(bridge, runner, route_active=True)
+    bridge.package_state = lambda: {"state": "verified", "unpacked": "verified"}
+    runner.unit_active = True
+    runner.port_busy = True
+    runner.launchers = [{"pid": 99, "managed": True}]
+    bridge.paths.descriptor.parent.mkdir(parents=True)
+    bridge.paths.descriptor.write_text(json.dumps({"pid": 99}))
+    write_profile(bridge.paths.launcher_data, signed_in=True, auto_start=False)
+    bridge.autostart_enable(True)
+    original = runner.run
+
+    def run(args, **kwargs):
+        if args[:4] == ["systemctl", "--user", "is-active", bridge.paths.compat_unit_name]:
+            return 3, "inactive\n", ""
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(runner, "run", run)
+    assert bridge.autostart_run()["ready"] is True
+    assert any(f"--unit={bridge.paths.compat_unit_name}" in call for call in runner.calls)
+    assert not runner.spawned
+    assert not runner.notifications  # normal login stays silent; failures still notify
+
+
+@pytest.mark.parametrize("first", [None, {"unavailable": True}])
+def test_connector_probe_skips_unavailable_tabs_and_uses_the_live_account(tmp_path, monkeypatch, first):
+    devtools = tmp_path / "DevToolsActivePort"
+    devtools.write_text("9222\n")
+    pages = [{"type": "page", "url": url, "webSocketDebuggerUrl": f"ws://127.0.0.1:9222/{index}"}
+             for index, url in enumerate(["https://chatgpt.com.evil/", "https://chatgpt.com/",
+                                          "https://chatgpt.com/c/own-test"])]
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def read(self): return json.dumps(pages).encode()
+
+    monkeypatch.setattr(bridge_module.urllib.request, "urlopen", lambda *a, **k: Response())
+    seen = []
+
+    def evaluate(target, script, timeout):
+        seen.append(target)
+        assert "location.origin!==" in script and 0 < timeout <= bridge_module.CONNECTOR_CHECK_TIMEOUT
+        if target.endswith("/1"):
+            if first is None:
+                raise ValueError("page navigating")
+            return first
+        return {"signedIn": True, "listed": True, "connectors": [
+            {"name": "Own test", "tunnelId": "tunnel_test", "authStatus": "ACTIVE",
+             "actions": 2, "readOnly": False}]}
+
+    monkeypatch.setattr(bridge_module, "cdp_evaluate", evaluate)
+    assert Runner().connector_status(devtools, "tunnel_test")["ok"] is True
+    assert seen == ["ws://127.0.0.1:9222/1", "ws://127.0.0.1:9222/2"]
+
+
+def test_connector_probe_does_not_report_logout_for_a_blank_page(tmp_path, monkeypatch):
+    devtools = tmp_path / "DevToolsActivePort"
+    devtools.write_text("9222\n")
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def read(self): return json.dumps([{"type": "page", "url": "https://chatgpt.com/",
+                                           "webSocketDebuggerUrl": "ws://127.0.0.1:9222/1"}]).encode()
+
+    monkeypatch.setattr(bridge_module.urllib.request, "urlopen", lambda *a, **k: Response())
+    monkeypatch.setattr(bridge_module, "cdp_evaluate", lambda *a: {"unavailable": True})
+    result = Runner().connector_status(devtools, "tunnel_test")
+    assert result["ok"] is None and "indisponível" in result["detail"]
+
+
+def test_smoke_exercises_the_desktop_model_instead_of_a_legacy_alias(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch)
+    bridge.paths.codex_config.write_text(bridge.paths.codex_config.read_text() + '\nmodel = "chatgpt-web/gpt-6-sol"\n')
+    runner.codex_reply = "PONG"
+    result = bridge.smoke()
+    assert result["ok"] is True and result["model"] == "chatgpt-web/gpt-6-sol"
+    call = next(call for call in runner.calls if call[0].endswith("/codex"))
+    assert call[call.index("-m") + 1] == "chatgpt-web/gpt-6-sol"
+    assert "chatgpt-web/light" not in call and "chatgpt-web/medium" not in call
+
+
+def test_smoke_never_falls_back_from_a_native_model_to_web_or_paid_api(host, monkeypatch):
+    bridge, runner, _ = ready_host(host, monkeypatch)
+    bridge.paths.codex_config.write_text(bridge.paths.codex_config.read_text() + '\nmodel = "native-selected-model"\n')
+    with pytest.raises(BridgeError) as error:
+        bridge.smoke()
+    assert error.value.code == "web-model-required"
+    assert not any(call[0].endswith("/codex") for call in runner.calls)
+
+
+def test_connector_verify_waits_for_running_turn_then_verifies(tmp_path, monkeypatch):
+    runner = FakeRunner()
+    bridge = Bridge(env={"HOME": str(tmp_path), "PATH": "/usr/bin"}, runner=runner)
+    monkeypatch.setattr(bridge_module.time, "sleep", lambda _s: None)
+    runner.launcher_snapshots = [{"available": True, "setupComplete": False, "turns": ["abc"]},
+                                 {"available": True, "setupComplete": False, "turns": []}]
+    result = bridge.connector_verify(wait_seconds=60, poll_seconds=1)
+    assert result["ok"] is True and result["waitedForTurn"] is True
+    assert runner.launcher_ui_calls == ["snapshot", "snapshot", "verify"]
+
+
+def test_connector_verify_defers_without_cancelling_active_turn(tmp_path):
+    runner = FakeRunner()
+    bridge = Bridge(env={"HOME": str(tmp_path), "PATH": "/usr/bin"}, runner=runner)
+    runner.launcher_snapshots = [{"available": True, "setupComplete": False, "turns": ["abc"]}]
+    result = bridge.connector_verify(wait_seconds=0)
+    assert result["state"] == "deferred-turn-active" and result["ok"] is None
+    assert result["turns"] == ["abc"] and "verify" not in runner.launcher_ui_calls
+
+
+def test_connector_verify_reports_launcher_failures(tmp_path):
+    runner = FakeRunner()
+    bridge = Bridge(env={"HOME": str(tmp_path), "PATH": "/usr/bin"}, runner=runner)
+    runner.launcher_verify = {"available": True, "ok": False,
+                              "failed": [{"id": "connector", "message": "missing"}]}
+    result = bridge.connector_verify(wait_seconds=0)
+    assert result["ok"] is False and result["failed"][0]["id"] == "connector"

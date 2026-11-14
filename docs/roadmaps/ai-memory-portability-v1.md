@@ -5,6 +5,138 @@ Owner: adaptadores IA, catálogo e UI existentes. Contrato de criptografia:
 `packaging/ai-memory/pins.json`. Baseline de implementação: `69a471cd`;
 branch de continuidade `codex/clean-host-dev-bootstrap`, PR #129.
 
+## Preparação nativa para Windows
+
+`tools/package-memory-windows.py --output <destino-vazio> --packages <pacotes>`
+empacota o owner existente, seus adaptadores e a janela de memória. O pacote
+não contém banco, sessões, tokens nem configuração de outro host. O build
+Windows do workflow `Windows memory package` compila o companion da fonte
+fixada e testa o runtime instalado com PowerShell 5.1. Não exige Rust no Deck.
+
+`INICIAR.cmd` abre `windows/ai/prepare-host.ps1`. A instalação usa o lifecycle
+canônico; MCP/hooks são preparados para Codex Desktop e Claude Code no mesmo
+servidor. O ZIP nativo local continua sujeito ao SHA-256 fixado. O companion
+local exige versão, hash de fonte e hash do executável correspondentes.
+
+Os aplicativos têm instalação e autenticação próprias no Windows. O Desktop
+não é satisfeito por encontrar o CLI. Downloads grandes permanecem manuais;
+`-Action InstallApps -AllowLargeDownloads` exige autorização explícita para
+essa exceção. O modo padrão abre as fontes oficiais para instalação manual.
+
+A janela oferece uma autorização explícita de downloads antes da instalação
+dos aplicativos. Cada ação aguarda o processo, conserva seu código de saída
+em `ai-tools/logs/prepare-host-<acao>.json` e mostra o resultado ao reabrir.
+A ação manual indica que a instalação continua pendente nas fontes oficiais.
+
+Em outra instalação, importe a recuperação antes de cadastrar GitHub/escopos.
+Restaure somente pelo plano verificado da janela Memória. Acesso ao GitHub não
+substitui a chave de criptografia. Registre as pastas reais desse Windows,
+mantendo hostId e referências WinCred próprios. Preparação offline, ensaio
+nativo em CI, instalação no Deck e login são evidências distintas.
+
+### Clientes preparados no cache local
+
+O preparador aceita um cache revisado com `packages/packages.lock.json`:
+
+```powershell
+.\windows\ai\prepare-host.ps1 -Action InstallCachedApps `
+  -OfflineCache C:\SteamDeck `
+  -ApplicationIds OpenAI.Codex,Anthropic.ClaudeCode,Anthropic.Claude,9PLM9XGG6VKS
+.\windows\ai\prepare-host.ps1 -Action CachedAppStatus `
+  -OfflineCache C:\SteamDeck -ApplicationIds OpenAI.Codex
+```
+
+O adaptador não baixa arquivos nem consulta WinGet. Confere ID, revisão fixada,
+origem oficial, tamanho e SHA-256. O Codex mantém o pacote standalone inteiro,
+incluindo executáveis auxiliares, recursos e busca; copiar só o executável não
+atende ao contrato. O Claude Code usa o executável local e o Claude Desktop usa
+MSIX assinado, registrado na conta atual. O aplicativo OpenAI usa o MSIX e a
+licença pública da [implantação oficial](https://learn.chatgpt.com/docs/enterprise/windows-deployment).
+Confere assinatura, identidade e hash da licença, provisiona com LicensePath e
+registra a família para a conta atual. Não usa SkipLicense. Um pacote provisionado
+sem registro saudável nessa conta continua pendente. Versão e hashes da origem
+mutável são fixados pelo chamador; mudanças exigem nova revisão.
+
+Instalação e verificação compartilham o mutex das dependências. O inventário
+existente `phasezero-ai-tools.json` conserva os outros componentes e vincula
+os resultados ao Windows e à conta. Hashes de arquivos instalados são derivados
+do payload verificado, sem confiar em um recibo local alterável. Caminhos
+redirecionados, ZIP com traversal/links, normalização Win32 perigosa, arquivos
+extras e alterações do payload impedem confirmar instalado. Interrupções mantêm
+staging e estado para revisão, sem repetir instaladores silenciosamente.
+
+Os clientes não são executados por uma consulta elevada. `verified` confirma
+os arquivos ou o registro do pacote; `functionTest` e autenticação permanecem
+pendentes do usuário interativo. A referência Windows descartável faz os ensaios
+nativos separados. A janela preserva a mesma conta na elevação, e o chamador
+pode vincular `-ExpectedTarget` e `-ExpectedCaller` observados anteriormente.
+O chamador mantém a supervisão térmica e a reserva do host físico; o adaptador
+confere margem para sua operação no Windows, inclusive em convidado supervisionado.
+Python 3.14 passa a ser a preferência do preparador; versões existentes a partir
+de 3.11 continuam sujeitas ao contrato e à revisão de suporte da implantação.
+
+### Dependências de aplicativos e projetos
+
+No Windows em execução, abra **Dependências de aplicativos e projetos** no
+preparador PhaseZero. Confira a unidade e a arquitetura, verifique os itens e
+selecione os que deseja instalar ou reparar. Escolha a arquitetura do aplicativo
+ao abrir requisitos de um programa x86 em Windows x64. SDKs e MSVC exigem
+seleção explícita. A janela recupera o último resultado da conta e confere
+novamente a instalação atual. Se o computador mudou, a janela informa a mudança.
+
+O inventário identifica o Visual C++ v14 Win32 por arquitetura, registro, versão
+e DLLs compartilhadas. DirectX legado exige as DLLs D3DX9/10/11, XInput 1.3,
+XAudio 2.7 e XACT 3.7 nas arquiteturas aplicáveis. VCLibs, .NET Native e DirectX
+Store são observações da conta atual. Os pacotes Store seguem pelo aplicativo
+que os declara. O .NET Framework usa o valor Release e oferece a fonte oficial.
+WebView2 verifica registros Evergreen da máquina e da conta.
+
+.NET 10 LTS e .NET 11 STS oferecem Runtime, Desktop Runtime e SDK pelo catálogo
+WinGet. Séries 6–9 aparecem quando detectadas ou explicitamente requeridas,
+com fonte oficial e aviso de fim de suporte. O componente histórico
+`dotnet-core` mantém SDK 8 para os perfis que dependem dele. Consulte a
+[política oficial de suporte .NET](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core)
+e o [catálogo oficial WinGet](https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/Microsoft/DotNet).
+
+A fila usa o resolvedor e o executor do bootstrap, com verificação posterior e
+registros em `%LOCALAPPDATA%\PhaseZero\ai-tools\logs`. Downloads grandes pedem
+autorização explícita. Se WinGet faltar, atualize o Instalador de Aplicativos
+pela Store. Em caso de rede indisponível ou MSI ocupado, corrija a condição e
+selecione novamente os itens. Após reinício, a fila verifica os itens antes de
+repetir. Uma consulta inconclusiva fica desconhecida e impede o reparo
+automático. A fila instala no Windows em execução, a partir da cópia local do
+PhaseZero. Um cartão anexado a outro Windows requer boot no cartão.
+
+#### Contrato para preparador e Autofix
+
+Resolva o launcher sob a pasta conhecida `ProgramFiles` do Windows em execução,
+`PhaseZero\windows\ai\prepare-host.ps1`. Use PowerShell 5.1, `-NoProfile` e
+`-File`. `-Action Dependencies` abre a janela (use `-STA`).
+`-Action DependencyStatus` devolve JSON `schemaVersion: 1` sem iniciar
+instalações. O relatório contém `target`, `targetError`, `items`, `store`,
+`previousRun` e `receiptError`. Cada item traz ID, arquitetura, versão,
+requisito, estado, detalhe e evidências. Trate saída indisponível ou consulta
+falha como desconhecida. Estados dos itens são `satisfied`, `missing`,
+`partial`, `insufficient`, `unknown` e `not-applicable`. Use `store.status` e
+`store.packages` para os frameworks da conta. O Autofix pode incorporar esse
+resultado ao próprio relatório e oferecer a ação interativa.
+
+O parâmetro `-RequirementFile` aceita `global.json`, `*.runtimeconfig.json`,
+`*.vcxproj` ou um JSON como
+`{"schemaVersion":1,"requirements":[{"id":"vcpp-redist-x86","minimumVersion":"14.44.0"}]}`.
+Use `-ApplicationArchitecture x86` quando indicado e `-OnlyRequired` para
+consultar só os requisitos declarados. O `.vcxproj` seleciona o MSVC x86/x64
+geral. Requisitos de toolset específicos podem declarar versão mínima no
+manifesto. Políticas de roll-forward são avaliadas conservadoramente dentro
+da série catalogada. Confira o SDK final com o comando do projeto.
+
+`-Action InstallDependencies -DependencyIds vcpp-redist,vcpp-redist-x86`
+processa a seleção na conta elevada. A interface vincula a execução ao
+Windows, à conta e ao hash de requisitos observados. Retorno 0 indica fila
+verificada, 2 indica pendências com recibo, e 1 indica falha de entrada ou de
+execução. `previousRun` mantém a última fila associada à instalação. Leia o
+inventário atual para obter a situação das dependências após a execução.
+
 ## Escopo e contratos
 
 - MEM-001: remover espelhamento destrutivo Windows. Não copiar SQLite ativo,

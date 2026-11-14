@@ -1,0 +1,6 @@
+{
+  "name": "phasezero-opencode-openai-api",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./index.js" }
+}

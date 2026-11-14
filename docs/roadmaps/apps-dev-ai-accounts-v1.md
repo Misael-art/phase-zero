@@ -93,6 +93,54 @@ runtime ainda usado por outra receita ou pacote preexistente. Em Windows, escolh
 por pacote e detectar duplicidade entre winget/Chocolatey; não unificar seus executores com
 `linux/pz`. Arch limpo e Windows limpo exigem aceites separados.
 
+### Vibe Code no Linux
+
+Objetivo: escolher ou retomar a pasta do projeto, abrir editor e console,
+executar a receita, conferir o resultado e voltar depois. O mesmo launcher
+atende Plasma Wayland e Hyprland.
+
+1. **Entrada manual.** Início e Desenvolvimento abrem o launcher nativo.
+   O menu PhaseZero usa `phasezero-control-center --vibe-code`. O launcher
+   destaca OpenCode Desktop, Codex Desktop e Claude Desktop. A aba Aplicativos
+   pesquisa atalhos XDG visíveis e produtos da Central. A ação Claude Code
+   Desktop usa o atalho da sessão de código publicado pelo Claude. Codex CLI,
+   Claude Code e OpenCode CLI usam Konsole na pasta explícita do projeto.
+   Pasta e editor ficam no estado privado. Preview e documentação usam o
+   navegador padrão do desktop. SDKs e conexões mantêm seus fluxos atuais.
+2. **Entrada no Plasma.** A opção “Mostrar Vibe Code ao entrar no Plasma”
+   registra um autostart de usuário que abre o launcher. Retomar a IDE é uma
+   ação explícita. Testar também a remoção do autostart e pasta indisponível.
+3. **Hyprland Foco.** `assets/vibe-code/hyprland.lua` é um overlay para Hyprland
+   0.56+. Importar após a configuração base em uma configuração candidata.
+   Verificar com `Hyprland --verify-config -c <arquivo-candidato.lua>`. O
+   atalho Super+Shift+Enter abre a entrada gerenciada via `gtk-launch`.
+   Validar a sessão manual no SDDM, portais, escala, bloqueio, entrada física,
+   monitor externo e retorno ao Plasma antes de promover o preset.
+4. **Instalação e boot dedicado.** Em Arch/Manjaro/BigLinux com GRUB
+   funcional, use `pz boot vibe-code plan` e `pz boot vibe-code install --yes`
+   como usuário da sessão. O script detecta ferramentas nativas, instala o
+   que falta pelo pacman e prepara o runtime PhaseZero se partir do checkout.
+   Uma transação que exigiria atualizar dependências instaladas é recusada
+   com instrução para atualizar pelo fluxo normal da distribuição.
+   `pz boot vibe-code apps --yes` usa os instaladores responsáveis pelos
+   clientes IA ausentes. Desktop sem origem automática validada e pacote
+   acima de 70 MB exigem mídia manual. O catálogo encaminha a preparação
+   para a ação canônica. Serviços e acesso a contas seguem os grants atuais.
+5. **Entrada GRUB.** Selecione **PhaseZero Vibe Code (Plasma)**. A entrada
+   usa kernel e initramfs da distro, sobe o Plasma via SDDM e permite uma
+   tentativa de login automático (`Relogin=false`). A checagem pré-SDDM usa
+   `setpriv` para validar o launcher sob o UID real sem iniciar PAM.
+   O Fôlego reaproveita seu autostart. Falha ao preparar o
+   launcher deixa o SDDM disponível. A entrada normal continua acessível.
+   `pz boot vibe-code verify` verifica pacotes, unidade e GRUB. Para retirar
+   a entrada e seus arquivos, use `pz boot vibe-code remove --yes`.
+   Desbloqueio do disco, cofre e autenticação de provedores são independentes.
+
+Aceite no host: abrir pelo menu, editar e testar um projeto, fechar, reabrir e
+trocar de pasta. Repetir com rede indisponível e a pasta anterior ausente.
+Comparar boot até primeiro input, editor utilizável, RAM e pressão durante a
+mesma carga antes de escolher Hyprland como padrão.
+
 ### Modo simples e avançado
 
 Simples padrão: estado, recomendação explicada, próximo passo e ação principal. Opções
@@ -3566,3 +3614,59 @@ no endpoint oficial e na UI; desconectar/expirar e desligar rede; verificar que 
 ficam desconhecidos. Na bandeja real, manter coleta lenta simulada, interagir com menu e
 fechar; confirmar processo coletor encerrado. Não usar conta privada como fixture automática.
 Evidência e resultados do lote: handoff `clean-host-development-20261024.md`.
+
+### PXA-010 — modelo exato e recuperação monitorada — 2026-11-07
+
+Pessoa acessa Codex Web da conta pelo atalho; backend inicia discretamente no
+login e falhas locais recuperam sem fechar tarefa ou repetir mensagem. Owner:
+bridge existente, módulo `chatgpt_web_health.py` e `pz repair codex-web`.
+Código instalado `949cfc24bf427eac1d9a925d733606c66a804fa5`, PR #135 draft,
+dependente de #134; sem promoção de release ou aceite geral G2/G3/G4.
+
+Reconexões reproduzidas em `chatgpt-web/gpt-6-sol` High: rótulo português
+`6 Alta` não era reconhecido pelo verificador upstream 6.1.17. Adaptador DOM
+traduz controles conhecidos preservando seleção real; smoke passou a usar
+modelo selecionado em vez de alias light. Cota nativa esgotada não é
+medida da cota Web: modelo exato respondeu, renderizou na janela e comprovou
+leitura/gravação real de arquivo enquanto o aviso nativo estava presente.
+
+Monitor opt-in sem inferência, timer por perfil, trava compartilhada, prazo e
+memória limitados, budget persistente, cooldown e disjuntor. Recupera helper,
+backend próprio ocioso, túnel órfão comprovado, rota e atalhos gerenciados.
+Espera por trabalho ativo/recursos; preserva políticas, conta, credenciais e
+desligamento manual. Limites/rede aguardam recuperação externa; login e
+permissão exigem fluxo oficial, sem troca de conta/modelo ou replay.
+
+244 regressões do artefato, resposta High, canary de ferramentas, recuperação
+real de helper/rota e queda do backend em 18,72 s. Instalação oficial aplicada
+e módulos conferidos. Matriz por falha, evidências privadas e limites de
+validação no [handoff IA](../handoff/ai-stack-remediation-handoff.md#codex-web-reconexões-no-modelo-selecionado-e-monitor-do-perfil--2026-11-07).
+Digitação física, novo login/reboot, Windows e expiração real de conta não
+homologados; CI do SHA publicado ainda precisa ser observado.
+
+### PXA-006/008/009 — créditos API OpenAI e OpenCode — 2026-11-07
+
+Owner: CredentialVault, carteira de Contas e conexões e manager OpenCode.
+Código `3a5a9c21501035540e109d9b833a4fdee46beae4`, branch de revisão
+`codex/openai-api-credits` sobre PR #135. Observação monetária por organização,
+com origem/vencimento e saldo desconhecido distinto de zero; v1→v2 com backup,
+sem novo store de segredo. Preço da assinatura não é saldo. Benefício oficial
+Pro/Business exige ativação; Plus não elegível. Créditos comprados podem ser
+consumidos após promocionais, conforme faturamento OpenAI.
+
+Adapter API direto do OpenCode usa grant por chave e helper do cofre a cada
+requisição HTTP, sem 9Router. Fixa organização/projeto/modelo/destino; revogação
+bloqueia próximas chamadas. Seleção do padrão exige consentimento, runtime e
+probe de autenticação/modelos. Plugin e contrato experimental continuam sem
+homologação no cliente real; versão mínima adotada não substitui essa prova.
+
+Artefato: 113 regressões passaram em lote limitado a 512 MiB e 75% de um núcleo;
+seis jornadas antigas de escala não repetidas após reboot. Formulários próprios
+renderizados com fonte 100/200%, sem rolagem horizontal. Host manteve >5,9 GiB
+disponíveis no lote final. Causa do crash continua indeterminada.
+
+Gates reais abertos: chave nativa OpenCode recusada (401), carteira OpenAI vazia,
+CLI 2.0.12, benefício/saldo não observados. Padrão não alterado; nenhuma compra
+ou inferência API. Retomar por concessão/chave válidas, cliente compatível e
+turno real com conferência do faturamento. Não fechar G3/PXA-008 por fixture.
+Detalhes e continuidade no [handoff IA](../handoff/ai-stack-remediation-handoff.md).

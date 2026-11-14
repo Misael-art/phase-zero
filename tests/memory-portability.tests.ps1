@@ -27,4 +27,27 @@ Describe 'Memory portability integration contracts' {
         if ($ui -notmatch 'PasswordBox') { throw 'Missing contract: PasswordBox' }
         if ($ui -notmatch 'expected-sha256') { throw 'Missing contract: expected-sha256' }
     }
+
+    It 'wires the desktop when no separate Codex CLI is installed' {
+        Mock Resolve-BootstrapAiToolCommandPath { return '' }
+        Mock Resolve-CommandPath { return '' }
+        Mock Get-BootstrapCodexDesktopPackageInfo { return @{ installed = $true } }
+        $agents = @(Get-BootstrapAiMemoryDetectedAgents)
+        if ($agents.Count -ne 1 -or $agents[0] -ne 'codex') { throw 'Desktop MCP was omitted or duplicated' }
+    }
+
+    It 'rejects a damaged offline release before extraction or downloading' {
+        $package = Join-Path $TestDrive 'damaged.zip'
+        [IO.File]::WriteAllText($package, 'not a release')
+        $before = $env:AI_MEMORY_RELEASE_ARCHIVE
+        try {
+            $env:AI_MEMORY_RELEASE_ARCHIVE = $package
+            Mock Invoke-WebRequest { throw 'Unexpected network access' }
+            Mock Expand-Archive { throw 'Unexpected extraction' }
+            $rejected = $false
+            try { Install-BootstrapAiMemoryViaRelease -CatalogEntry (Get-BootstrapAiToolCatalog)['ai-memory'] -InstallRoot (Join-Path $TestDrive 'tools') | Out-Null }
+            catch { $rejected = $_.Exception.Message -match 'Checksum ai-memory invalido' }
+            if (-not $rejected) { throw 'Unverified archive was accepted' }
+        } finally { $env:AI_MEMORY_RELEASE_ARCHIVE = $before }
+    }
 }

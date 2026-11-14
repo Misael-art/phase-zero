@@ -129,8 +129,8 @@ Canal **stable**: [destino Latest](https://github.com/Misael-art/PhaseZero/relea
 ### 1. Baixar e conferir o checksum
 
 ```bash
-# exemplo: última estável (substitua a versão pelo nome do ficheiro na Release)
-sha256sum -c SHA256SUMS-1.19.0
+# substitua X.Y.Z pela versão da Release que você baixou
+sha256sum -c SHA256SUMS-X.Y.Z
 ```
 
 Se a linha do pacote não for `OK`, **pare**. Não instale.
@@ -336,7 +336,7 @@ CI (`.github/workflows/ci.yml`): parse PowerShell, Pester 3.4.0, ShellCheck 0.9 
 Release canónica:
 
 ```bash
-packaging/release.sh 1.19.0 --push    # bump, tag anotada, dispara o workflow
+packaging/release.sh X.Y.Z --push    # bump, tag anotada, dispara o workflow
 ```
 
 Tags históricas **não** se movem. Confira sempre o `SHA256SUMS` da versão que vai instalar.

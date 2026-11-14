@@ -64,6 +64,7 @@ Usage:
   pz boot selector            Open visual pre-reboot boot selector
   pz boot choose <choice>     Set one-shot boot: normal|steamos|windows|waydroid|emergency|iso:<id>|usb:<id>|grubfm
   pz boot kde-login <action>  KDE login without password (status|enable|disable)
+  pz boot vibe-code <action>  Vibe Code tools and GRUB entry (plan|install|apps|status|verify|remove)
   pz boot iso <action>        Manage local ISO loopback entries
   pz boot usb <action>        Manage removable EFI entries by UUID
   pz boot grubfm <action>     Manage experimental local grubfm EFI payload
@@ -196,6 +197,8 @@ Usage:
   pz ai opencode run --route=9router -- <args>  Blocked until account-bound grants are enforceable
   pz ai opencode rollback <manifest> Restore an OpenCode route transaction
   pz ai deepseek-harness <action>  Official Harness (plan|status|install|update|start|open|login|stop|doctor|uninstall)
+  pz ai grok-build <action>        Official Grok Build (status|check|plan|install|update|open|login)
+  pz ai agent-shortcuts           Register agent shortcuts in the PhaseZero menu
   pz ai setup <tool>           Setup AI tool (codex|ollama|webui|claude|desktop|opencode|omo|openclaw|memory|admin|rtk|caveman|headroom|compat|ides|ide-apps|usagebar|codexbar|all)
   pz ai drift [status|sync [--dry-run]]  Compare installed runtime copies with the repo (exit 2 on drift)
   pz ai codexbar <action>      CodexBar CLI + optional KodexBar plasmoid (status|setup|health|auth|watchdog|plasmoid|plasmoid-remove|repair)
@@ -263,6 +266,7 @@ Usage:
   pz doctor                    Run full system diagnostics
   pz support-bundle [--plan]   Generate support tarball (--plan: preview sem escrita)
   pz repair-plan               Generate repair plan
+  pz repair stability <action> Crash diagnostics and reversible ICC/journal setup (status|plan|apply|rollback)
   pz tune <area> [apply|revert|status] [--dry-run]
                                Tuning por área (browser|gaming|dev): aplica, reverte
                                pelos backups gravados ou reporta estado em JSON
@@ -631,7 +635,7 @@ cmd_ai() {
             case "${1:-status}" in
                 sync|align) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" sync ;;
                 version-status|version) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" version-status ;;
-                status|heal|install|configure|repair|verify|run|rollback)
+                status|openai-credit-status|configure-openai|disable-openai|heal|install|configure|repair|verify|run|rollback)
                     python3 "$PZ_ROOT/linux/ai/opencode_9router_manager.py" "$@"
                     ;;
                 local-model|ollama) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" local-model ;;
@@ -639,13 +643,21 @@ cmd_ai() {
                 install-hook) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" install-hook ;;
                 remove-hook) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" remove-hook ;;
                 setup) bash "$PZ_ROOT/linux/ai/setup-opencode.sh" setup ;;
-                *) pz_error "usage: pz ai opencode (status|heal|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup)"; return 1 ;;
+                *) pz_error "usage: pz ai opencode (status|openai-credit-status|heal|install|verify|run|rollback|sync|version-status|local-model|free-model|install-hook|remove-hook|setup)"; return 1 ;;
             esac
             ;;
         deepseek-harness|dsh)
             shift
             PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
                 python3 "$PZ_ROOT/linux/ai/deepseek_harness_manager.py" "${@:-status}"
+            ;;
+        grok-build)
+            shift
+            python3 "$PZ_ROOT/linux/ai/grok_build.py" "$@"
+            ;;
+        agent-shortcuts)
+            shift
+            bash "$PZ_ROOT/linux/ai/agent-shortcuts.sh" "$@"
             ;;
         doctor)
             local mcp_doctor codexbar_health codexbar_status

@@ -75,6 +75,15 @@ file_sha256() {
     sha256sum "$1" | awk '{print $1}'
 }
 
+desktop_download_guard() {
+    local size="$1" url="$2" digest="$3" destination="$4" limit="${PZ_DESKTOP_DOWNLOAD_MAX_BYTES:-0}"
+    if [[ "$limit" =~ ^[0-9]+$ ]] && [ "$limit" -gt 0 ] && [ "$size" -gt "$limit" ]; then
+        pz_error "download manual necessário: $size bytes"
+        printf 'Origem: %s\nSHA-256: %s\nDestino: %s\n' "$url" "$digest" "$destination"
+        return 1
+    fi
+}
+
 download_atomic() {
     local url="$1" target="$2" tmp
     tmp="${target}.part.$$"
@@ -192,6 +201,7 @@ install_qwen() {
         rm -f "$cache"
     fi
     if [ ! -f "$cache" ]; then
+        desktop_download_guard "$size" "$url" "$sha256" "$cache" || return
         pz_info "downloading official Qwen Code Desktop: $version"
         download_atomic "$url" "$cache"
     fi
@@ -450,6 +460,7 @@ install_claude() {
         rm -f "$deb"
     fi
     if [ ! -f "$deb" ]; then
+        desktop_download_guard "$CLAUDE_SIZE" "$CLAUDE_REPO_BASE/$CLAUDE_FILENAME" "$CLAUDE_SHA256" "$deb" || return
         pz_info "downloading official Claude Desktop $CLAUDE_VERSION"
         download_atomic "$CLAUDE_REPO_BASE/$CLAUDE_FILENAME" "$deb"
         verify_size_hash "$deb" "$CLAUDE_SIZE" "$CLAUDE_SHA256"
