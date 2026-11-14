@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "wingetCommit": "3a24851f0985ddf88f112e8b6520bd331aff308f",
+  "scope": "Public pinned vendor payloads for disposable native QA only; caller owns production selection",
+  "packages": [
+    {
+      "id": "9PLM9XGG6VKS",
+      "name": "ChatGPT desktop (Codex)",
+      "source": "msstore",
+      "version": "26.1111.2228.0",
+      "architecture": "x64",
+      "url": "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix",
+      "sha256": "9af8619e929f00369a47326717f9515205a0e25dd409bc4c29af62c74c1ed898",
+      "size": 1057802768,
+      "file": "packages/9af8619e929f00369a47326717f9515205a0e25dd409bc4c29af62c74c1ed898.msix",
+      "assets": [
+        {
+          "id": "OpenAI.Desktop.OfflineLicense",
+          "name": "Licença offline pública OpenAI",
+          "purpose": "vendor-offline-license",
+          "version": "26.1111.2228.0",
+          "url": "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-License.xml",
+          "sha256": "c26569dbc30c1f630d49a9bd305b6496b1a467319f495b21d1fc7919d3c0481a",
+          "size": 2621,
+          "file": "packages/c26569dbc30c1f630d49a9bd305b6496b1a467319f495b21d1fc7919d3c0481a.xml"
+        }
+      ],
+      "manifestUrl": "https://learn.chatgpt.com/docs/enterprise/windows-deployment",
+      "license": "OpenAI offline distribution license",
+      "licenseUrl": "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-License.xml",
+      "publisher": "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B",
+      "signaturePolicy": "required-valid",
+      "signerPattern": "^CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B$",
+      "installerType": "msix",
+      "adapter": "phasezero-cached-apps-v1",
+      "arguments": "",
+      "successCodes": [
+        0
+      ],
+      "dependencies": [
+        "Microsoft.VCRedist.2015+.x64"
+      ],
+      "verification": {
+        "packageName": "OpenAI.Codex",
+        "packageFamilyName": "OpenAI.Codex_2p2nqsd0c76g0",
+        "displayVersion": "26.1111.2228.0"
+      },
+      "offline": true,
+      "status": "resolved",
+      "nativeOfflineTest": "signed-package-and-license-acquired; native provisioning pending",
+      "limitations": [
+        "Online login and application use require an account and network. Native provisioning acceptance pending."
+      ],
+      "hashOrigin": "locally observed; signed package verified; not an OpenAI-published checksum",
+      "verificationEvidence": {
+        "run": "https://github.com/Misael-art/Windows11_SteamDeck_preparo/actions/runs/43587914719",
+        "scope": "acquisition, signature and XML identity only; installation pending"
+      }
+    }
+  ]
+}

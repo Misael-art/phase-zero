@@ -18,9 +18,32 @@ on:
       - 'tests/Invoke-WindowsHostPreparationSmoke.ps1'
       - 'tests/Invoke-WindowsDependenciesSmoke.ps1'
       - 'tests/Invoke-WindowsCachedAppsSmoke.ps1'
+      - 'tests/Invoke-WindowsOpenAIOfflineNative.ps1'
+      - 'tests/fixtures/windows-openai-offline.json'
 permissions:
   contents: read
 jobs:
+  openai-offline:
+    if: github.repository == 'Misael-art/phase-zero'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Package canonical owner on the reference system drive
+        shell: powershell
+        run: |
+          python tools/package-memory-windows.py --output "$env:ProgramFiles/PhaseZero"
+          if ($LASTEXITCODE) { throw 'Owner package failed' }
+      - name: Verify licensed OpenAI offline provisioning and current-user registration
+        shell: powershell
+        run: ./tests/Invoke-WindowsOpenAIOfflineNative.ps1 -RuntimeRoot "$env:ProgramFiles/PhaseZero" -OutputDirectory "$env:RUNNER_TEMP/phasezero-openai-reference"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: openai-offline-native-receipts
+          path: ${{ runner.temp }}/phasezero-openai-reference/receipts/
+          if-no-files-found: warn
+          retention-days: 7
   package:
     runs-on: windows-latest
     timeout-minutes: 25

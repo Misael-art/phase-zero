@@ -1343,3 +1343,22 @@ As fixtures locais passaram em 52 checks, sem execução real dos clientes.
 Assinatura/identidade/licença de origem foram conferidas pelo preparador em
 [referência Windows descartável](https://github.com/Misael-art/Windows11_SteamDeck_preparo/actions/runs/43587914719).
 A instalação real desse quarto adaptador e o aceite físico continuam separados.
+
+O código `18ce8d88192fab63525182f89127b38f5d225d23` passou no
+[empacotamento/lifecycle Windows](https://github.com/Misael-art/phase-zero/actions/runs/43590184221).
+O preparador confirmou instalações reais de Codex CLI, Claude Code e Claude
+Desktop em referência Windows, com versões CLI executadas sem saída de rede.
+O ensaio OpenAI no executor privado de 8 GiB foi interrompido pela reserva de
+recursos durante o provisionamento. Os três recibos anteriores permanecem
+válidos para seu escopo; não há recibo de aceite OpenAI daquela tentativa.
+
+O ensaio de provisionamento OpenAI passa ao workflow do próprio owner público,
+cujo executor padrão dispõe de 16 GiB. Mantém reserva de 4 GiB/25%, pico
+estimado de 1 GiB e 10 GiB além da saída estimada de 8 GiB. Fixtures contêm
+somente URLs/hashes públicos fixados; MSIX/licença não entram no Git nem nos
+artifacts de recibos. GITHUB_ACTIONS, hosted runner, repositório, identidade,
+privilégio e destino temporário são conferidos antes dos efeitos. A instalação
+usa a entrada normal, vinculada a Windows/SID, com prazo e supervisão serial.
+A reserva não foi reduzida para obter aprovação. Registro/provisionamento
+nativos ainda não comprovam abertura/login, isolamento de rede de todo o SO
+ou Windows 11 físico.
