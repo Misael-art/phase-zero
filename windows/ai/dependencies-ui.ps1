@@ -44,7 +44,7 @@
     }
     $controls.Architecture.ItemsSource = @('Windows', 'x64', 'x86', 'arm64')
     $controls.Architecture.SelectedIndex = 0
-    $context = @{ requirementFile = ''; report = $null; process = $null; rendered = $false; probeError = ''; restoring = $false }
+    $context = @{ entryPoint = $EntryPoint; requirementFile = ''; report = $null; process = $null; rendered = $false; probeError = ''; restoring = $false }
     $updateSelection = {
         $rows = @($controls.Dependencies.SelectedItems)
         $controls.Details.Text = if ($rows.Count -eq 1) { $rows[0].detail } elseif ($rows.Count) { "$($rows.Count) itens selecionados." } else { 'Selecione os itens que deseja instalar ou reparar.' }
@@ -145,7 +145,7 @@
     $controls.Install.Add_Click({
         try {
             $ids = @($controls.Dependencies.SelectedItems | ForEach-Object { $_.id })
-            $context.process = Start-PhaseZeroDependencyWorker -EntryPoint $EntryPoint -Selected $ids -Report $context.report -AllowLargeDownloads:($controls.Large.IsChecked -eq $true)
+            $context.process = Start-PhaseZeroDependencyWorker -EntryPoint $context.entryPoint -Selected $ids -Report $context.report -AllowLargeDownloads:($controls.Large.IsChecked -eq $true)
             foreach ($name in 'Check','Project','Architecture','Clear','Install') { $controls[$name].IsEnabled = $false }
             $controls.Outcome.Text = 'Instalação em andamento. O registro permite conferir o resultado ao reabrir.'
             $timer.Start()

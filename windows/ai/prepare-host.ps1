@@ -82,7 +82,7 @@ if ($Action -notin @('Menu','Dependencies')) {
             if (@($wiring | Where-Object { $_.status -eq 'failed' }).Count) { throw 'Integracao MCP/hooks incompleta.' }
             Write-Output 'Memoria local instalada. Importe a recuperacao antes de cadastrar GitHub/projetos e restaurar o historico.'
         } elseif ($Action -eq 'InstallApps') {
-            Ensure-PhaseZeroHostCodexRuntime
+            Install-PhaseZeroHostCodexRuntime
             if ($AllowLargeDownloads) {
                 $winget = Resolve-CommandPath -Name winget
                 if (-not $winget) { throw 'WinGet ausente.' }

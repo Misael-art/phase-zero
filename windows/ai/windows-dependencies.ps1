@@ -31,7 +31,7 @@ function Get-PhaseZeroDependencyTarget {
     }
 }
 
-function Get-PhaseZeroStoreDependencies {
+function Get-PhaseZeroStoreDependency {
     try {
         if (-not (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue)) { throw 'Get-AppxPackage indisponivel.' }
         $packages = @(Get-AppxPackage -PackageTypeFilter Framework -ErrorAction Stop |
@@ -45,7 +45,7 @@ function Get-PhaseZeroStoreDependencies {
     }
 }
 
-function Get-PhaseZeroDependencyDefinitions {
+function Get-PhaseZeroDependencyDefinition {
     $catalog = Get-BootstrapComponentCatalog
     $definitions = [ordered]@{}
     foreach ($entry in $catalog.Values) {
@@ -54,7 +54,7 @@ function Get-PhaseZeroDependencyDefinitions {
     return $definitions
 }
 
-function Resolve-PhaseZeroDependencyRequirements {
+function Resolve-PhaseZeroDependencyRequirement {
     param([string]$RequirementFile, $Definitions, [string]$ApplicationArchitecture)
     $requirements = @{}
     if (-not $RequirementFile) { return $requirements }
@@ -134,8 +134,8 @@ function Get-PhaseZeroDependencyReport {
     param([string]$RequirementFile, [string]$ApplicationArchitecture, [switch]$OnlyRequired)
 
     $requirementHash = if ($RequirementFile) { (Get-FileHash -LiteralPath $RequirementFile -Algorithm SHA256 -ErrorAction Stop).Hash } else { '' }
-    $definitions = Get-PhaseZeroDependencyDefinitions
-    $requirements = Resolve-PhaseZeroDependencyRequirements -RequirementFile $RequirementFile -Definitions $definitions -ApplicationArchitecture $ApplicationArchitecture
+    $definitions = Get-PhaseZeroDependencyDefinition
+    $requirements = Resolve-PhaseZeroDependencyRequirement -RequirementFile $RequirementFile -Definitions $definitions -ApplicationArchitecture $ApplicationArchitecture
     $target = $null; $targetError = ''
     try { $target = Get-PhaseZeroDependencyTarget } catch { $targetError = $_.Exception.Message }
     $previous = $null; $receiptError = ''
@@ -151,7 +151,7 @@ function Get-PhaseZeroDependencyReport {
     })
     [pscustomobject]@{
         schemaVersion = 1; at = [DateTime]::UtcNow.ToString('o'); target = $target; targetError = $targetError
-        requirementFile = $RequirementFile; requirementHash = $requirementHash; applicationArchitecture = $ApplicationArchitecture; items = $items; store = Get-PhaseZeroStoreDependencies
+        requirementFile = $RequirementFile; requirementHash = $requirementHash; applicationArchitecture = $ApplicationArchitecture; items = $items; store = Get-PhaseZeroStoreDependency
         previousRun = $previous; receiptError = $receiptError
     }
 }
@@ -159,11 +159,11 @@ function Get-PhaseZeroDependencyReport {
 function Invoke-PhaseZeroDependencySelection {
     param([string[]]$Selected, [string]$RequirementFile, [switch]$AllowLargeDownloads, [string]$ExpectedTarget, [string]$ExpectedCaller, [string]$ApplicationArchitecture, [string]$ExpectedRequirementHash)
 
-    $definitions = Get-PhaseZeroDependencyDefinitions
+    $definitions = Get-PhaseZeroDependencyDefinition
     if ($ExpectedRequirementHash -and (-not $RequirementFile -or (Get-FileHash -LiteralPath $RequirementFile -Algorithm SHA256 -ErrorAction Stop).Hash -ne $ExpectedRequirementHash)) {
         throw 'O arquivo de requisitos mudou. Verifique a selecao novamente.'
     }
-    $requirements = Resolve-PhaseZeroDependencyRequirements -RequirementFile $RequirementFile -Definitions $definitions -ApplicationArchitecture $ApplicationArchitecture
+    $requirements = Resolve-PhaseZeroDependencyRequirement -RequirementFile $RequirementFile -Definitions $definitions -ApplicationArchitecture $ApplicationArchitecture
     if (-not $Selected.Count) { throw 'Selecione ao menos uma dependencia.' }
     foreach ($name in $Selected) {
         if (-not $definitions.Contains($name)) { throw "Dependencia desconhecida: $name." }
@@ -208,7 +208,7 @@ function Invoke-PhaseZeroDependencySelection {
                         Invoke-BootstrapComponent -Name $name -State $state
                     } else {
                         $requiredVersion = if ($requirements.ContainsKey($name)) { $requirements[$name].version } else { '' }
-                        $null = Ensure-BootstrapWindowsDependency -Definition $definition -WingetPath $state.Winget -MinimumVersion $requiredVersion
+                        $null = Install-BootstrapWindowsDependency -Definition $definition -WingetPath $state.Winget -MinimumVersion $requiredVersion
                     }
                 }
                 $after = Get-PhaseZeroDependencyStatus -Definition $definition -Requirements $requirements
@@ -257,7 +257,7 @@ function Start-PhaseZeroDependencyWorker {
     }
 }
 
-function Ensure-PhaseZeroHostCodexRuntime {
+function Install-PhaseZeroHostCodexRuntime {
     $runtime = Get-BootstrapCodexRuntimeComponent
     $dependency = Get-BootstrapWindowsDependencyStatus -Definition $runtime
     if ($dependency.status -eq 'satisfied') { return }

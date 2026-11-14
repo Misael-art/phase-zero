@@ -11,7 +11,7 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ('phasezero-dependencies-' + [gu
 $null = New-Item -ItemType Directory -Path $fixture
 $oldWindows = $env:WINDIR
 $env:WINDIR = $fixture
-$repoRoot = $RuntimeRoot
+$script:repoRoot = $RuntimeRoot
 $script:fixtureState = @{
     Registry = @{}; Files = @{}; RegistryFailure = $false; Queries = @(); Exit = 0; Runs = @()
     After = $null; Admin = $true; Reboot = @(); Idle = $true; Winget = 'fixture-winget'
@@ -28,14 +28,15 @@ function Get-BootstrapDependencyFile($Path) {
     return $script:fixtureState.Files[$Path]
 }
 function Test-IsAdmin { $script:fixtureState.Admin }
-function Get-BootstrapPendingRebootReasons { $script:fixtureState.Reboot }
+Set-Item Function:Get-BootstrapPendingRebootReasons -Value { $script:fixtureState.Reboot }
 function Wait-BootstrapWingetMsiIdle($TimeoutSeconds, $HeartbeatSeconds) { $script:fixtureState.Idle }
 function Resolve-CommandPath($Name) { if ($Name -eq 'winget') { $script:fixtureState.Winget } }
 function Assert-BootstrapDiskSpace($RequiredGB) {}
-function Refresh-SessionPath {}
-function Write-Log($Message, $Level) {}
+Set-Item Function:Refresh-SessionPath -Value {}
+Set-Item Function:Write-Log -Value { param($Message, $Level) }
 function Invoke-NativeWithLog {
     param($Exe, [Alias('Args')]$Arguments)
+    if ($Exe -cne $script:fixtureState.Winget) { throw 'Unexpected native executable outside the fixture' }
     $script:fixtureState.Runs += ,$Arguments
     if ($script:fixtureState.After) { & $script:fixtureState.After }
     return $script:fixtureState.Exit
@@ -50,14 +51,19 @@ function Add-FixtureVCRuntime($Cpu, $Version) {
 }
 function Assert-InstallBlock($Definition, $Reason, $Code = $null) {
     $failure = $null
-    try { $null = Ensure-BootstrapWindowsDependency -Definition $Definition } catch { $failure = $_ }
+    try { $null = Install-BootstrapWindowsDependency -Definition $Definition } catch { $failure = $_ }
     Assert-Equal (Get-BootstrapBlockedErrorInfo $failure).Kind $Reason 'installer blocker'
     if ($null -ne $Code) { Assert-Equal $failure.Exception.Data['DependencyExitCode'] $Code 'installer code' }
 }
 
 try {
-    $catalog = Get-PhaseZeroDependencyDefinitions
+    $catalog = Get-PhaseZeroDependencyDefinition
     $dx = $catalog['directx-runtime']; $vc64 = $catalog['vcpp-redist']; $vc86 = $catalog['vcpp-redist-x86']
+    $paths = @($vc64.ProbePaths)
+    Assert-Equal (@($paths | Where-Object { $_ -match 'System32' }).Count) 3 'VC diagnostic paths remain public'
+    Assert-Equal (@($paths | Where-Object { $_ -match 'Program Files' }).Count) 0 'VC diagnostic paths never use a phantom program directory'
+    foreach ($dll in 'vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll') { Assert-Equal (@($paths | Where-Object { $_.EndsWith($dll) }).Count) 1 'VC diagnostic DLL coverage' }
+
     $legacy = @('d3dx9_43.dll','d3dx10_43.dll','d3dx11_43.dll','xinput1_3.dll','xaudio2_7.dll','xactengine3_7.dll')
     Add-FixtureFile x64 'd3d12.dll'
     Add-FixtureFile x86 'd3d11.dll'
@@ -66,7 +72,7 @@ try {
     Add-FixtureFile x64 $legacy[0]
     Assert-Equal (Get-BootstrapWindowsDependencyStatus $dx).status 'partial' 'DirectX partial'
     $script:fixtureState.After = { foreach ($cpu in 'x64','x86') { foreach ($dll in $legacy) { Add-FixtureFile $cpu $dll } } }
-    Assert-Equal (Ensure-BootstrapWindowsDependency $dx).status 'satisfied' 'DirectX rechecked after install'
+    Assert-Equal (Install-BootstrapWindowsDependency $dx).status 'satisfied' 'DirectX rechecked after install'
     Assert-Equal (($script:fixtureState.Runs[0] -join ' ') -match '--installer-type exe') $true 'Win32 DirectX installer'
     $script:fixtureState.After = $null
 
@@ -119,21 +125,21 @@ try {
 
     $project = Join-Path $fixture 'global.json'
     Set-Content -LiteralPath $project -Value '{"sdk":{"version":"10.0.400","rollForward":"latestPatch"}}'
-    $requirements = Resolve-PhaseZeroDependencyRequirements -RequirementFile $project -Definitions $catalog
+    $requirements = Resolve-PhaseZeroDependencyRequirement -RequirementFile $project -Definitions $catalog
     Assert-Equal $requirements['dotnet-sdk-10-x64'].policy 'sdk-band' 'global.json policy'
     Set-Content -LiteralPath $project -Value '{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}'
-    $requirements = Resolve-PhaseZeroDependencyRequirements -RequirementFile $project -Definitions $catalog
+    $requirements = Resolve-PhaseZeroDependencyRequirement -RequirementFile $project -Definitions $catalog
     Assert-Equal $requirements['dotnet-sdk-10-x64'].policy 'minimum' 'global.json feature roll-forward'
     $app = Join-Path $fixture 'app.runtimeconfig.json'
     Set-Content -LiteralPath $app -Value '{"runtimeOptions":{"framework":{"name":"Microsoft.WindowsDesktop.App","version":"10.0.4"}}}'
-    $requirements = Resolve-PhaseZeroDependencyRequirements -RequirementFile $app -Definitions $catalog -ApplicationArchitecture x86
+    $requirements = Resolve-PhaseZeroDependencyRequirement -RequirementFile $app -Definitions $catalog -ApplicationArchitecture x86
     Assert-Equal $requirements['dotnet-desktop-10-x86'].version '10.0.4' '32-bit app requirements'
 
     function Get-PhaseZeroDependencyTarget {
         [pscustomobject]@{ windowsId = 'fixture-windows'; hostId = 'fixture-host'; boot = $script:fixtureBoot
             caller = 'fixture-user'; systemDrive = [IO.Path]::GetPathRoot($RuntimeRoot) }
     }
-    function Get-PhaseZeroStoreDependencies { [pscustomobject]@{ status = 'unknown'; packages = @() } }
+    function Get-PhaseZeroStoreDependency { [pscustomobject]@{ status = 'unknown'; packages = @() } }
     function Get-BootstrapVsWherePath { '' }
     function Get-PhaseZeroDependencyReceiptPath { Join-Path $fixture 'receipt.json' }
     $script:fixtureBoot = 'boot-1'
@@ -161,7 +167,7 @@ try {
         if ((Get-BootstrapWindowsDependencyStatus $vc64).status -ne 'satisfied') { throw 'Codex checked before its redistributable' }
         return @{ installed = $true }
     }
-    Ensure-PhaseZeroHostCodexRuntime
+    Install-PhaseZeroHostCodexRuntime
     Ensure-CodexInstaller -WingetPath 'fixture-winget'
     Assert-Equal $script:fixtureState.Runs.Count ($runs + 1) 'simplified Codex installs its dependency exactly once'
     $script:fixtureState.Files.Remove((Join-Path (Join-Path $fixture x64) 'vcruntime140_1.dll'))

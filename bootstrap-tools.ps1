@@ -5697,7 +5697,7 @@ function Ensure-WslUi {
     }
 
     $null = Ensure-WindowsOptionalFeatureEnabled -FeatureName 'Microsoft-Windows-Subsystem-Linux' -DisplayName 'Microsoft-Windows-Subsystem-Linux (WSL)'
-    Ensure-BootstrapWindowsDependency -Definition ((Get-BootstrapComponentCatalog)['webview2-runtime']) -WingetPath $WingetPath | Out-Null
+    Install-BootstrapWindowsDependency -Definition ((Get-BootstrapComponentCatalog)['webview2-runtime']) -WingetPath $WingetPath | Out-Null
 
     try {
         Ensure-WingetPackage -WingetPath $WingetPath -Id $id -DisplayName $name -PreferUserScope $false
@@ -7244,7 +7244,7 @@ function Ensure-CodexInstaller {
     param([Parameter(Mandatory = $true)][string]$WingetPath)
 
     $runtime = Get-BootstrapCodexRuntimeComponent
-    Ensure-BootstrapWindowsDependency -Definition $runtime -WingetPath $WingetPath | Out-Null
+    Install-BootstrapWindowsDependency -Definition $runtime -WingetPath $WingetPath | Out-Null
 
     # Desktop and CLI are independent products. A CLI shim cannot satisfy this.
     if ((Get-BootstrapCodexDesktopPackageInfo)['installed']) {
@@ -7450,7 +7450,7 @@ function Ensure-BootstrapCodexDesktopVcppRuntime {
         return [ordered]@{ status = 'healthy'; reason = 'vcpp-runtime-present'; before = $before; after = $before }
     }
     try {
-        $null = Ensure-BootstrapWindowsDependency -Definition (Get-BootstrapCodexRuntimeComponent)
+        $null = Install-BootstrapWindowsDependency -Definition (Get-BootstrapCodexRuntimeComponent)
     } catch {
         return [ordered]@{ status = 'failed'; reason = $_.Exception.Message; before = $before; after = (Get-BootstrapVcppRuntimeStatus) }
     }
@@ -15904,7 +15904,7 @@ function Get-BootstrapSwitchEmulationTuningRecommendation {
     }
 }
 
-function Add-BootstrapWindowsDependencyComponents {
+function Add-BootstrapWindowsDependencyComponent {
     param($Catalog)
 
     $definitions = @(
@@ -15940,6 +15940,14 @@ function Add-BootstrapWindowsDependencyComponents {
             MinimumVersion = [string]$item['Min']; DependencyMajor = [int]$item['Major']; OfficialUrl = [string]$item['Url']
             LargeDownload = [bool]$item['Large']; InstallerArchitecture = [string]$item['InstallerArchitecture']
             InstallerType = [string]$item['InstallerType']; Stage = 'payload'
+        }
+        if ($item['Probe'] -eq 'vc') {
+            # Keep the public diagnostic path contract. Presence alone never
+            # bypasses the windows-dependency registry/version/architecture probe.
+            $directory = if ($item['Arch'] -eq 'x86' -and (Get-BootstrapWindowsArchitecture) -ne 'x86') { 'SysWOW64' } else { 'System32' }
+            $names = @('vcruntime140.dll', 'msvcp140.dll')
+            if ($item['Arch'] -eq 'x64') { $names += 'vcruntime140_1.dll' }
+            $data.ProbePaths = @($names | ForEach-Object { '{0}\{1}\{2}' -f $env:SystemRoot, $directory, $_ })
         }
         $prerequisites = @()
         if ($item['Id']) {
@@ -16223,7 +16231,7 @@ function Assert-BootstrapDependencyInstallerResult {
     }
 }
 
-function Ensure-BootstrapWindowsDependency {
+function Install-BootstrapWindowsDependency {
     param($Definition, [string]$WingetPath, [string]$MinimumVersion, [switch]$ExactVersion, [switch]$SdkBand)
 
     $mutex = [Threading.Mutex]::new($false, 'Global\PhaseZeroWindowsDependencies')
@@ -16502,7 +16510,7 @@ function Get-BootstrapComponentCatalog {
     # vcpp-redist: o runtime VC++ instala as DLLs em System32 (Side-by-Side merge), NAO em Program Files.
     # ProbePaths apontando para Program Files causava ghost-recovery destrutiva (uninstall) de um runtime
     # critico do sistema. Mesmas DLLs sao validadas em Get-BootstrapVcppRuntimeStatus.
-    Add-BootstrapWindowsDependencyComponents -Catalog $catalog
+    Add-BootstrapWindowsDependencyComponent -Catalog $catalog
     $catalog['sunshine'] = New-BootstrapComponentDefinition -Name 'sunshine' -Description 'Servidor de game streaming.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'LizardByte.Sunshine'; DisplayName = 'Sunshine'; Stage = 'payload'; Provisioning = 'winget'; ValueReason = 'Transforma o Deck dockado em host de streaming sem abrir portas manualmente.'; ProbePaths = @("${env:ProgramFiles(x86)}\Sunshine\gamesunshine.exe", "$env:ProgramFiles\Sunshine\gamesunshine.exe") }
     $catalog['moonlight'] = New-BootstrapComponentDefinition -Name 'moonlight' -Description 'Cliente para streaming Sunshine/GameStream.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'MoonlightGameStreamingProject.Moonlight'; DisplayName = 'Moonlight'; Stage = 'payload'; Provisioning = 'winget'; ValueReason = 'Facilita testes e acesso remoto ao ecossistema do Deck.'; ProbePaths = @("${env:LOCALAPPDATA}\Programs\Moonlight Game Streaming Project\Moonlight\Moonlight.exe", "$env:ProgramFiles\Moonlight Game Streaming Project\Moonlight\Moonlight.exe") }
     $catalog['tailscale'] = New-BootstrapComponentDefinition -Name 'tailscale' -Description 'VPN mesh para acesso remoto seguro.' -DependsOn @('system-core') -Kind 'winget' -Data @{ AllowFailureWhenNotAdmin = $true; Id = 'Tailscale.Tailscale'; DisplayName = 'Tailscale'; Stage = 'payload'; Provisioning = 'winget'; ValueReason = 'Conecta o Deck remotamente sem expor servicos publicamente.'; ProbePaths = @("$env:ProgramFiles\Tailscale\tailscale.exe", "${env:LOCALAPPDATA}\Programs\Tailscale\tailscale.exe") }
@@ -32874,7 +32882,7 @@ function Invoke-BootstrapComponent {
                 $requirement = $State.DependencyRequirements[$Name]
                 $options = @{ MinimumVersion = $requirement.version; ExactVersion = ($requirement.policy -eq 'exact'); SdkBand = ($requirement.policy -eq 'sdk-band') }
             }
-            Ensure-BootstrapWindowsDependency -Definition $componentDef -WingetPath ([string]$State.Winget) @options | Out-Null
+            Install-BootstrapWindowsDependency -Definition $componentDef -WingetPath ([string]$State.Winget) @options | Out-Null
         }
         'winget' {
             Ensure-BootstrapSystemCore -State $State

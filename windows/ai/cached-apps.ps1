@@ -215,7 +215,7 @@ function Invoke-PhaseZeroCachedApplication {
         try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
         if (-not $locked) { throw 'Outra operacao de dependencias do PhaseZero esta em execucao.' }
         Invoke-PhaseZeroCachedBudget $root
-        $dependencyDefinitions = Get-PhaseZeroDependencyDefinitions
+        $dependencyDefinitions = Get-PhaseZeroDependencyDefinition
         $runtime = Get-PhaseZeroDependencyStatus -Definition $dependencyDefinitions['vcpp-redist'] -Requirements @{}
         if ($runtime.status -ne 'satisfied') { throw 'Prepare o Visual C++ x64 pelo cache de dependencias antes de instalar os clientes locais.' }
         $package = Get-PhaseZeroCachedApplication $CacheDirectory $Id

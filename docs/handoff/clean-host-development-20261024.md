@@ -1369,3 +1369,29 @@ PowerShell 5.1: Math.Max escolhia Int32 a partir do literal 512MB, mas 25% de
 preservando os mesmos limites. Uma fixture executa a aritmética real com
 leituras sintéticas de 16 GiB. Não houve falta de RAM nessa falha nem
 provisionamento OpenAI aprovado; a referência deve ser repetida no novo SHA.
+
+O [ensaio OpenAI em d2ac48b5](https://github.com/Misael-art/phase-zero/actions/runs/43603433097)
+passou, incluindo o provisionamento com a licença pública e o registro para a
+conta vinculada. O mesmo workflow passou o lifecycle de memória e suas fixtures.
+A revisão d2ac48b5 tem 54 checks locais do cache, incluindo os limites
+proporcionais em 16/32 GiB. Nenhum login privado ou Windows físico foi aprovado.
+
+A CI geral encontrou três regressões de ProbePaths do VC e orçamento de análise
+936/921. A migração anterior para windows-dependency descartou o campo público
+de diagnóstico; ele volta a listar System32/SysWOW64 e suas DLLs, sem substituir
+a consulta nativa obrigatória de registro, versão, arquitetura e todos os arquivos.
+A fixture verifica os caminhos e continua recusando o runtime parcial. Nomes de
+helpers internos de dependências passam a verbos aprovados e substantivos
+singulares, com os chamadores atualizados. A API pública JSON da janela continua
+igual. Mocks usam injeção explícita; o worker da janela conserva seu EntryPoint
+no contexto da closure. O limite 921 permanece, e a falha agora mostra locais
+acionáveis de todos os avisos. A análise e as regressões devem ser conferidas
+no SHA seguinte antes de reconstruir o runtime final.
+
+A fixture de dependências passou localmente após restaurar os caminhos e
+renomear os primeiros helpers. A rodada serial seguinte (dependências/cache/
+janela), limitada a um núcleo, 192 MiB e sem swap, terminou por SIGTERM sem
+recibo final. Não é aprovação. O host voltou a aproximadamente 4 GiB disponíveis
+e pressão crescente; novos testes locais ficam adiados. O próximo incremento
+será validado pela CI Windows, mantendo o orçamento 921 e todos os checks.
+O trabalho não inclui o reparador de toque não rastreado de outra tarefa.

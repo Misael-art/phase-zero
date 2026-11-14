@@ -19,7 +19,7 @@ $script:Checks = 0; $script:NativeCalls = 0; $script:AppxCalls = 0; $script:Runt
 function Confirm-Fixture([bool]$Condition, [string]$Message) { if (-not $Condition) { throw ('FAIL: ' + $Message) }; $script:Checks++ }
 function Invoke-RejectedFixture([scriptblock]$Action, [string]$Message) { $rejected = $false; try { & $Action | Out-Null } catch { $rejected = $true }; Confirm-Fixture $rejected $Message }
 function Get-PhaseZeroDependencyTarget { [CmdletBinding()]param(); return @{ windowsId = 'fixture-windows'; caller = 'fixture-user'; boot = 'fixture-boot'; elevated = $true; systemDrive = [IO.Path]::GetPathRoot($repoRoot) } }
-Set-Item Function:Get-PhaseZeroDependencyDefinitions -Value { [CmdletBinding()]param(); return @{ 'vcpp-redist' = @{ Name = 'vcpp-redist' } } }
+Set-Item Function:Get-PhaseZeroDependencyDefinition -Value { [CmdletBinding()]param(); return @{ 'vcpp-redist' = @{ Name = 'vcpp-redist' } } }
 function Get-PhaseZeroDependencyStatus { [CmdletBinding()]param($Definition, $Requirements); Confirm-Fixture ($Definition.Name -eq 'vcpp-redist' -and $Requirements.Count -eq 0) 'Only declared runtime prerequisite queried'; return @{ status = $script:RuntimeState } }
 $nativeBudget = ${function:Invoke-PhaseZeroCachedBudget}
 function Invoke-PhaseZeroCachedBudget { [CmdletBinding()]param([string]$InstallRoot, [long]$OutputBytes); Confirm-Fixture ($InstallRoot.StartsWith($fixture) -and $OutputBytes -ge 0 -and $OutputBytes -le 2GB) 'Fixture budget never targets real app data' }
