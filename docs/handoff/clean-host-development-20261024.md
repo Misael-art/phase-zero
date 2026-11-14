@@ -1395,3 +1395,15 @@ recibo final. Não é aprovação. O host voltou a aproximadamente 4 GiB dispon�
 e pressão crescente; novos testes locais ficam adiados. O próximo incremento
 será validado pela CI Windows, mantendo o orçamento 921 e todos os checks.
 O trabalho não inclui o reparador de toque não rastreado de outra tarefa.
+
+A referência Windows do código 92aefb7f passou seu pacote/lifecycle e o
+provisionamento OpenAI. O Pester geral chegou a 809 aprovados, uma falha e
+dois ignorados: as três regressões VC foram resolvidas, e restaram 927/921
+avisos. O diagnóstico mostrou três mocks AppX declarados como cmdlets no
+Windows, dois parâmetros do mock de log sem uso e o Write-Host novo do próprio
+diagnóstico. Os mocks agora usam injeção explícita, o log registra seus dois
+argumentos e o diagnóstico usa Write-Information. Isso remove seis avisos sem
+alterar o limite 921 nem excluir regras. A próxima CI deve confirmar o delta.
+O job homelab-shell-test da mesma rodada falhou por tar informar arquivo
+modificado durante backup de fixture; essa frente não foi alterada por este
+incremento Windows.

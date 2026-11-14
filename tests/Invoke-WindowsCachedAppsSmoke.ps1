@@ -36,7 +36,7 @@ Set-Item Function:Get-AuthenticodeSignature -Value {
     $certificate | Add-Member ScriptMethod GetNameInfo { param($NameType, $ForIssuer); if ([string]$NameType -eq 'SimpleName' -and -not $ForIssuer) { return 'Anthropic, PBC' }; return '' }
     return @{ Status = $(if ($LiteralPath.EndsWith('.msix')) { 'Valid' } else { 'NotSigned' }); SignerCertificate = $certificate }
 }
-function Add-AppxPackage {
+Set-Item Function:Add-AppxPackage -Value {
     [CmdletBinding(SupportsShouldProcess = $true)]param([string]$Path, [switch]$RegisterByFamilyName, [string]$MainPackage)
     if ($PSCmdlet.ShouldProcess($Path, 'Fixture registration only')) {
         $script:AppxCalls++
@@ -46,14 +46,14 @@ function Add-AppxPackage {
         } else { $script:FixtureAppx = @{ Name = 'Claude'; Version = '3.6556.2.0'; Publisher = 'CN=Anthropic Fixture'; Status = 'Ok' } }
     }
 }
-function Add-AppxProvisionedPackage {
+Set-Item Function:Add-AppxProvisionedPackage -Value {
     [CmdletBinding(SupportsShouldProcess = $true)]param([switch]$Online, [string]$PackagePath, [string]$LicensePath, [string]$Regions)
     if ($PSCmdlet.ShouldProcess($PackagePath, 'Fixture licensing only')) {
         Confirm-Fixture ($Online -and $Regions -eq 'all' -and [IO.File]::Exists($LicensePath)) 'Public offline license reaches provisioning without SkipLicense'
         $script:ProvisionCalls++
     }
 }
-function Get-AppxPackage { [CmdletBinding()]param([string]$Name); if ($script:FixtureAppx -and $Name -ceq $script:FixtureAppx.Name) { return $script:FixtureAppx } }
+Set-Item Function:Get-AppxPackage -Value { [CmdletBinding()]param([string]$Name); if ($script:FixtureAppx -and $Name -ceq $script:FixtureAppx.Name) { return $script:FixtureAppx } }
 $script:ProvisionCalls = 0
 $script:FixtureAppx = $null
 Add-Type -AssemblyName System.IO.Compression.FileSystem

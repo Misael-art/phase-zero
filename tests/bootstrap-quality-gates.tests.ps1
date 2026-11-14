@@ -35,7 +35,7 @@ Describe 'Bootstrap quality gates' {
         }
         if ($warnings.Count -gt 921) {
             # Preserve actionable locations when the unchanged budget blocks CI.
-            $warnings | Select-Object ScriptName, Line, RuleName, Message | Format-Table -AutoSize | Out-String -Width 240 | Write-Host
+            $warnings | Select-Object ScriptName, Line, RuleName, Message | Format-Table -AutoSize | Out-String -Width 240 | Write-Information -InformationAction Continue
         }
         # Baseline medida com PSScriptAnalyzer 1.25.0: 921 warnings no Windows
         # Server 2025 runner atual. Errors continuam em 0; qualquer warning novo

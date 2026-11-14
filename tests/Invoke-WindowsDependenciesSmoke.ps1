@@ -33,7 +33,7 @@ function Wait-BootstrapWingetMsiIdle($TimeoutSeconds, $HeartbeatSeconds) { $scri
 function Resolve-CommandPath($Name) { if ($Name -eq 'winget') { $script:fixtureState.Winget } }
 function Assert-BootstrapDiskSpace($RequiredGB) {}
 Set-Item Function:Refresh-SessionPath -Value {}
-Set-Item Function:Write-Log -Value { param($Message, $Level) }
+Set-Item Function:Write-Log -Value { param($Message, $Level); $script:fixtureState['LastLog'] = @{ message = $Message; level = $Level } }
 function Invoke-NativeWithLog {
     param($Exe, [Alias('Args')]$Arguments)
     if ($Exe -cne $script:fixtureState.Winget) { throw 'Unexpected native executable outside the fixture' }
