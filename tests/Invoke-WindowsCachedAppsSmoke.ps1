@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $repoRoot 'bootstrap-tools.ps1') -BootstrapUiLibraryMode -RotateSecretsSchedule none
 . (Join-Path $repoRoot 'windows/ai/cached-apps.ps1')
