@@ -1299,3 +1299,33 @@ indisponível. O serviço de origem estava inativo. O histórico aguarda a chave
 desse domínio ou o arquivo de recuperação criptografado existente, solicitado
 ao operador. Instalação, autenticação, consulta MCP pelos dois clientes e
 sincronização permanecem sujeitos ao aceite no Windows físico.
+
+
+## Clientes Windows pelo cache preparado — 14/11/2026
+
+O preparador do microSD já possui os payloads fixados de Codex CLI, Claude Code
+e Claude Desktop. O owner PhaseZero passa a expor InstallCachedApps e
+CachedAppStatus em prepare-host.ps1, com cache explícito e sem rede/WinGet.
+O novo módulo cached-apps.ps1 preserva o inventário ai-tools, vincula Windows e
+SID, confere bytes contra o payload original e conserva o pacote Codex inteiro.
+Nenhuma consulta elevada executa os clientes. Abertura, login e memória privada
+continuam gates distintos. A janela oferece essa ação quando recebe OfflineCache
+e conserva a identidade do usuário na elevação.
+
+No Jupiter Linux, o ambiente gerenciado ui estava pronto. Sob execução serial,
+as fixtures passaram: 40 checks do cache, cinco jornadas da janela e dois
+testes pytest do empacotador. PSScriptAnalyzer nos quatro arquivos PowerShell
+afetados não apresentou avisos ou erros novos; o orçamento global 921 permanece.
+As fixtures substituem processos, registro, rede e AppX. O workflow Windows
+renderiza também a janela com cache; ainda é necessário observar seu resultado
+no SHA publicado e ensaiar os clientes reais no Windows descartável. O preparador
+Windows fará a ponte para esse contrato, sem copiar sua implementação.
+
+As práticas continuam practices-not-configured, e o servidor ai-memory de origem
+está indisponível. O cofre não forneceu a chave configurada; nenhum banco, cofre
+ou chave foi recriado. Esta entrada conserva a descoberta até a memória voltar.
+A distribuição oficial offline OpenAI foi localizada com MSIX e licença pública
+própria; sua aquisição e identidade estão em validação pelo preparador antes de
+expandir os três adaptadores atuais. Não há instalação física ou recuperação
+de histórico privado nova nesta rodada. O cartão e o overlay antigo permanecem
+sob o contrato de recuperação do owner Windows11_SteamDeck_preparo.

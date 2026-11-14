@@ -1,10 +1,11 @@
 ﻿#Requires -Version 5.1
 [CmdletBinding()]
 param(
-    [ValidateSet('Menu','InstallMemory','InstallApps','GitHub','Status','Dependencies','DependencyStatus','InstallDependencies')][string]$Action = 'Menu',
+    [ValidateSet('Menu','InstallMemory','InstallApps','InstallCachedApps','CachedAppStatus','GitHub','Status','Dependencies','DependencyStatus','InstallDependencies')][string]$Action = 'Menu',
     [switch]$AllowLargeDownloads, [switch]$UiProbe, [string]$DependencyIds, [string]$RequirementFile,
     [ValidateSet('','x64','x86','arm64')][string]$ApplicationArchitecture = '', [switch]$OnlyRequired,
-    [string]$ExpectedTarget, [string]$ExpectedCaller, [string]$ExpectedRequirementHash
+    [string]$ExpectedTarget, [string]$ExpectedCaller, [string]$ExpectedRequirementHash,
+    [string]$OfflineCache, [string]$ApplicationIds
 )
 $ErrorActionPreference = 'Stop'
 $dependencyAction = $Action
@@ -15,6 +16,8 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Execut
 . (Join-Path $repoRoot 'bootstrap-tools.ps1') -BootstrapUiLibraryMode -RotateSecretsSchedule none
 . (Join-Path $PSScriptRoot 'host-instructions.ps1')
 . (Join-Path $PSScriptRoot 'windows-dependencies.ps1')
+. (Join-Path $PSScriptRoot 'cached-apps.ps1')
+if ($OfflineCache) { $OfflineCache = Resolve-PhaseZeroCachedLocalPath $OfflineCache }
 $Action = $dependencyAction
 $packages = Join-Path $repoRoot 'packages'
 $env:PZ_MEMORY_PACKAGES = $packages
@@ -23,7 +26,7 @@ if (Test-Path -LiteralPath $archive) { $env:AI_MEMORY_RELEASE_ARCHIVE = $archive
 
 function Update-PhaseZeroHostPath {
     Refresh-SessionPath
-    foreach ($directory in @("${env:ProgramFiles(x86)}\GnuPG\bin", "$env:ProgramFiles\GnuPG\bin", "$env:LOCALAPPDATA\Programs\Python\Python313", "$env:USERPROFILE\.local\bin")) {
+    foreach ($directory in @("${env:ProgramFiles(x86)}\GnuPG\bin", "$env:ProgramFiles\GnuPG\bin", "$env:LOCALAPPDATA\Programs\Python\Python314", "$env:LOCALAPPDATA\Programs\Python\Python313", "$env:USERPROFILE\.local\bin")) {
         if ((Test-Path -LiteralPath $directory) -and $env:PATH.Split(';') -notcontains $directory) { $env:PATH = $directory + ';' + $env:PATH }
     }
 }
@@ -37,12 +40,23 @@ if ($Action -notin @('Menu','Dependencies')) {
             $receipt = Invoke-PhaseZeroDependencySelection -Selected @($DependencyIds -split ',' | Where-Object { $_ }) -RequirementFile $RequirementFile -ApplicationArchitecture $ApplicationArchitecture -AllowLargeDownloads:$AllowLargeDownloads -ExpectedTarget $ExpectedTarget -ExpectedCaller $ExpectedCaller -ExpectedRequirementHash $ExpectedRequirementHash
             $receipt | ConvertTo-Json -Depth 12
             if ($receipt.state -ne 'verified') { exit 2 }
+        } elseif ($Action -in @('InstallCachedApps','CachedAppStatus')) {
+            if (-not $OfflineCache -or -not $ApplicationIds) { throw 'Informe o cache local e os aplicativos selecionados.' }
+            $cacheTarget = Get-PhaseZeroDependencyTarget
+            if (($ExpectedTarget -and $cacheTarget.windowsId -cne $ExpectedTarget) -or ($ExpectedCaller -and $cacheTarget.caller -cne $ExpectedCaller)) { throw 'A instalacao Windows ou a conta mudou. Reabra o preparador na conta original.' }
+            $requestedApplications = @($ApplicationIds -split ',' | Select-Object -Unique)
+            if (@($requestedApplications | Where-Object { $_ -notin @('OpenAI.Codex','Anthropic.ClaudeCode','Anthropic.Claude') }).Count) { throw 'Aplicativo sem adaptador de cache aprovado.' }
+            $applicationResults = @(foreach ($applicationId in $requestedApplications) {
+                if ($Action -eq 'CachedAppStatus') { Get-PhaseZeroCachedApplicationStatus -CacheDirectory $OfflineCache -Id $applicationId }
+                else { Invoke-PhaseZeroCachedApplication -CacheDirectory $OfflineCache -Id $applicationId }
+            })
+            @{ schemaVersion = 1; action = $Action; results = $applicationResults } | ConvertTo-Json -Depth 12
         } elseif ($Action -eq 'InstallMemory') {
             Set-PhaseZeroHostInstructions | Out-Null
             $winget = Resolve-CommandPath -Name winget
             if (-not $winget) { throw 'Atualize o Instalador de Aplicativos pela Microsoft Store para obter o WinGet.' }
             # Only runtime dependencies; no Node, Rust, WSL or Linux VM.
-            foreach ($dependency in @(@{Command='python';Id='Python.Python.3.13'}, @{Command='gpg';Id='GnuPG.GnuPG'}, @{Command='gh';Id='GitHub.cli'})) {
+            foreach ($dependency in @(@{Command='python';Id='Python.Python.3.14'}, @{Command='gpg';Id='GnuPG.GnuPG'}, @{Command='gh';Id='GitHub.cli'})) {
                 $command = Get-Command $dependency.Command -ErrorAction SilentlyContinue
                 $usable = $false
                 if ($command) {
@@ -104,6 +118,9 @@ if ($Action -eq 'Dependencies') {
 $window = New-Object System.Windows.Window
 $window.Title = 'PhaseZero - Codex, Claude e memoria'
 $window.Width = 650; $window.Height = 590; $window.MinWidth = 480; $window.MinHeight = 460
+$workArea = [Windows.SystemParameters]::WorkArea
+$window.Width = [Math]::Min($window.Width, [Math]::Max($window.MinWidth, $workArea.Width - 20))
+$window.Height = [Math]::Min($window.Height, [Math]::Max($window.MinHeight, $workArea.Height - 20))
 $window.WindowStartupLocation = 'CenterScreen'; $window.Background = '#18202B'; $window.Foreground = '#F0F3F7'
 foreach ($key in @('DarkReadonly','DarkInput')) {
     $style = New-Object System.Windows.Style([Windows.Controls.TextBox])
@@ -123,6 +140,7 @@ $panel = New-Object System.Windows.Controls.StackPanel
 $panel.Margin = '22'; $scroll.Content = $panel; $window.Content = $scroll
 $description = New-Object System.Windows.Controls.TextBlock
 $description.Text = "Prepare os aplicativos e a memoria em etapas, uma por vez. Instalar baixa os aplicativos e dependencias. Depois importe sua chave de recuperacao e restaure o backup Linux pela janela Memoria. Entre nas contas dos aplicativos e no GitHub pelo navegador."
+if ($OfflineCache) { $description.Text = "Instale os clientes pelos pacotes locais preparados. Abertura e login continuam separados. Depois instale a memoria, importe sua recuperacao e restaure o historico pela janela Memoria. A instalacao online continua disponivel nos botoes existentes." }
 $description.TextWrapping = 'Wrap'; $description.FontSize = 17; $description.Margin = '0,0,0,15'
 $panel.Children.Add($description) | Out-Null
 $operationStatus = New-Object System.Windows.Controls.TextBlock
@@ -144,9 +162,16 @@ function Invoke-PhaseZeroHostPreparationAction {
     $window.Hide()
     try {
         $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $hostScript + '" -Action ' + $SelectedAction
+        if ($OfflineCache) { $arguments += ' -OfflineCache "' + $OfflineCache + '"' }
+        if ($SelectedAction -eq 'InstallCachedApps') {
+            $caller = Get-PhaseZeroDependencyTarget
+            $arguments += ' -ApplicationIds OpenAI.Codex,Anthropic.ClaudeCode,Anthropic.Claude -ExpectedTarget ' + $caller.windowsId + ' -ExpectedCaller ' + $caller.caller
+        }
         if ($SelectedAction -eq 'InstallApps') { $arguments += ' -AllowLargeDownloads' }
         $exe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $process = Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru -ErrorAction Stop
+        $launch = @{ FilePath = $exe; ArgumentList = $arguments; Wait = $true; PassThru = $true; ErrorAction = 'Stop' }
+        if ($SelectedAction -eq 'InstallCachedApps' -and -not (Test-IsAdmin)) { $launch['Verb'] = 'RunAs' }
+        $process = Start-Process @launch
         $receipt = Join-Path $setupLogRoot ('prepare-host-' + $SelectedAction + '.json')
         & $writeReceipt -Path $receipt -Value @{ action = $SelectedAction; exitCode = $process.ExitCode; downloadsAuthorized = ($SelectedAction -eq 'InstallApps'); at = (Get-Date).ToString('o') }
         if ($process.ExitCode -ne 0) {
@@ -159,6 +184,7 @@ function Invoke-PhaseZeroHostPreparationAction {
 $run = ${function:Invoke-PhaseZeroHostPreparationAction}
 Add-PhaseZeroHostButton '1. Instalar / reparar memoria e dependencias' { & $run 'InstallMemory' }.GetNewClosure()
 Add-PhaseZeroHostButton '2. Instalar Codex Desktop e Claude Code' { & $run 'InstallApps' }.GetNewClosure()
+if ($OfflineCache) { Add-PhaseZeroHostButton 'Instalar clientes preparados no cache local' { & $run 'InstallCachedApps' }.GetNewClosure() }
 Add-PhaseZeroHostButton '3. Entrar no GitHub' { & $run 'GitHub' }.GetNewClosure()
 Add-PhaseZeroHostButton '4. Memoria - recuperar, GitHub e sincronizacao' {
     Show-PhaseZeroMemoryWindow -Owner $window -RepoRoot $repoRoot

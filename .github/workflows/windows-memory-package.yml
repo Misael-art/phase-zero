@@ -8,6 +8,7 @@ on:
       - 'windows/ai/memory*.ps1'
       - 'windows/ai/prepare-host.ps1'
       - 'windows/ai/*dependencies*.ps1'
+      - 'windows/ai/cached-apps.ps1'
       - 'tools/package-memory-windows.py'
       - 'bootstrap-tools.ps1'
       - 'windows/ai/host-instructions.ps1'
@@ -16,6 +17,7 @@ on:
       - 'tests/windows-memory-package.ps1'
       - 'tests/Invoke-WindowsHostPreparationSmoke.ps1'
       - 'tests/Invoke-WindowsDependenciesSmoke.ps1'
+      - 'tests/Invoke-WindowsCachedAppsSmoke.ps1'
 permissions:
   contents: read
 jobs:
@@ -32,8 +34,12 @@ jobs:
         run: |
           & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$env:RUNNER_TEMP/memory-runtime/windows/ai/prepare-host.ps1" -UiProbe
           if ($LASTEXITCODE) { throw 'Native UI probe failed' }
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$env:RUNNER_TEMP/memory-runtime/windows/ai/prepare-host.ps1" -UiProbe -OfflineCache "$env:RUNNER_TEMP/cached-app-ui-fixture"
+          if ($LASTEXITCODE) { throw 'Native cached-app UI probe failed' }
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/Invoke-WindowsHostPreparationSmoke.ps1
           if ($LASTEXITCODE) { throw 'Host preparation journeys failed' }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/Invoke-WindowsCachedAppsSmoke.ps1
+          if ($LASTEXITCODE) { throw 'Cached application fixtures failed' }
       - name: Verify Windows dependencies in PowerShell 5.1
         shell: powershell
         run: |

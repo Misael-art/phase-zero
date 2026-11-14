@@ -34,6 +34,43 @@ substitui a chave de criptografia. Registre as pastas reais desse Windows,
 mantendo hostId e referências WinCred próprios. Preparação offline, ensaio
 nativo em CI, instalação no Deck e login são evidências distintas.
 
+### Clientes preparados no cache local
+
+O preparador aceita um cache revisado com `packages/packages.lock.json`:
+
+```powershell
+.\windows\ai\prepare-host.ps1 -Action InstallCachedApps `
+  -OfflineCache C:\SteamDeck `
+  -ApplicationIds OpenAI.Codex,Anthropic.ClaudeCode,Anthropic.Claude
+.\windows\ai\prepare-host.ps1 -Action CachedAppStatus `
+  -OfflineCache C:\SteamDeck -ApplicationIds OpenAI.Codex
+```
+
+O adaptador não baixa arquivos nem consulta WinGet. Confere ID, revisão fixada,
+origem oficial, tamanho e SHA-256. O Codex mantém o pacote standalone inteiro,
+incluindo executáveis auxiliares, recursos e busca; copiar só o executável não
+atende ao contrato. O Claude Code usa o executável local e o Claude Desktop usa
+MSIX assinado, registrado na conta atual. Desktop OpenAI permanece pelo fluxo
+próprio até a integração do pacote/licença offline oficial.
+
+Instalação e verificação compartilham o mutex das dependências. O inventário
+existente `phasezero-ai-tools.json` conserva os outros componentes e vincula
+os resultados ao Windows e à conta. Hashes de arquivos instalados são derivados
+do payload verificado, sem confiar em um recibo local alterável. Caminhos
+redirecionados, ZIP com traversal/links, normalização Win32 perigosa, arquivos
+extras e alterações do payload impedem confirmar instalado. Interrupções mantêm
+staging e estado para revisão, sem repetir instaladores silenciosamente.
+
+Os clientes não são executados por uma consulta elevada. `verified` confirma
+os arquivos ou o registro do pacote; `functionTest` e autenticação permanecem
+pendentes do usuário interativo. A referência Windows descartável faz os ensaios
+nativos separados. A janela preserva a mesma conta na elevação, e o chamador
+pode vincular `-ExpectedTarget` e `-ExpectedCaller` observados anteriormente.
+O chamador mantém a supervisão térmica e a reserva do host físico; o adaptador
+confere margem para sua operação no Windows, inclusive em convidado supervisionado.
+Python 3.14 passa a ser a preferência do preparador; versões existentes a partir
+de 3.11 continuam sujeitas ao contrato e à revisão de suporte da implantação.
+
 ### Dependências de aplicativos e projetos
 
 No Windows em execução, abra **Dependências de aplicativos e projetos** no
