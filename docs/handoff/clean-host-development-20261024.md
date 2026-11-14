@@ -1362,3 +1362,10 @@ usa a entrada normal, vinculada a Windows/SID, com prazo e supervisão serial.
 A reserva não foi reduzida para obter aprovação. Registro/provisionamento
 nativos ainda não comprovam abertura/login, isolamento de rede de todo o SO
 ou Windows 11 físico.
+
+A primeira referência OpenAI pública encontrou estreitamento numérico no
+PowerShell 5.1: Math.Max escolhia Int32 a partir do literal 512MB, mas 25% de
+16 GiB excedia Int32. O orçamento usa agora ambos os operandos double,
+preservando os mesmos limites. Uma fixture executa a aritmética real com
+leituras sintéticas de 16 GiB. Não houve falta de RAM nessa falha nem
+provisionamento OpenAI aprovado; a referência deve ser repetida no novo SHA.

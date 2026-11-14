@@ -180,7 +180,7 @@ function Invoke-PhaseZeroCachedBudget {
     $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($InstallRoot))
     # Application admission, including a small supervised guest. The caller
     # still owns the physical host reserve, thermal gates and VM supervision.
-    if ($available - 256MB -lt [Math]::Max(512MB, .25 * $total) -or $drive.AvailableFreeSpace -lt 10GB + $OutputBytes) { throw 'Aguarde margem de RAM e disco para instalar pelo cache.' }
+    if ($available - 256MB -lt [Math]::Max([double]512MB, [double](.25 * $total)) -or $drive.AvailableFreeSpace -lt 10GB + $OutputBytes) { throw 'Aguarde margem de RAM e disco para instalar pelo cache.' }
 }
 
 function Get-PhaseZeroCachedApplicationStatus {

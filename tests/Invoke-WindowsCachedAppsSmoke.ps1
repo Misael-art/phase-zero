@@ -21,6 +21,7 @@ function Invoke-RejectedFixture([scriptblock]$Action, [string]$Message) { $rejec
 function Get-PhaseZeroDependencyTarget { [CmdletBinding()]param(); return @{ windowsId = 'fixture-windows'; caller = 'fixture-user'; boot = 'fixture-boot'; elevated = $true; systemDrive = [IO.Path]::GetPathRoot($repoRoot) } }
 Set-Item Function:Get-PhaseZeroDependencyDefinitions -Value { [CmdletBinding()]param(); return @{ 'vcpp-redist' = @{ Name = 'vcpp-redist' } } }
 function Get-PhaseZeroDependencyStatus { [CmdletBinding()]param($Definition, $Requirements); Confirm-Fixture ($Definition.Name -eq 'vcpp-redist' -and $Requirements.Count -eq 0) 'Only declared runtime prerequisite queried'; return @{ status = $script:RuntimeState } }
+$nativeBudget = ${function:Invoke-PhaseZeroCachedBudget}
 function Invoke-PhaseZeroCachedBudget { [CmdletBinding()]param([string]$InstallRoot, [long]$OutputBytes); Confirm-Fixture ($InstallRoot.StartsWith($fixture) -and $OutputBytes -ge 0 -and $OutputBytes -le 2GB) 'Fixture budget never targets real app data' }
 Set-Item Function:Ensure-PathUserContainsFirst -Value { [CmdletBinding()]param([string]$Dir); $script:FixturePath = $Dir }
 Set-Item Function:Invoke-BootstrapAiNativeCommand -Value {
@@ -74,6 +75,14 @@ function New-FixtureRecord {
     return @{ id = $Id; name = $Id; version = $Version; installerType = $Kind; url = $Url; sha256 = $hash; size = (Get-Item -LiteralPath $Source).Length; file = $name }
 }
 try {
+    # Exercise the real arithmetic with synthetic 16/32 GiB readings. The
+    # native PowerShell 5.1 overload must not narrow a byte count to Int32.
+    $script:BudgetTotal = 16GB; $script:BudgetAvailable = 12GB
+    Set-Item Function:Get-CimInstance -Value { [CmdletBinding()]param([string]$ClassName, [int]$OperationTimeoutSec); if ($ClassName -cne 'Win32_OperatingSystem' -or $OperationTimeoutSec -ne 5) { throw 'Unexpected budget query' }; return @{ FreePhysicalMemory = $script:BudgetAvailable / 1KB; TotalVisibleMemorySize = $script:BudgetTotal / 1KB } }
+    & $nativeBudget $fixture 0
+    Confirm-Fixture $true '16 GiB native budget arithmetic accepts sufficient physical reserve'
+    $script:BudgetTotal = 32GB; $script:BudgetAvailable = 7GB
+    Invoke-RejectedFixture { & $nativeBudget $fixture 0 } '32 GiB reference keeps its proportional reserve instead of accepting a low-memory sample'
     $portable = Join-Path $fixture 'portable-fixture.exe'; [IO.File]::WriteAllText($portable, 'not executable; native boundary mocked')
     $claude = New-FixtureRecord 'Anthropic.ClaudeCode' '2.1.318' 'portable' 'https://downloads.claude.ai/claude-code-releases/2.1.318/win32-x64/claude.exe' $portable
     $layout = @{ layoutVersion = 1; version = '0.168.0'; target = 'x86_64-pc-windows-msvc'; entrypoint = 'codex-x86_64-pc-windows-msvc.exe' } | ConvertTo-Json
