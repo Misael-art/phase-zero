@@ -18,7 +18,7 @@ $env:CLAUDE_CONFIG_DIR = Join-Path $env:USERPROFILE '.claude'
 $script:Checks = 0; $script:NativeCalls = 0; $script:AppxCalls = 0; $script:RuntimeState = 'satisfied'
 function Confirm-Fixture([bool]$Condition, [string]$Message) { if (-not $Condition) { throw ('FAIL: ' + $Message) }; $script:Checks++ }
 function Invoke-RejectedFixture([scriptblock]$Action, [string]$Message) { $rejected = $false; try { & $Action | Out-Null } catch { $rejected = $true }; Confirm-Fixture $rejected $Message }
-function Get-PhaseZeroDependencyTarget { [CmdletBinding()]param(); return @{ windowsId = 'fixture-windows'; caller = 'fixture-user'; boot = 'fixture-boot'; systemDrive = [IO.Path]::GetPathRoot($repoRoot) } }
+function Get-PhaseZeroDependencyTarget { [CmdletBinding()]param(); return @{ windowsId = 'fixture-windows'; caller = 'fixture-user'; boot = 'fixture-boot'; elevated = $true; systemDrive = [IO.Path]::GetPathRoot($repoRoot) } }
 Set-Item Function:Get-PhaseZeroDependencyDefinitions -Value { [CmdletBinding()]param(); return @{ 'vcpp-redist' = @{ Name = 'vcpp-redist' } } }
 function Get-PhaseZeroDependencyStatus { [CmdletBinding()]param($Definition, $Requirements); Confirm-Fixture ($Definition.Name -eq 'vcpp-redist' -and $Requirements.Count -eq 0) 'Only declared runtime prerequisite queried'; return @{ status = $script:RuntimeState } }
 function Invoke-PhaseZeroCachedBudget { [CmdletBinding()]param([string]$InstallRoot, [long]$OutputBytes); Confirm-Fixture ($InstallRoot.StartsWith($fixture) -and $OutputBytes -ge 0 -and $OutputBytes -le 2GB) 'Fixture budget never targets real app data' }
@@ -31,29 +31,45 @@ Set-Item Function:Invoke-BootstrapAiNativeCommand -Value {
 
 Set-Item Function:Get-AuthenticodeSignature -Value {
     [CmdletBinding()]param([string]$LiteralPath)
-    $certificate = [pscustomobject]@{}
+    $certificate = [pscustomobject]@{ Subject = 'CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B' }
     $certificate | Add-Member ScriptMethod GetNameInfo { param($NameType, $ForIssuer); if ([string]$NameType -eq 'SimpleName' -and -not $ForIssuer) { return 'Anthropic, PBC' }; return '' }
     return @{ Status = $(if ($LiteralPath.EndsWith('.msix')) { 'Valid' } else { 'NotSigned' }); SignerCertificate = $certificate }
 }
 function Add-AppxPackage {
-    [CmdletBinding(SupportsShouldProcess = $true)]param([string]$Path)
-    if ($PSCmdlet.ShouldProcess($Path, 'Fixture registration only')) { $script:AppxCalls++; $script:FixtureAppx = @{ Name = 'Claude'; Version = '3.6556.2.0'; Publisher = 'CN=Anthropic Fixture'; Status = 'Ok' } }
+    [CmdletBinding(SupportsShouldProcess = $true)]param([string]$Path, [switch]$RegisterByFamilyName, [string]$MainPackage)
+    if ($PSCmdlet.ShouldProcess($Path, 'Fixture registration only')) {
+        $script:AppxCalls++
+        if ($RegisterByFamilyName) {
+            Confirm-Fixture ($MainPackage -ceq 'OpenAI.Codex_2p2nqsd0c76g0' -and $script:ProvisionCalls -eq 1) 'OpenAI registration follows licensed provisioning'
+            $script:FixtureAppx = @{ Name = 'OpenAI.Codex'; Version = '26.1111.2228.0'; Publisher = 'CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B'; Status = 'Ok' }
+        } else { $script:FixtureAppx = @{ Name = 'Claude'; Version = '3.6556.2.0'; Publisher = 'CN=Anthropic Fixture'; Status = 'Ok' } }
+    }
 }
-function Get-AppxPackage { [CmdletBinding()]param([string]$Name); if ($Name -eq 'Claude' -and $script:FixtureAppx) { return $script:FixtureAppx } }
+function Add-AppxProvisionedPackage {
+    [CmdletBinding(SupportsShouldProcess = $true)]param([switch]$Online, [string]$PackagePath, [string]$LicensePath, [string]$Regions)
+    if ($PSCmdlet.ShouldProcess($PackagePath, 'Fixture licensing only')) {
+        Confirm-Fixture ($Online -and $Regions -eq 'all' -and [IO.File]::Exists($LicensePath)) 'Public offline license reaches provisioning without SkipLicense'
+        $script:ProvisionCalls++
+    }
+}
+function Get-AppxPackage { [CmdletBinding()]param([string]$Name); if ($script:FixtureAppx -and $Name -ceq $script:FixtureAppx.Name) { return $script:FixtureAppx } }
+$script:ProvisionCalls = 0
 $script:FixtureAppx = $null
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $cache = Join-Path $fixture 'cache'
 function New-FixtureArchive {
-    [CmdletBinding()]param([hashtable]$Contents, [string]$Name)
+    [CmdletBinding(SupportsShouldProcess = $true)]param([hashtable]$Contents, [string]$Name)
     $path = Join-Path $fixture $Name
+    if (-not $PSCmdlet.ShouldProcess($path, 'Create private archive fixture')) { return }
     $archive = [IO.Compression.ZipFile]::Open($path, [IO.Compression.ZipArchiveMode]::Create)
     try { foreach ($key in $Contents.Keys) { $entry = $archive.CreateEntry($key); $stream = $entry.Open(); try { $bytes = [Text.Encoding]::UTF8.GetBytes($Contents[$key]); $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() } } } finally { $archive.Dispose() }
     return $path
 }
 function New-FixtureRecord {
-    [CmdletBinding()]param([string]$Id, [string]$Version, [string]$Kind, [string]$Url, [string]$Source)
+    [CmdletBinding(SupportsShouldProcess = $true)]param([string]$Id, [string]$Version, [string]$Kind, [string]$Url, [string]$Source)
     $hash = Get-BootstrapFileSha256 $Source; $extension = if ($Kind -eq 'portable') { 'exe' } else { $Kind }
     $name = 'packages/' + $hash + '.' + $extension
+    if (-not $PSCmdlet.ShouldProcess((Join-Path $cache $name), 'Copy private fixture payload')) { return }
     Copy-Item -LiteralPath $Source -Destination (Join-Path $cache $name)
     return @{ id = $Id; name = $Id; version = $Version; installerType = $Kind; url = $Url; sha256 = $hash; size = (Get-Item -LiteralPath $Source).Length; file = $name }
 }
@@ -65,7 +81,14 @@ try {
     $codex = New-FixtureRecord 'OpenAI.Codex' '0.168.0' 'zip' 'https://github.com/openai/codex/releases/download/rust-v0.168.0/codex-x86_64-pc-windows-msvc.exe.zip' $archive
     $msix = New-FixtureArchive @{ 'AppxManifest.xml' = '<Package><Identity Name="Claude" ProcessorArchitecture="x64" Version="3.6556.2.0" Publisher="CN=Anthropic Fixture" /></Package>' } 'desktop-fixture.msix'
     $desktop = New-FixtureRecord 'Anthropic.Claude' '3.6556.2' 'msix' ('https://downloads.claude.ai/releases/win32/x64/3.6556.2/Claude-' + ('a' * 40) + '.msix') $msix
-    $lock = @{ schemaVersion = 1; wingetCommit = ('1' * 40); packages = @($claude, $codex, $desktop) }
+    $openaiMsix = New-FixtureArchive @{ 'AppxManifest.xml' = '<Package><Identity Name="OpenAI.Codex" ProcessorArchitecture="x64" Version="26.1111.2228.0" Publisher="CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B" /></Package>' } 'openai-fixture.msix'
+    $openai = New-FixtureRecord '9PLM9XGG6VKS' '26.1111.2228.0' 'msix' 'https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix' $openaiMsix
+    $licenseBytes = [Text.Encoding]::UTF8.GetBytes('<License>public fixture</License>')
+    $licenseSource = Join-Path $fixture 'license.xml'; [IO.File]::WriteAllBytes($licenseSource, $licenseBytes)
+    $licenseHash = Get-BootstrapFileSha256 $licenseSource; $licenseFile = 'packages/' + $licenseHash + '.xml'
+    Copy-Item -LiteralPath $licenseSource -Destination (Join-Path $cache $licenseFile)
+    $openai.assets = @(@{ id = 'OpenAI.Desktop.OfflineLicense'; purpose = 'vendor-offline-license'; url = 'https://persistent.oaistatic.com/codex-app-prod/ChatGPT-License.xml'; sha256 = $licenseHash; size = $licenseBytes.Length; file = $licenseFile })
+    $lock = @{ schemaVersion = 1; wingetCommit = ('1' * 40); packages = @($claude, $codex, $desktop, $openai) }
     $lockPath = Join-Path $cache 'packages/packages.lock.json'
     $null = Write-BootstrapJsonFile -Path $lockPath -Value $lock
     Invoke-RejectedFixture { Get-PhaseZeroCachedApplication $cache 'Unknown.App' } 'Unapproved app refused'
@@ -76,7 +99,7 @@ try {
     [IO.File]::WriteAllBytes($claudePath, $original)
     $lock.packages += $claude; $null = Write-BootstrapJsonFile -Path $lockPath -Value $lock
     Invoke-RejectedFixture { Get-PhaseZeroCachedApplication $cache $claude.id } 'Duplicate identity refused'
-    $lock.packages = @($claude, $codex, $desktop); $null = Write-BootstrapJsonFile -Path $lockPath -Value $lock
+    $lock.packages = @($claude, $codex, $desktop, $openai); $null = Write-BootstrapJsonFile -Path $lockPath -Value $lock
     $script:RuntimeState = 'missing'
     Invoke-RejectedFixture { Invoke-PhaseZeroCachedApplication $cache $claude.id } 'Missing runtime never triggers an online installer'
     $script:RuntimeState = 'satisfied'
@@ -98,6 +121,15 @@ try {
     Remove-Item -LiteralPath $extra
     $installed = Invoke-PhaseZeroCachedApplication $cache $desktop.id
     Confirm-Fixture ($installed.state -eq 'verified' -and $script:AppxCalls -eq 1) 'Signed MSIX uses only current-user registration boundary'
+    $licensePath = Join-Path $cache $licenseFile
+    [IO.File]::WriteAllText($licensePath, '<License>damaged</License>')
+    Invoke-RejectedFixture { Invoke-PhaseZeroCachedApplication $cache $openai.id } 'Corrupt offline license blocks provisioning'
+    Confirm-Fixture ($script:ProvisionCalls -eq 0) 'No provisioning occurs before license verification'
+    [IO.File]::WriteAllBytes($licensePath, $licenseBytes)
+    $installed = Invoke-PhaseZeroCachedApplication $cache $openai.id
+    Confirm-Fixture ($installed.state -eq 'verified' -and $script:ProvisionCalls -eq 1 -and $script:AppxCalls -eq 2) 'OpenAI offline package is provisioned with its public license and registered for the bound user'
+    $null = Invoke-PhaseZeroCachedApplication $cache $openai.id
+    Confirm-Fixture ($script:ProvisionCalls -eq 1) 'Verified OpenAI registration is reused without repeated provisioning'
     $target = Get-PhaseZeroDependencyTarget; $target.caller = 'other-user'
     Confirm-Fixture (-not (Test-PhaseZeroCachedApplication (Get-PhaseZeroCachedApplication $cache $codex.id) $target $entry)) 'Other account cannot reuse a prepared receipt'
     $binary = Join-Path $entry['directory'] 'codex.exe'; [IO.File]::WriteAllText($binary, 'corrupt installed binary')

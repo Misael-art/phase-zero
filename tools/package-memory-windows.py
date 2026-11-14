@@ -64,7 +64,7 @@ def build(destination: Path, packages: Path | None = None, model_cache: Path | N
         "Downloads acima de 70 MB ficam manuais, salvo autorizacao expressa.\n"
         "3. Entre no GitHub pelo navegador. Contas Codex e Claude exigem login proprio no Windows.\n"
         "Pacotes locais: prepare-host.ps1 -Action InstallCachedApps -OfflineCache <raiz-do-cache> "
-        "-ApplicationIds OpenAI.Codex,Anthropic.ClaudeCode,Anthropic.Claude. "
+        "-ApplicationIds OpenAI.Codex,Anthropic.ClaudeCode,Anthropic.Claude,9PLM9XGG6VKS. "
         "Sem downloads; preserva contas e confirma bytes/registro. Abertura e login continuam separados.\n"
         "4. Memoria: importe primeiro a chave de recuperacao .gpg com sua senha local. "
         "Depois verifique o backup, revise o plano e restaure. Nenhum restore ocorre por anexar o cartao.\n"

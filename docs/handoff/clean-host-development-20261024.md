@@ -1314,8 +1314,10 @@ e conserva a identidade do usuário na elevação.
 
 No Jupiter Linux, o ambiente gerenciado ui estava pronto. Sob execução serial,
 as fixtures passaram: 40 checks do cache, cinco jornadas da janela e dois
-testes pytest do empacotador. PSScriptAnalyzer nos quatro arquivos PowerShell
-afetados não apresentou avisos ou erros novos; o orçamento global 921 permanece.
+testes pytest do empacotador. A conferência inicial do PSScriptAnalyzer foi revista: a rodada completa
+identificou dois avisos novos nos construtores de fixture e um aviso existente
+na atualização do PATH. Os três agora têm ShouldProcess efetivo; o orçamento
+global 921 permanece. A análise final deve ser conferida no SHA publicado.
 As fixtures substituem processos, registro, rede e AppX. O workflow Windows
 renderiza também a janela com cache; ainda é necessário observar seu resultado
 no SHA publicado e ensaiar os clientes reais no Windows descartável. O preparador
@@ -1329,3 +1331,15 @@ própria; sua aquisição e identidade estão em validação pelo preparador ant
 expandir os três adaptadores atuais. Não há instalação física ou recuperação
 de histórico privado nova nesta rodada. O cartão e o overlay antigo permanecem
 sob o contrato de recuperação do owner Windows11_SteamDeck_preparo.
+
+A referência PowerShell 5.1 revelou que a fixture ZIP precisava carregar
+System.IO.Compression explicitamente antes do enum ZipArchiveMode. O ajuste
+`e415e67c7fbc5914b5bf06dc721cd9ada51066b8` passou no
+[ensaio Windows completo](https://github.com/Misael-art/phase-zero/actions/runs/43588457553),
+incluindo WPF, cinco jornadas, 40 checks do cache e lifecycle de memória.
+O incremento seguinte acrescenta o quarto cliente: OpenAI MSIX com licença
+pública fixada, provisionamento licenciado e registro da família na mesma conta.
+As fixtures locais passaram em 52 checks, sem execução real dos clientes.
+Assinatura/identidade/licença de origem foram conferidas pelo preparador em
+[referência Windows descartável](https://github.com/Misael-art/Windows11_SteamDeck_preparo/actions/runs/43587914719).
+A instalação real desse quarto adaptador e o aceite físico continuam separados.

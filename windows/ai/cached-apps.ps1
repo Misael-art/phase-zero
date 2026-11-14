@@ -25,6 +25,7 @@ function Get-PhaseZeroCachedApplication {
         'OpenAI.Codex' = @{ component = 'codex-cli'; kind = 'zip'; command = 'codex.exe' }
         'Anthropic.ClaudeCode' = @{ component = 'claude-code'; kind = 'portable'; command = 'claude.exe' }
         'Anthropic.Claude' = @{ component = 'claude-desktop'; kind = 'msix'; command = '' }
+        '9PLM9XGG6VKS' = @{ component = 'codex-desktop'; kind = 'msix'; command = '' }
     }
     if (-not $definitions.ContainsKey($Id)) { throw 'Aplicativo sem adaptador local aprovado.' }
     $cache = Resolve-PhaseZeroCachedLocalPath $CacheDirectory
@@ -34,17 +35,29 @@ function Get-PhaseZeroCachedApplication {
     $rows = @($manifest.packages | Where-Object { $_.id -ceq $Id })
     if ($rows.Count -ne 1) { throw 'O pacote deve conter uma unica entrada do aplicativo.' }
     $row = $rows[0]; $definition = $definitions[$Id]
-    if ($row.version -cnotmatch '^\d+\.\d+\.\d+$' -or $row.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $row.installerType -cne $definition.kind) { throw 'Identidade ou formato do pacote local invalido.' }
+    $versionPattern = if ($Id -eq '9PLM9XGG6VKS') { '^\d+\.\d+\.\d+\.\d+$' } else { '^\d+\.\d+\.\d+$' }
+    if ($row.version -cnotmatch $versionPattern -or $row.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $row.installerType -cne $definition.kind) { throw 'Identidade ou formato do pacote local invalido.' }
     $origin = switch ($Id) {
         'OpenAI.Codex' { '^' + [regex]::Escape('https://github.com/openai/codex/releases/download/rust-v' + $row.version + '/codex-x86_64-pc-windows-msvc.exe.zip') + '$' }
         'Anthropic.ClaudeCode' { '^' + [regex]::Escape('https://downloads.claude.ai/claude-code-releases/' + $row.version + '/win32-x64/claude.exe') + '$' }
         'Anthropic.Claude' { '^' + [regex]::Escape('https://downloads.claude.ai/releases/win32/x64/' + $row.version + '/Claude-') + '[a-f0-9]{40}\.msix$' }
+        '9PLM9XGG6VKS' { '^https://persistent\.oaistatic\.com/codex-app-prod/ChatGPT-x64\.msix$' }
     }
     $extension = if ($definition.kind -eq 'portable') { 'exe' } else { $definition.kind }
     if ($row.url -cnotmatch $origin -or $row.file -cne ('packages/' + $row.sha256 + '.' + $extension)) { throw 'Origem ou nome do payload difere do contrato oficial.' }
     $payload = Resolve-PhaseZeroCachedLocalPath (Join-Path $cache $row.file)
     if (-not [IO.File]::Exists($payload) -or (Get-Item -LiteralPath $payload).Length -ne $row.size -or (Get-BootstrapFileSha256 $payload) -cne $row.sha256) { throw 'Pacote local ausente ou corrompido; o arquivo foi preservado.' }
-    return @{ row = $row; definition = $definition; path = $payload; manifestSha256 = Get-BootstrapFileSha256 $manifestPath }
+    $licensePath = ''
+    if ($Id -eq '9PLM9XGG6VKS') {
+        $assets = @($row.assets)
+        if ($assets.Count -ne 1 -or $assets[0].id -cne 'OpenAI.Desktop.OfflineLicense' -or $assets[0].purpose -cne 'vendor-offline-license' -or $assets[0].url -cne 'https://persistent.oaistatic.com/codex-app-prod/ChatGPT-License.xml' -or $assets[0].sha256 -cnotmatch '^[a-f0-9]{64}$' -or $assets[0].file -cne ('packages/' + $assets[0].sha256 + '.xml') -or $assets[0].size -le 0 -or $assets[0].size -gt 1MB) { throw 'Licenca offline OpenAI ausente ou sem contrato aprovado.' }
+        $licensePath = Resolve-PhaseZeroCachedLocalPath (Join-Path $cache $assets[0].file)
+        if ((Get-Item -LiteralPath $licensePath).Length -ne $assets[0].size -or (Get-BootstrapFileSha256 $licensePath) -cne $assets[0].sha256) { throw 'Licenca offline ausente ou corrompida.' }
+        $settings = [Xml.XmlReaderSettings]::new(); $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit; $settings.XmlResolver = $null
+        $reader = [Xml.XmlReader]::Create($licensePath, $settings)
+        try { while ($reader.Read()) {} } finally { $reader.Dispose() }
+    }
+    return @{ row = $row; definition = $definition; path = $payload; licensePath = $licensePath; manifestSha256 = Get-BootstrapFileSha256 $manifestPath }
 }
 
 function Get-PhaseZeroCachedManifest {
@@ -85,8 +98,11 @@ function Get-PhaseZeroCachedMsixIdentity {
         $settings = [Xml.XmlReaderSettings]::new(); $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit; $settings.XmlResolver = $null
         $xmlReader = [Xml.XmlReader]::Create([IO.StringReader]::new($xmlText), $settings)
         try { $xml = [Xml.XmlDocument]::new(); $xml.XmlResolver = $null; $xml.Load($xmlReader) } finally { $xmlReader.Dispose() }
-        if ($xml.Package.Identity.Name -cne 'Claude' -or $xml.Package.Identity.Version -cne ($Package.row.version + '.0') -or $xml.Package.Identity.ProcessorArchitecture -cne 'x64') { throw 'Identidade MSIX diferente do manifesto fixado.' }
-        return @{ publisher = [string]$xml.Package.Identity.Publisher; version = [string]$xml.Package.Identity.Version }
+        $name = if ($Package.row.id -eq '9PLM9XGG6VKS') { 'OpenAI.Codex' } else { 'Claude' }
+        $version = if ($Package.row.id -eq '9PLM9XGG6VKS') { $Package.row.version } else { $Package.row.version + '.0' }
+        if ($xml.Package.Identity.Name -cne $name -or $xml.Package.Identity.Version -cne $version -or $xml.Package.Identity.ProcessorArchitecture -cne 'x64') { throw 'Identidade MSIX diferente do manifesto fixado.' }
+        if ($Package.row.id -eq '9PLM9XGG6VKS' -and $xml.Package.Identity.Publisher -cne 'CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B') { throw 'Editor MSIX OpenAI diferente da distribuicao oficial conferida.' }
+        return @{ name = $name; publisher = [string]$xml.Package.Identity.Publisher; version = [string]$xml.Package.Identity.Version }
     } finally { $archive.Dispose() }
 }
 
@@ -116,7 +132,7 @@ function Test-PhaseZeroCachedApplication {
     if ($Entry['windowsId'] -cne $Target.windowsId -or $Entry['caller'] -cne $Target.caller -or $Entry['sourceSha256'] -cne $Package.row.sha256 -or $Entry['version'] -cne $Package.row.version) { return $false }
     if ($Package.definition.kind -eq 'msix') {
         $identity = Get-PhaseZeroCachedMsixIdentity $Package
-        $apps = @(Get-AppxPackage -Name Claude -ErrorAction Stop | Where-Object { $_.Name -ceq 'Claude' })
+        $apps = @(Get-AppxPackage -Name $identity.name -ErrorAction Stop | Where-Object { $_.Name -ceq $identity.name })
         return ($apps.Count -eq 1 -and [string]$apps[0].Version -ceq $identity.version -and [string]$apps[0].Publisher -ceq $identity.publisher -and [string]$apps[0].Status -eq 'Ok')
     }
     $directory = Resolve-PhaseZeroCachedLocalPath ([string]$Entry['directory'])
@@ -191,6 +207,7 @@ function Invoke-PhaseZeroCachedApplication {
     param([Parameter(Mandatory = $true)][string]$CacheDirectory, [Parameter(Mandatory = $true)][string]$Id)
     $target = Get-PhaseZeroDependencyTarget
     if (-not $target.windowsId -or -not $target.caller -or -not $target.boot -or [IO.Path]::GetPathRoot($repoRoot) -ine $target.systemDrive) { throw 'Use o PhaseZero do Windows em execucao, na conta correta.' }
+    if ($Id -eq '9PLM9XGG6VKS' -and -not $target.elevated) { throw 'Abra a instalacao pelo preparador para autorizar o provisionamento na mesma conta Windows.' }
     $root = Get-BootstrapAiInstallRoot -InstallRoot ''
     $null = Resolve-PhaseZeroCachedLocalPath $root
     $mutex = [Threading.Mutex]::new($false, 'Global\PhaseZeroWindowsDependencies'); $locked = $false
@@ -205,7 +222,8 @@ function Invoke-PhaseZeroCachedApplication {
         if (-not $PSCmdlet.ShouldProcess($package.row.name, 'Instalar pacote local verificado')) { return @{ id = $Id; state = 'not-executed' } }
         $signature = if ($package.definition.kind -eq 'zip') { @{ Status = 'NotApplicable' } } else { Get-AuthenticodeSignature -LiteralPath $package.path -ErrorAction Stop }
         if ($signature.Status -notin @('Valid', 'NotSigned', 'NotApplicable')) { throw 'Assinatura do payload local invalida.' }
-        if ($Id -eq 'Anthropic.Claude' -and $signature.Status -ne 'Valid') { throw 'O pacote MSIX exige assinatura valida.' }
+        if ($package.definition.kind -eq 'msix' -and $signature.Status -ne 'Valid') { throw 'O pacote MSIX exige assinatura valida.' }
+        if ($Id -eq '9PLM9XGG6VKS' -and $signature.SignerCertificate.Subject -cne 'CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B') { throw 'Assinatura MSIX OpenAI diferente da origem conferida.' }
         if ($signature.Status -eq 'Valid' -and $Id -like 'Anthropic.*' -and $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -notin @('Anthropic PBC', 'Anthropic, PBC')) { throw 'Editor Anthropic diferente do esperado.' }
         if ($package.definition.kind -eq 'msix') { $identity = Get-PhaseZeroCachedMsixIdentity $package }
         if ($package.definition.kind -eq 'zip') {
@@ -235,7 +253,12 @@ function Invoke-PhaseZeroCachedApplication {
         $progress = { if ($clock.Elapsed.TotalSeconds -ge 20) { & $checkResources $root; $clock.Restart() } }.GetNewClosure()
         if ($package.definition.kind -eq 'msix') {
             $entry['publisher'] = $identity.publisher
-            Add-AppxPackage -Path $package.path -ErrorAction Stop
+            if ($Id -eq '9PLM9XGG6VKS') {
+                # Public vendor offline license, never SkipLicense. Provision
+                # once, then register the family for this bound Windows user.
+                Add-AppxProvisionedPackage -Online -PackagePath $package.path -LicensePath $package.licensePath -Regions all -ErrorAction Stop | Out-Null
+                Add-AppxPackage -RegisterByFamilyName -MainPackage 'OpenAI.Codex_2p2nqsd0c76g0' -ErrorAction Stop
+            } else { Add-AppxPackage -Path $package.path -ErrorAction Stop }
         } else {
             [void][IO.Directory]::CreateDirectory($stage)
             if ($package.definition.kind -eq 'portable') {

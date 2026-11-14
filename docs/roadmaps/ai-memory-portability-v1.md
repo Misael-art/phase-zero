@@ -41,7 +41,7 @@ O preparador aceita um cache revisado com `packages/packages.lock.json`:
 ```powershell
 .\windows\ai\prepare-host.ps1 -Action InstallCachedApps `
   -OfflineCache C:\SteamDeck `
-  -ApplicationIds OpenAI.Codex,Anthropic.ClaudeCode,Anthropic.Claude
+  -ApplicationIds OpenAI.Codex,Anthropic.ClaudeCode,Anthropic.Claude,9PLM9XGG6VKS
 .\windows\ai\prepare-host.ps1 -Action CachedAppStatus `
   -OfflineCache C:\SteamDeck -ApplicationIds OpenAI.Codex
 ```
@@ -50,8 +50,12 @@ O adaptador não baixa arquivos nem consulta WinGet. Confere ID, revisão fixada
 origem oficial, tamanho e SHA-256. O Codex mantém o pacote standalone inteiro,
 incluindo executáveis auxiliares, recursos e busca; copiar só o executável não
 atende ao contrato. O Claude Code usa o executável local e o Claude Desktop usa
-MSIX assinado, registrado na conta atual. Desktop OpenAI permanece pelo fluxo
-próprio até a integração do pacote/licença offline oficial.
+MSIX assinado, registrado na conta atual. O aplicativo OpenAI usa o MSIX e a
+licença pública da [implantação oficial](https://learn.chatgpt.com/docs/enterprise/windows-deployment).
+Confere assinatura, identidade e hash da licença, provisiona com LicensePath e
+registra a família para a conta atual. Não usa SkipLicense. Um pacote provisionado
+sem registro saudável nessa conta continua pendente. Versão e hashes da origem
+mutável são fixados pelo chamador; mudanças exigem nova revisão.
 
 Instalação e verificação compartilham o mutex das dependências. O inventário
 existente `phasezero-ai-tools.json` conserva os outros componentes e vincula

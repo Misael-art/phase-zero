@@ -25,6 +25,8 @@ $archive = Join-Path $packages 'ai-memory-windows-x86_64.zip'
 if (Test-Path -LiteralPath $archive) { $env:AI_MEMORY_RELEASE_ARCHIVE = $archive }
 
 function Update-PhaseZeroHostPath {
+    [CmdletBinding(SupportsShouldProcess = $true)]param()
+    if (-not $PSCmdlet.ShouldProcess('Current process PATH', 'Refresh prepared host tools')) { return }
     Refresh-SessionPath
     foreach ($directory in @("${env:ProgramFiles(x86)}\GnuPG\bin", "$env:ProgramFiles\GnuPG\bin", "$env:LOCALAPPDATA\Programs\Python\Python314", "$env:LOCALAPPDATA\Programs\Python\Python313", "$env:USERPROFILE\.local\bin")) {
         if ((Test-Path -LiteralPath $directory) -and $env:PATH.Split(';') -notcontains $directory) { $env:PATH = $directory + ';' + $env:PATH }
@@ -45,7 +47,7 @@ if ($Action -notin @('Menu','Dependencies')) {
             $cacheTarget = Get-PhaseZeroDependencyTarget
             if (($ExpectedTarget -and $cacheTarget.windowsId -cne $ExpectedTarget) -or ($ExpectedCaller -and $cacheTarget.caller -cne $ExpectedCaller)) { throw 'A instalacao Windows ou a conta mudou. Reabra o preparador na conta original.' }
             $requestedApplications = @($ApplicationIds -split ',' | Select-Object -Unique)
-            if (@($requestedApplications | Where-Object { $_ -notin @('OpenAI.Codex','Anthropic.ClaudeCode','Anthropic.Claude') }).Count) { throw 'Aplicativo sem adaptador de cache aprovado.' }
+            if (@($requestedApplications | Where-Object { $_ -notin @('OpenAI.Codex','Anthropic.ClaudeCode','Anthropic.Claude','9PLM9XGG6VKS') }).Count) { throw 'Aplicativo sem adaptador de cache aprovado.' }
             $applicationResults = @(foreach ($applicationId in $requestedApplications) {
                 if ($Action -eq 'CachedAppStatus') { Get-PhaseZeroCachedApplicationStatus -CacheDirectory $OfflineCache -Id $applicationId }
                 else { Invoke-PhaseZeroCachedApplication -CacheDirectory $OfflineCache -Id $applicationId }
@@ -165,7 +167,7 @@ function Invoke-PhaseZeroHostPreparationAction {
         if ($OfflineCache) { $arguments += ' -OfflineCache "' + $OfflineCache + '"' }
         if ($SelectedAction -eq 'InstallCachedApps') {
             $caller = Get-PhaseZeroDependencyTarget
-            $arguments += ' -ApplicationIds OpenAI.Codex,Anthropic.ClaudeCode,Anthropic.Claude -ExpectedTarget ' + $caller.windowsId + ' -ExpectedCaller ' + $caller.caller
+            $arguments += ' -ApplicationIds OpenAI.Codex,Anthropic.ClaudeCode,Anthropic.Claude,9PLM9XGG6VKS -ExpectedTarget ' + $caller.windowsId + ' -ExpectedCaller ' + $caller.caller
         }
         if ($SelectedAction -eq 'InstallApps') { $arguments += ' -AllowLargeDownloads' }
         $exe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
