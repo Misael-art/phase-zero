@@ -35,7 +35,7 @@ Escopo: integrações opcionais. Nenhuma chave real entra no repositório.
 | `oh-my-openagent` (OMO) | Linux: `bunx oh-my-openagent install --no-tui --platform=opencode` (exige Bun; provider-agnostic por padrão, telemetria off) | `bunx oh-my-openagent doctor --platform=opencode --json` (`exitCode 0`) | Plugin registrado em `~/.config/opencode/opencode.jsonc`; `oh-my-openagent.json` com agentes/categorias; providers via `PZ_OMO_*` | `linux/pz ai omo disable` (desregistra) ou `uninstall` (remove config) |
 | `openclaw` | Linux: `npm install -g --prefix <root> openclaw@latest` | `openclaw --version`, `openclaw doctor` | Linux: baseline non-interactive, MCP, ai-memory hooks; daemon guiado via `openclaw onboard --install-daemon` | Remove pacote/prefixo/PATH gerenciado |
 | `rtk` | Windows: release GitHub; Linux: release GitHub `rtk-*-linux-*.tar.gz` com SHA-256 de `checksums.txt` | `rtk --version` | `rtk init`, `rtk gain`; no Linux via `linux/pz ai setup rtk` | Remove binario gerenciado em `~/.local/bin` |
-| `antigravity-workflows` | Sem binário | Arquivos locais | Gera `.antigravity/workflows/*.md` | Manual, para preservar edições |
+| `antigravity-workflows` | [Cliente oficial do Google](https://antigravity.google/download) | Skill do workspace e registro do MCP e dos hooks | Gera `.agents/skills/phasezero-development/SKILL.md` e conecta o ai-memory local | Remoção seletiva da skill e das entradas do ai-memory |
 | `hermes-agent` | Linux/WSL2 + `install.sh --skip-setup --non-interactive` oficial | `hermes --version`, `hermes doctor` | Linux: MCP em `~/.hermes/config.yaml`; provider/login via `hermes setup --portal` ou `hermes model` | Manual, preserva `~/.hermes` |
 | `hermes-desktop` | Manual | Detecta caminhos comuns | Manual | Não remove artefato não gerenciado |
 | `aion-ui` | Manual/winget oficial | Detecta caminhos comuns | Manual | Não remove artefato não gerenciado |
@@ -53,6 +53,30 @@ Escopo: integrações opcionais. Nenhuma chave real entra no repositório.
 | `ai-proxy-suite` | Windows: git/npm/go por ferramenta; Linux: `linux/pz ai proxies install all` com Node 24 isolado | Windows: doctor/webValidation; Linux: `linux/pz ai proxies auth/test` | OpenAI-compatible providers kimi/qwen/deeps/mimo; browser-session ou env-session redigidos | Remove manual para preservar checkouts/sessões |
 
 ## CLI
+
+No Windows, prepare o workspace do Antigravity com o ai-memory já instalado
+pelo PhaseZero. Execute em PowerShell a partir da raiz do PhaseZero:
+
+```powershell
+. .\bootstrap-tools.ps1 -BootstrapUiLibraryMode -RotateSecretsSchedule none
+Invoke-BootstrapAiToolAction -ToolName antigravity-workflows -Action configure -ProjectRoot 'C:\caminho\do\workspace' -Yes
+```
+
+Use `-DryRun` para revisar o destino. O instalador nativo do ai-memory
+mescla o MCP e os hooks em `~/.gemini/config/` e preserva as demais entradas.
+O MCP chama o bridge do ai-memory para consultar o servidor existente.
+A skill é criada apenas quando ausente e os workflows antigos ficam disponíveis
+para migração manual. As regras de recursos do PhaseZero são mescladas em
+~/.gemini/AGENTS.md dentro de um bloco identificado.
+Para desfazer, remova a skill gerada, o bloco de regras, a entrada
+`ai-memory` de `mcp_config.json` e os hooks pertencentes ao ai-memory de
+`hooks.json`. Preserve configurações de outros servidores e hooks.
+
+Abra o workspace no Antigravity CLI, conclua o login do Google e use `/mcp`
+para conferir o servidor. Execute uma consulta de leitura ao escopo do projeto
+e confira o registro da sessão no ai-memory para validar os hooks. O Google
+documenta [MCP](https://antigravity.google/docs/cli/mcp/) e
+[skills](https://antigravity.google/docs/skills/).
 
 Exemplos:
 
