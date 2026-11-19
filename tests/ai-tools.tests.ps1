@@ -359,17 +359,6 @@ Describe 'AI coding tool support' {
         (@($apps | Where-Object { [string]$_['id'] -eq 'app-aionui' }).Count) | Should Be 1
     }
 
-    It 'generates Antigravity workflow templates without external dependencies' {
-        . $toolsScriptPath -BootstrapUiLibraryMode
-
-        $result = Invoke-BootstrapAiToolAction -ToolName 'antigravity-workflows' -Action 'configure' -InstallRoot $script:AiToolsTestRoot -ProjectRoot $script:AiToolsTestRoot -Yes
-
-        [string]$result.status | Should Be 'configured'
-        foreach ($name in @('planning.md','backend.md','frontend.md','tests.md','review.md')) {
-            Test-Path -LiteralPath (Join-Path $script:AiToolsTestRoot (Join-Path '.antigravity\workflows' $name)) | Should Be $true
-        }
-    }
-
     It 'prefers Windows npm command shims over extensionless package files' {
         . $toolsScriptPath -BootstrapUiLibraryMode
 

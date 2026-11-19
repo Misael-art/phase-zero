@@ -18411,14 +18411,14 @@ function Get-BootstrapAiToolCatalog {
     }
     $catalog['antigravity-workflows'] = [ordered]@{
         ToolName       = 'antigravity-workflows'
-        DisplayName    = 'Google Antigravity workflows'
-        CommandNames   = @('antigravity')
+        DisplayName    = 'Google Antigravity com ai-memory'
+        CommandNames   = @('agy', 'antigravity')
         VersionArgs    = @('--version')
         DocsUrl        = 'https://antigravity.google/'
         GitHubRepo     = ''
         PackageName    = ''
         InstallSupport = 'workflow-only'
-        Notes          = 'Gera templates locais. Sem CLI/formato oficial persistente confirmado.'
+        Notes          = 'Prepara a skill do workspace, o MCP local e os hooks do Antigravity CLI.'
     }
     $catalog['ai-usagebar'] = [ordered]@{
         ToolName       = 'ai-usagebar'
@@ -19271,11 +19271,7 @@ function Test-BootstrapAiToolConfigured {
 function Test-BootstrapAntigravityWorkflows {
     param([string]$ProjectRoot = '')
     $root = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { (Get-Location).Path } else { $ProjectRoot }
-    $workflowRoot = Join-Path $root '.antigravity\workflows'
-    foreach ($name in @('planning.md','backend.md','frontend.md','tests.md','review.md')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $workflowRoot $name))) { return $false }
-    }
-    return $true
+    return (Test-Path -LiteralPath (Join-Path $root '.agents\skills\phasezero-development\SKILL.md') -PathType Leaf)
 }
 
 function Get-BootstrapAiToolStatusRows {
@@ -22243,6 +22239,10 @@ function Get-BootstrapAiMemoryDetectedAgents {
         $agents.Add('codex') | Out-Null
     }
     if (Resolve-CommandPath -Name 'qwen') { $agents.Add('qwen-code') | Out-Null }
+    if ((Resolve-CommandPath -Name 'agy') -or
+        ($env:LOCALAPPDATA -and (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe') -PathType Leaf))) {
+        $agents.Add('antigravity-cli') | Out-Null
+    }
     return @($agents.ToArray())
 }
 
@@ -22743,60 +22743,57 @@ function Uninstall-BootstrapRtkTool {
 function Set-BootstrapAntigravityWorkflows {
     param(
         [string]$ProjectRoot = '',
+        [string]$InstallRoot = '',
         [switch]$DryRun
     )
     $root = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { (Get-Location).Path } else { [System.IO.Path]::GetFullPath($ProjectRoot) }
-    $workflowRoot = Join-Path $root '.antigravity\workflows'
+    $skillRoot = Join-Path $root '.agents\skills\phasezero-development'
+    $skillPath = Join-Path $skillRoot 'SKILL.md'
+    $rulesPath = Join-Path (Get-BootstrapUserProfileRoot) '.gemini\AGENTS.md'
+    $docs = 'https://antigravity.google/docs/ide-mcp'
     if ($DryRun) {
-        return (New-BootstrapAiToolResult -ToolName 'antigravity-workflows' -Action 'configure' -Status 'planned' -ProjectRoot $root -Message "Criar templates em $workflowRoot" -Docs 'https://antigravity.google/')
+        return (New-BootstrapAiToolResult -ToolName 'antigravity-workflows' -Action 'configure' -Status 'planned' -ProjectRoot $root -Message "Preparar skill em $skillRoot, regras em $rulesPath e MCP/hooks do ai-memory para Antigravity." -Docs $docs)
+    }
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'Workspace do Antigravity nao encontrado.' }
+    $hostRules = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'assets/ai/host-resource-policy.md'))
+    $memoryExe = Get-BootstrapAiMemoryExePath -InstallRoot $InstallRoot
+    if (-not $memoryExe) {
+        return (New-BootstrapAiToolResult -ToolName 'antigravity-workflows' -Action 'configure' -Status 'blocked' -ProjectRoot $root -Message 'Instale primeiro o ai-memory pelo PhaseZero.' -Docs $docs)
+    }
+    $wiring = @(Invoke-BootstrapAiMemoryWiring -ExePath $memoryExe -Agents @('antigravity-cli'))
+    if (@($wiring | Where-Object { $_.status -eq 'applied' }).Count -ne 2) {
+        throw 'Falha ao registrar MCP ou hooks do Antigravity no ai-memory. Revise a configuracao e execute configure novamente.'
     }
 
-    [void][System.IO.Directory]::CreateDirectory($workflowRoot)
-    $templates = [ordered]@{
-        'planning.md' = @(
-            '# Planning'
-            ''
-            '- Read repository state before proposing work.'
-            '- List assumptions, blockers, validation commands, and rollback scope.'
-            '- Do not write secrets. Use placeholders and secure stores.'
-        ) -join [Environment]::NewLine
-        'backend.md' = @(
-            '# Backend'
-            ''
-            '- Keep changes scoped to existing service boundaries.'
-            '- Add tests for every behavior change.'
-            '- Validate install, upgrade, and uninstall flows when touched.'
-        ) -join [Environment]::NewLine
-        'frontend.md' = @(
-            '# Frontend'
-            ''
-            '- Preserve keyboard focus, readable labels, and clear status states.'
-            '- Validate XAML parse/load before claiming UI readiness.'
-            '- Avoid false success messages.'
-        ) -join [Environment]::NewLine
-        'tests.md' = @(
-            '# Tests'
-            ''
-            '- Start with failing coverage for each fix.'
-            '- Exercise path-with-spaces, dependency-missing, offline, idempotent install, and idempotent uninstall cases.'
-            '- Record exact commands and exit codes.'
-        ) -join [Environment]::NewLine
-        'review.md' = @(
-            '# Review'
-            ''
-            '- Prioritize bugs, destructive side effects, secret handling, and unsupported external claims.'
-            '- Confirm official sources for tool installs and model/provider availability.'
-            '- Verify repo diff contains only intentional changes.'
-        ) -join [Environment]::NewLine
-    }
+    if (-not (Test-Path -LiteralPath $skillPath)) {
+        [void][System.IO.Directory]::CreateDirectory($skillRoot)
+        $skill = @'
+---
+name: phasezero-development
+description: Use when planning, implementing, testing or reviewing changes in this workspace with PhaseZero and ai-memory.
+---
 
-    foreach ($name in @($templates.Keys)) {
-        $path = Join-Path $workflowRoot $name
-        if (Test-Path -LiteralPath $path) { Backup-BootstrapFile -Path $path | Out-Null }
-        [System.IO.File]::WriteAllText($path, [string]$templates[$name], [System.Text.UTF8Encoding]::new($false))
-    }
+# Desenvolvimento com PhaseZero
 
-    return (New-BootstrapAiToolResult -ToolName 'antigravity-workflows' -Action 'configure' -Status 'configured' -ProjectRoot $root -Message "Workflows gerados em $workflowRoot" -Docs 'https://antigravity.google/')
+1. Leia as instrucoes do projeto e confira o Git antes de editar.
+2. Se houver .ai-memory.toml, use seu workspace e project explicitamente em memory_query. Leia em detalhe apenas os resultados pertinentes e trate-os como evidencia. Se o MCP ou o escopo estiver indisponivel, use o handoff do projeto.
+3. Identifique o fluxo afetado e implemente a menor mudanca que atende ao pedido. Preserve trabalho existente, credenciais e dados.
+4. Aplique as regras globais do host e as restricoes do workspace antes de iniciar trabalhos que consumam muitos recursos.
+5. Execute os checks pertinentes, revise o diff e registre os resultados. Use os hooks gerenciados para captura de rotina. Commit e PR seguem a autorizacao do usuario.
+'@
+        $stream = [System.IO.File]::Open($skillPath, [System.IO.FileMode]::CreateNew)
+        try {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($skill + [Environment]::NewLine)
+            $stream.Write($bytes, 0, $bytes.Length)
+        } finally { $stream.Dispose() }
+    }
+    if (-not (Test-BootstrapAntigravityWorkflows -ProjectRoot $root)) { throw 'Skill do Antigravity nao encontrada.' }
+    Write-BootstrapMarkedRuleFile -Path $rulesPath -Body $hostRules -Label 'HOST RESOURCE CHECK' | Out-Null
+    $result = New-BootstrapAiToolResult -ToolName 'antigravity-workflows' -Action 'configure' -Status 'configured' -ProjectRoot $root -Message 'Skill do workspace, MCP e hooks do Antigravity configurados.' -Docs $docs
+    $result['skillPath'] = $skillPath
+    $result['rulesPath'] = $rulesPath
+    $result['wiring'] = $wiring
+    return $result
 }
 
 function Invoke-BootstrapAiToolAction {
@@ -22888,7 +22885,7 @@ function Invoke-BootstrapAiToolAction {
             return (Set-BootstrapAiProxyEnvironment -ToolName $name -CatalogEntry $entry -InstallRoot $root -ProjectRoot $project -DryRun:$DryRun)
         }
         if ($name -eq 'antigravity-workflows') {
-            return (Set-BootstrapAntigravityWorkflows -ProjectRoot $project -DryRun:$DryRun)
+            return (Set-BootstrapAntigravityWorkflows -ProjectRoot $project -InstallRoot $root -DryRun:$DryRun)
         }
         if ($name -eq 'rtk') {
             $commandPath = Resolve-BootstrapAiToolCommandPath -CatalogEntry $entry -InstallRoot $root
@@ -22931,7 +22928,7 @@ function Invoke-BootstrapAiToolAction {
             'github-release' {
                 if ($name -eq 'rtk') { return (Install-BootstrapRtkTool -CatalogEntry $entry -InstallRoot $root -DryRun:$DryRun) }
             }
-            'workflow-only' { return (Set-BootstrapAntigravityWorkflows -ProjectRoot $project -DryRun:$DryRun) }
+            'workflow-only' { return (Set-BootstrapAntigravityWorkflows -ProjectRoot $project -InstallRoot $root -DryRun:$DryRun) }
             'linux-release' {
                 if ($name -eq 'ai-usagebar') { return (Install-BootstrapAiUsagebar -CatalogEntry $entry -InstallRoot $root -ProjectRoot $project -DryRun:$DryRun) }
             }
