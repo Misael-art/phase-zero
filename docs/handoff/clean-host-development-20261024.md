@@ -530,3 +530,12 @@ duas contas de teste, listar pastas de Meu Drive, conferir um envio no
 Google e repetir a montagem após reinício. O catálogo assinado retornou
 `practices-not-configured`; foi usado o memorial versionado. O ensaio e as
 particularidades do rclone foram registrados na memória do projeto.
+
+Na primeira configuração real, o navegador concluiu o consentimento e a
+consulta de identidade recebeu `403 SERVICE_DISABLED`. Revisão do PR #139
+sobre `5c67d1e8` acrescenta instruções para preparar o rclone, ativar a API
+e importar o cliente OAuth, além da recuperação no projeto indicado pelo
+Google. A Central explica quando a janela expira e permite 5 minutos para
+concluir a autorização. Passaram 14 testes focados e a revisão visual offscreen
+dos estados de preparo, permissão, falha e conta conectada com dados de teste.
+O aceite real segue condicionado ao novo consentimento após a ativação da API.

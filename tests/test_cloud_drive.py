@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import configparser
+import io
 import json
 import os
 from pathlib import Path
+from urllib.error import HTTPError
 
 import pytest
 
@@ -86,6 +88,16 @@ def test_cancelled_authorization_does_not_publish_account(manager, monkeypatch, 
     assert len(manager.status()["accounts"]) == 2
 
 
+def test_oauth_timeout_points_back_to_connect_account(manager, monkeypatch, tmp_path):
+    def expires(argv, *, timeout, **kwargs):
+        assert timeout == 300
+        raise cloud_drive.subprocess.TimeoutExpired(argv, timeout)
+
+    monkeypatch.setattr(cloud_drive.subprocess, "run", expires)
+    with pytest.raises(cloud_drive.DriveError, match="expirou.*Conectar conta"):
+        manager.complete_oauth(tmp_path / "rclone.conf")
+
+
 def test_nonempty_symlink_and_overlapping_local_paths_are_rejected(manager, monkeypatch, tmp_path):
     reader, _ = authorize_two(manager, monkeypatch, tmp_path)
     target = tmp_path / "disco"
@@ -158,6 +170,26 @@ def test_cli_status_does_not_create_storage(manager, capsys, monkeypatch):
     assert json.loads(capsys.readouterr().out)["accounts"] == []
     assert not manager.state.exists()
     assert not manager.config.exists()
+
+
+@pytest.mark.parametrize(("body", "project"), [
+    ({"details": [{"reason": "SERVICE_DISABLED", "metadata": {
+        "service": "drive.googleapis.com", "consumer": "projects/12345",
+    }}]}, "12345"),
+    ({"errors": [{"reason": "accessNotConfigured"}]}, ""),
+    ({"details": [{"reason": "SERVICE_DISABLED", "metadata": {
+        "service": "drive.googleapis.com", "consumer": "projects/123&other=x",
+    }}]}, ""),
+    ({"details": [{"reason": "SERVICE_DISABLED", "metadata": {
+        "service": "some-other-api.googleapis.com",
+    }}]}, None),
+    ({"errors": [{"reason": "insufficientPermissions"}]}, None),
+])
+def test_drive_api_error_only_offers_verified_recovery(body, project):
+    response = io.BytesIO(json.dumps({"error": body}).encode())
+    failure = HTTPError(cloud_drive.ABOUT_URL, 403, "Forbidden", {}, response)
+    error = cloud_drive.drive_api_error(failure)
+    assert error.activation_project == project
 
 
 def test_resource_journey_browses_and_reopens_a_mounted_folder(monkeypatch, tmp_path):
@@ -240,3 +272,34 @@ def test_resource_journey_browses_and_reopens_a_mounted_folder(monkeypatch, tmp_
     panel.change_mount.click()
     assert panel.mounts.currentItem().text() == "Projetos · Desmontada · drive@example.invalid"
     page.close()
+
+
+def test_access_recovery_links_to_google_cloud_project(monkeypatch):
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    from linux.ui_native import cloud_drive_panel as ui
+
+    app = QApplication.instance() or QApplication([])
+    parent = QWidget()
+    panel = ui.CloudDrivePanel(Path.cwd(), parent)
+    state = {"ok": True, "clientConfigured": True, "rclone": True, "fuse": True,
+             "accounts": [], "mounts": []}
+    result = {"ok": False, "activationProject": "12345", "message": "Ative a Google Drive API."}
+    monkeypatch.setattr(ui.DriveCommands, "start", lambda self, args, callback:
+                        callback(result if args[0] == "authorize" else state))
+    opened = []
+    monkeypatch.setattr(ui.QDesktopServices, "openUrl", lambda url: opened.append(url.toString()) or True)
+    parent.show()
+    app.processEvents()
+    panel.operate(["authorize"], "Autorizando…", "")
+    assert panel.fix_api.isVisible()
+    assert panel.fix_api.objectName() == "primaryButton"
+    assert panel.connect_button.objectName() == "secondaryButton"
+    panel.refresh()
+    assert panel.message.text() == result["message"]
+    panel.fix_api.click()
+    assert opened == [ui.DRIVE_API_URL + "?project=12345"]
+    result.update(ok=True, activationProject=None)
+    panel.operate(["authorize"], "Autorizando…", "Conta conectada.")
+    assert not panel.fix_api.isVisible()
+    parent.close()

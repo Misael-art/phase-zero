@@ -36,12 +36,17 @@ Plano de implementação:
 4. Validar autorização, cancelamento, duas contas, múltiplas pastas, envio,
    desmontagem e reabertura. Registrar os gates que exigem uma conta real.
 
-O responsável pela instalação prepara uma vez o [cliente OAuth Desktop do
-Google](https://rclone.org/drive/#making-your-own-client-id) com a Google Drive
-API habilitada e importa o JSON em **Configurar autorização Google**.
+O responsável pela instalação abre **Configurar autorização Google** uma vez.
+A janela leva à ativação da Google Drive API e à criação do
+[cliente OAuth Desktop](https://rclone.org/drive/#making-your-own-client-id)
+no mesmo projeto. Importe o JSON baixado em **Importar JSON…**.
 Para um piloto, configure o público de teste no Google Cloud. Para distribuição,
 siga os [requisitos de verificação dos escopos do
 Drive](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
+
+Quando o consentimento termina e o Google informa que a API do Drive está
+desativada, a Central exibe **Ativar API do Drive**. Ative a API no projeto
+indicado e volte a **Conectar conta**.
 
 **Conectar conta** abre o navegador padrão. O modo edição pede acesso de
 leitura e escrita ao Drive. Operações feitas na pasta montada afetam os

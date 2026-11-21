@@ -278,5 +278,7 @@ class ResourcesPage(CatalogWorkspacePage):
             from ..cloud_drive_panel import CloudDrivePanel
 
             content = scroll.widget()
-            content.layout().insertWidget(1, CloudDrivePanel(self.root, content))
+            rclone = next((action for action in actions if action.id == "capability.plan.backup.rclone"), None)
+            panel = CloudDrivePanel(self.root, content, (lambda: self._select_action(rclone)) if rclone else None)
+            content.layout().insertWidget(1, panel)
         return scroll

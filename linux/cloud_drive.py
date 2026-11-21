@@ -17,12 +17,17 @@ import socket
 import stat
 import subprocess
 import tempfile
+import urllib.error
 import urllib.request
 from uuid import uuid4
 
 
 class DriveError(Exception):
     """A message suitable for the CLI or the desktop without upstream output."""
+
+    def __init__(self, message: str, *, activation_project: str | None = None) -> None:
+        super().__init__(message)
+        self.activation_project = activation_project
 
 
 REMOTE = "drive"
@@ -94,6 +99,26 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def drive_api_error(error: urllib.error.HTTPError) -> DriveError:
+    if error.code == 403:
+        try:
+            details = json.loads(error.read(65536))["error"]
+            for item in [*details.get("details", []), *details.get("errors", [])]:
+                if item.get("reason") not in {"SERVICE_DISABLED", "accessNotConfigured"}:
+                    continue
+                metadata = item.get("metadata", {})
+                if metadata.get("service", "drive.googleapis.com") != "drive.googleapis.com":
+                    continue
+                project = re.fullmatch(r"projects/([0-9]+)", metadata.get("consumer", ""))
+                return DriveError(
+                    "A conta autorizou o acesso. Ative a Google Drive API no projeto do cliente OAuth e conecte a conta novamente.",
+                    activation_project=project[1] if project else "",
+                )
+        except (ValueError, KeyError, TypeError, AttributeError, OSError):
+            pass
+    return DriveError("O Google Drive não confirmou a conta. Confira a autorização e tente conectar novamente.")
+
+
 def account_identity(config: Path) -> tuple[str, str]:
     settings = configparser.ConfigParser(interpolation=None)
     try:
@@ -107,6 +132,8 @@ def account_identity(config: Path) -> tuple[str, str]:
         identity, email = user["permissionId"], user["emailAddress"]
         if not isinstance(identity, str) or not identity or not isinstance(email, str) or not email:
             raise ValueError
+    except urllib.error.HTTPError as error:
+        raise drive_api_error(error) from None
     except (KeyError, ValueError, OSError, TypeError, AttributeError, configparser.Error):
         raise DriveError("O Google Drive não confirmou a conta. Verifique a autorização e a Google Drive API.") from None
     return identity, email
@@ -160,7 +187,10 @@ class CloudDrive:
         if not self.rclone:
             raise DriveError("Prepare o rclone em Recursos → Backup e nuvem.")
 
-    def run(self, *args: str, failure: str, timeout: int = 25, capture: bool = True) -> str:
+    def run(
+        self, *args: str, failure: str, timeout: int = 25, capture: bool = True,
+        timeout_message: str = "O Google Drive não respondeu a tempo. Tente novamente.",
+    ) -> str:
         self.require_rclone()
         try:
             process = subprocess.run(
@@ -170,7 +200,7 @@ class CloudDrive:
                 encoding="utf-8", errors="replace",
             )
         except subprocess.TimeoutExpired:
-            raise DriveError("O Google Drive não respondeu a tempo. Tente novamente.") from None
+            raise DriveError(timeout_message) from None
         if process.returncode:
             raise DriveError(failure)
         return process.stdout or ""
@@ -249,8 +279,9 @@ class CloudDrive:
         # The Drive backend keeps the selected OAuth scope in process memory.
         self.run(
             "config", "update", REMOTE, "config_is_local=true", "config_change_team_drive=false",
-            "--config", str(config), timeout=180, capture=False,
+            "--config", str(config), timeout=300, capture=False,
             failure="A autorização não foi concluída. Confira a janela do Google e tente novamente.",
+            timeout_message="A janela de autorização expirou. Clique em Conectar conta para abrir outra.",
         )
 
     @staticmethod
@@ -522,13 +553,16 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"ok": True, **result}, ensure_ascii=False))
         return 0
     except (DriveError, OSError, subprocess.TimeoutExpired, KeyboardInterrupt, KeyError, TypeError) as error:
+        response = {"ok": False}
         if isinstance(error, DriveError):
-            message = str(error)
+            response["message"] = str(error)
+            if error.activation_project is not None:
+                response["activationProject"] = error.activation_project
         elif isinstance(error, KeyboardInterrupt):
-            message = "Operação cancelada."
+            response["message"] = "Operação cancelada."
         else:
-            message = "Não foi possível concluir a operação. Confira permissões, disco e estado do rclone."
-        print(json.dumps({"ok": False, "message": message}, ensure_ascii=False))
+            response["message"] = "Não foi possível concluir a operação. Confira permissões, disco e estado do rclone."
+        print(json.dumps(response, ensure_ascii=False))
         return 1
 
 

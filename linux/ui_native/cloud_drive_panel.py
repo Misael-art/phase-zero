@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QProcess, Qt, QUrl
+from PySide6.QtCore import QObject, QProcess, QStandardPaths, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGridLayout,
@@ -14,6 +14,9 @@ from PySide6.QtWidgets import (
 )
 
 from .widgets import SectionHeader
+
+GOOGLE_CLIENTS_URL = "https://console.cloud.google.com/auth/clients"
+DRIVE_API_URL = "https://console.cloud.google.com/apis/library/drive.googleapis.com"
 
 
 def note(text: str = "") -> QLabel:
@@ -209,7 +212,7 @@ class FolderSetup(QDialog):
 
 
 class CloudDrivePanel(QFrame):
-    def __init__(self, root: Path, parent: QWidget) -> None:
+    def __init__(self, root: Path, parent: QWidget, prepare_rclone=None) -> None:
         super().__init__(parent)
         self.root = root
         self.setObjectName("choiceJourney")
@@ -219,6 +222,7 @@ class CloudDrivePanel(QFrame):
         self.loaded = False
         self.selection = ""
         self.preferred_account = ""
+        self.api_project = None
         layout = QVBoxLayout(self)
         layout.addWidget(SectionHeader("Pastas do Google Drive", "Acesse arquivos da nuvem pelo gerenciador de arquivos."))
         self.body = QWidget()
@@ -242,10 +246,15 @@ class CloudDrivePanel(QFrame):
         self.account_options.setMenu(menu)
         self.setup = QPushButton("Configurar autorização Google")
         self.setup.clicked.connect(self.set_client)
+        self.prepare = QPushButton("Preparar rclone")
+        if prepare_rclone is not None:
+            self.prepare.clicked.connect(prepare_rclone)
+        self.has_prepare_action = prepare_rclone is not None
         accounts.addWidget(self.accounts, 0, 0, 1, 2)
         accounts.addWidget(self.connect_button, 1, 0)
         accounts.addWidget(self.account_options, 1, 1)
-        accounts.addWidget(self.setup, 2, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
+        accounts.addWidget(self.prepare, 2, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
+        accounts.addWidget(self.setup, 3, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
         body.addLayout(accounts)
         self.prerequisites = note()
         body.addWidget(self.prerequisites)
@@ -273,10 +282,15 @@ class CloudDrivePanel(QFrame):
             controls.addWidget(button, index // 2, index % 2)
         body.addLayout(controls)
         layout.addWidget(self.body)
-        footer = QHBoxLayout()
         self.message = note()
         self.message.setAccessibleName("Estado da operação do Google Drive")
-        footer.addWidget(self.message, 1)
+        layout.addWidget(self.message)
+        footer = QHBoxLayout()
+        self.fix_api = QPushButton("Ativar API do Drive")
+        self.fix_api.setObjectName("primaryButton")
+        self.fix_api.clicked.connect(self.open_api_setup)
+        footer.addWidget(self.fix_api)
+        footer.addStretch()
         self.cancel = QPushButton("Cancelar autorização")
         self.cancel.clicked.connect(self.commands.cancel)
         self.cancel.hide()
@@ -294,6 +308,8 @@ class CloudDrivePanel(QFrame):
     def refresh(self, message: str = "") -> None:
         if self.commands.callback is not None:
             return
+        if not message and self.api_project is not None:
+            message = self.message.text()
         self.body.setEnabled(False)
         self.refresh_button.setEnabled(False)
         self.message.setText(message or "Consultando pastas virtuais…")
@@ -353,13 +369,21 @@ class CloudDrivePanel(QFrame):
         mount = self.selected_mount() if self.loaded else {}
         mounted = mount.get("state") in {"mounted", "stale"}
         depends = data.get("rclone") and data.get("fuse")
-        self.accounts.setEnabled(bool(account))
+        connect_ready = bool(data.get("clientConfigured") and data.get("rclone"))
+        self.accounts.setVisible(bool(account))
         self.account_options.setVisible(bool(account or data.get("clientConfigured")))
         self.setup.setVisible(self.loaded and not data.get("clientConfigured"))
-        self.connect_button.setEnabled(bool(data.get("clientConfigured") and data.get("rclone")))
-        self.renew.setEnabled(bool(data.get("clientConfigured") and data.get("rclone") and account))
+        self.prepare.setVisible(self.loaded and not data.get("rclone") and self.has_prepare_action)
+        self.connect_button.setVisible(connect_ready)
+        button_style = "secondaryButton" if account or self.api_project is not None else "primaryButton"
+        if self.connect_button.objectName() != button_style:
+            self.connect_button.setObjectName(button_style)
+            self.connect_button.style().unpolish(self.connect_button)
+            self.connect_button.style().polish(self.connect_button)
+        self.renew.setEnabled(bool(connect_ready and account))
         self.disconnect.setEnabled(bool(account))
         self.add.setEnabled(bool(depends and account.get("configured")))
+        self.add.setVisible(bool(account))
         self.change_mount.setText("Desmontar" if mounted else "Montar")
         self.change_mount.setEnabled(bool(mounted or (depends and mount.get("state") == "unmounted")))
         self.open.setEnabled(mount.get("state") == "mounted")
@@ -368,17 +392,20 @@ class CloudDrivePanel(QFrame):
         self.details.setVisible(bool(mount))
         for button in (self.change_mount, self.open, self.remove):
             button.setVisible(bool(mount))
+        self.fix_api.setVisible(self.api_project is not None)
         owner = next((row["email"] for row in data.get("accounts", []) if row["id"] == mount.get("account")), "")
         scope = "Edição" if mount.get("write") else "Leitura"
         self.details.setText(f'{mount["local"]}\n{owner} · {scope}' if mount else "")
-        if self.loaded and not data.get("rclone"):
-            hint = "Prepare o rclone na lista abaixo e atualize esta seção."
-        elif self.loaded and not data.get("fuse"):
-            hint = "FUSE indisponível nesta sessão Linux. A montagem ficará desativada."
+        if self.api_project is not None:
+            hint = ""
+        elif self.loaded and not data.get("rclone"):
+            hint = "O rclone monta as pastas do Drive. Depois de prepará-lo, atualize esta seção."
         elif self.loaded and not data.get("clientConfigured"):
-            hint = "Importe o arquivo OAuth Desktop para liberar a conexão de contas."
+            hint = "Configure o Google uma vez para conectar suas contas pelo navegador."
         elif self.loaded and not account:
             hint = "Conecte uma conta Google para escolher a primeira pasta."
+        elif self.loaded and not data.get("fuse"):
+            hint = "Esta sessão Linux está sem FUSE. A montagem depende dele."
         elif self.loaded and not mount:
             hint = "Escolha uma pasta do Google Drive e onde ela deve aparecer no computador."
         else:
@@ -387,6 +414,8 @@ class CloudDrivePanel(QFrame):
         self.prerequisites.setVisible(bool(hint))
 
     def operate(self, args: list[str], busy: str, success: str, callback=None) -> None:
+        self.api_project = None
+        self.fix_api.hide()
         self.body.setEnabled(False)
         self.refresh_button.setEnabled(False)
         self.cancel.setVisible(args[0] == "authorize")
@@ -394,6 +423,8 @@ class CloudDrivePanel(QFrame):
 
         def ready(result: dict) -> None:
             self.cancel.hide()
+            if args[0] == "authorize":
+                self.api_project = result.get("activationProject")
             if callback and result["ok"]:
                 callback(result)
                 return
@@ -405,10 +436,44 @@ class CloudDrivePanel(QFrame):
         self.commands.start(args, ready)
 
     def set_client(self) -> None:
+        setup = QDialog(self)
+        setup.setWindowTitle("Configurar autorização Google")
+        setup.resize(440, 280)
+        layout = QVBoxLayout(setup)
+        layout.addWidget(SectionHeader("Prepare o acesso no Google Cloud"))
+        layout.addWidget(note("No mesmo projeto, ative a Google Drive API e crie um cliente OAuth do tipo Aplicativo para computador."))
+        for label, url in (("Ativar Google Drive API", DRIVE_API_URL), ("Criar cliente OAuth", GOOGLE_CLIENTS_URL)):
+            action = QPushButton(label)
+            action.clicked.connect(lambda _checked=False, target=url: QDesktopServices.openUrl(QUrl(target)))
+            layout.addWidget(action)
+        layout.addWidget(note("Se o app estiver em teste, adicione sua conta em Público → Usuários de teste. Baixe o JSON do cliente e importe aqui."))
+        footer = QHBoxLayout()
+        footer.addStretch()
+        cancel = QPushButton("Cancelar")
+        cancel.clicked.connect(setup.reject)
+        import_file = QPushButton("Importar JSON…")
+        import_file.setObjectName("primaryButton")
+        import_file.clicked.connect(setup.accept)
+        footer.addWidget(cancel)
+        footer.addWidget(import_file)
+        layout.addLayout(footer)
+        if setup.exec() != QDialog.DialogCode.Accepted:
+            setup.deleteLater()
+            return
+        setup.deleteLater()
+        downloads = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation)
         filename, _ = QFileDialog.getOpenFileName(self, "Importar cliente OAuth Desktop do Google",
-                                                  str(Path.home()), "Cliente Google (*.json)")
+                                                  downloads or str(Path.home()), "Cliente Google (*.json)")
         if filename:
-            self.operate(["set-client", "--", filename], "Verificando o arquivo…", "Autorização Google configurada.")
+            self.operate(["set-client", "--", filename], "Verificando o arquivo…",
+                         "Cliente Google importado. Conecte sua conta quando o rclone estiver pronto.")
+
+    def open_api_setup(self) -> None:
+        url = DRIVE_API_URL
+        if isinstance(self.api_project, str) and self.api_project.isascii() and self.api_project.isdecimal():
+            url += f"?project={self.api_project}"
+        if not QDesktopServices.openUrl(QUrl(url)):
+            self.message.setText("O navegador não abriu. Ative a Google Drive API no Google Cloud e conecte novamente.")
 
     def connect_account(self, *, renew: bool = False) -> None:
         args = ["authorize"]
@@ -420,15 +485,16 @@ class CloudDrivePanel(QFrame):
             dialog.setText("Como você quer acessar os arquivos deste Drive?")
             dialog.setInformativeText("Leitura permite consultar e copiar. Edição também permite alterar e excluir arquivos no Drive.")
             read = dialog.addButton("Leitura", QMessageBox.ButtonRole.AcceptRole)
+            read.setObjectName("primaryButton")
             write = dialog.addButton("Edição", QMessageBox.ButtonRole.ActionRole)
-            dialog.addButton(QMessageBox.StandardButton.Cancel)
+            dialog.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
             dialog.setDefaultButton(read)
             dialog.exec()
             if dialog.clickedButton() not in (read, write):
                 return
             if dialog.clickedButton() == write:
                 args.append("--write")
-        self.operate(args, "Conclua a autorização na janela do Google.", "", self.authorized)
+        self.operate(args, "Permita o acesso no Google e volte ao PhaseZero. A conexão será confirmada aqui.", "", self.authorized)
 
     def authorized(self, result: dict) -> None:
         self.preferred_account = result["id"]
