@@ -18,7 +18,7 @@ from .ai_dev import AiDevPage
 from .steamdeck import SteamDeckPage
 from .tuning import TuningPage
 from .results import ResultsPage
-from .workspace import CatalogWorkspacePage
+from .workspace import CatalogWorkspacePage, ResourcesPage
 from .product_registry import ProductRegistryPage
 from .development import DevelopmentPage
 from .accounts import AccountsPage
@@ -55,7 +55,7 @@ class PageRegistry:
         "Emulação": EmulationPage,
         "Boot Direto": CatalogWorkspacePage,
         "Flatpak": CatalogWorkspacePage,
-        "Recursos": CatalogWorkspacePage,
+        "Recursos": ResourcesPage,
         "IA & Dev": AiDevPage,
         "Proxies IA": AiProxiesPage,
         "Roteamento IA": AiRoutingPage,

@@ -273,6 +273,7 @@ Usage:
   pz capabilities remove-plan Preview removal of what PhaseZero installed
   pz capabilities remove      Execute a confirmed removal plan
   pz capabilities verify-removal Confirm capabilities left the host
+  pz cloud-drive --help        Connect Google accounts and mount virtual folders (Linux)
   pz themes status            Temas e acessibilidade: estado efetivo Plasma (JSON)
   pz themes catalog           Catálogo avaliado: features, wallpapers, extensões
   pz themes plan              Plano com snapshot (--profile|--feature|--wallpaper)
@@ -1141,6 +1142,7 @@ main() {
         repair-plan)   cmd_repair_plan "$@" ;;
         tune)          cmd_tune "$@" ;;
         capabilities|capability|features|recursos) cmd_capabilities "$@" ;;
+        cloud-drive)   PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m linux.cloud_drive "${@:-status}" ;;
         themes|temas) cmd_themes "$@" ;;
         deps|dependencias|dependências) cmd_deps "$@" ;;
         installation|installations) cmd_installation "$@" ;;

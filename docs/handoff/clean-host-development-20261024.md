@@ -502,3 +502,40 @@ ID/tag/estado atual e obter autorização específica para editar a release já
 publicada. Não mover tags históricas. Próximo passo: conferir CI/Gitleaks do
 SHA final e, com ambientes/contas autorizados, executar gates físicos acima;
 somente então preparar manifesto de aceite de stable.
+
+## Pastas virtuais Google Drive — 20/11/2026
+
+Branch `codex/google-drive-mounts`, implementação `245ba2f631f1` sobre
+`8b5920a`. Owner `linux/cloud_drive.py`, entrada `pz cloud-drive` e Central
+em **Recursos → Backup e nuvem**. O [plano de entrega e uso](../capabilities.md#pastas-virtuais-do-google-drive-no-linux)
+cobre importação do cliente OAuth Desktop, escopos e retomada de envios.
+
+No BigLinux, kernel 6.18.49-1-MANJARO, o rclone 1.76.0 conferido por SHA-256
+abriu duas montagens FUSE simultâneas com uma origem local descartável.
+Leitura recusou gravação. Edição
+gravou pelo cache, bloqueou desmontagem durante o envio e confirmou
+desmontagem e reabertura depois da gravação. O ensaio também recuperou um
+ponto FUSE desconectado. Redirecionamento OAuth do loopback para o Google
+verificado para `drive.readonly` e `drive`, com cancelamento sem gravar
+contas. Binário usado em pasta de teste, sem instalação de pacote no host.
+
+Os sete testes do Google Drive passaram na revisão final. O lote nativo
+passou 35 testes, incluindo a janela offscreen e a jornada compacta com
+teclado do novo painel. O teste de higiene do checkout encontrou
+12 bytecodes sem fonte na base `main`, vindos de arquivos de outras branches.
+Os caches foram preservados. CI em checkout limpo cobre esse gate.
+
+Próximo aceite: importar o cliente OAuth Desktop registrado, consentir com
+duas contas de teste, listar pastas de Meu Drive, conferir um envio no
+Google e repetir a montagem após reinício. O catálogo assinado retornou
+`practices-not-configured`; foi usado o memorial versionado. O ensaio e as
+particularidades do rclone foram registrados na memória do projeto.
+
+Na primeira configuração real, o navegador concluiu o consentimento e a
+consulta de identidade recebeu `403 SERVICE_DISABLED`. Revisão do PR #139
+sobre `5c67d1e8` acrescenta instruções para preparar o rclone, ativar a API
+e importar o cliente OAuth, além da recuperação no projeto indicado pelo
+Google. A Central explica quando a janela expira e permite 5 minutos para
+concluir a autorização. Passaram 14 testes focados e a revisão visual offscreen
+dos estados de preparo, permissão, falha e conta conectada com dados de teste.
+O aceite real segue condicionado ao novo consentimento após a ativação da API.

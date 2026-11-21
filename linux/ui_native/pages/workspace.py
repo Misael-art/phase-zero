@@ -269,3 +269,16 @@ class CatalogWorkspacePage(BasePage):
 
     def block_while_running(self, running: bool) -> None:
         self.setEnabled(not running)
+
+
+class ResourcesPage(CatalogWorkspacePage):
+    def _section_page(self, section: str, actions: list[ActionSpec]) -> QWidget:
+        scroll = super()._section_page(section, actions)
+        if section == "Backup e nuvem":
+            from ..cloud_drive_panel import CloudDrivePanel
+
+            content = scroll.widget()
+            rclone = next((action for action in actions if action.id == "capability.plan.backup.rclone"), None)
+            panel = CloudDrivePanel(self.root, content, (lambda: self._select_action(rclone)) if rclone else None)
+            content.layout().insertWidget(1, panel)
+        return scroll
