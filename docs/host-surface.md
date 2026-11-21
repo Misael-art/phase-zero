@@ -133,6 +133,14 @@ global e mapas personalizados são preservados. Não amplia direitos do sandbox.
 |---|---|---|
 | receitas de capability | `capabilities/recipes.py` | ✅ delega para os módulos acima; não muta o host diretamente |
 
+### `cloud-drive`
+
+| Mutação | Owner | Destino e limite |
+| --- | --- | --- |
+| Conectar, renovar e desconectar Google Drive | `linux/cloud_drive.py` | `$XDG_CONFIG_HOME/phasezero/cloud-drive`, configuração OAuth privada do rclone. Revogação no Google fica nas permissões da conta. |
+| Definir, montar, desmontar e remover pastas | `linux/cloud_drive.py` | `$PZ_STATE/cloud-drive` guarda o registro e a fila de gravações. O ponto de montagem escolhido precisa ser vazio e pertencer ao usuário. A desmontagem preserva a fila e nunca usa remoção forçada. |
+| Consultar a fila da montagem | `linux/cloud_drive.py` | Socket Unix em `$XDG_RUNTIME_DIR/phasezero-drive`, com fallback privado no estado da montagem. |
+
 ### `tuning`
 
 | Mutação | Onde | Cobertura |
