@@ -54,8 +54,15 @@ Catálogo separa compatibilidade, fonte e provider. Linux oferece Arch, Debian, 
 
 Contrato específico: `linux/pz boot iso|usb|grubfm`.
 
+- Na Central Linux, abra **Boot Direto → Testar distros** e escolha uma ISO. A
+  prévia informa o perfil detectado e o arquivo que vai ser usado. Confirme e
+  autorize a gravação da entrada. Na próxima inicialização, escolha a
+  distribuição no menu do GRUB. A remoção pela mesma página preserva o arquivo.
+- A detecção cobre BigLinux/Manjaro com layout MISO, Arch Linux, SystemRescue,
+  Ubuntu e derivados com Casper, Debian Live e Grml. Preserve a localização
+  da ISO para iniciar a sessão. Imagens sem perfil compatível são recusadas.
 - `iso inspect/scan/status`: read-only; identifica somente layouts conhecidos.
-- `iso add/remove/install`: manifesta ISO por UUID, caminho GRUB, perfil e SHA-256; toda escrita recompila e valida GRUB.
+- `iso add/remove/install`: manifesta ISO por UUID, caminho GRUB, perfil e SHA-256. A Central vincula a confirmação ao hash da prévia. A gravação confere a sintaxe e a presença das entradas no GRUB.
 - `usb discover/status`: inventaria mídia removível.
 - `usb add/remove/install`: registra `/EFI/BOOT/BOOTX64.EFI` por UUID; nunca persiste `/dev/sdX` ou `(hdN,gptN)`.
 - `grubfm inspect/status`: audita payload EFI local.

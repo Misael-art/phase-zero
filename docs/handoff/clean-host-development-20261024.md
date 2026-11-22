@@ -1,5 +1,21 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Sessões live pelo GRUB — 22/11/2026
+
+`codex/grub-live-iso` usa o backend `linux/pz boot iso` em **Boot Direto →
+Testar distros**. A Central apresenta o arquivo, o perfil reconhecido e o
+impacto antes da operação administrativa. A aplicação confere o SHA-256 visto
+na prévia, valida a sintaxe e verifica as entradas no GRUB. A reversão em
+fixture restaurou o manifesto e o `grub.cfg` anteriores após falha simulada.
+
+Jornada conferida em Qt nos temas escuro 800×600 e claro 1280×800. Em
+BigLinux, a imagem `biglinux_2026-06-06_k618.iso` em NTFS foi reconhecida
+como MISO. O leitor GRUB consultou kernel, initramfs e microcodes na imagem,
+e a entrada renderizada passou no `grub-script-check`. A tentativa no host
+parou no gate existente do carregador EFI ativo, que detectou um prefixo
+dependente da ordem dos discos antes de gravar. O registro e o boot físico
+dependem da correção autorizada desse carregador.
+
 ## Integração manual de entrada — 30/10/2026
 
 Correção posterior após teste do operador sem dock: pedir senha sem teclado

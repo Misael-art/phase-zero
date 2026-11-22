@@ -62,6 +62,7 @@ _CATEGORY_RULES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("Acesso", ("tailscale", "network", "casaos", "remote")),
     ),
     "Boot Direto": (
+        ("Testar distros", ("boot.iso.",)),
         ("Visão geral", ("status", "list", "detect")),
         ("Próxima sessão", ("choose", "selector", "next", "menu")),
         ("Recuperação", ("recovery", "rescue", "repair", "restore")),
@@ -86,6 +87,8 @@ _CATEGORY_RULES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
 
 
 def action_section(category: str, action: ActionSpec) -> str:
+    if category == "Boot Direto" and action.id.startswith("boot.iso."):
+        return "Testar distros"
     text = f"{action.id} {action.title}".casefold()
     if action.visibility == "advanced" or action.risk in {"elevated", "high"} or any(
         term in text for term in _ADVANCED_TERMS

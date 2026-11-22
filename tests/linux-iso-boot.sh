@@ -94,4 +94,48 @@ after="$(sha256sum "$PZ_ISO_BOOT_CONFIG" | awk '{print $1}')"
 catalog="$(bash "$REPO_ROOT/linux/boot/iso-boot.sh" catalog)"
 jq -e '.choices[] | select(.key == "iso:arch-rescue" and .available == true)' <<< "$catalog" >/dev/null
 
+(
+    iso_listing() {
+        printf '%s\n' boot/vmlinuz-x86_64 boot/initramfs-x86_64.img \
+            boot/amd_ucode.img boot/intel_ucode.img manjaro/x86_64/rootfs.sfs
+    }
+    blkid() {
+        case "$3" in TYPE) printf '%s\n' iso9660 ;; LABEL) printf '%s\n' BIGLINUXLIVE ;; esac
+    }
+    inspection="$(inspect_iso_json "$tmp/rescue.iso")"
+    jq -e '.profile=="manjaro-miso" and (.microcodePaths | length)==2' <<< "$inspection" >/dev/null
+    live="$(jq -c --argjson inspection "$inspection" '.entries[0] + $inspection' "$PZ_ISO_BOOT_CONFIG")"
+    manifest_with_entry "$live" > "$tmp/miso-manifest.json"
+    render_iso_script "$tmp/miso-manifest.json" > "$tmp/miso-script"
+    bash "$tmp/miso-script" > "$tmp/miso.cfg"
+    grep -Fq 'misobasedir=manjaro "misolabel=BIGLINUXLIVE"' "$tmp/miso.cfg"
+    grep -Fq '"img_dev=/dev/disk/by-uuid/1111-2222"' "$tmp/miso.cfg"
+    grep -Fq 'initrd "(loop)/boot/amd_ucode.img" "(loop)/boot/intel_ucode.img" "(loop)/boot/initramfs-x86_64.img"' "$tmp/miso.cfg"
+    iso_plan_json "$live" add | jq -e --arg hash "$sha" '.sha256==$hash and .entry.profile=="manjaro-miso"' >/dev/null
+    if command -v grub-script-check >/dev/null; then
+        grub-script-check "$tmp/miso.cfg"
+    fi
+
+    GRUB_CFG="$tmp/grub.cfg"
+    printf 'menuentry "Linux atual" {\n    true\n}\n' > "$GRUB_CFG"
+    original_cfg="$(cat "$GRUB_CFG")"
+    original_manifest="$(cat "$PZ_ISO_BOOT_CONFIG")"
+    need_root() { :; }
+    pz_boot_path() { printf '%s\n' "$tmp/lock"; }
+    pz_boot_require_current_root_target() { :; }
+    pz_boot_preflight_grub() { :; }
+    pz_boot_validate_active_efi_safe() { :; }
+    pz_boot_backup_bundle() { :; }
+    pz_boot_refresh_grub_config() { printf '%s\n' incomplete > "$GRUB_CFG"; return 9; }
+    if ! command -v grub-script-check >/dev/null; then grub-script-check() { :; }; fi
+    # The nested shell keeps errexit active for the transaction under test.
+    set +e
+    (set -e; apply_manifest_file "$tmp/miso-manifest.json" "$original_manifest")
+    rc=$?
+    set -e
+    [ "$rc" -eq 9 ]
+    [ "$(cat "$GRUB_CFG")" = "$original_cfg" ]
+    [ "$(cat "$PZ_ISO_BOOT_CONFIG")" = "$original_manifest" ]
+)
+
 echo "linux-iso-boot ok"

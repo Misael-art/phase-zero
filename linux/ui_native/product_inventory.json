@@ -426,6 +426,7 @@
     {"actionId":"boot.emergency","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
     {"actionId":"boot.iso.status","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
     {"actionId":"boot.iso.add","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
+    {"actionId":"boot.iso.remove","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
     {"actionId":"boot.usb.discover","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
     {"actionId":"boot.usb.add","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},
     {"actionId":"boot.grubfm.status","targetId":"system.boot","targetKind":"system","destination":"Sistema","role":"shortcut","context":"Boot Direto","instanceScope":"host","installationAuthorityId":null},

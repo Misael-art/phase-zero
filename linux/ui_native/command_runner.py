@@ -50,6 +50,11 @@ def build_program(
     args = action.resolved_args(value, preview=preview, values=values)
     if any(token.startswith("{") and token.endswith("}") for token in args):
         raise ValueError(f"input required for {action.id}")
+    if action.id == "boot.iso.add" and not preview:
+        expected = (values or {}).get("sha256", "")
+        if not re.fullmatch(r"[a-f0-9]{64}", expected):
+            raise ValueError("Verifique a ISO antes de confirmar.")
+        args.extend(("--expect-sha256", expected))
     if action.elevated and not preview:
         bridge = admin_bridge()
         if not bridge:
