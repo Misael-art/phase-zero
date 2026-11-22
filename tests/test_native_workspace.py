@@ -64,7 +64,7 @@ def test_context_rail_has_large_labeled_targets(qapp):
     assert rail.buttons[2].isChecked()
 
 
-def test_boot_live_iso_journey_uses_preview_and_selected_entry(qapp, catalog, monkeypatch):
+def test_boot_live_iso_journey_uses_preview_and_selected_entry(qapp, catalog, monkeypatch, tmp_path):
     actions = [action for action in catalog if action.category == "Boot Direto"]
     by_id = {action.id: action for action in catalog}
     page = BootPage(ROOT, CommandRunner(ROOT), actions, by_id)
@@ -72,8 +72,16 @@ def test_boot_live_iso_journey_uses_preview_and_selected_entry(qapp, catalog, mo
     assert next(iter(grouped_actions("Boot Direto", actions))) == "Testar distros"
     assert page.represented_action_ids == {action.id for action in actions}
     assert not page.iso_remove.isEnabled()
-    path = "/media/Windows SD/BigLinux.iso"
-    monkeypatch.setattr("linux.ui_native.pages.boot.QFileDialog.getOpenFileName", lambda *args: (path, ""))
+    directory = tmp_path / "Windows SD"
+    directory.mkdir()
+    path = str(directory / "BigLinux.iso")
+    picker_calls = []
+
+    def choose_iso(_parent, _title, folder, _filter):
+        picker_calls.append(folder)
+        return path, ""
+
+    monkeypatch.setattr("linux.ui_native.pages.boot.QFileDialog.getOpenFileName", choose_iso)
     requested = QSignalSpy(page.action_requested)
     page.iso_add.click()
     add = requested.at(0)[0]
@@ -98,6 +106,8 @@ def test_boot_live_iso_journey_uses_preview_and_selected_entry(qapp, catalog, mo
     page.iso_remove.click()
     remove = requested.at(1)[0]
     assert remove.resolved_args(preview=True) == ["boot", "iso", "remove", "biglinux-live", "--plan-json"]
+    page.iso_add.click()
+    assert picker_calls == ["", str(directory)]
 
 
 def test_inspector_is_single_execution_surface(qapp, catalog):

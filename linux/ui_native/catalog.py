@@ -696,7 +696,7 @@ def build_catalog(root: Path, platform_name: str | None = None) -> list[ActionSp
                 elevated=True, input_kind="file", input_label="Imagem ISO",
                 parameters=(_p("input", "Imagem ISO", "iso-file"),),
                 preview_bindings=(("sha256", "sha256"),), badge="Protegido",
-                keywords=("testar distro", "sessão live", "BigLinux", "Manjaro", "boot ISO"),
+                keywords=("testar distro", "sessão live", "Armbian", "BigLinux", "Manjaro", "boot ISO"),
             ),
             _a(
                 "boot.iso.remove", "Boot Direto", "Remover ISO do menu",

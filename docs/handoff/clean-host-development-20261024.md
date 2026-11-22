@@ -36,6 +36,31 @@ do EFI com backup, a CLI registrou e conferiu **BigLinux 2026-06-06 (Live)**
 na configuração ativa. A ordem do firmware e a seleção padrão permaneceram
 preservadas.
 
+### Armbian Live no WindowsSD
+
+A Central reconhece a ISO Armbian UEFI x86-64 e abre a pasta da entrada
+selecionada ao escolher outra ISO. Para Armbian sobre NTFS, a prévia
+verifica o driver no ambiente inicial e aponta o Live para o volume por
+UUID, com montagem somente leitura e sem persistência.
+
+O [Armbian 26.11.2 GNOME UEFI x86](https://armbian.com/boards/uefi-x86)
+foi selecionado para o Steam Deck. A
+[ISO oficial](https://armbian.atomonetworks.com/dl/uefi-x86/archive/Armbian_26.11.2_Uefi-x86_resolute_edge_7.3.5_gnome_desktop.iso)
+tem 3.572.144.128 bytes. O
+[SHA-256 do espelho oficial](https://armbian.atomonetworks.com/dl/uefi-x86/archive/Armbian_26.11.2_Uefi-x86_resolute_edge_7.3.5_gnome_desktop.iso.sha)
+é `00a028ffea0aedf9694826b959bade71809ef1a158a23bb15e2cf18698484c64`.
+O destino é `/mnt/WindowsSD/Isos/` no NTFS `20006A5C006A38C4`.
+A estimativa deixa 12,9 GiB livres após a cópia.
+
+No Steam Deck Jupiter com BigLinux, as verificações de shell, GRUB
+e 11 testes focados de Qt passaram. O cabeçalho do kernel da edição
+oficial foi lido e reconhecido como x86-64. A inspeção dos drivers
+foi conferida com um initramfs sintético. A transferência da ISO integral
+aguarda autorização e a entrada Armbian no GRUB permanece pendente.
+Com a ISO completa, confira o hash publicado, rode a prévia e só registre
+a entrada se o suporte a NTFS for confirmado. O aceite físico é chegar à
+sessão Live no Steam Deck com a ISO lida do cartão.
+
 ### Incidente físico a partir do cartão NTFS
 
 O primeiro teste relatado chegou ao aviso de espera de 30 segundos no Live.

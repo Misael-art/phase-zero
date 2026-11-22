@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
@@ -147,7 +148,15 @@ class BootPage(CatalogWorkspacePage):
         ))
 
     def _choose_iso(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Escolher ISO de Linux", "", "Imagens ISO (*.iso *.ISO)")
+        folder = ""
+        current = self.iso_list.currentItem()
+        if current is not None:
+            source = current.data(Qt.ItemDataRole.UserRole).get("hostPath")
+            if isinstance(source, str):
+                iso = Path(source)
+                if iso.is_absolute() and iso.parent.is_dir():
+                    folder = str(iso.parent)
+        path, _ = QFileDialog.getOpenFileName(self, "Escolher ISO de Linux", folder, "Imagens ISO (*.iso *.ISO)")
         if path:
             self._run_iso_action("boot.iso.add", path)
 

@@ -95,6 +95,66 @@ iso_storage_help() {
     printf '%s\n' 'BigLinux / Manjaro em NTFS fica indisponível neste modo. Use um pendrive de instalação separado ou teste a ISO a partir de uma partição Linux.'
 }
 
+armbian_kernel_is_x86_64() {
+    bsdtar -xOf "$1" live/vmlinuz | python3 -c '
+import sys
+
+kernel = sys.stdin.buffer
+header = kernel.read(0x238)
+while kernel.read(1024 * 1024):
+    pass
+valid = (
+    len(header) == 0x238
+    and header[0x1fe:0x200] == b"\x55\xaa"
+    and header[0x202:0x206] == b"HdrS"
+    and int.from_bytes(header[0x236:0x238], "little") & 1
+)
+sys.exit(not valid)
+'
+}
+
+armbian_fromiso_arg() {
+    local uuid="$1" path="$2" fstype="$3"
+    [[ "$uuid" =~ ^[A-Fa-f0-9-]+$ && "$path" =~ ^/[A-Za-z0-9_./+-]+\.[Ii][Ss][Oo]$ ]] || return 1
+    case "$fstype" in ""|ntfs|ntfs3) ;; *) return 1 ;; esac
+    printf 'fromiso=%s/dev/disk/by-uuid/%s%s\n' "${fstype:+$fstype:}" "$uuid" "$path"
+}
+
+armbian_ntfs_type_from_listing() {
+    local listing="$1"
+    if grep -Eq '(^|/)ntfs-3g$' <<< "$listing" && grep -Eq '(^|/)mount\.ntfs$' <<< "$listing"; then
+        printf '%s\n' ntfs
+    elif grep -Eq '(^|/)kernel/fs/ntfs3/ntfs3\.ko(\.(gz|xz|zst))?$' <<< "$listing"; then
+        printf '%s\n' ntfs3
+    else
+        return 1
+    fi
+}
+
+armbian_ntfs_type() (
+    local iso="$1" cache tmp listing
+    if [ "$EUID" -eq 0 ]; then
+        cache="/var/cache/phasezero"
+        if [ -L "$cache" ] || { [ -d "$cache" ] && [ "$(stat -c %u -- "$cache")" != 0 ]; }; then return 1; fi
+    else
+        cache="${XDG_CACHE_HOME:-$HOME/.cache}/phasezero"
+    fi
+    mkdir -p -- "$cache" || return 1
+    tmp="$(mktemp -d "$cache/armbian-initrd.XXXXXXXX")" || return 1
+    trap 'rm -rf -- "$tmp"' EXIT
+    # Keep at most 256 MiB of untrusted ISO content, outside tmpfs.
+    (ulimit -f 262144; bsdtar -xOf "$iso" live/initrd.img > "$tmp/initrd.img") || return 1
+    if command -v lsinitramfs >/dev/null 2>&1; then
+        listing="$(lsinitramfs "$tmp/initrd.img")" || return 1
+    elif command -v lsinitcpio >/dev/null 2>&1; then
+        listing="$(lsinitcpio --cpio -l "$tmp/initrd.img")" || return 1
+    else
+        pz_error "Instale lsinitcpio ou lsinitramfs para verificar o suporte a NTFS da ISO."
+        return 1
+    fi
+    armbian_ntfs_type_from_listing "$listing"
+)
+
 inspect_iso_json() {
     local path="$1" requested="${2:-auto}" real listing profile kernel initrd label matches=0 candidate microcode='[]'
     [ -f "$path" ] || { pz_error "ISO not found: $path"; return 1; }
@@ -104,8 +164,15 @@ inspect_iso_json() {
         return 1
     fi
     listing="$(iso_listing "$real")" || { pz_error "could not read ISO: $real"; return 1; }
+    label="$(blkid -p -s LABEL -o value "$real" 2>/dev/null || true)"
 
-    if [ "$requested" = auto ]; then
+    if [ "$label" = ARMBIAN ]; then
+        if [ "$requested" != auto ] && [ "$requested" != armbian-live ]; then
+            pz_error "Selecione o perfil da ISO Armbian UEFI x86."
+            return 1
+        fi
+        profile=armbian-live
+    elif [ "$requested" = auto ]; then
         profile=""
         for candidate in systemrescue archiso ubuntu-casper debian-live grml manjaro-miso; do
             case "$candidate" in
@@ -140,6 +207,16 @@ inspect_iso_json() {
             kernel="$(grep -E '^casper/vmlinuz([^/]*)$' <<< "$listing" | head -1)"
             initrd="$(grep -E '^casper/initrd([^/]*)$' <<< "$listing" | head -1)"
             ;;
+        armbian-live)
+            if [ "$label" != ARMBIAN ] || ! grep -Fxq 'live/filesystem.squashfs' <<< "$listing" ||
+                ! grep -Fxq 'live/initrd.img' <<< "$listing" || ! grep -Fxq 'live/vmlinuz' <<< "$listing" ||
+                ! armbian_kernel_is_x86_64 "$real"; then
+                pz_error "Escolha uma ISO Live Armbian UEFI x86-64."
+                return 1
+            fi
+            kernel=live/vmlinuz
+            initrd=live/initrd.img
+            ;;
         debian-live)
             kernel="$(grep -E '^live/vmlinuz([^/]*)$' <<< "$listing" | head -1)"
             initrd="$(grep -E '^live/initrd([^/]*)$' <<< "$listing" | head -1)"
@@ -162,7 +239,6 @@ inspect_iso_json() {
         pz_error "profile $profile kernel/initrd missing"
         return 1
     fi
-    label="$(blkid -p -s LABEL -o value "$real" 2>/dev/null || true)"
     if [ "$profile" = manjaro-miso ] && [[ ! "$label" =~ ^[A-Za-z0-9_.-]+$ ]]; then
         pz_error "A ISO BigLinux/Manjaro não tem rótulo de boot válido"
         return 1
@@ -173,7 +249,8 @@ inspect_iso_json() {
 }
 
 iso_entry_json() {
-    local path="$1" profile="$2" id="$3" title="$4" identity inspection sha size mtime real signature module
+    local path="$1" profile="$2" id="$3" title="$4" identity inspection sha size mtime real signature module uuid grub_path
+    local mount_type=""
     pz_boot_valid_id "$id" || { pz_error "invalid entry id: $id"; return 2; }
     safe_title "$title" || { pz_error "unsafe entry title"; return 2; }
     identity="$(pz_boot_resolve_file_identity "$path")" || return 1
@@ -187,17 +264,29 @@ iso_entry_json() {
         pz_error "$(iso_storage_help)"
         return 1
     fi
+    if [ "$profile" = armbian-live ]; then
+        uuid="$(jq -r '.fsUuid' <<< "$identity")"; grub_path="$(jq -r '.grubPath' <<< "$identity")"
+        if ! armbian_fromiso_arg "$uuid" "$grub_path" "" >/dev/null; then
+            pz_error "Para iniciar o Armbian, use um caminho de ISO com letras ASCII, números e sem espaços."
+            return 1
+        fi
+        if [ "$module" = ntfs ] && ! mount_type="$(armbian_ntfs_type "$real")"; then
+            pz_error "Esta ISO do Armbian precisa incluir suporte a NTFS no ambiente inicial para abrir o cartão."
+            return 1
+        fi
+    fi
     sha="$(sha256sum < "$real" | awk '{print $1}')" || return 1
     size="$(stat -c %s -- "$real")" || return 1
     mtime="$(stat -c %Y -- "$real")" || return 1
     [ "$signature" = "$(stat -c '%d:%i:%s:%y' -- "$real")" ] || { pz_error "A ISO mudou durante a leitura"; return 1; }
     jq -n --arg id "$id" --arg title "$title" --arg sha256 "$sha" --argjson size "$size" --argjson mtime "$mtime" \
-        --argjson identity "$identity" --argjson inspection "$inspection" \
-        '$identity + $inspection + {id:$id,title:$title,kind:"iso",sha256:$sha256,size:$size,mtime:$mtime,enabled:true}'
+        --argjson identity "$identity" --argjson inspection "$inspection" --arg mountType "$mount_type" \
+        '$identity + $inspection + {id:$id,title:$title,kind:"iso",sha256:$sha256,size:$size,mtime:$mtime,enabled:true}
+        + (if $mountType=="" then {} else {isoMountType:$mountType} end)'
 }
 
 render_iso_script() {
-    local manifest="$1" row id title uuid module path kernel initrd profile label qtitle qpath qkernel qinitrd microcode
+    local manifest="$1" row id title uuid module path kernel initrd profile label qtitle qpath qkernel qinitrd microcode fromiso mount_type
     cat <<'EOF'
 #!/usr/bin/env bash
 exec tail -n +3 "$0"
@@ -239,6 +328,13 @@ EOF
                 ;;
             debian-live)
                 printf '        linux %s boot=live components %s\n' "$qkernel" "$(pz_boot_grub_dquote "findiso=$path")"
+                ;;
+            armbian-live)
+                mount_type="$(jq -r '.isoMountType // ""' <<< "$row")"
+                [[ "$module" != ntfs || -n "$mount_type" ]] || return 1
+                fromiso="$(armbian_fromiso_arg "$uuid" "$path" "$mount_type")" || return 1
+                printf '        linux %s boot=live components systemd.gpt_auto=0 nopersistence ro %s\n' "$qkernel" \
+                    "$(pz_boot_grub_dquote "$fromiso")"
                 ;;
             grml)
                 printf '        linux %s boot=live %s %s\n' "$qkernel" "$(pz_boot_grub_dquote "findiso=$path")" \
@@ -401,6 +497,7 @@ iso_plan_json() {
     jq -n --argjson entry "$entry" --arg operation "$operation" '
         def profile_name:
             if .=="manjaro-miso" then "BigLinux / Manjaro"
+            elif .=="armbian-live" then "Armbian Live UEFI x86-64"
             elif .=="archiso" then "Arch Linux"
             elif .=="systemrescue" then "SystemRescue"
             elif .=="ubuntu-casper" then "Ubuntu e derivados"
@@ -411,7 +508,10 @@ iso_plan_json() {
                   else "Remover “" + $entry.title + "” do menu do GRUB." end),
          reasons:(if $operation=="add" then ["Layout detectado — " + ($entry.profile|profile_name),
                                               "Arquivo — " + $entry.hostPath,
-                                              "Sessão live pendente de teste no hardware."]
+                                              "Sessão live pendente de teste no hardware."] +
+                  (if $entry.profile=="armbian-live" and $entry.fsModule=="ntfs" then
+                      ["O Live abre o volume da ISO em modo somente leitura e inicia sem persistência."]
+                    else [] end)
                   else ["O arquivo ISO permanece disponível no disco."] end),
          next:(if $operation=="add" then "Escolha essa entrada no GRUB na próxima vez que ligar o computador."
                      else "O GRUB deixará de oferecer essa entrada." end)}'

@@ -95,6 +95,52 @@ catalog="$(bash "$REPO_ROOT/linux/boot/iso-boot.sh" catalog)"
 jq -e '.choices[] | select(.key == "iso:arch-rescue" and .available == true)' <<< "$catalog" >/dev/null
 
 (
+    iso_listing() { printf '%s\n' live/vmlinuz live/initrd.img live/filesystem.squashfs; }
+    blkid() {
+        case "$3" in TYPE) printf '%s\n' iso9660 ;; LABEL) printf '%s\n' ARMBIAN ;; esac
+    }
+    bsdtar() {
+        python3 -c '
+import os
+import sys
+header = bytearray(0x238)
+header[0x1fe:0x200] = b"\x55\xaa"
+header[0x202:0x206] = b"HdrS"
+header[0x236] = int(os.environ.get("PZ_TEST_KERNEL_64", "1"))
+sys.stdout.buffer.write(header + bytes(50000))
+'
+    }
+    pz_boot_resolve_file_identity() {
+        jq -n --arg host "$tmp/rescue.iso" '{hostPath:$host,fsUuid:"20006A5C006A38C4",
+            fsModule:"ntfs",fsType:"fuseblk",grubPath:"/Isos/Armbian-test.iso"}'
+    }
+    armbian_ntfs_type() { armbian_ntfs_type_from_listing "${PZ_TEST_INITRD_LISTING}"; }
+    PZ_TEST_INITRD_LISTING=$'usr/bin/ntfs-3g\nusr/sbin/mount.ntfs'
+    jq -e '.profile == "armbian-live" and .initrdPath == "/live/initrd.img"' \
+        <<< "$(inspect_iso_json "$tmp/rescue.iso")" >/dev/null
+    if PZ_TEST_KERNEL_64=0 inspect_iso_json "$tmp/rescue.iso" >/dev/null 2>&1 ||
+        inspect_iso_json "$tmp/rescue.iso" debian-live >/dev/null 2>&1 ||
+        armbian_fromiso_arg 1234 "/Isos/Armbian copy.iso" ntfs >/dev/null ||
+        PZ_TEST_INITRD_LISTING=usr/bin/ntfs-3g iso_entry_json "$tmp/rescue.iso" auto armbian "Armbian" >/dev/null 2>&1; then
+        echo "FAIL: Armbian accepted an incompatible architecture, profile, path or NTFS image"
+        exit 1
+    fi
+    armbian="$(iso_entry_json "$tmp/rescue.iso" auto armbian "Armbian")"
+    iso_plan_json "$armbian" add | jq -e '.reasons[-1] | contains("somente leitura")' >/dev/null
+    jq -n --argjson entry "$armbian" '{schemaVersion:1,entries:[$entry]}' > "$tmp/armbian.json"
+    render_iso_script "$tmp/armbian.json" | tail -n +3 > "$tmp/armbian.cfg"
+    grep -Fq 'boot=live components systemd.gpt_auto=0 nopersistence ro' "$tmp/armbian.cfg"
+    grep -Fq '"fromiso=ntfs:/dev/disk/by-uuid/20006A5C006A38C4/Isos/Armbian-test.iso"' "$tmp/armbian.cfg"
+    grep -Fq 'initrd "(loop)/live/initrd.img"' "$tmp/armbian.cfg"
+    if command -v grub-script-check >/dev/null; then grub-script-check "$tmp/armbian.cfg"; fi
+    PZ_TEST_INITRD_LISTING=usr/lib/modules/7.3.5/kernel/fs/ntfs3/ntfs3.ko.zst
+    armbian="$(iso_entry_json "$tmp/rescue.iso" auto armbian "Armbian")"
+    jq -n --argjson entry "$armbian" '{schemaVersion:1,entries:[$entry]}' > "$tmp/armbian.json"
+    render_iso_script "$tmp/armbian.json" > "$tmp/armbian.cfg"
+    grep -Fq '"fromiso=ntfs3:/dev/disk/by-uuid/20006A5C006A38C4/Isos/Armbian-test.iso"' "$tmp/armbian.cfg"
+)
+
+(
     iso_listing() {
         printf '%s\n' boot/vmlinuz-x86_64 boot/initramfs-x86_64.img \
             boot/amd_ucode.img boot/intel_ucode.img manjaro/x86_64/rootfs.sfs
