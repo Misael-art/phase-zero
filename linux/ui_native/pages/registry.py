@@ -19,6 +19,7 @@ from .steamdeck import SteamDeckPage
 from .tuning import TuningPage
 from .results import ResultsPage
 from .workspace import CatalogWorkspacePage
+from .boot import BootPage
 from .product_registry import ProductRegistryPage
 from .development import DevelopmentPage
 from .accounts import AccountsPage
@@ -53,7 +54,7 @@ class PageRegistry:
         "Servidor": ServerPage,
         "Homelab": HomelabPage,
         "Emulação": EmulationPage,
-        "Boot Direto": CatalogWorkspacePage,
+        "Boot Direto": BootPage,
         "Flatpak": CatalogWorkspacePage,
         "Recursos": CatalogWorkspacePage,
         "IA & Dev": AiDevPage,

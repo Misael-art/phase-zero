@@ -86,26 +86,110 @@ iso_listing() {
     bsdtar -tf "$path" 2>/dev/null | sed 's#^\./##'
 }
 
+iso_storage_supported() {
+    # GRUB's NTFS driver is separate from the live kernel's mount path.
+    [[ "$1" != manjaro-miso || "$2" != ntfs ]]
+}
+
+iso_storage_help() {
+    printf '%s\n' 'BigLinux / Manjaro em NTFS fica indisponível neste modo. Use um pendrive de instalação separado ou teste a ISO a partir de uma partição Linux.'
+}
+
+armbian_kernel_is_x86_64() {
+    bsdtar -xOf "$1" live/vmlinuz | python3 -c '
+import sys
+
+kernel = sys.stdin.buffer
+header = kernel.read(0x238)
+while kernel.read(1024 * 1024):
+    pass
+valid = (
+    len(header) == 0x238
+    and header[0x1fe:0x200] == b"\x55\xaa"
+    and header[0x202:0x206] == b"HdrS"
+    and int.from_bytes(header[0x236:0x238], "little") & 1
+)
+sys.exit(not valid)
+'
+}
+
+armbian_fromiso_arg() {
+    local uuid="$1" path="$2" fstype="$3"
+    [[ "$uuid" =~ ^[A-Fa-f0-9-]+$ && "$path" =~ ^/[A-Za-z0-9_./+-]+\.[Ii][Ss][Oo]$ ]] || return 1
+    case "$fstype" in ""|ntfs|ntfs3) ;; *) return 1 ;; esac
+    printf 'fromiso=%s/dev/disk/by-uuid/%s%s\n' "${fstype:+$fstype:}" "$uuid" "$path"
+}
+
+armbian_ntfs_type_from_listing() {
+    local listing="$1"
+    if grep -Eq '(^|/)ntfs-3g$' <<< "$listing" && grep -Eq '(^|/)mount\.ntfs$' <<< "$listing"; then
+        printf '%s\n' ntfs
+    elif grep -Eq '(^|/)kernel/fs/ntfs3/ntfs3\.ko(\.(gz|xz|zst))?$' <<< "$listing"; then
+        printf '%s\n' ntfs3
+    else
+        return 1
+    fi
+}
+
+armbian_ntfs_type() (
+    local iso="$1" cache tmp listing
+    if [ "$EUID" -eq 0 ]; then
+        cache="/var/cache/phasezero"
+        if [ -L "$cache" ] || { [ -d "$cache" ] && [ "$(stat -c %u -- "$cache")" != 0 ]; }; then return 1; fi
+    else
+        cache="${XDG_CACHE_HOME:-$HOME/.cache}/phasezero"
+    fi
+    mkdir -p -- "$cache" || return 1
+    tmp="$(mktemp -d "$cache/armbian-initrd.XXXXXXXX")" || return 1
+    trap 'rm -rf -- "$tmp"' EXIT
+    # Keep at most 256 MiB of untrusted ISO content, outside tmpfs.
+    (ulimit -f 262144; bsdtar -xOf "$iso" live/initrd.img > "$tmp/initrd.img") || return 1
+    if command -v lsinitramfs >/dev/null 2>&1; then
+        listing="$(lsinitramfs "$tmp/initrd.img")" || return 1
+    elif command -v lsinitcpio >/dev/null 2>&1; then
+        listing="$(lsinitcpio --cpio -l "$tmp/initrd.img")" || return 1
+    else
+        pz_error "Instale lsinitcpio ou lsinitramfs para verificar o suporte a NTFS da ISO."
+        return 1
+    fi
+    armbian_ntfs_type_from_listing "$listing"
+)
+
 inspect_iso_json() {
-    local path="$1" requested="${2:-auto}" real listing profile kernel initrd label matches=0 candidate
+    local path="$1" requested="${2:-auto}" real listing profile kernel initrd label matches=0 candidate microcode='[]'
     [ -f "$path" ] || { pz_error "ISO not found: $path"; return 1; }
     real="$(realpath -e -- "$path")"
+    if [ "$(blkid -p -s TYPE -o value "$real" 2>/dev/null || true)" != iso9660 ]; then
+        pz_error "O arquivo não é uma imagem ISO9660 legível."
+        return 1
+    fi
     listing="$(iso_listing "$real")" || { pz_error "could not read ISO: $real"; return 1; }
+    label="$(blkid -p -s LABEL -o value "$real" 2>/dev/null || true)"
 
-    if [ "$requested" = auto ]; then
+    if [ "$label" = ARMBIAN ]; then
+        if [ "$requested" != auto ] && [ "$requested" != armbian-live ]; then
+            pz_error "Selecione o perfil da ISO Armbian UEFI x86."
+            return 1
+        fi
+        profile=armbian-live
+    elif [ "$requested" = auto ]; then
         profile=""
-        for candidate in systemrescue archiso ubuntu-casper debian-live grml; do
+        for candidate in systemrescue archiso ubuntu-casper debian-live grml manjaro-miso; do
             case "$candidate" in
                 systemrescue) grep -Eq '^sysresccd/boot/x86_64/vmlinuz$' <<< "$listing" || continue ;;
                 archiso) grep -Eq '^arch/boot/x86_64/vmlinuz-linux$' <<< "$listing" || continue ;;
                 ubuntu-casper) grep -Eq '^casper/vmlinuz' <<< "$listing" || continue ;;
                 debian-live) grep -Eq '^live/vmlinuz' <<< "$listing" || continue ;;
                 grml) grep -Eq '^boot/grml[^/]*/vmlinuz' <<< "$listing" || continue ;;
+                manjaro-miso)
+                    grep -Fxq 'manjaro/x86_64/rootfs.sfs' <<< "$listing" || continue
+                    grep -Fxq 'boot/vmlinuz-x86_64' <<< "$listing" || continue
+                    ;;
             esac
             profile="$candidate"
             matches=$((matches + 1))
         done
-        [ "$matches" -eq 1 ] || { pz_error "ISO profile auto-detection expected one match, got $matches"; return 1; }
+        [ "$matches" -eq 1 ] || { pz_error "A imagem não corresponde a um perfil live compatível."; return 1; }
     else
         profile="$requested"
     fi
@@ -123,6 +207,16 @@ inspect_iso_json() {
             kernel="$(grep -E '^casper/vmlinuz([^/]*)$' <<< "$listing" | head -1)"
             initrd="$(grep -E '^casper/initrd([^/]*)$' <<< "$listing" | head -1)"
             ;;
+        armbian-live)
+            if [ "$label" != ARMBIAN ] || ! grep -Fxq 'live/filesystem.squashfs' <<< "$listing" ||
+                ! grep -Fxq 'live/initrd.img' <<< "$listing" || ! grep -Fxq 'live/vmlinuz' <<< "$listing" ||
+                ! armbian_kernel_is_x86_64 "$real"; then
+                pz_error "Escolha uma ISO Live Armbian UEFI x86-64."
+                return 1
+            fi
+            kernel=live/vmlinuz
+            initrd=live/initrd.img
+            ;;
         debian-live)
             kernel="$(grep -E '^live/vmlinuz([^/]*)$' <<< "$listing" | head -1)"
             initrd="$(grep -E '^live/initrd([^/]*)$' <<< "$listing" | head -1)"
@@ -131,32 +225,68 @@ inspect_iso_json() {
             kernel="$(grep -E '^boot/grml[^/]*/vmlinuz([^/]*)$' <<< "$listing" | head -1)"
             initrd="$(grep -E '^boot/grml[^/]*/initrd([^/]*)$' <<< "$listing" | head -1)"
             ;;
+        manjaro-miso)
+            grep -Fxq 'manjaro/x86_64/rootfs.sfs' <<< "$listing" || {
+                pz_error "ISO sem o sistema live do BigLinux/Manjaro"; return 1;
+            }
+            kernel="$(grep -Fx 'boot/vmlinuz-x86_64' <<< "$listing" || true)"
+            initrd="$(grep -Fx 'boot/initramfs-x86_64.img' <<< "$listing" || true)"
+            microcode="$(jq -Rsc 'split("\n") | map(select(test("^boot/(amd|intel)[_-]ucode\\.img$"))) | map("/" + .)' <<< "$listing")"
+            ;;
         *) pz_error "unsupported ISO profile: $profile"; return 2 ;;
     esac
     if [ -z "$kernel" ] || [ -z "$initrd" ]; then
         pz_error "profile $profile kernel/initrd missing"
         return 1
     fi
-    label="$(blkid -p -s LABEL -o value "$real" 2>/dev/null || true)"
+    if [ "$profile" = manjaro-miso ] && [[ ! "$label" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+        pz_error "A ISO BigLinux/Manjaro não tem rótulo de boot válido"
+        return 1
+    fi
     jq -n --arg profile "$profile" --arg kernelPath "/$kernel" --arg initrdPath "/$initrd" --arg isoLabel "$label" \
-        '{profile:$profile,kernelPath:$kernelPath,initrdPath:$initrdPath,isoLabel:$isoLabel}'
+        --argjson microcodePaths "$microcode" \
+        '{profile:$profile,kernelPath:$kernelPath,initrdPath:$initrdPath,isoLabel:$isoLabel,microcodePaths:$microcodePaths}'
 }
 
 iso_entry_json() {
-    local path="$1" profile="$2" id="$3" title="$4" identity inspection sha size mtime
+    local path="$1" profile="$2" id="$3" title="$4" identity inspection sha size mtime real signature module uuid grub_path
+    local mount_type=""
     pz_boot_valid_id "$id" || { pz_error "invalid entry id: $id"; return 2; }
     safe_title "$title" || { pz_error "unsafe entry title"; return 2; }
-    identity="$(pz_boot_resolve_file_identity "$path")"
-    inspection="$(inspect_iso_json "$path" "$profile")"
-    sha="$(sha256sum -- "$path" | awk '{print $1}')"
-    size="$(stat -c %s -- "$path")"; mtime="$(stat -c %Y -- "$path")"
+    identity="$(pz_boot_resolve_file_identity "$path")" || return 1
+    real="$(jq -r .hostPath <<< "$identity")" || return 1
+    [[ "$real" != *$'\n'* && "$real" != *$'\r'* ]] || { pz_error "Caminho de ISO inválido"; return 2; }
+    signature="$(stat -c '%d:%i:%s:%y' -- "$real")" || return 1
+    inspection="$(inspect_iso_json "$real" "$profile")" || return 1
+    profile="$(jq -r '.profile' <<< "$inspection")"
+    module="$(jq -r '.fsModule' <<< "$identity")"
+    if ! iso_storage_supported "$profile" "$module"; then
+        pz_error "$(iso_storage_help)"
+        return 1
+    fi
+    if [ "$profile" = armbian-live ]; then
+        uuid="$(jq -r '.fsUuid' <<< "$identity")"; grub_path="$(jq -r '.grubPath' <<< "$identity")"
+        if ! armbian_fromiso_arg "$uuid" "$grub_path" "" >/dev/null; then
+            pz_error "Para iniciar o Armbian, use um caminho de ISO com letras ASCII, números e sem espaços."
+            return 1
+        fi
+        if [ "$module" = ntfs ] && ! mount_type="$(armbian_ntfs_type "$real")"; then
+            pz_error "Esta ISO do Armbian precisa incluir suporte a NTFS no ambiente inicial para abrir o cartão."
+            return 1
+        fi
+    fi
+    sha="$(sha256sum < "$real" | awk '{print $1}')" || return 1
+    size="$(stat -c %s -- "$real")" || return 1
+    mtime="$(stat -c %Y -- "$real")" || return 1
+    [ "$signature" = "$(stat -c '%d:%i:%s:%y' -- "$real")" ] || { pz_error "A ISO mudou durante a leitura"; return 1; }
     jq -n --arg id "$id" --arg title "$title" --arg sha256 "$sha" --argjson size "$size" --argjson mtime "$mtime" \
-        --argjson identity "$identity" --argjson inspection "$inspection" \
-        '$identity + $inspection + {id:$id,title:$title,kind:"iso",sha256:$sha256,size:$size,mtime:$mtime,enabled:true}'
+        --argjson identity "$identity" --argjson inspection "$inspection" --arg mountType "$mount_type" \
+        '$identity + $inspection + {id:$id,title:$title,kind:"iso",sha256:$sha256,size:$size,mtime:$mtime,enabled:true}
+        + (if $mountType=="" then {} else {isoMountType:$mountType} end)'
 }
 
 render_iso_script() {
-    local manifest="$1" row id title uuid module path kernel initrd profile label qtitle qpath qkernel qinitrd
+    local manifest="$1" row id title uuid module path kernel initrd profile label qtitle qpath qkernel qinitrd microcode fromiso mount_type
     cat <<'EOF'
 #!/usr/bin/env bash
 exec tail -n +3 "$0"
@@ -172,7 +302,13 @@ EOF
         qtitle="$(pz_boot_grub_dquote "$title")"; qpath="$(pz_boot_grub_dquote "$path")"
         qkernel="$(pz_boot_grub_dquote "(loop)$kernel")"; qinitrd="$(pz_boot_grub_dquote "(loop)$initrd")"
         printf "menuentry %s --id='phasezero-iso-%s' --class recovery --class iso {\n" "$qtitle" "$id"
-        printf '    insmod part_gpt\n    insmod part_msdos\n    insmod %s\n    insmod loopback\n' "$module"
+        if ! iso_storage_supported "$profile" "$module"; then
+            printf "    echo 'BigLinux / Manjaro em NTFS indisponivel neste modo.'\n"
+            printf "    echo 'Use um pendrive de instalacao separado e preserve o cartao de backup.'\n"
+            printf '    sleep 7\n}\n'
+            continue
+        fi
+        printf '    insmod part_gpt\n    insmod part_msdos\n    insmod %s\n    insmod loopback\n    insmod iso9660\n' "$module"
         printf '    search --no-floppy --fs-uuid --set=iso_dev %s\n' "$uuid"
         # shellcheck disable=SC2016 # grub variable literal in generated script
         printf '    if [ -f ($iso_dev)%s ]; then\n' "$qpath"
@@ -193,13 +329,30 @@ EOF
             debian-live)
                 printf '        linux %s boot=live components %s\n' "$qkernel" "$(pz_boot_grub_dquote "findiso=$path")"
                 ;;
+            armbian-live)
+                mount_type="$(jq -r '.isoMountType // ""' <<< "$row")"
+                [[ "$module" != ntfs || -n "$mount_type" ]] || return 1
+                fromiso="$(armbian_fromiso_arg "$uuid" "$path" "$mount_type")" || return 1
+                printf '        linux %s boot=live components systemd.gpt_auto=0 nopersistence ro %s\n' "$qkernel" \
+                    "$(pz_boot_grub_dquote "$fromiso")"
+                ;;
             grml)
                 printf '        linux %s boot=live %s %s\n' "$qkernel" "$(pz_boot_grub_dquote "findiso=$path")" \
                     "$(pz_boot_grub_dquote "iso-scan/filename=$path")"
                 ;;
+            manjaro-miso)
+                printf '        linux %s misobasedir=manjaro %s %s %s wayland driver=free rw\n' "$qkernel" \
+                    "$(pz_boot_grub_dquote "misolabel=$label")" \
+                    "$(pz_boot_grub_dquote "img_dev=/dev/disk/by-uuid/$uuid")" \
+                    "$(pz_boot_grub_dquote "img_loop=$path")"
+                ;;
         esac
         [ -z "$label" ] || printf '        set iso_label=%s\n' "$(pz_boot_grub_dquote "$label")"
-        printf '        initrd %s\n' "$qinitrd"
+        printf '        initrd'
+        while IFS= read -r microcode; do
+            printf ' %s' "$(pz_boot_grub_dquote "(loop)$microcode")"
+        done < <(jq -r '.microcodePaths[]?' <<< "$row")
+        printf ' %s\n' "$qinitrd"
         printf "    else\n        echo 'PhaseZero ISO unavailable or filesystem UUID changed.'\n        sleep 5\n    fi\n}\n"
     done < <(jq -c '.entries[] | select(.kind == "iso" and .enabled == true)' "$manifest")
 }
@@ -258,51 +411,75 @@ restore_file() {
     if [ -f "$backup" ]; then install -m "$(stat -c %a "$backup")" "$backup" "$target"; else rm -f "$target"; fi
 }
 
-apply_manifest_file() {
-    local proposed="$1" rollback tmpdir iso_tmp usb_tmp fm_tmp config_old iso_old usb_old fm_old rc=0
+apply_manifest_file() (
+    local proposed="$1" previous="${2:-}" rollback tmpdir iso_tmp usb_tmp fm_tmp config_old iso_old usb_old fm_old
+    local writing=0 committed=0 id
     need_root
     pz_boot_require_current_root_target
     pz_boot_preflight_grub
     pz_boot_validate_active_efi_safe
+    command -v grub-script-check >/dev/null || { pz_error "grub-script-check missing"; return 1; }
+    exec 9>"$(pz_boot_path /run/lock/phasezero-dynamic-boot.lock)"
+    flock -n 9 || { pz_error "O menu de boot está sendo atualizado por outra operação."; return 1; }
+    if [ -n "$previous" ] && [ "$previous" != "$(manifest_json)" ]; then
+        pz_error "A lista de ISOs mudou. Abra a prévia novamente."; return 1
+    fi
     jq -e '.schemaVersion == 1 and (.entries | type == "array")' "$proposed" >/dev/null
-    pz_boot_backup_bundle "dynamic-iso-boot"
     tmpdir="$(pz_tempfile -d)"; rollback="$tmpdir/rollback"; install -d "$rollback"
     config_old="$rollback/config"; iso_old="$rollback/iso"; usb_old="$rollback/usb"; fm_old="$rollback/grubfm"
+    # shellcheck disable=SC2329 # Invoked by the transaction's EXIT trap.
+    finish() {
+        local rc=$?
+        trap - EXIT
+        if [ "$writing" -eq 1 ] && [ "$committed" -eq 0 ]; then
+            pz_warn "Falha ao aplicar. Restaurando a configuração anterior do GRUB."
+            restore_file "$config_old" "$CONFIG" || rc=1
+            restore_file "$iso_old" "$ISO_SCRIPT" || rc=1
+            restore_file "$usb_old" "$USB_SCRIPT" || rc=1
+            restore_file "$fm_old" "$GRUBFM_SCRIPT" || rc=1
+            restore_file "$rollback/grub.cfg" "$GRUB_CFG" || rc=1
+        fi
+        rm -rf "$tmpdir"
+        exit "$rc"
+    }
+    trap finish EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'exit 129' HUP
     [ -f "$CONFIG" ] && cp -a "$CONFIG" "$config_old"
     [ -f "$ISO_SCRIPT" ] && cp -a "$ISO_SCRIPT" "$iso_old"
     [ -f "$USB_SCRIPT" ] && cp -a "$USB_SCRIPT" "$usb_old"
     [ -f "$GRUBFM_SCRIPT" ] && cp -a "$GRUBFM_SCRIPT" "$fm_old"
+    cp -a "$GRUB_CFG" "$rollback/grub.cfg"
     iso_tmp="$tmpdir/46"; usb_tmp="$tmpdir/47"; fm_tmp="$tmpdir/48"
     render_iso_script "$proposed" > "$iso_tmp"
     render_usb_script "$proposed" > "$usb_tmp"
     render_grubfm_script > "$fm_tmp"
     chmod 0755 "$iso_tmp" "$usb_tmp" "$fm_tmp"
+    "$iso_tmp" > "$tmpdir/iso.cfg"
+    grub-script-check "$tmpdir/iso.cfg"
+    if grep -Eq '\(hd[0-9]+,gpt[0-9]+' "$iso_tmp" "$usb_tmp" "$fm_tmp"; then
+        pz_error "generated PhaseZero entry contains disk ordinal"
+        return 1
+    fi
+    pz_boot_backup_bundle "dynamic-iso-boot"
+    writing=1
     pz_boot_atomic_install "$proposed" "$CONFIG" 0644
     pz_boot_atomic_install "$iso_tmp" "$ISO_SCRIPT" 0755
     pz_boot_atomic_install "$usb_tmp" "$USB_SCRIPT" 0755
     pz_boot_atomic_install "$fm_tmp" "$GRUBFM_SCRIPT" 0755
-    pz_boot_refresh_grub_config "$GRUB_CFG" || rc=$?
-    if [ "$rc" -eq 0 ]; then
-        pz_boot_validate_grub_cfg_safe "$GRUB_CFG" || rc=$?
-    fi
-    if [ "$rc" -eq 0 ] && grep -Eq '\(hd[0-9]+,gpt[0-9]+' "$ISO_SCRIPT" "$USB_SCRIPT" "$GRUBFM_SCRIPT"; then
-        pz_error "generated PhaseZero entry contains disk ordinal"
-        rc=1
-    fi
-    if [ "$rc" -ne 0 ]; then
-        pz_warn "dynamic boot transaction failed; restoring previous files"
-        restore_file "$config_old" "$CONFIG"
-        restore_file "$iso_old" "$ISO_SCRIPT"
-        restore_file "$usb_old" "$USB_SCRIPT"
-        restore_file "$fm_old" "$GRUBFM_SCRIPT"
-        pz_boot_refresh_grub_config "$GRUB_CFG" || true
-        rm -rf "$tmpdir"
-        return "$rc"
-    fi
+    pz_boot_refresh_grub_config "$GRUB_CFG"
+    grub-script-check "$GRUB_CFG"
+    pz_boot_validate_grub_cfg_safe "$GRUB_CFG"
     pz_boot_validate_active_efi_safe
-    rm -rf "$tmpdir"
+    while IFS= read -r id; do
+        grep -Fq -- "--id='phasezero-iso-$id'" "$GRUB_CFG" || {
+            pz_error "Entrada ausente no GRUB após atualização: $id"; return 1;
+        }
+    done < <(jq -r '.entries[] | select(.kind=="iso" and .enabled==true) | .id' "$proposed")
+    committed=1
     pz_info "dynamic ISO boot configuration installed"
-}
+)
 
 manifest_with_entry() {
     local entry="$1" current
@@ -311,16 +488,44 @@ manifest_with_entry() {
 }
 
 manifest_without_entry() {
-    local id="$1"
-    manifest_json | jq --arg id "$id" '.entries = [.entries[] | select(.id != $id)]'
+    local id="$1" kind="${2:-removable-efi}"
+    manifest_json | jq --arg id "$id" --arg kind "$kind" '.entries |= map(select(.id != $id or .kind != $kind))'
+}
+
+iso_plan_json() {
+    local entry="$1" operation="$2"
+    jq -n --argjson entry "$entry" --arg operation "$operation" '
+        def profile_name:
+            if .=="manjaro-miso" then "BigLinux / Manjaro"
+            elif .=="armbian-live" then "Armbian Live UEFI x86-64"
+            elif .=="archiso" then "Arch Linux"
+            elif .=="systemrescue" then "SystemRescue"
+            elif .=="ubuntu-casper" then "Ubuntu e derivados"
+            elif .=="debian-live" then "Debian Live"
+            else "Grml" end;
+        {schemaVersion:1,sha256:$entry.sha256,entry:$entry,
+         summary:(if $operation=="add" then "Adicionar “" + $entry.title + "” ao menu do GRUB."
+                  else "Remover “" + $entry.title + "” do menu do GRUB." end),
+         reasons:(if $operation=="add" then ["Layout detectado — " + ($entry.profile|profile_name),
+                                              "Arquivo — " + $entry.hostPath,
+                                              "Sessão live pendente de teste no hardware."] +
+                  (if $entry.profile=="armbian-live" and $entry.fsModule=="ntfs" then
+                      ["O Live abre o volume da ISO em modo somente leitura e inicia sem persistência."]
+                    else [] end)
+                  else ["O arquivo ISO permanece disponível no disco."] end),
+         next:(if $operation=="add" then "Escolha essa entrada no GRUB na próxima vez que ligar o computador."
+                     else "O GRUB deixará de oferecer essa entrada." end)}'
 }
 
 entry_state_json() {
-    local row="$1" kind path sha actual expected_size expected_mtime actual_size actual_mtime available=false reason=missing
+    local row="$1" kind path sha actual expected_size expected_mtime actual_size actual_mtime profile module available=false reason=missing
     kind="$(jq -r '.kind' <<< "$row")"
     if [ "$kind" = iso ]; then
         path="$(jq -r '.hostPath' <<< "$row")"; sha="$(jq -r '.sha256' <<< "$row")"
-        if [ -f "$path" ]; then
+        profile="$(jq -r '.profile' <<< "$row")"; module="$(jq -r '.fsModule' <<< "$row")"
+        if ! iso_storage_supported "$profile" "$module"; then
+            reason=miso-ntfs
+        elif [ -f "$path" ]; then
             expected_size="$(jq -r '.size // empty' <<< "$row")"; expected_mtime="$(jq -r '.mtime // empty' <<< "$row")"
             if [ -n "$expected_size" ] && [ -n "$expected_mtime" ]; then
                 actual_size="$(stat -c %s -- "$path")"; actual_mtime="$(stat -c %Y -- "$path")"
@@ -333,7 +538,11 @@ entry_state_json() {
     else
         if blkid -U "$(jq -r '.fsUuid' <<< "$row")" >/dev/null 2>&1; then available=true; reason=present; fi
     fi
-    jq --argjson available "$available" --arg reason "$reason" '. + {available:$available,reason:$reason}' <<< "$row"
+    jq --argjson available "$available" --arg reason "$reason" '
+        . + {available:$available,reason:$reason}
+        | if .kind == "iso" then
+              . + {bootValidation:(if .reason == "miso-ntfs" then "blocked" else "pending" end)}
+          else . end' <<< "$row"
 }
 
 status_json() {
@@ -359,7 +568,7 @@ print_status() {
 }
 
 cmd_iso() {
-    local sub="$SUBCOMMAND" json=0 path profile=auto id="" title="" dry=0 arg entry proposed
+    local sub="$SUBCOMMAND" json=0 path profile=auto id="" title="" dry=0 arg entry proposed expected="" real known i validation
     case "$sub" in
         status)
             [ "${REST[0]:-}" = --json ] && json=1
@@ -383,19 +592,74 @@ cmd_iso() {
             ;;
         add)
             path="${REST[0]:-}"; [ -n "$path" ] || { pz_error "usage: boot iso add PATH [--profile PROFILE] [--id ID] [--title TITLE] [--dry-run]"; return 2; }
-            for arg in "${REST[@]:1}"; do
-                case "$arg" in --profile=*) profile="${arg#*=}" ;; --id=*) id="${arg#*=}" ;; --title=*) title="${arg#*=}" ;; --dry-run|-n) dry=1 ;; *) pz_error "unknown option: $arg"; return 2 ;; esac
+            for (( i=1; i<${#REST[@]}; i++ )); do
+                arg="${REST[i]}"
+                case "$arg" in
+                    --profile=*) profile="${arg#*=}" ;;
+                    --id=*) id="${arg#*=}" ;;
+                    --title=*) title="${arg#*=}" ;;
+                    --dry-run|-n) dry=1 ;;
+                    --plan-json) json=1 ;;
+                    --expect-sha256)
+                        i=$((i+1)); expected="${REST[i]:-}"
+                        [[ "$expected" =~ ^[a-f0-9]{64}$ ]] || { pz_error "SHA-256 esperado inválido"; return 2; }
+                        ;;
+                    *) pz_error "unknown option: $arg"; return 2 ;;
+                esac
             done
-            [ -n "$id" ] || id="$(slugify "$(basename "${path%.iso}")")"
-            [ -n "$title" ] || title="ISO: $(basename "$path")"
+            if [ "$EUID" -eq 0 ] && [ "$json" -eq 0 ] && [ "$dry" -eq 0 ] && ! pz_boot_validate_active_efi_safe; then
+                jq -n '{status:"blocked",summary:"O carregador EFI atual precisa de revisão antes de alterar o GRUB.",
+                        next:"Abra Boot Direto e confira o estado do carregador EFI."}'
+                return 1
+            fi
+            real="$(realpath -e -- "$path")" || return 1
+            known="$(manifest_json)"
+            if [ -z "$id" ]; then
+                id="$(jq -r --arg path "$real" 'first(.entries[] | select(.kind=="iso" and .hostPath==$path) | .id) // ""' <<< "$known")"
+                if [ -z "$id" ]; then
+                    id="$(slugify "$(basename "${path%.[Ii][Ss][Oo]}")")"
+                    if jq -e --arg id "$id" '.entries | any(.id==$id)' <<< "$known" >/dev/null; then
+                        id="$id-$(printf '%s' "$real" | sha256sum | cut -c1-10)"
+                    fi
+                fi
+            fi
+            if jq -e --arg id "$id" --arg path "$real" \
+                '.entries | any(.id==$id and (.kind!="iso" or .hostPath!=$path))' <<< "$known" >/dev/null; then
+                pz_error "Já existe outra entrada com o ID $id"; return 1
+            fi
+            [ -n "$title" ] || title="$(basename "${path%.[Ii][Ss][Oo]}") (Live)"
+            if [ "$json" -eq 1 ]; then
+                if ! entry="$(iso_entry_json "$path" "$profile" "$id" "$title" 2>&1)"; then
+                    jq -n --arg reason "$entry" '{status:"blocked",summary:"Não foi possível preparar esta ISO.",blockers:[$reason]}'
+                    return 1
+                fi
+                iso_plan_json "$entry" add
+                return
+            fi
             entry="$(iso_entry_json "$path" "$profile" "$id" "$title")"
+            if [ -n "$expected" ] && [ "$expected" != "$(jq -r .sha256 <<< "$entry")" ]; then
+                pz_error "A ISO mudou depois da verificação. Escolha o arquivo novamente."; return 1
+            fi
             proposed="$(pz_tempfile)"; manifest_with_entry "$entry" > "$proposed"
-            if [ "$dry" -eq 1 ]; then jq . "$proposed"; rm -f "$proposed"; else apply_manifest_file "$proposed"; rm -f "$proposed"; fi
+            if [ "$dry" -eq 1 ]; then
+                jq . "$proposed"
+            else
+                apply_manifest_file "$proposed" "$known"
+                jq -n --argjson entry "$entry" \
+                    '{status:"ready",bootValidation:"pending",entryId:("phasezero-iso-" + $entry.id),
+                      summary:("Entrada “" + $entry.title + "” registrada no GRUB."),
+                      next:"Teste a sessão live no próximo boot antes de iniciar a instalação."}'
+            fi
+            rm -f "$proposed"
             ;;
         remove)
             id="${REST[0]:-}"; [ -n "$id" ] || { pz_error "usage: boot iso remove ID [--dry-run]"; return 2; }
+            pz_boot_valid_id "$id" || { pz_error "ID de ISO inválido"; return 2; }
+            entry="$(manifest_json | jq -c --arg id "$id" 'first(.entries[] | select(.id==$id and .kind=="iso")) // empty')"
+            [ -n "$entry" ] || { pz_error "ISO não registrada: $id"; return 1; }
+            if [ "${REST[1]:-}" = --plan-json ]; then iso_plan_json "$entry" remove; return; fi
             [ "${REST[1]:-}" = --dry-run ] && dry=1
-            proposed="$(pz_tempfile)"; manifest_without_entry "$id" > "$proposed"
+            proposed="$(pz_tempfile)"; manifest_without_entry "$id" iso > "$proposed"
             if [ "$dry" -eq 1 ]; then jq . "$proposed"; rm -f "$proposed"; else apply_manifest_file "$proposed"; rm -f "$proposed"; fi
             ;;
         verify)
@@ -406,7 +670,12 @@ cmd_iso() {
             [ -f "$path" ] || { pz_error "ISO unavailable: $path"; return 1; }
             arg="$(sha256sum -- "$path" | awk '{print $1}')"
             [ "$arg" = "$(jq -r '.sha256' <<< "$entry")" ] || { pz_error "ISO SHA-256 mismatch: $id"; return 1; }
-            inspect_iso_json "$path" "$profile" | jq --arg id "$id" --arg sha256 "$arg" '. + {id:$id,sha256:$sha256,verified:true}'
+            validation=pending
+            if ! iso_storage_supported "$profile" "$(jq -r .fsModule <<< "$entry")"; then validation=blocked; fi
+            inspect_iso_json "$path" "$profile" |
+                jq --arg id "$id" --arg sha256 "$arg" \
+                    --arg bootValidation "$validation" \
+                    '. + {id:$id,sha256:$sha256,verified:true,verificationScope:"file",bootValidation:$bootValidation}'
             ;;
         refresh)
             id="${REST[0]:-}"; [ -n "$id" ] || { pz_error "usage: boot iso refresh ID [--dry-run]"; return 2; }
@@ -550,7 +819,7 @@ cmd_grubfm() {
 }
 
 schedule_next() {
-    local kind="$1" id="$2" reboot=0 entry_id row
+    local kind="$1" id="$2" reboot=0 entry_id row state
     shift 2 || true
     [ "${1:-}" = --reboot ] && reboot=1
     case "$kind" in
@@ -558,7 +827,12 @@ schedule_next() {
             [ -n "$id" ] || { pz_error "entry id required"; return 2; }
             row="$(manifest_json | jq -c --arg id "$id" --arg kind "$kind" '.entries[] | select(.id == $id and .kind == $kind)' | head -1)"
             [ -n "$row" ] || { pz_error "boot entry not registered: $kind/$id"; return 1; }
-            [ "$(entry_state_json "$row" | jq -r '.available')" = true ] || { pz_error "boot entry unavailable: $kind/$id"; return 1; }
+            state="$(entry_state_json "$row")"
+            if [ "$(jq -r '.reason' <<< "$state")" = miso-ntfs ]; then
+                pz_error "$(iso_storage_help)"
+                return 1
+            fi
+            [ "$(jq -r '.available' <<< "$state")" = true ] || { pz_error "boot entry unavailable: $kind/$id"; return 1; }
             [ "$kind" = iso ] && entry_id="phasezero-iso-$id" || entry_id="phasezero-removable-$id"
             ;;
         grubfm)
@@ -579,7 +853,12 @@ catalog_json() {
     while IFS= read -r row; do
         [ -n "$row" ] || continue
         state="$(entry_state_json "$row")"; key="$(jq -r 'if .kind == "iso" then "iso:"+.id else "usb:"+.id end' <<< "$row")"
-        title="$(jq -r '.title' <<< "$row")"; desc="$(jq -r 'if .available then "Pronto para boot one-shot." else "Indisponível: "+.reason end' <<< "$state")"
+        title="$(jq -r '.title' <<< "$row")"
+        desc="$(jq -r '
+            if .reason == "miso-ntfs" then "Use um pendrive de instalação separado para esta ISO."
+            elif .available and .kind == "iso" then "Disponível para testar a sessão live."
+            elif .available then "Pronto para boot one-shot."
+            else "Indisponível: "+.reason end' <<< "$state")"
         choices="$(jq --arg key "$key" --arg title "$title" --arg description "$desc" --argjson available "$(jq '.available' <<< "$state")" \
             '. + [{key:$key,title:$title,description:$description,available:$available}]' <<< "$choices")"
     done < <(manifest_json | jq -c '.entries[]')

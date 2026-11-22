@@ -94,4 +94,125 @@ after="$(sha256sum "$PZ_ISO_BOOT_CONFIG" | awk '{print $1}')"
 catalog="$(bash "$REPO_ROOT/linux/boot/iso-boot.sh" catalog)"
 jq -e '.choices[] | select(.key == "iso:arch-rescue" and .available == true)' <<< "$catalog" >/dev/null
 
+(
+    iso_listing() { printf '%s\n' live/vmlinuz live/initrd.img live/filesystem.squashfs; }
+    blkid() {
+        case "$3" in TYPE) printf '%s\n' iso9660 ;; LABEL) printf '%s\n' ARMBIAN ;; esac
+    }
+    bsdtar() {
+        python3 -c '
+import os
+import sys
+header = bytearray(0x238)
+header[0x1fe:0x200] = b"\x55\xaa"
+header[0x202:0x206] = b"HdrS"
+header[0x236] = int(os.environ.get("PZ_TEST_KERNEL_64", "1"))
+sys.stdout.buffer.write(header + bytes(50000))
+'
+    }
+    pz_boot_resolve_file_identity() {
+        jq -n --arg host "$tmp/rescue.iso" '{hostPath:$host,fsUuid:"20006A5C006A38C4",
+            fsModule:"ntfs",fsType:"fuseblk",grubPath:"/Isos/Armbian-test.iso"}'
+    }
+    armbian_ntfs_type() { armbian_ntfs_type_from_listing "${PZ_TEST_INITRD_LISTING}"; }
+    PZ_TEST_INITRD_LISTING=$'usr/bin/ntfs-3g\nusr/sbin/mount.ntfs'
+    jq -e '.profile == "armbian-live" and .initrdPath == "/live/initrd.img"' \
+        <<< "$(inspect_iso_json "$tmp/rescue.iso")" >/dev/null
+    if PZ_TEST_KERNEL_64=0 inspect_iso_json "$tmp/rescue.iso" >/dev/null 2>&1 ||
+        inspect_iso_json "$tmp/rescue.iso" debian-live >/dev/null 2>&1 ||
+        armbian_fromiso_arg 1234 "/Isos/Armbian copy.iso" ntfs >/dev/null ||
+        PZ_TEST_INITRD_LISTING=usr/bin/ntfs-3g iso_entry_json "$tmp/rescue.iso" auto armbian "Armbian" >/dev/null 2>&1; then
+        echo "FAIL: Armbian accepted an incompatible architecture, profile, path or NTFS image"
+        exit 1
+    fi
+    armbian="$(iso_entry_json "$tmp/rescue.iso" auto armbian "Armbian")"
+    iso_plan_json "$armbian" add | jq -e '.reasons[-1] | contains("somente leitura")' >/dev/null
+    jq -n --argjson entry "$armbian" '{schemaVersion:1,entries:[$entry]}' > "$tmp/armbian.json"
+    render_iso_script "$tmp/armbian.json" | tail -n +3 > "$tmp/armbian.cfg"
+    grep -Fq 'boot=live components systemd.gpt_auto=0 nopersistence ro' "$tmp/armbian.cfg"
+    grep -Fq '"fromiso=ntfs:/dev/disk/by-uuid/20006A5C006A38C4/Isos/Armbian-test.iso"' "$tmp/armbian.cfg"
+    grep -Fq 'initrd "(loop)/live/initrd.img"' "$tmp/armbian.cfg"
+    if command -v grub-script-check >/dev/null; then grub-script-check "$tmp/armbian.cfg"; fi
+    PZ_TEST_INITRD_LISTING=usr/lib/modules/7.3.5/kernel/fs/ntfs3/ntfs3.ko.zst
+    armbian="$(iso_entry_json "$tmp/rescue.iso" auto armbian "Armbian")"
+    jq -n --argjson entry "$armbian" '{schemaVersion:1,entries:[$entry]}' > "$tmp/armbian.json"
+    render_iso_script "$tmp/armbian.json" > "$tmp/armbian.cfg"
+    grep -Fq '"fromiso=ntfs3:/dev/disk/by-uuid/20006A5C006A38C4/Isos/Armbian-test.iso"' "$tmp/armbian.cfg"
+)
+
+(
+    iso_listing() {
+        printf '%s\n' boot/vmlinuz-x86_64 boot/initramfs-x86_64.img \
+            boot/amd_ucode.img boot/intel_ucode.img manjaro/x86_64/rootfs.sfs
+    }
+    blkid() {
+        case "$3" in TYPE) printf '%s\n' iso9660 ;; LABEL) printf '%s\n' BIGLINUXLIVE ;; esac
+    }
+    inspection="$(inspect_iso_json "$tmp/rescue.iso")"
+    jq -e '.profile=="manjaro-miso" and (.microcodePaths | length)==2' <<< "$inspection" >/dev/null
+    live="$(jq -c --argjson inspection "$inspection" '.entries[0] + $inspection' "$PZ_ISO_BOOT_CONFIG")"
+    manifest_with_entry "$live" > "$tmp/miso-manifest.json"
+    render_iso_script "$tmp/miso-manifest.json" > "$tmp/miso-script"
+    bash "$tmp/miso-script" > "$tmp/miso.cfg"
+    grep -Fq 'misobasedir=manjaro "misolabel=BIGLINUXLIVE"' "$tmp/miso.cfg"
+    grep -Fq '"img_dev=/dev/disk/by-uuid/1111-2222"' "$tmp/miso.cfg"
+    grep -Fq 'initrd "(loop)/boot/amd_ucode.img" "(loop)/boot/intel_ucode.img" "(loop)/boot/initramfs-x86_64.img"' "$tmp/miso.cfg"
+    iso_plan_json "$live" add | jq -e --arg hash "$sha" '.sha256==$hash and .entry.profile=="manjaro-miso"' >/dev/null
+    if command -v grub-script-check >/dev/null; then
+        grub-script-check "$tmp/miso.cfg"
+    fi
+
+    ntfs="$(jq -c '. + {id:"biglinux-ntfs",fsModule:"ntfs",fsType:"fuseblk"}' <<< "$live")"
+    entry_state_json "$ntfs" |
+        jq -e '.available == false and .reason == "miso-ntfs" and .bootValidation == "blocked"' >/dev/null
+    jq -n --argjson entry "$ntfs" '{schemaVersion:1,entries:[$entry]}' > "$tmp/miso-ntfs.json"
+    render_iso_script "$tmp/miso-ntfs.json" > "$tmp/miso-ntfs-script"
+    bash "$tmp/miso-ntfs-script" > "$tmp/miso-ntfs.cfg"
+    grep -Fq -- "--id='phasezero-iso-biglinux-ntfs'" "$tmp/miso-ntfs.cfg"
+    grep -Fq 'Use um pendrive de instalacao separado' "$tmp/miso-ntfs.cfg"
+    if grep -Eq '^[[:space:]]+(loopback|linux|initrd)[[:space:]]' "$tmp/miso-ntfs.cfg"; then
+        echo "FAIL: unsafe legacy ISO entry still loads a kernel"
+        exit 1
+    fi
+    if command -v grub-script-check >/dev/null; then grub-script-check "$tmp/miso-ntfs.cfg"; fi
+
+    (
+        CONFIG="$tmp/miso-ntfs.json"
+        SUBCOMMAND=add
+        REST=("$tmp/rescue.iso" --id=biglinux-ntfs --plan-json)
+        pz_boot_resolve_file_identity() { printf '%s\n' "$ntfs"; }
+        if result="$(cmd_iso)"; then
+            echo "FAIL: preview allowed BigLinux from NTFS"
+            exit 1
+        fi
+        jq -e '.status == "blocked" and (.blockers[0] | contains("pendrive"))' <<< "$result" >/dev/null
+        if result="$(schedule_next iso biglinux-ntfs 2>&1)"; then
+            echo "FAIL: one-shot allowed a blocked legacy entry"
+            exit 1
+        fi
+        grep -Fq 'pendrive de instalação separado' <<< "$result"
+    )
+
+    GRUB_CFG="$tmp/grub.cfg"
+    printf 'menuentry "Linux atual" {\n    true\n}\n' > "$GRUB_CFG"
+    original_cfg="$(cat "$GRUB_CFG")"
+    original_manifest="$(cat "$PZ_ISO_BOOT_CONFIG")"
+    need_root() { :; }
+    pz_boot_path() { printf '%s\n' "$tmp/lock"; }
+    pz_boot_require_current_root_target() { :; }
+    pz_boot_preflight_grub() { :; }
+    pz_boot_validate_active_efi_safe() { :; }
+    pz_boot_backup_bundle() { :; }
+    pz_boot_refresh_grub_config() { printf '%s\n' incomplete > "$GRUB_CFG"; return 9; }
+    if ! command -v grub-script-check >/dev/null; then grub-script-check() { :; }; fi
+    # The nested shell keeps errexit active for the transaction under test.
+    set +e
+    (set -e; apply_manifest_file "$tmp/miso-manifest.json" "$original_manifest")
+    rc=$?
+    set -e
+    [ "$rc" -eq 9 ]
+    [ "$(cat "$GRUB_CFG")" = "$original_cfg" ]
+    [ "$(cat "$PZ_ISO_BOOT_CONFIG")" = "$original_manifest" ]
+)
+
 echo "linux-iso-boot ok"

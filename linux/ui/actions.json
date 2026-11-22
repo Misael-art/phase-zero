@@ -2329,7 +2329,7 @@
     },
     {
       "name": "boot.iso.status",
-      "label": "ISOs registradas",
+      "label": "ISOs no GRUB",
       "command": "linux/pz boot iso status --json",
       "mutable": false,
       "require_plan": false,
@@ -2340,15 +2340,27 @@
     },
     {
       "name": "boot.iso.add",
-      "label": "Registrar ISO",
-      "command": "linux/pz boot iso add {input} --profile=auto",
+      "label": "Adicionar ISO ao GRUB",
+      "command": "linux/pz boot iso add {input}",
       "mutable": true,
       "require_plan": true,
       "module": "Boot Direto",
       "elevated": true,
-      "input_kind": "",
-      "input_label": "",
-      "plan_command": "linux/pz boot iso add {input} --profile=auto --dry-run"
+      "input_kind": "file",
+      "input_label": "Imagem ISO",
+      "plan_command": "linux/pz boot iso add {input} --plan-json"
+    },
+    {
+      "name": "boot.iso.remove",
+      "label": "Remover ISO do menu",
+      "command": "linux/pz boot iso remove {input}",
+      "mutable": true,
+      "require_plan": true,
+      "module": "Boot Direto",
+      "elevated": true,
+      "input_kind": "text",
+      "input_label": "ID da entrada",
+      "plan_command": "linux/pz boot iso remove {input} --plan-json"
     },
     {
       "name": "boot.usb.discover",

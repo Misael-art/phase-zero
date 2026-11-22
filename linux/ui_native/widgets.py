@@ -738,6 +738,7 @@ class ContextRail(QFrame):
             button.setAccessibleName(f"Abrir seção {section}")
             icon_map = {
                 "Visão geral": QStyle.SP_DialogApplyButton,
+                "Testar distros": QStyle.SP_DriveCDIcon,
                 "Biblioteca e mídia": QStyle.SP_DirOpenIcon,
                 "Frontends": QStyle.SP_FileDialogListView,
                 "Controles": QStyle.SP_ComputerIcon,
@@ -1017,7 +1018,7 @@ class ParameterDialog(QDialog):
             else:
                 field = QLineEdit()
                 field.setPlaceholderText(parameter.placeholder)
-                if parameter.kind in {"file", "path", "save-file"}:
+                if parameter.kind in {"file", "iso-file", "path", "save-file"}:
                     row = QWidget()
                     row_layout = QHBoxLayout(row)
                     row_layout.setContentsMargins(0, 0, 0, 0)
@@ -1044,7 +1045,9 @@ class ParameterDialog(QDialog):
         layout.addWidget(buttons)
 
     def _browse(self, kind: str, target: QLineEdit) -> None:
-        if kind == "file":
+        if kind == "iso-file":
+            value, _ = QFileDialog.getOpenFileName(self, "Escolher ISO de Linux", "", "Imagens ISO (*.iso *.ISO)")
+        elif kind == "file":
             value, _ = QFileDialog.getOpenFileName(self, "Selecionar arquivo")
         elif kind == "save-file":
             value, _ = QFileDialog.getSaveFileName(self, "Guardar arquivo de recuperação", "phasezero-memory-recovery.gpg", "OpenPGP (*.gpg)")
