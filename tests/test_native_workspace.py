@@ -89,7 +89,12 @@ def test_boot_live_iso_journey_uses_preview_and_selected_entry(qapp, catalog, mo
     page._iso_status_ready("boot.iso.status", "", {"entries": [
         {"id": "biglinux-live", "title": "BigLinux (Live)", "hostPath": path, "reason": "ready"}
     ]})
-    assert "Arquivo disponível" in page.iso_details.text()
+    assert "Sessão live pendente de teste no hardware" in page.iso_details.text()
+    page._iso_status_ready("boot.iso.status", "", {"entries": [
+        {"id": "biglinux-live", "title": "BigLinux (Live)", "hostPath": path, "reason": "miso-ntfs"}
+    ]})
+    assert "Use um pendrive de instalação separado" in page.iso_details.text()
+    assert page.iso_remove.isEnabled()
     page.iso_remove.click()
     remove = requested.at(1)[0]
     assert remove.resolved_args(preview=True) == ["boot", "iso", "remove", "biglinux-live", "--plan-json"]

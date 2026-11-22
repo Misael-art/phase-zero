@@ -116,6 +116,37 @@ jq -e '.choices[] | select(.key == "iso:arch-rescue" and .available == true)' <<
         grub-script-check "$tmp/miso.cfg"
     fi
 
+    ntfs="$(jq -c '. + {id:"biglinux-ntfs",fsModule:"ntfs",fsType:"fuseblk"}' <<< "$live")"
+    entry_state_json "$ntfs" |
+        jq -e '.available == false and .reason == "miso-ntfs" and .bootValidation == "blocked"' >/dev/null
+    jq -n --argjson entry "$ntfs" '{schemaVersion:1,entries:[$entry]}' > "$tmp/miso-ntfs.json"
+    render_iso_script "$tmp/miso-ntfs.json" > "$tmp/miso-ntfs-script"
+    bash "$tmp/miso-ntfs-script" > "$tmp/miso-ntfs.cfg"
+    grep -Fq -- "--id='phasezero-iso-biglinux-ntfs'" "$tmp/miso-ntfs.cfg"
+    grep -Fq 'Use um pendrive de instalacao separado' "$tmp/miso-ntfs.cfg"
+    if grep -Eq '^[[:space:]]+(loopback|linux|initrd)[[:space:]]' "$tmp/miso-ntfs.cfg"; then
+        echo "FAIL: unsafe legacy ISO entry still loads a kernel"
+        exit 1
+    fi
+    if command -v grub-script-check >/dev/null; then grub-script-check "$tmp/miso-ntfs.cfg"; fi
+
+    (
+        CONFIG="$tmp/miso-ntfs.json"
+        SUBCOMMAND=add
+        REST=("$tmp/rescue.iso" --id=biglinux-ntfs --plan-json)
+        pz_boot_resolve_file_identity() { printf '%s\n' "$ntfs"; }
+        if result="$(cmd_iso)"; then
+            echo "FAIL: preview allowed BigLinux from NTFS"
+            exit 1
+        fi
+        jq -e '.status == "blocked" and (.blockers[0] | contains("pendrive"))' <<< "$result" >/dev/null
+        if result="$(schedule_next iso biglinux-ntfs 2>&1)"; then
+            echo "FAIL: one-shot allowed a blocked legacy entry"
+            exit 1
+        fi
+        grep -Fq 'pendrive de instalação separado' <<< "$result"
+    )
+
     GRUB_CFG="$tmp/grub.cfg"
     printf 'menuentry "Linux atual" {\n    true\n}\n' > "$GRUB_CFG"
     original_cfg="$(cat "$GRUB_CFG")"

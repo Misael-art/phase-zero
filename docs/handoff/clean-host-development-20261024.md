@@ -34,7 +34,46 @@ parou no gate existente do carregador EFI ativo, que detectou um prefixo
 dependente da ordem dos discos antes de gravar. Após a correção autorizada
 do EFI com backup, a CLI registrou e conferiu **BigLinux 2026-06-06 (Live)**
 na configuração ativa. A ordem do firmware e a seleção padrão permaneceram
-preservadas. Boot físico pendente.
+preservadas.
+
+### Incidente físico a partir do cartão NTFS
+
+O primeiro teste relatado chegou ao aviso de espera de 30 segundos no Live.
+O journal persistente registra o BigLinux instalado antes e depois dos
+intervalos de reinício, com o leitor SD detectado e a partição NTFS montada
+no sistema instalado. A tentativa Live parou antes de iniciar o journal.
+Não há transcrição daquela tela no journal nem arquivo arquivado no pstore.
+
+| Etapa | Evidência |
+| --- | --- |
+| GRUB | O script instalado carrega kernel e initramfs da ISO. A mensagem de 30 segundos pertence ao ambiente inicial da imagem. |
+| Busca do volume | Em QEMU/KVM, com kernel e initramfs extraídos da mesma ISO e um cartão NTFS sintético, o caminho original reproduziu `Mounting ''` e o timeout. `miso_loop_mnt` substitui o `img_dev` recebido do GRUB pelo resultado da busca por caminho. |
+| Montagem | Com rótulo explícito e módulos do leitor antecipados, o mesmo teste encontrou o volume. A montagem falhou com `unknown filesystem type 'ntfs3'`. O arquivo `disable_ntfs3.conf` do initramfs põe esse módulo na lista de bloqueio. O sistema instalado usa o driver de espaço de usuário NTFS-3G. |
+| Montagem explícita | No shell do mesmo initramfs, o NTFS-3G montou o cartão sintético como `fuseblk ro` e encontrou o arquivo ISO de prova. Isso demonstra a alternativa de leitura no ambiente inicial. |
+| Controle com mídia Live | A ISO real, apresentada como CD virtual somente leitura, montou `/dev/sr0`, iniciou o sistema Live e chegou ao login de texto. A sessão gráfica e a instalação no Steam Deck exigem teste físico. |
+
+A releitura integral da ISO no cartão produziu o mesmo SHA-256 do
+manifesto usado para registrar a entrada
+(`50de80b7d5ca45e28c677b9f844b85028e87d6835353bad5b1fdde2f77593092`).
+
+A prévia recusa o perfil BigLinux/Manjaro sobre NTFS no modo loopback.
+A Central exibe a orientação junto das entradas antigas, e a CLI bloqueia
+o agendamento dessas entradas. Quando o GRUB for regenerado pelo código
+corrigido, o item antigo oferece a mesma orientação. Arquivo disponível,
+configuração registrada e boot físico são evidências diferentes.
+
+Regressão conferida pela prévia e pelo status da ISO real, sem elevação.
+A suíte de shell e 11 testes focados de Qt passaram. Na rodada mais ampla
+de Qt, 34 passaram e a verificação de bytecode órfão encontrou caches de
+outros módulos já presentes neste checkout.
+
+Para instalar, use um pendrive separado preparado pelo
+[guia do BigLinux](https://apps.biglinux.com.br/pt-br/instalacao-do-biglinux)
+e confirme a área de trabalho Live antes de abrir o instalador. O cartão
+com os backups fica preservado. Para retomar suporte a NTFS no PhaseZero,
+a etapa pendente é validar montagem explícita somente leitura no initramfs
+e a passagem até a área de trabalho no leitor físico, sem depender da
+detecção automática que reproduziu o incidente.
 
 ## Integração manual de entrada — 30/10/2026
 

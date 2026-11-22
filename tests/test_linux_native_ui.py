@@ -218,7 +218,7 @@ def test_dynamic_boot_choices_are_loaded_without_shell():
 def test_dynamic_boot_catalog_actions_are_safe(catalog):
     actions = {item.id: item for item in catalog if item.id.startswith("boot.iso.") or item.id.startswith("boot.usb.") or item.id.startswith("boot.grubfm.")}
     assert set(actions) == {
-        "boot.iso.status", "boot.iso.add", "boot.usb.discover", "boot.usb.add",
+        "boot.iso.status", "boot.iso.add", "boot.iso.remove", "boot.usb.discover", "boot.usb.add",
         "boot.grubfm.status", "boot.grubfm.install", "boot.grubfm.remove",
     }
     for action in actions.values():

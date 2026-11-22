@@ -86,6 +86,15 @@ iso_listing() {
     bsdtar -tf "$path" 2>/dev/null | sed 's#^\./##'
 }
 
+iso_storage_supported() {
+    # GRUB's NTFS driver is separate from the live kernel's mount path.
+    [[ "$1" != manjaro-miso || "$2" != ntfs ]]
+}
+
+iso_storage_help() {
+    printf '%s\n' 'BigLinux / Manjaro em NTFS fica indisponível neste modo. Use um pendrive de instalação separado ou teste a ISO a partir de uma partição Linux.'
+}
+
 inspect_iso_json() {
     local path="$1" requested="${2:-auto}" real listing profile kernel initrd label matches=0 candidate microcode='[]'
     [ -f "$path" ] || { pz_error "ISO not found: $path"; return 1; }
@@ -164,7 +173,7 @@ inspect_iso_json() {
 }
 
 iso_entry_json() {
-    local path="$1" profile="$2" id="$3" title="$4" identity inspection sha size mtime real signature
+    local path="$1" profile="$2" id="$3" title="$4" identity inspection sha size mtime real signature module
     pz_boot_valid_id "$id" || { pz_error "invalid entry id: $id"; return 2; }
     safe_title "$title" || { pz_error "unsafe entry title"; return 2; }
     identity="$(pz_boot_resolve_file_identity "$path")" || return 1
@@ -172,6 +181,12 @@ iso_entry_json() {
     [[ "$real" != *$'\n'* && "$real" != *$'\r'* ]] || { pz_error "Caminho de ISO inválido"; return 2; }
     signature="$(stat -c '%d:%i:%s:%y' -- "$real")" || return 1
     inspection="$(inspect_iso_json "$real" "$profile")" || return 1
+    profile="$(jq -r '.profile' <<< "$inspection")"
+    module="$(jq -r '.fsModule' <<< "$identity")"
+    if ! iso_storage_supported "$profile" "$module"; then
+        pz_error "$(iso_storage_help)"
+        return 1
+    fi
     sha="$(sha256sum < "$real" | awk '{print $1}')" || return 1
     size="$(stat -c %s -- "$real")" || return 1
     mtime="$(stat -c %Y -- "$real")" || return 1
@@ -198,6 +213,12 @@ EOF
         qtitle="$(pz_boot_grub_dquote "$title")"; qpath="$(pz_boot_grub_dquote "$path")"
         qkernel="$(pz_boot_grub_dquote "(loop)$kernel")"; qinitrd="$(pz_boot_grub_dquote "(loop)$initrd")"
         printf "menuentry %s --id='phasezero-iso-%s' --class recovery --class iso {\n" "$qtitle" "$id"
+        if ! iso_storage_supported "$profile" "$module"; then
+            printf "    echo 'BigLinux / Manjaro em NTFS indisponivel neste modo.'\n"
+            printf "    echo 'Use um pendrive de instalacao separado e preserve o cartao de backup.'\n"
+            printf '    sleep 7\n}\n'
+            continue
+        fi
         printf '    insmod part_gpt\n    insmod part_msdos\n    insmod %s\n    insmod loopback\n    insmod iso9660\n' "$module"
         printf '    search --no-floppy --fs-uuid --set=iso_dev %s\n' "$uuid"
         # shellcheck disable=SC2016 # grub variable literal in generated script
@@ -388,20 +409,23 @@ iso_plan_json() {
         {schemaVersion:1,sha256:$entry.sha256,entry:$entry,
          summary:(if $operation=="add" then "Adicionar “" + $entry.title + "” ao menu do GRUB."
                   else "Remover “" + $entry.title + "” do menu do GRUB." end),
-         reasons:(if $operation=="add" then ["Compatibilidade detectada — " + ($entry.profile|profile_name),
+         reasons:(if $operation=="add" then ["Layout detectado — " + ($entry.profile|profile_name),
                                               "Arquivo — " + $entry.hostPath,
-                                              "O arquivo permanece no local escolhido."]
+                                              "Sessão live pendente de teste no hardware."]
                   else ["O arquivo ISO permanece disponível no disco."] end),
          next:(if $operation=="add" then "Escolha essa entrada no GRUB na próxima vez que ligar o computador."
                      else "O GRUB deixará de oferecer essa entrada." end)}'
 }
 
 entry_state_json() {
-    local row="$1" kind path sha actual expected_size expected_mtime actual_size actual_mtime available=false reason=missing
+    local row="$1" kind path sha actual expected_size expected_mtime actual_size actual_mtime profile module available=false reason=missing
     kind="$(jq -r '.kind' <<< "$row")"
     if [ "$kind" = iso ]; then
         path="$(jq -r '.hostPath' <<< "$row")"; sha="$(jq -r '.sha256' <<< "$row")"
-        if [ -f "$path" ]; then
+        profile="$(jq -r '.profile' <<< "$row")"; module="$(jq -r '.fsModule' <<< "$row")"
+        if ! iso_storage_supported "$profile" "$module"; then
+            reason=miso-ntfs
+        elif [ -f "$path" ]; then
             expected_size="$(jq -r '.size // empty' <<< "$row")"; expected_mtime="$(jq -r '.mtime // empty' <<< "$row")"
             if [ -n "$expected_size" ] && [ -n "$expected_mtime" ]; then
                 actual_size="$(stat -c %s -- "$path")"; actual_mtime="$(stat -c %Y -- "$path")"
@@ -414,7 +438,11 @@ entry_state_json() {
     else
         if blkid -U "$(jq -r '.fsUuid' <<< "$row")" >/dev/null 2>&1; then available=true; reason=present; fi
     fi
-    jq --argjson available "$available" --arg reason "$reason" '. + {available:$available,reason:$reason}' <<< "$row"
+    jq --argjson available "$available" --arg reason "$reason" '
+        . + {available:$available,reason:$reason}
+        | if .kind == "iso" then
+              . + {bootValidation:(if .reason == "miso-ntfs" then "blocked" else "pending" end)}
+          else . end' <<< "$row"
 }
 
 status_json() {
@@ -440,7 +468,7 @@ print_status() {
 }
 
 cmd_iso() {
-    local sub="$SUBCOMMAND" json=0 path profile=auto id="" title="" dry=0 arg entry proposed expected="" real known i
+    local sub="$SUBCOMMAND" json=0 path profile=auto id="" title="" dry=0 arg entry proposed expected="" real known i validation
     case "$sub" in
         status)
             [ "${REST[0]:-}" = --json ] && json=1
@@ -518,9 +546,9 @@ cmd_iso() {
             else
                 apply_manifest_file "$proposed" "$known"
                 jq -n --argjson entry "$entry" \
-                    '{status:"ready",entryId:("phasezero-iso-" + $entry.id),
-                      summary:("Entrada “" + $entry.title + "” conferida no GRUB."),
-                      next:"Ao ligar o computador, selecione a entrada para abrir a sessão live."}'
+                    '{status:"ready",bootValidation:"pending",entryId:("phasezero-iso-" + $entry.id),
+                      summary:("Entrada “" + $entry.title + "” registrada no GRUB."),
+                      next:"Teste a sessão live no próximo boot antes de iniciar a instalação."}'
             fi
             rm -f "$proposed"
             ;;
@@ -542,7 +570,12 @@ cmd_iso() {
             [ -f "$path" ] || { pz_error "ISO unavailable: $path"; return 1; }
             arg="$(sha256sum -- "$path" | awk '{print $1}')"
             [ "$arg" = "$(jq -r '.sha256' <<< "$entry")" ] || { pz_error "ISO SHA-256 mismatch: $id"; return 1; }
-            inspect_iso_json "$path" "$profile" | jq --arg id "$id" --arg sha256 "$arg" '. + {id:$id,sha256:$sha256,verified:true}'
+            validation=pending
+            if ! iso_storage_supported "$profile" "$(jq -r .fsModule <<< "$entry")"; then validation=blocked; fi
+            inspect_iso_json "$path" "$profile" |
+                jq --arg id "$id" --arg sha256 "$arg" \
+                    --arg bootValidation "$validation" \
+                    '. + {id:$id,sha256:$sha256,verified:true,verificationScope:"file",bootValidation:$bootValidation}'
             ;;
         refresh)
             id="${REST[0]:-}"; [ -n "$id" ] || { pz_error "usage: boot iso refresh ID [--dry-run]"; return 2; }
@@ -686,7 +719,7 @@ cmd_grubfm() {
 }
 
 schedule_next() {
-    local kind="$1" id="$2" reboot=0 entry_id row
+    local kind="$1" id="$2" reboot=0 entry_id row state
     shift 2 || true
     [ "${1:-}" = --reboot ] && reboot=1
     case "$kind" in
@@ -694,7 +727,12 @@ schedule_next() {
             [ -n "$id" ] || { pz_error "entry id required"; return 2; }
             row="$(manifest_json | jq -c --arg id "$id" --arg kind "$kind" '.entries[] | select(.id == $id and .kind == $kind)' | head -1)"
             [ -n "$row" ] || { pz_error "boot entry not registered: $kind/$id"; return 1; }
-            [ "$(entry_state_json "$row" | jq -r '.available')" = true ] || { pz_error "boot entry unavailable: $kind/$id"; return 1; }
+            state="$(entry_state_json "$row")"
+            if [ "$(jq -r '.reason' <<< "$state")" = miso-ntfs ]; then
+                pz_error "$(iso_storage_help)"
+                return 1
+            fi
+            [ "$(jq -r '.available' <<< "$state")" = true ] || { pz_error "boot entry unavailable: $kind/$id"; return 1; }
             [ "$kind" = iso ] && entry_id="phasezero-iso-$id" || entry_id="phasezero-removable-$id"
             ;;
         grubfm)
@@ -715,7 +753,12 @@ catalog_json() {
     while IFS= read -r row; do
         [ -n "$row" ] || continue
         state="$(entry_state_json "$row")"; key="$(jq -r 'if .kind == "iso" then "iso:"+.id else "usb:"+.id end' <<< "$row")"
-        title="$(jq -r '.title' <<< "$row")"; desc="$(jq -r 'if .available then "Pronto para boot one-shot." else "Indisponível: "+.reason end' <<< "$state")"
+        title="$(jq -r '.title' <<< "$row")"
+        desc="$(jq -r '
+            if .reason == "miso-ntfs" then "Use um pendrive de instalação separado para esta ISO."
+            elif .available and .kind == "iso" then "Disponível para testar a sessão live."
+            elif .available then "Pronto para boot one-shot."
+            else "Indisponível: "+.reason end' <<< "$state")"
         choices="$(jq --arg key "$key" --arg title "$title" --arg description "$desc" --argjson available "$(jq '.available' <<< "$state")" \
             '. + [{key:$key,title:$title,description:$description,available:$available}]' <<< "$choices")"
     done < <(manifest_json | jq -c '.entries[]')

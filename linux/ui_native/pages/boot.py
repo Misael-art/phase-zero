@@ -112,7 +112,7 @@ class BootPage(CatalogWorkspacePage):
         self.iso_list.setVisible(self.iso_list.count() > 0)
         if self.iso_list.count():
             self.iso_list.setFixedHeight(42 * min(self.iso_list.count(), 4) + 2 * self.iso_list.frameWidth())
-            self.iso_status.setText("Escolha a entrada desejada no GRUB ao ligar o computador.")
+            self.iso_status.setText("Confira o estado da imagem antes de reiniciar.")
             self.iso_list.setCurrentRow(0)
         else:
             self.iso_status.setText("Nenhuma ISO registrada. Escolha um arquivo para começar.")
@@ -130,7 +130,8 @@ class BootPage(CatalogWorkspacePage):
         if current is not None:
             entry = current.data(Qt.ItemDataRole.UserRole)
             state = {
-                "ready": "Arquivo disponível",
+                "ready": "Arquivo disponível. Sessão live pendente de teste no hardware.",
+                "miso-ntfs": "BigLinux / Manjaro em NTFS. Use um pendrive de instalação separado.",
                 "missing": "Arquivo indisponível",
                 "metadata-mismatch": "O arquivo mudou. Selecione a ISO novamente.",
                 "hash-mismatch": "O arquivo mudou. Selecione a ISO novamente.",
