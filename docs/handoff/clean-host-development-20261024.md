@@ -1,5 +1,23 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Retomada no BigLinux — 22/11/2026
+
+O [resgate privado do GitHub](https://github.com/Misael-art/phase-zero-continuity-20261024/releases/tag/rescue-20261122)
+contém o guia `COMECE-AQUI.md`, fontes do restaurador EmuAtlas e mudanças
+locais do PhaseZero e do SMSForge. Confira os arquivos com `SHA256SUMS.txt`.
+Para o ambiente de desenvolvimento do PhaseZero, use
+`codex/clean-host-dev-bootstrap` e os comandos de primeiro uso abaixo.
+Para retomar as frentes em revisão, use `codex/google-drive-mounts`
+([PR #139](https://github.com/Misael-art/phase-zero/pull/139)) ou
+`codex/grub-live-iso` ([PR #140](https://github.com/Misael-art/phase-zero/pull/140)).
+A beta publicada continua sendo `v1.22.16`. Os dois PRs têm checks de CI com
+falhas e permanecem em revisão.
+
+O atalho **Restaurar EmuAtlas** no WindowsSD restaura o backup privado do
+Google Drive, oferece o aplicativo base PhaseZero e prepara o Fôlego em Modo
+Auditor. O recibo do Drive corresponde aos 292 lotes do índice do
+restaurador. Preserve o cartão e o TPM ao reinstalar o BigLinux.
+
 ## Sessões live pelo GRUB — 22/11/2026
 
 `codex/grub-live-iso` usa o backend `linux/pz boot iso` em **Boot Direto →
@@ -13,8 +31,10 @@ BigLinux, a imagem `biglinux_2026-06-06_k618.iso` em NTFS foi reconhecida
 como MISO. O leitor GRUB consultou kernel, initramfs e microcodes na imagem,
 e a entrada renderizada passou no `grub-script-check`. A tentativa no host
 parou no gate existente do carregador EFI ativo, que detectou um prefixo
-dependente da ordem dos discos antes de gravar. O registro e o boot físico
-dependem da correção autorizada desse carregador.
+dependente da ordem dos discos antes de gravar. Após a correção autorizada
+do EFI com backup, a CLI registrou e conferiu **BigLinux 2026-06-06 (Live)**
+na configuração ativa. A ordem do firmware e a seleção padrão permaneceram
+preservadas. Boot físico pendente.
 
 ## Integração manual de entrada — 30/10/2026
 
