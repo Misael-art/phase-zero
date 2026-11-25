@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <rect x="2" y="2" width="20" height="20" rx="4" fill="#1e1b4b"/>
-<rect x="4" y="4" width="16" height="16" rx="3" fill="{muted}"/>
-  <circle cx="12" cy="12" r="3" fill="{accent}"/>
-  <path d="M12 6v2M12 16v2M6 12h2M16 12h2" stroke="{accent}" stroke-width="1.5" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8">
+  <path d="M9 4.5a2 2 0 1 1 4 0V6h4a1 1 0 0 1 1 1v4h1.5a2 2 0 1 1 0 4H18v4a1 1 0 0 1-1 1h-4v-1.5a2 2 0 1 0-4 0V20H5a1 1 0 0 1-1-1v-4h1.5a2 2 0 1 0 0-4H4V7a1 1 0 0 1 1-1h4z" stroke="#14a594"/>
 </svg>

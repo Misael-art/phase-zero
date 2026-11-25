@@ -719,6 +719,54 @@ def cdp_evaluate(ws_url: str, expression: str, timeout: float) -> Any:
                         return result.get("result", {}).get("value")
 
 
+# ChatGPT ships composer markups the pinned runtime may not know yet. Runtime
+# 6.1.17 only accepts the Markdown composer inside `form[data-chatgpt-composer]`;
+# ChatGPT dropped that attribute (2026-11), so every turn and the launcher's own
+# session inspection waited for a composer forever. The shim only tags the form
+# that already holds ChatGPT's own composer textbox; it reads and sends nothing.
+COMPOSER_COMPAT_SCRIPT = (
+    "(()=>{const sel='[data-composer-markdown][contenteditable=\"true\"][role=\"textbox\"]';"
+    "const mark=()=>{let n=0;for(const e of document.querySelectorAll(sel)){const f=e.closest('form');"
+    "if(f&&!f.hasAttribute('data-chatgpt-composer')){f.setAttribute('data-chatgpt-composer','');n++;}}return n;};"
+    "const n=mark();if(!window.__pzComposerCompat){let q=false;"
+    "window.__pzComposerCompat=new MutationObserver(()=>{if(q)return;q=true;"
+    "requestAnimationFrame(()=>{q=false;mark();});});"
+    "window.__pzComposerCompat.observe(document.documentElement,{childList:true,subtree:true});}"
+    "return n;})()")
+DOM_COMPAT_INTERVAL = 1.5
+
+
+def chatgpt_page_targets(devtools_file: Path) -> list[str]:
+    """WebSocket URLs of every chatgpt.com page in the launcher (home and turn tabs)."""
+    port = int(devtools_file.read_text(encoding="utf-8").split()[0])
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as resp:
+        pages = json.loads(resp.read())
+    return [page["webSocketDebuggerUrl"] for page in pages
+            if page.get("type") == "page" and page.get("webSocketDebuggerUrl")
+            and str(page.get("url", "")).startswith("https://chatgpt.com")]
+
+
+def dom_compat_pass(devtools_file: Path) -> int:
+    """Apply the composer shim to every ChatGPT page once; returns forms tagged."""
+    tagged = 0
+    for target in chatgpt_page_targets(devtools_file):
+        try:
+            tagged += int(cdp_evaluate(target, COMPOSER_COMPAT_SCRIPT, 5) or 0)
+        except (OSError, ValueError, TypeError):
+            continue  # page navigating or closed; next pass retries
+    return tagged
+
+
+def dom_compat_loop(devtools_file: Path, interval: float = DOM_COMPAT_INTERVAL) -> int:
+    """Keep the shim on pages the launcher reloads. Stopped with the launcher unit."""
+    while True:
+        try:
+            dom_compat_pass(devtools_file)
+        except (OSError, ValueError, KeyError, IndexError, urllib.error.URLError):
+            pass  # launcher still starting or DevTools port rotating
+        time.sleep(interval)
+
+
 def classify_launchers(processes: dict[int, dict[str, Any]],
                        unit_pid: int) -> list[dict[str, Any]]:
     """Main launcher processes (parent is not a launcher) and whether each is isolated."""
@@ -1036,6 +1084,7 @@ class Paths:
             raise BridgeError("Slot Web inválido", "instance-slot")
         self.port = DEFAULT_PORT if not instance else 24000 + int(slot) * 4
         self.unit_name = UNIT_NAME if not instance else f"pz-chatgpt-web-{instance}.service"
+        self.compat_unit_name = self.unit_name.removesuffix(".service") + "-compat.service"
         self.shortcut_entries = (SHORTCUT_ENTRIES if not instance else
                                  {mode: f"phasezero-chatgpt-web-{instance}-{mode}.desktop"
                                   for mode in SHORTCUT_ENTRIES})
@@ -1178,6 +1227,30 @@ class Bridge:
     def launcher_active(self) -> bool:
         code, out, _ = self.runner.run(["systemctl", "--user", "is-active", self.paths.unit_name], timeout=10)
         return code == 0 and out.strip() in {"active", "activating"}
+
+    def compat_active(self) -> bool:
+        code, out, _ = self.runner.run(["systemctl", "--user", "is-active", self.paths.compat_unit_name],
+                                       timeout=10)
+        return code == 0 and out.strip() in {"active", "activating"}
+
+    def ensure_dom_compat(self) -> str:
+        """Run the composer shim beside the launcher; bound to it, so it stops with it.
+
+        Best effort: a failure here never blocks the launcher, it only shows in status.
+        """
+        unit = self.paths.compat_unit_name
+        if self.compat_active():
+            return "active"
+        if not self.launcher_active():
+            return "inactive"
+        command = ["systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}",
+                   "--description=PhaseZero ChatGPT Web composer compatibility",
+                   "-p", f"BindsTo={self.paths.unit_name}", "-p", f"After={self.paths.unit_name}",
+                   "-p", "Restart=on-failure", "-p", "RestartSec=5",
+                   sys.executable, str(Path(__file__).resolve()), "dom-compat",
+                   "--devtools-file", str(self.paths.launcher_data / "DevToolsActivePort")]
+        code, _, _ = self.runner.run(command, timeout=30)
+        return "started" if code == 0 else "failed"
 
     def upstream_config(self) -> dict[str, Any] | None:
         try:
@@ -1565,6 +1638,7 @@ class Bridge:
                 "loginEntryRestored": self.restore_autostart(),
                 "shortcutsRestored": self.restore_shortcuts(),
                 "liveCodexRouteTouched": self.live_route_touched(),
+                "composerCompat": self.ensure_dom_compat(),
                 "isolation": self.isolation()}
 
     def adopt_session(self) -> dict[str, Any]:
@@ -1740,7 +1814,8 @@ class Bridge:
             "product": PRODUCT_ID, "experimental": True, "optIn": bool(state.get("optIn")),
             "stage": stage, "pin": {k: PIN[k] for k in ("version", "tag", "commit", "auditedAt")},
             "package": package, "launcher": {"active": active, "unit": self.paths.unit_name, "port": self.paths.port,
-                                             "hardening": state.get("hardening")},
+                                             "hardening": state.get("hardening"),
+                                             "composerCompat": self.compat_active()},
             "upstreamMode": mode,
             "autoApproveToolCalls": bool((config or {}).get("autoApproveToolCalls")),
             "route": route, "codexHome": str(self.paths.codex_home),
@@ -2072,7 +2147,8 @@ class Bridge:
                               "package-unverified")
         self.migrate_owned_config(state)
         if self.launcher_active():
-            return {"launcher": "already-active", "unit": self.paths.unit_name}
+            return {"launcher": "already-active", "unit": self.paths.unit_name,
+                    "composerCompat": self.ensure_dom_compat()}
         if package["unpacked"] != "verified":
             raise BridgeError("launcher não instalado ou alterado após a verificação; rode `install`",
                               "install-unverified")
@@ -2135,6 +2211,7 @@ class Bridge:
         state["launchedAt"] = iso(self.clock())
         self.save_state(state)
         return {"launcher": "started", "unit": self.paths.unit_name, "hardening": state["hardening"],
+                "composerCompat": self.ensure_dom_compat(),
                 "next": "Entre no ChatGPT dentro da janela do launcher e rode `setup`."}
 
     def stop_launcher(self) -> dict[str, Any]:
@@ -3874,6 +3951,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("plan", "status", "fetch", "install", "launch", "stop", "disable", "opt-out",
                  "repair", "adopt-session", "smoke"):
         sub.add_parser(name)
+    compat = sub.add_parser("dom-compat")  # internal: run by the compat unit
+    compat.add_argument("--devtools-file", required=True)
     update = sub.add_parser("update", help="atualiza o app para a release mais nova (hash conferido)")
     update.add_argument("--check", action="store_true", help="só consulta, não altera nada")
     desktop = sub.add_parser("desktop", help="Codex Desktop no perfil dedicado")
@@ -4159,6 +4238,8 @@ def offer_autostart(bridge: Bridge) -> None:
 
 def main(argv: list[str] | None = None, *, env: dict[str, str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "dom-compat":
+        return dom_compat_loop(Path(args.devtools_file))
     bridge = Bridge(env=env)
     friendly = args.command in FRIENDLY_COMMANDS and not args.json
     try:

@@ -49,6 +49,7 @@ detected_agents() {
     command -v opencode >/dev/null 2>&1 && echo "opencode:open-code"
     command -v cursor >/dev/null 2>&1 && echo "cursor:cursor"
     command -v gemini >/dev/null 2>&1 && echo "gemini-cli:gemini-cli"
+    command -v qwen >/dev/null 2>&1 && echo "qwen-code:qwen-code"
     { command -v grok >/dev/null 2>&1 || [ -d "$HOME/.grok" ]; } && echo "grok:grok"
     { command -v kimi >/dev/null 2>&1 || command -v kimi-code >/dev/null 2>&1 || [ -d "$HOME/.kimi" ] || [ -d "$HOME/.kimi-code" ]; } && echo "kimi-code:kimi-code"
 }

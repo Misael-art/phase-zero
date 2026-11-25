@@ -9,6 +9,15 @@ pz_pkg_install() {
         pz_error "invalid package name: $pkg"
         return 2
     }
+    local equivalent=""
+    case "$manager" in
+        flatpak) equivalent="$(pz_equivalent_present flatpak "$pkg" 2>/dev/null)" || equivalent="" ;;
+        *) equivalent="$(pz_equivalent_present pacman "$pkg" 2>/dev/null)" || equivalent="" ;;
+    esac
+    if [ -n "$equivalent" ]; then
+        pz_info "skip $pkg: já presente via ${equivalent//$'\t'/ }"
+        return 0
+    fi
     case "$manager" in
         pacman)
             command -v pacman >/dev/null 2>&1 || { pz_error "pacman missing"; return 69; }

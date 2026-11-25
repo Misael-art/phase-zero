@@ -235,3 +235,31 @@ def test_synthesized_actions_produce_real_pz_commands(monkeypatch, catalog):
     tune = tuning_action(items["tune.gaming"], True)
     program, args = command_runner.build_program(ROOT, tune, preview=False)
     assert args == ["tune", "gaming", "apply"]
+
+
+def test_install_switch_names_the_state_itself(page):
+    """"Instalado" ao lado de "Desligado" era lido como app instalado."""
+    page._absorb_capabilities(status_payload({"gaming.mangohud"}))
+    installed = card_for(page, "gaming.mangohud").install_switch
+    missing = card_for(page, "gaming.gamescope").install_switch
+    assert installed.accessibleDescription() == "Instalado"
+    assert missing.accessibleDescription() == "Não instalado"
+    assert installed.sizeHint().width() >= installed.fontMetrics().horizontalAdvance("Não instalado") + 50
+
+
+def test_app_from_another_channel_shows_origin_and_locks_switch(page):
+    payload = status_payload({"security.brave"})
+    for item in payload["capabilities"]:
+        if item["id"] == "security.brave":
+            item["external"] = "programa /usr/bin/brave"
+    page._absorb_capabilities(payload)
+    card = card_for(page, "security.brave")
+    assert card.install_switch.isChecked() is True
+    assert card.install_switch.isEnabled() is False
+    assert not card.external_chip.isHidden()
+    assert all(chip.isHidden() for chip in card._rollback_chips)
+    assert "fora do PhaseZero" in card.install_switch.toolTip()
+    card.set_busy(False)
+    assert card.install_switch.isEnabled() is False
+    other = card_for(page, "gaming.mangohud")
+    assert other.external_chip.isHidden()

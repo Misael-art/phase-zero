@@ -1,5 +1,24 @@
 # Steam Deck KDE input v1
 
+## Preferência do microfone interno durante falha de perfil — 06/11/2026
+
+O watcher de desktop captura preferências a cada três segundos fora de jogos.
+Se a placa acp5x muda para `pro-audio` com `Int Mic` ou `DMIC Enable`
+desligado, a fonte pode continuar enumerada sem captar; capturar esse perfil
+substituiria a referência saudável antes de um reparador observá-lo. Com
+`HiFi (Mic, Speaker)` salvo e `mic-biglinux` ainda selecionado como entrada
+padrão, `capture_preferences` agora preserva a referência e retorna erro.
+O watcher entra em reconciliação e restaura o perfil no ciclo seguinte. Aplica
+a mesma proteção a `HiFi (Headset, Speaker)` selecionado sem headset disponível.
+Se a entrada padrão mudou para um microfone externo ou os dois controles estão
+ligados em Pro Audio, a escolha do usuário continua capturável. Não lê áudio,
+reinicia serviços ou exige o Fôlego; a guarda de perfis do Fôlego continua
+independente e pode reparar quando sua política está habilitada.
+
+Isso impede um novo snapshot ruim; uma preferência antiga já salva com headset
+ausente continua a exigir reconciliação manual antes de automação concorrente.
+O teste usa estados descartáveis e não troca perfis físicos para simular falha.
+
 ## Desktop resilience — 2026-10-29
 
 ### Correção de abertura automática — 29/10/2026

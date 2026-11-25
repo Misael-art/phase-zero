@@ -14,6 +14,7 @@ from .product_inventory import (
     instances_from_status_payload,
     status_action_matches_app,
 )
+from .health_models import parse_health_checks
 from .result_parser import parse_json_output
 
 _SECRET_PATTERNS = (
@@ -39,6 +40,10 @@ def report_outcome(stdout: str, stderr: str, exit_code: int) -> tuple[str, objec
     """
     parsed = parse_json_output(stdout)
     if isinstance(parsed, dict) and parsed:
+        return "ready", parsed, ""
+    # A diagnostic that found problems exits non-zero by contract; its check
+    # list is still the report the user asked for, not a failed verification.
+    if parse_health_checks(parsed):
         return "ready", parsed, ""
     if exit_code != 0:
         detail = redact(stderr.strip())[:500]

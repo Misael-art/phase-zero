@@ -11,9 +11,7 @@ EMUDECK_PHASEZERO_DESKTOP="$PZ_DESKTOP_DIR/phasezero-emudeck.desktop"
 EMUDECK_WRAPPER="$PZ_LOCAL_BIN/phasezero-emudeck"
 
 resolve_emudeck_url() {
-    curl -fsSL "$PZ_EMUDECK_RELEASE_API" |
-        jq -r '.assets[]? | select(.name | test("AppImage$")) | .browser_download_url' |
-        head -1
+    pz_emulation_release_appimage_url "$PZ_EMUDECK_RELEASE_API"
 }
 
 emudeck_desktop_dir() {
@@ -174,6 +172,10 @@ EOF
 }
 
 install_emudeck_appimage() {
+    if pz_emulation_foreign_install EmuDeck "$PZ_EMULATION_STATE/emudeck.json" \
+        --appimage 'EmuDeck*.AppImage' --desktop-exec EmuDeck.AppImage; then
+        return 0
+    fi
     local url
     pz_emulation_ensure_layout
     url="$(resolve_emudeck_url)"

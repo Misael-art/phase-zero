@@ -21901,6 +21901,7 @@ function Get-BootstrapAiMemoryDetectedAgents {
         }
         if (-not [string]::IsNullOrWhiteSpace($path)) { $agents.Add([string]$item.Id) | Out-Null }
     }
+    if (Resolve-CommandPath -Name 'qwen') { $agents.Add('qwen-code') | Out-Null }
     return @($agents.ToArray())
 }
 
@@ -22166,7 +22167,7 @@ function Set-BootstrapAiMemoryConfig {
     $message = if (@($agents).Count -gt 0) {
         ("Servidor loopback {0}; MCP/hooks aplicados para: {1}." -f [string]$task['status'], (($agents -join ', ')))
     } else {
-        ("Servidor loopback {0}; nenhum agente (Claude Code/Codex/OpenCode/Gemini) detectado para wiring automatico." -f [string]$task['status'])
+        ("Servidor loopback {0}; nenhum agente compatível detectado para wiring automático." -f [string]$task['status'])
     }
     $result = New-BootstrapAiToolResult -ToolName 'ai-memory' -Action 'configure' -Status $status -InstallRoot $root -ProjectRoot $ProjectRoot -Message $message -Docs 'https://github.com/akitaonrails/ai-memory' -CommandPath $exePath
     $result['serverTask'] = $task
@@ -26999,14 +27000,27 @@ function Invoke-BootstrapPhaseZeroBaselineProbe {
 
 function Get-BootstrapPhaseZeroToolRuleBody {
     $templatePath = Join-Path $PSScriptRoot 'assets\agent-skills\phasezero-tools-always-on.md'
-    if (Test-Path $templatePath) {
-        return ((Get-Content -Path $templatePath -Raw -Encoding utf8).Trim())
+    if (Test-Path -LiteralPath $templatePath) {
+        return (Get-Content -LiteralPath $templatePath -Raw -Encoding utf8).Trim()
     }
     return @'
-Always use rtk (token-economy) for every response.
-Consult and write context to ai-memory for cross-agent handoff.
-Follow caveman mode (terse, technical, no filler).
+Read AGENTS.md and follow current user and repository instructions.
+Use pz ai memory practices before non-trivial work. Apply verified practices within scope.
+The configured private GitHub repository transports encrypted memory packages.
+If memory is unavailable, use the checkout, run the applicable checks and preserve the handoff.
+For interface work, use the PhaseZero memorial's Fôlego and RetroDev Studio cases to define the user's task, the outcome, and how to verify the real journey.
 '@.Trim()
+}
+
+function Get-BootstrapRooProjectRulePath {
+    param([string]$WorkspaceRoot)
+    $rulesDir = Join-Path $WorkspaceRoot '.roo\rules'
+    $legacy = Join-Path $WorkspaceRoot '.roorules'
+    if ((Test-Path -LiteralPath $legacy -PathType Leaf) -and
+        -not (Get-ChildItem -LiteralPath $rulesDir -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+        return $legacy
+    }
+    return (Join-Path $rulesDir 'phasezero-tools.md')
 }
 
 function Ensure-BootstrapPhaseZeroToolRuleFiles {
@@ -27017,8 +27031,12 @@ function Ensure-BootstrapPhaseZeroToolRuleFiles {
         @{ id = 'cursor'; path = (Join-Path $root '.cursor\rules\phasezero-tools.mdc'); header = 'cursor' },
         @{ id = 'windsurf'; path = (Join-Path $root '.windsurf\rules\phasezero-tools.md'); header = 'windsurf' },
         @{ id = 'cline'; path = (Join-Path $root '.clinerules\phasezero-tools.md'); header = 'none' },
+        @{ id = 'roo'; path = (Get-BootstrapRooProjectRulePath -WorkspaceRoot $root); header = 'none' },
         @{ id = 'githubCopilot'; path = (Join-Path $root '.github\copilot-instructions.md'); header = 'none' },
-        @{ id = 'agents'; path = (Join-Path $root 'AGENTS.md'); header = 'none' }
+        @{ id = 'agents'; path = (Join-Path $root 'AGENTS.md'); header = 'none' },
+        @{ id = 'claudeCode'; path = (Join-Path $root 'CLAUDE.md'); header = 'none' },
+        @{ id = 'geminiCli'; path = (Join-Path $root 'GEMINI.md'); header = 'none' },
+        @{ id = 'qwenCode'; path = (Join-Path $root 'QWEN.md'); header = 'none' }
     )
     $records = @()
     $updated = $false
@@ -27184,11 +27202,12 @@ function Get-BootstrapAgentCompatTargetCatalog {
         cursor = [ordered]@{ displayName = 'Cursor'; ruleFiles = @((Join-Path $root '.cursor\rules\phasezero-tools.mdc')); mcp = @((Get-BootstrapCursorMcpConfigPath)) }
         windsurf = [ordered]@{ displayName = 'Windsurf'; ruleFiles = @((Join-Path $root '.windsurf\rules\phasezero-tools.md')); mcp = @((Get-BootstrapWindsurfMcpConfigPath)) }
         vsCode = [ordered]@{ displayName = 'VS Code'; ruleFiles = @((Join-Path $root '.github\copilot-instructions.md')); mcp = @((Get-BootstrapVsCodeMcpConfigPath)) }
-        zed = [ordered]@{ displayName = 'Zed'; ruleFiles = @(); mcp = @((Get-BootstrapZedConfigPath)) }
+        zed = [ordered]@{ displayName = 'Zed'; ruleFiles = @((Join-Path $root '.github\copilot-instructions.md'), (Join-Path $root 'AGENTS.md')); mcp = @((Get-BootstrapZedConfigPath)) }
         openCode = [ordered]@{ displayName = 'OpenCode'; ruleFiles = @((Join-Path $root 'AGENTS.md')); mcp = @((Get-BootstrapOpenCodeConfigPath)) }
         cline = [ordered]@{ displayName = 'Cline'; ruleFiles = @((Join-Path $root '.clinerules\phasezero-tools.md')); mcp = @((Get-BootstrapClineMcpConfigPath)) }
-        roo = [ordered]@{ displayName = 'Roo Code'; ruleFiles = @(); mcp = @((Get-BootstrapRooMcpConfigPath)) }
-        geminiCli = [ordered]@{ displayName = 'Gemini CLI'; ruleFiles = @((Join-Path $root 'AGENTS.md')); mcp = @() }
+        roo = [ordered]@{ displayName = 'Roo Code'; ruleFiles = @((Get-BootstrapRooProjectRulePath -WorkspaceRoot $root)); mcp = @((Get-BootstrapRooMcpConfigPath)) }
+        geminiCli = [ordered]@{ displayName = 'Gemini CLI'; ruleFiles = @((Join-Path $root 'GEMINI.md')); mcp = @() }
+        qwenCode = [ordered]@{ displayName = 'Qwen Code'; ruleFiles = @((Join-Path $root 'QWEN.md')); mcp = @() }
     }
 }
 
@@ -27313,11 +27332,7 @@ function Invoke-BootstrapPhaseZeroPostConfig {
         }
     }
     # 2. ai-memory — detect agents and wire
-    $agentsToWire = @()
-    foreach ($agent in @('claude-code', 'codex-cli', 'opencode')) {
-        $path = Resolve-CommandPath -Name ($agent -replace '-cli$','')
-        if ($path) { $agentsToWire += $agent }
-    }
+    $agentsToWire = @(Get-BootstrapAiMemoryDetectedAgents)
     $memoryExe = Get-BootstrapAiMemoryExePath
     if (-not $memoryExe) { $memoryExe = Resolve-CommandPath -Name 'ai-memory' }
     if ($memoryExe -and $agentsToWire.Count -gt 0) {

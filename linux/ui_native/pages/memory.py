@@ -1,7 +1,8 @@
 """Memory journey embedded in the existing AI page; execution stays in catalog."""
 from dataclasses import replace
+from pathlib import Path
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QGridLayout, QInputDialog, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QFrame, QGridLayout, QInputDialog, QLabel, QVBoxLayout, QWidget
 
 from ..widgets import SectionHeader
 
@@ -23,6 +24,7 @@ BUTTONS = {
         ("backup", "Backup completo agora"), ("verify", "Verificar backup"),
         ("restore", "Restaurar backup"), ("key-export", "Guardar recuperação"),
         ("key-import", "Cadastrar outro host"), ("resolve", "Resolver conflitos"),
+        ("curate", "Curar memorial"), ("curate-apply", "Revisar proposta"),
     )},
 }
 
@@ -37,6 +39,7 @@ class MemoryCard(QFrame):
         self.setProperty("cardRole", "memory")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
+        layout.setAlignment(Qt.AlignTop)
         layout.addWidget(SectionHeader("Memória dos agentes", "Conhecimento entre hosts · backups privados por equipamento"))
         self.state = QLabel("Verificando memória…")
         self.state.setObjectName("memoryState")
@@ -57,6 +60,7 @@ class MemoryCard(QFrame):
         advanced = QWidget()
         extra = QGridLayout(advanced)
         extra.setContentsMargins(0, 0, 0, 0)
+        curation = QGridLayout()
         for index, (name, (action_id, title)) in enumerate(BUTTONS.items()):
             action = page.by_id.get(action_id)
             if action is None:
@@ -75,6 +79,11 @@ class MemoryCard(QFrame):
             elif name == "scope-add":
                 button.clicked.disconnect()
                 button.clicked.connect(self.enroll_project)
+            elif name in {"curate", "curate-apply"}:
+                button.clicked.disconnect()
+                button.clicked.connect(self.select_memorial if name == "curate" else self.review_curation)
+                curation.addWidget(button, 0, 0 if name == "curate" else 1)
+                continue
             elif name in {"device-remove", "scope-remove"}:
                 button.clicked.disconnect()
                 button.clicked.connect(lambda _checked=False, selected=name: self.remove_selected(selected))
@@ -86,6 +95,14 @@ class MemoryCard(QFrame):
                 row, column = position // 2, position % 2
             grid.addWidget(button, row, column)
         layout.addLayout(main)
+        layout.addWidget(SectionHeader("Curadoria do memorial"))
+        self.curation_status = QLabel("Selecione um memorial.md para gerar uma proposta de revisão.")
+        self.curation_status.setObjectName("sectionCaption")
+        self.curation_status.setAccessibleName("Estado da curadoria")
+        self.curation_status.setTextFormat(Qt.PlainText)
+        self.curation_status.setWordWrap(True)
+        layout.addWidget(self.curation_status)
+        layout.addLayout(curation)
         self.advanced = advanced
         advanced.setVisible(page._advanced_mode)
         page._technical_widgets.append(advanced)
@@ -98,6 +115,24 @@ class MemoryCard(QFrame):
         layout.addLayout(setup)
         layout.addWidget(advanced)
         self.apply_buttons()
+
+    def select_memorial(self):
+        initial = Path(__file__).resolve().parents[3] / "assets/agent-skills/memorial.md"
+        path, _ = QFileDialog.getOpenFileName(self, "Selecionar memorial", str(initial), "Memorial (memorial.md)")
+        if path:
+            self.request_curation_action("curate", "{path}", path)
+
+    def review_curation(self):
+        report_id = (self.payload or {}).get("curation", {}).get("id")
+        if report_id:
+            self.request_curation_action("curate-apply", "{id}", report_id)
+
+    def request_curation_action(self, name, placeholder, value):
+        action = self.page.by_id["ai.memory-" + name]
+        self.page.action_requested.emit(replace(action,
+            args=tuple(value if part == placeholder else part for part in action.args),
+            preview_args=tuple(value if part == placeholder else part for part in action.preview_args),
+            parameters=()))
 
     def resolve_selected(self):
         conflicts = (self.payload or {}).get("conflicts", [])
@@ -181,16 +216,31 @@ class MemoryCard(QFrame):
                 state = "desconectado"
             rows.append(f"{target.get('label', 'Dispositivo')}: {state} · backup verificado: {backup.get('verifiedAt', 'ainda não')}")
         self.targets.setText("\n".join(rows) or "Cadastre dispositivo ou repositório privado para proteger memória.")
+        report = payload.get("curation") or {}
+        if report:
+            count = report.get("findings", 0)
+            outcome = ("Alterações aplicadas ao memorial local." if report.get("applied") else
+                       "Um achado para revisar." if count == 1 else
+                       f"{count} achados para revisar." if count else
+                       "A revisão não identificou achados com evidência.")
+            self.curation_status.setText(f"{outcome} {report['provider']} · {report['model']}")
+        else:
+            self.curation_status.setText("Selecione um memorial.md para gerar uma proposta de revisão.")
+        if payload.get("curationRunning"):
+            self.curation_status.setText("Curadoria em andamento em outra operação.")
         self.apply_buttons()
 
     def failed(self):
         self.payload = None
         self.state.setText("Estado da memória indisponível. Atualize estado para continuar.")
+        self.curation_status.setText("Estado da curadoria indisponível. Atualize para consultar propostas.")
         self.apply_buttons()
 
     def apply_buttons(self):
         payload = self.payload or {}
-        idle = not self.page._operation_running and not payload.get("operationRunning", False)
+        report = payload.get("curation") or {}
+        review_pending = bool(report.get("findings") and not report.get("applied"))
+        curation_primary = "curate-apply" if review_pending else "curate"
         for name, button in self.buttons.items():
             enabled = self.payload is not None
             if name == "install":
@@ -207,6 +257,8 @@ class MemoryCard(QFrame):
                 enabled = payload.get("automatic") is True
             elif name == "resolve":
                 enabled = bool(payload.get("conflicts"))
+            elif name == "curate-apply":
+                enabled = review_pending
             elif name == "scope-add":
                 enabled = payload.get("service") == "active"
             elif name == "scope-remove":
@@ -219,6 +271,14 @@ class MemoryCard(QFrame):
                 enabled = bool(payload.get("github"))
             elif name in {"verify", "restore", "key-export"}:
                 enabled = bool(payload.get("keyConfigured"))
-            button.setEnabled(bool((idle or name == "portability-status" and not self.page._operation_running) and enabled))
+            is_curation = name in {"curate", "curate-apply"}
+            if is_curation:
+                style = "primaryButton" if name == curation_primary else "secondaryButton"
+                if button.objectName() != style:
+                    button.setObjectName(style)
+                    button.style().unpolish(button)
+                    button.style().polish(button)
+            busy = payload.get("curationRunning" if is_curation else "operationRunning")
+            button.setEnabled(bool(not self.page._operation_running and (not busy or name == "portability-status") and enabled))
         self.buttons["install"].setVisible(payload.get("installed") is not True)
         self.buttons["sync"].setVisible(payload.get("installed") is True)

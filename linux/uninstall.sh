@@ -223,6 +223,13 @@ print_root_items() {
   sudo linux/pz windows-vm boot remove        # entrada GRUB Windows VM
   sudo linux/pz waydroid boot remove          # entrada GRUB Waydroid
   sudo linux/pz server boot remove            # entrada GRUB homelab
+  sudo linux/pz boot safe-menu remove         # menu GRUB visível (09/10-phasezero-*)
+  sudo linux/pz boot emergency-shell clear    # entrada GRUB de resgate
+  sudo linux/pz boot iso remove <ID>          # cada ISO loopback (linux/pz boot iso status)
+  sudo linux/pz boot usb remove <ID>          # cada EFI removível (linux/pz boot usb status)
+  sudo linux/pz boot grubfm remove            # payload grubfm experimental
+  # EFI standalone: /boot/efi/EFI/phasezero; se usou --active/--fallback,
+  # restaure o loader pelo backup em ~/.local/state/phasezero/backups/boot-efi-fallback*
   sudo linux/pz steamdeck privileged remove   # bridge root TDP/GPU + polkit
   sudo rm -rf /usr/local/lib/phasezero        # helpers de sistema
   sudo flatpak override --reset               # overrides flatpak de sistema (se aplicados)

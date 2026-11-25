@@ -20,7 +20,10 @@ from linux.capabilities.catalog import BY_ID, CAPABILITIES, PROFILES, compatibil
 from linux.capabilities.engine import (
     CapabilityError,
     apply_plan,
+    catalog_payload,
     create_plan,
+    create_removal_plan,
+    verify_removal,
     read_manifest,
     rollback_operation,
     verify_operation,
@@ -63,6 +66,18 @@ class FakeProvider(Provider):
 
     def available(self, source):
         return True
+
+    # Host falso: nada instalado por outro canal (as sondas reais olhariam o
+    # host que roda o teste).
+    external_names: dict[str, str] = {}
+    external_binary_names: set[str] = set()
+
+    def external(self, source):
+        return self.external_names.get(source.name)
+
+    def external_binaries(self, names):
+        hit = next((name for name in names if name in self.external_binary_names), None)
+        return f"programa /usr/bin/{hit}" if hit else None
 
     def estimate_space(self, source):
         if source.kind == "flatpak":
@@ -1068,3 +1083,61 @@ def test_removal_preserves_shared_dependency_until_last_dependent_is_removed(
         facts=facts, provider=provider,
     )
     assert "docker" not in provider.installed_names
+
+
+def test_app_installed_by_another_channel_is_present_and_never_reinstalled():
+    """Meta-pacote do BigLinux entrega /usr/bin/keepassxc sem o pacote."""
+    facts = host()
+    provider = FakeProvider(facts)
+    provider.external_binary_names = {"keepassxc"}
+    payload = catalog_payload(facts, include_status=True, provider=provider)
+    item = next(entry for entry in payload["capabilities"] if entry["id"] == "security.keepassxc")
+    assert item["installationState"] == "present"
+    assert "keepassxc" in item["external"]
+    plan = create_plan(capability_ids=["security.keepassxc"], facts=facts, provider=provider)
+    action = plan["actions"][0]
+    assert action["status"] == "installed"
+    assert action["command"] is None
+    assert "fora do PhaseZero" in action["reason"]
+    removal = create_removal_plan(["security.keepassxc"], facts=facts, provider=provider)
+    assert removal["status"] == "blocked"
+
+
+def test_system_flatpak_or_provides_counts_as_present():
+    facts = host()
+    provider = FakeProvider(facts)
+    provider.external_names = {"libreoffice-fresh": "pacote que fornece libreoffice-fresh"}
+    payload = catalog_payload(facts, include_status=True, provider=provider)
+    item = next(entry for entry in payload["capabilities"] if entry["id"] == "creative.libreoffice")
+    assert item["installationState"] == "present"
+    assert item["external"] == "pacote que fornece libreoffice-fresh"
+
+
+def test_probes_force_untranslated_package_manager_output(monkeypatch):
+    """pt-BR dizia "não foi encontrado"; o marcador inglês não casava."""
+    from linux.capabilities import providers
+
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        class Result:
+            returncode = 1
+            stdout = ""
+            stderr = "error: package 'x' was not found"
+        return Result()
+
+    monkeypatch.setattr(providers.subprocess, "run", fake_run)
+    provider = Provider(host())
+    from linux.capabilities.models import SourceSpec
+    assert provider.installed(SourceSpec("package", "x", ("arch",))) is False
+    assert seen.get("LC_ALL") == "C"
+
+
+def test_removal_verification_ignores_copy_from_another_channel():
+    facts = host()
+    provider = FakeProvider(facts)
+    provider.external_binary_names = {"keepassxc"}
+    result = verify_removal(["security.keepassxc"], facts=facts, provider=provider)
+    assert result["ok"] is True
+    assert "keepassxc" in result["checks"][0]["remainingExternal"]

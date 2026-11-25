@@ -51,6 +51,7 @@ from . import __version__
 from .models import ActionSpec, OperationResult
 from .platform import open_path
 from .preferences import reduced_motion
+from .health_models import HealthCheck, health_summary, parse_health_checks
 from .result_parser import guidance, is_pending_report, restart_required
 
 
@@ -456,15 +457,22 @@ class HubAppCard(QFrame):
 
         chips = QHBoxLayout()
         chips.setSpacing(6)
+        self._rollback_chips: list[HubChip] = []
         for label in item.rollback_labels:
             state = "success" if item.reversible else "warning"
-            chips.addWidget(HubChip(label, state, f"Como isto é desfeito: {label.lower()}."))
+            chip = HubChip(label, state, f"Como isto é desfeito: {label.lower()}.")
+            self._rollback_chips.append(chip)
+            chips.addWidget(chip)
         if item.reboot == "required":
             chips.addWidget(HubChip("Requer reiniciar", "warning", "Só passa a valer após reiniciar."))
         elif item.reboot == "recommended":
             chips.addWidget(HubChip("Reinício recomendado", "info", "Funciona melhor após reiniciar."))
         if item.risk in {"elevated", "high"}:
             chips.addWidget(HubChip("Pede privilégio", "warning", "Precisa de elevação administrativa."))
+        self._external = ""
+        self.external_chip = HubChip("Instalado fora do PhaseZero", "info")
+        self.external_chip.setVisible(False)
+        chips.addWidget(self.external_chip)
         chips.addStretch(1)
         center.addLayout(chips)
 
@@ -502,6 +510,7 @@ class HubAppCard(QFrame):
 
         if not item.available:
             self.set_available(False, item.reason)
+        self.set_external(getattr(item, "external", ""))
 
     def _switch_block(self, caption: str, kind: str) -> QWidget:
         # Legenda ao lado do switch, não acima: o switch já escreve
@@ -511,13 +520,13 @@ class HubAppCard(QFrame):
         row = QHBoxLayout(block)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
-        label = QLabel(caption)
-        label.setObjectName("hubSwitchCaption")
         switch = SwitchControl()
+        # O próprio switch diz o estado ("Não instalado"); legenda separada
+        # ao lado de "Desligado" era lida como "Instalado" por quem escaneia.
+        switch.set_state_texts(*{"install": ("Instalado", "Não instalado"), "tune": ("Otimizado", "Padrão")}[kind])
         switch.setAccessibleName(f"{caption}: {self.item.title}")
         switch.setTristate(False)
         switch.toggled.connect(lambda checked, which=kind: self._on_toggled(which, checked))
-        row.addWidget(label, 0, Qt.AlignVCenter)
         row.addWidget(switch, 0, Qt.AlignVCenter)
         if kind == "install":
             self.install_switch = switch
@@ -541,6 +550,8 @@ class HubAppCard(QFrame):
         switch.blockSignals(True)
         switch.setChecked(bool(value))
         switch.blockSignals(False)
+        # Sinais bloqueados: atualiza texto acessível/pintura manualmente.
+        switch._state_changed(bool(value))
         switch.setProperty("syncing", False)
         switch.set_pending(False)
         # Estado desconhecido não pode parecer "desligado": o texto diz o que
@@ -548,6 +559,7 @@ class HubAppCard(QFrame):
         unknown = value is None
         switch.setEnabled(not unknown and self.property("available") is not False)
         switch.setToolTip("Estado ainda não verificado" if unknown else "")
+        self._lock_external()
 
     def set_state(self, *, installed: bool | None = None, applied: bool | None = None) -> None:
         if self.install_switch is not None:
@@ -582,11 +594,33 @@ class HubAppCard(QFrame):
         if reason:
             self.reason_label.setText(reason)
         self.reason_label.setVisible(bool(reason) and not available)
+        self._lock_external()
+
+    def set_external(self, origin: str) -> None:
+        """App já presente por outro canal: mostra, mas não instala/remove."""
+        self._external = origin or ""
+        tip = (
+            f"Já instalado fora do PhaseZero ({self._external}). "
+            "Para remover ou atualizar, use quem o instalou."
+        ) if self._external else ""
+        self.external_chip.setVisible(bool(self._external))
+        # Quem instalou é quem desfaz: o meio de reversão do PhaseZero não vale.
+        for chip in getattr(self, "_rollback_chips", ()):
+            chip.setVisible(not self._external)
+        self.external_chip.setToolTip(tip)
+        self.external_chip.setAccessibleDescription(tip)
+        self._lock_external()
+
+    def _lock_external(self) -> None:
+        if getattr(self, "_external", "") and self.install_switch is not None:
+            self.install_switch.setEnabled(False)
+            self.install_switch.setToolTip(self.external_chip.toolTip())
 
     def set_busy(self, busy: bool) -> None:
         for switch in (self.install_switch, self.tune_switch):
             if switch is not None:
                 switch.setEnabled(not busy and self.property("available") is not False)
+        self._lock_external()
 
 
 class StatusPill(QFrame):
@@ -908,12 +942,25 @@ class SwitchControl(QCheckBox):
         super().__init__(parent)
         self.setObjectName("largeSwitch")
         self.setCursor(Qt.PointingHandCursor)
+        self._on_text = "Ligado"
+        self._off_text = "Desligado"
+        self._label_width = 76
         self.setMinimumSize(126, 30)
         self.setAccessibleDescription("Desligado")
         self.toggled.connect(self._state_changed)
 
+    def set_state_texts(self, on: str, off: str) -> None:
+        """Name the state itself ("Instalado"/"Não instalado") instead of
+        Ligado/Desligado beside a caption, which read as two rival states."""
+        self._on_text, self._off_text = on, off
+        metrics = self.fontMetrics()
+        self._label_width = max(76, *(metrics.horizontalAdvance(text) + 8 for text in (on, off, "Aplicando…")))
+        self.setMinimumSize(self._label_width + 50, 30)
+        self._state_changed(self.isChecked())
+        self.updateGeometry()
+
     def sizeHint(self) -> QSize:
-        return QSize(126, 30)
+        return QSize(self._label_width + 50, 30)
 
     def hitButton(self, pos) -> bool:
         # paintEvent desenha trilho e rótulo por toda a largura; o hit rect
@@ -922,7 +969,7 @@ class SwitchControl(QCheckBox):
         return self.rect().contains(pos)
 
     def _state_changed(self, checked: bool) -> None:
-        self.setAccessibleDescription("Ligado" if checked else "Desligado")
+        self.setAccessibleDescription(self._on_text if checked else self._off_text)
         self.update()
 
     def set_pending(self, pending: bool) -> None:
@@ -937,9 +984,9 @@ class SwitchControl(QCheckBox):
         enabled = self.isEnabled()
         palette = self.palette()
 
-        text = "Aplicando…" if pending else "Ligado" if checked else "Desligado"
+        text = "Aplicando…" if pending else self._on_text if checked else self._off_text
         text_color = QColor("#b77900") if pending else palette.windowText().color() if enabled else palette.mid().color()
-        label_rect = QRectF(0, 0, 76, self.height())
+        label_rect = QRectF(0, 0, self._label_width, self.height())
         painter.setPen(text_color)
         painter.drawText(label_rect, Qt.AlignRight | Qt.AlignVCenter, text)
 
@@ -1349,19 +1396,9 @@ class StructuredResultView(QWidget):
             item = self.summary_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        if isinstance(value, list) and all(isinstance(item, str) for item in value):
-            counts = {"PASS": 0, "WARN": 0, "FAIL": 0, "ERROR": 0, "INFO": 0}
-            for item in value:
-                for status in counts:
-                    if item.startswith(f"[{status}]"):
-                        counts[status] += 1
-                        break
-            row = QHBoxLayout()
-            row.addWidget(StatusPill("Tudo certo", "success", str(counts["PASS"])))
-            row.addWidget(StatusPill("Avisos", "warning", str(counts["WARN"] + counts["INFO"])))
-            row.addWidget(StatusPill("Erros", "error", str(counts["FAIL"] + counts["ERROR"])))
-            row.addStretch()
-            self.summary_layout.addLayout(row)
+        checks = parse_health_checks(value)
+        if checks:
+            self._show_checks(checks)
         else:
             facts = _result_facts(value)
             if facts:
@@ -1396,8 +1433,64 @@ class StructuredResultView(QWidget):
             raw_text = json.dumps(value, ensure_ascii=False, indent=2)
         self.raw.setPlainText(raw_text[:2_000_000])
 
+    def _show_checks(self, checks: list[HealthCheck]) -> None:
+        """Counts first, then every item that needs a decision, in plain words."""
+        pills = QWidget()
+        pills.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        row = QHBoxLayout(pills)
+        row.setContentsMargins(0, 0, 0, 0)
+        # INFO é informativo (subsistema não usado): não conta como aviso,
+        # mesmo veredito da Visão geral.
+        for label, state, statuses in (
+            ("Tudo certo", "success", {"PASS"}),
+            ("Avisos", "warning", {"WARN"}),
+            ("Erros", "error", {"FAIL", "ERROR"}),
+            ("Informativos", "info", {"INFO"}),
+        ):
+            count = sum(check.status in statuses for check in checks)
+            row.addWidget(StatusPill(label, state, str(count)))
+        row.addStretch()
+        self.summary_layout.addWidget(pills)
+        attention = sorted(
+            (check for check in checks if check.needs_attention),
+            key=lambda check: 0 if check.state == "error" else 1,
+        )
+        if not attention:
+            return
+        heading = QLabel("O que revisar")
+        heading.setObjectName("sectionHeading")
+        self.summary_layout.addWidget(heading)
+        rows = QWidget()
+        rows.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        rows_layout = QVBoxLayout(rows)
+        rows_layout.setContentsMargins(0, 0, 0, 0)
+        rows_layout.setSpacing(0)
+        for check in attention:
+            item = QWidget()
+            item.setObjectName("healthCheckRow")
+            item_layout = QHBoxLayout(item)
+            item_layout.setContentsMargins(4, 6, 4, 6)
+            icon = QLabel({"warning": "⚠", "error": "✕"}.get(check.state, "i"))
+            icon.setObjectName("healthCheckIcon")
+            icon.setProperty("state", check.state)
+            icon.setAlignment(Qt.AlignCenter)
+            icon.setFixedSize(28, 28)
+            icon.setAccessibleName({"warning": "Aviso", "error": "Erro"}.get(check.state, "Informação"))
+            text = QLabel(f"<b>{_escape(check.title)}</b>" + (f" — {_escape(check.detail)}" if check.detail else ""))
+            text.setTextFormat(Qt.RichText)
+            text.setWordWrap(True)
+            item_layout.addWidget(icon)
+            item_layout.addWidget(text, 1)
+            rows_layout.addWidget(item)
+        self.summary_layout.addWidget(rows)
+        self.summary_layout.addStretch(1)
+
     def set_advanced_mode(self, enabled: bool) -> None:
         self.details_toggle.setChecked(bool(enabled))
+
+
+def _escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def sanitized_command(command: list[str]) -> str:
@@ -1535,10 +1628,14 @@ class PreviewDialog(StatefulDialog):
         blockers = result.parsed.get("blockers") if isinstance(result.parsed, dict) else None
         pending = is_pending_report(result.parsed)
         preview_ok = (result.ok or pending) and not blockers
+        curation = result.parsed.get("state") if isinstance(result.parsed, dict) else None
+        curation_preview = curation in {"curation-planned", "curation-reviewed"}
         dialog_state = "success" if preview_ok and not pending else "warning" if preview_ok else "error"
         state_only = bool(action and action.preview_kind == "state")
         if not preview_ok:
             dialog_title = "Não é seguro aplicar agora"
+        elif curation_preview:
+            dialog_title = "Revisar proposta" if curation == "curation-reviewed" else "Confirmar envio do memorial"
         elif state_only:
             dialog_title = "Revisar antes de aplicar"
         else:
@@ -1567,6 +1664,27 @@ class PreviewDialog(StatefulDialog):
         summary.setWordWrap(True)
         summary.setObjectName("cardDescription")
         self.body.addWidget(summary)
+        if curation_preview:
+            path_label = QLabel(result.parsed["path"])
+            path_label.setTextFormat(Qt.PlainText)
+            path_label.setWordWrap(True)
+            path_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+            path_label.setAccessibleName("Arquivo selecionado")
+            self.body.addWidget(path_label)
+        if curation == "curation-reviewed":
+            model = QLabel(f"{result.parsed['provider']} · {result.parsed['model']}")
+            model.setTextFormat(Qt.PlainText)
+            model.setWordWrap(True)
+            self.body.addWidget(model)
+            comparison = QPlainTextEdit()
+            comparison.setReadOnly(True)
+            comparison.setObjectName("logView")
+            comparison.setAccessibleName("Evidências e comparação do memorial")
+            comparison.setMinimumHeight(210)
+            findings = "\n\n".join(f"{item['tipo'].capitalize()} · {item['motivo']}\nEvidência\n{item['evidencia']}"
+                                   for item in result.parsed["achados"])
+            comparison.setPlainText("Alterações propostas\n\n" + result.parsed["diff"] + "\n\nEvidências\n\n" + findings)
+            self.body.addWidget(comparison, 1)
         for index, line in enumerate(_capability_space_lines(result.parsed)):
             space_label = QLabel(line)
             space_label.setObjectName("capabilitySpaceSummary" if index == 0 else "capabilitySpaceDetail")
@@ -1661,11 +1779,16 @@ class PreviewDialog(StatefulDialog):
         copy.clicked.connect(lambda: QApplication.clipboard().setText(self.output.toPlainText()))
         cancel = self.add_action("Voltar", QDialogButtonBox.RejectRole)
         self.confirm = self.add_action(
-            "Confirmar e aplicar",
+            "Gerar proposta" if curation == "curation-planned" else
+            "Aplicar ao memorial local" if curation == "curation-reviewed" else "Confirmar e aplicar",
             QDialogButtonBox.AcceptRole,
             variant="dangerButton" if action and action.risk == "high" else "primaryButton",
             enabled=preview_ok and not (action and action.risk == "high"),
         )
+        if curation_preview:
+            self.confirm.setAutoDefault(False)
+            self.confirm.setDefault(False)
+            cancel.setDefault(True)
         if action and action.risk == "high":
             warning = QLabel("Alto risco: digite CONFIRMAR para liberar a execução.")
             warning.setObjectName("errorTitle")
@@ -1701,9 +1824,11 @@ class ProgressDialog(StatefulDialog):
         super().__init__(title, "running", parent)
         self._started = time.monotonic()
         self._running = True
-        summary = QLabel("Aguarde. O PhaseZero está cuidando desta etapa.")
-        summary.setObjectName("cardDescription")
-        self.body.addWidget(summary)
+        self.summary = QLabel("Aguarde. O PhaseZero está cuidando desta etapa.")
+        self.summary.setTextFormat(Qt.PlainText)
+        self.summary.setWordWrap(True)
+        self.summary.setObjectName("cardDescription")
+        self.body.addWidget(self.summary)
         self.details_toggle = QToolButton()
         self.details_toggle.setObjectName("technicalDisclosure")
         self.details_toggle.setText("Ver detalhes técnicos")
@@ -1756,6 +1881,10 @@ class ProgressDialog(StatefulDialog):
         self.progress.setRange(0, 100)
         self.progress.setValue(value)
 
+    def set_stage(self, text: str) -> None:
+        self.summary.setText(text)
+        self.body.setAlignment(Qt.AlignTop)
+
     def finish(self) -> None:
         self._running = False
         self._timer.stop()
@@ -1788,6 +1917,12 @@ class ResultDialog(StatefulDialog):
         sev = severity or ("success" if result.ok else "error")
         title_map = {"success": "Operação concluída", "warning": "Concluído com avisos", "error": "Operação falhou"}
         title = title_map.get(sev, "Operação falhou")
+        checks = parse_health_checks(result.parsed)
+        if checks and sev != "error":
+            # O diagnóstico rodou; os achados são o resultado, não uma falha.
+            title = "Diagnóstico concluído"
+            if sev == "success" and any(check.needs_attention for check in checks):
+                sev = "warning"
         if restart_required(result.parsed):
             title = "Reinício necessário"
         super().__init__(title, sev, parent)
@@ -1805,6 +1940,8 @@ class ResultDialog(StatefulDialog):
             parts = [part for part in (human, f"Próximo passo: {nxt}" if nxt else "") if part]
             if parts:
                 message = "\n".join(parts)
+        if checks:
+            message = health_summary(checks)
         if getattr(result, "timed_out", False):
             message = (
                 "A operação passou do tempo limite e foi interrompida.\n"
@@ -1828,6 +1965,12 @@ class ResultDialog(StatefulDialog):
         summary.setWordWrap(True)
         self.summary_label = summary
         self.body.addWidget(summary)
+        if result.action_id == "ai.memory-curate" and isinstance(result.parsed, dict) and result.parsed.get("assessment"):
+            assessment = QLabel("Leitura do modelo\n" + result.parsed["assessment"])
+            assessment.setTextFormat(Qt.PlainText)
+            assessment.setWordWrap(True)
+            assessment.setObjectName("cardDescription")
+            self.body.addWidget(assessment)
         self.view = StructuredResultView(
             result.parsed, formatted, self, advanced_mode=advanced_mode
         )

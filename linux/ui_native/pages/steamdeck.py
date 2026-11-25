@@ -25,6 +25,13 @@ def _dict(value: object) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+DISPLAY_PROFILES = {
+    "steamdeck-docked": "Dock (TV ou monitor)",
+    "steamdeck-lcd-handheld": "Portátil — tela LCD",
+    "steamdeck-oled-handheld": "Portátil — tela OLED",
+}
+
+
 class SteamDeckPage(BasePage):
     """Página Steam Deck viva: modo, watcher, teclado, Decky e boot direto.
 
@@ -188,6 +195,10 @@ class SteamDeckPage(BasePage):
         self._mode_pending = False
         self.refresh_modes(enabled=True)
         self._sync_mode_from_payload()
+        current = self._mode_radios.get(str(parsed.get("mode") or ""))
+        self.state_label.setText(
+            f"● Modo atual: {current.text()}" if current is not None else "● Status atualizado"
+        )
 
         automation = _dict(parsed.get("automation"))
         if automation.get("watcherActive"):
@@ -200,15 +211,17 @@ class SteamDeckPage(BasePage):
         opened = _dict(keyboard.get("open"))
         configured = _dict(keyboard.get("configured"))
         dbus = _dict(keyboard.get("dbus"))
-        provider = str(keyboard.get("provider") or "—")
+        provider_name = str(keyboard.get("provider") or "")
+        # "none"/vazio não é nome de teclado; só mostra o provedor real.
+        provider = f" ({provider_name})" if provider_name not in {"", "none", "—", "unknown"} else ""
         # Configured and D-Bus-available are not the same as a keyboard the
         # user can type on. "Ligado" used to fire from the config flag alone.
         if opened.get("effective") or kde.get("visible"):
-            self.keyboard_label.setText(f"Aberto ({provider})")
+            self.keyboard_label.setText(f"Aberto{provider}")
         elif dbus.get("available") or kde.get("available"):
-            self.keyboard_label.setText(f"Disponível, fechado ({provider})")
+            self.keyboard_label.setText(f"Disponível, fechado{provider}")
         elif configured.get("inputMethod") or kde.get("enabled"):
-            self.keyboard_label.setText(f"Configurado, KWin sem teclado ativo ({provider})")
+            self.keyboard_label.setText(f"Configurado, KWin sem teclado ativo{provider}")
         else:
             self.keyboard_label.setText("Indisponível neste desktop")
 
@@ -223,17 +236,23 @@ class SteamDeckPage(BasePage):
 
         boot = _dict(parsed.get("boot"))
         entry = str(boot.get("grubCfgEntry") or boot.get("nextEntry") or "unknown")
+        # grub_cfg_entry_state emite present/missing/unknown-permission.
         if entry == "active":
             self.boot_label.setText("Entrada GRUB presente e marcada")
+        elif entry == "present":
+            self.boot_label.setText("Entrada GRUB presente")
         elif entry in {"none", "missing"}:
             self.boot_label.setText("Sem entrada GRUB dedicada")
+        elif entry == "unknown-permission":
+            self.boot_label.setText("Não verificado — ler o GRUB exige administrador")
         else:
-            self.boot_label.setText(f"Estado: {entry}")
+            self.boot_label.setText("Não verificado")
 
         display = _dict(parsed.get("display"))
-        profile = str(display.get("profile") or "—")
-        if "oled" in profile:
-            profile += " (OLED)"
+        profile_id = str(display.get("profile") or "")
+        profile = DISPLAY_PROFILES.get(profile_id, profile_id or "Não detectado")
+        if profile_id == "unknown":
+            profile = "Não detectado"
         self.display_label.setText(profile)
 
     def _on_status_failed(self, action_id: str, message: str) -> None:

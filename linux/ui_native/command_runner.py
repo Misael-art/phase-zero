@@ -20,6 +20,7 @@ from .platform import (
     state_dir,
     terminate_process_group,
 )
+from .health_models import parse_health_checks
 from .result_parser import parse_json_output
 
 CAPTURE_LIMIT = 8 * 1024 * 1024
@@ -344,6 +345,7 @@ class CommandRunner(QObject):
                 exit_code=code,
                 result_path=result.result_path,
                 cancelled=cancelled,
+                findings=bool(parse_health_checks(parsed)),
             )
         except OSError as exc:
             result.stderr += f"\nfailed to persist operation ledger: {exc}\n"

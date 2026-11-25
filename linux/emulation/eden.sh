@@ -67,6 +67,10 @@ sync_eden_user_content() {
     ryujinx=$(pz_emulation_switch_ryujinx_paths)
 
     install -d "$(dirname "$EDEN_KEYS")" "$(dirname "$EDEN_FIRMWARE")"
+    if pz_emulation_user_link "$EDEN_KEYS" || pz_emulation_user_link "$EDEN_FIRMWARE"; then
+        pz_info "Eden: chaves/firmware apontam para uma pasta escolhida pelo usuário; preservado"
+        return 0
+    fi
     # Clear any pre-existing keys/firmware path (symlink OR empty dir) so the
     # link below replaces it in place instead of creating a nested symlink.
     if [ -L "$EDEN_KEYS" ] || { [ -d "$EDEN_KEYS" ] && [ -z "$(ls -A "$EDEN_KEYS" 2>/dev/null)" ]; }; then
@@ -113,6 +117,10 @@ sync_eden_user_content() {
 }
 
 install_eden() {
+    if pz_emulation_foreign_install Eden "$PZ_EMULATION_STATE/eden.json" \
+        --bin eden --flatpak dev.eden_emu.eden --appimage 'Eden*.AppImage' --desktop-exec eden; then
+        return 0
+    fi
     pz_emulation_ensure_layout
     configure_eden_dirs
 
@@ -125,7 +133,7 @@ install_eden() {
         pz_emulation_download "$PZ_EDEN_APPIMAGE_URL" "$EDEN_APP"
     fi
 
-    ln -sfn "$EDEN_APP" "$EDEN_LINK"
+    pz_emulation_safe_link "$EDEN_APP" "$EDEN_LINK"
     write_eden_wrapper
     write_eden_desktop
     sync_eden_user_content

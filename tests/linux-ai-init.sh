@@ -30,6 +30,15 @@ grep -q 'BEGIN BOOTSTRAP CAVEMAN' "$PROJECT/AGENTS.md"
 grep -q 'BEGIN PHASEZERO TOOLS' "$PROJECT/CLAUDE.md"
 grep -q 'BEGIN PHASEZERO TOOLS' "$PROJECT/GEMINI.md"
 grep -q 'BEGIN PHASEZERO TOOLS' "$PROJECT/.github/copilot-instructions.md"
+for instructions in "$PROJECT/AGENTS.md" "$PROJECT/CLAUDE.md" "$PROJECT/GEMINI.md" "$PROJECT/QWEN.md" \
+    "$PROJECT/.github/copilot-instructions.md" "$PROJECT/.cursor/rules/phasezero-tools.mdc" \
+    "$PROJECT/.windsurf/rules/phasezero-tools.md" "$PROJECT/.clinerules/phasezero-tools.md" \
+    "$PROJECT/.roo/rules/phasezero-tools.md"; do
+    grep -Fq 'pz ai memory practices' "$instructions"
+    grep -Fq 'configured private GitHub repository' "$instructions"
+    grep -Fq 'Local continuity' "$instructions"
+    grep -Fq 'Fôlego and RetroDev Studio' "$instructions"
+done
 [ -f "$PROJECT/.cursor/rules/caveman.mdc" ]
 [ -f "$PROJECT/.windsurf/rules/phasezero-tools.md" ]
 [ -f "$PROJECT/.clinerules/phasezero-tools.md" ]
@@ -86,13 +95,24 @@ if grep -q 'BEGIN BOOTSTRAP CAVEMAN' "$PROJECT/AGENTS.md"; then
 fi
 [ ! -f "$PROJECT/CLAUDE.md" ]
 [ ! -f "$PROJECT/GEMINI.md" ]
+[ ! -f "$PROJECT/QWEN.md" ]
 [ ! -e "$PROJECT/.cursor" ]
 [ ! -e "$PROJECT/.windsurf" ]
 [ ! -e "$PROJECT/.clinerules" ]
+[ ! -e "$PROJECT/.roo" ]
 [ ! -e "$PROJECT/.zcode" ]
 [ ! -f "$PROJECT/.aiderignore" ]
 [ ! -e "$PROJECT/.codex" ]
 "$ROOT/linux/pz" ai init --list \
     | jq -e --arg p "$PROJECT" '[.projects[] | select(.path == $p)] | length == 0' >/dev/null
+
+step "preserve a Roo legacy rule file"
+printf '%s\n' "Keep this Roo rule." > "$PROJECT/.roorules"
+"$ROOT/linux/pz" ai init --only-rules "$PROJECT" >/dev/null
+grep -Fq 'Keep this Roo rule.' "$PROJECT/.roorules"
+grep -Fq 'pz ai memory practices' "$PROJECT/.roorules"
+[ ! -e "$PROJECT/.roo" ]
+"$ROOT/linux/pz" ai init --undo "$PROJECT" >/dev/null
+[ "$(cat "$PROJECT/.roorules")" = "Keep this Roo rule." ]
 
 echo "linux-ai-init smoke ok"

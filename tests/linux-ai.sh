@@ -44,19 +44,26 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$PZ_LOCAL_BIN/hermes"
+# Clients without native HTTP MCP get `npx mcp-remote`; PhaseZero writes that
+# only when npx exists. The stub makes the fixture independent of host Node.
+printf '#!/usr/bin/env bash\necho "npx: test stub" >&2; exit 1\n' > "$PZ_LOCAL_BIN/npx"
+chmod +x "$PZ_LOCAL_BIN/npx"
 # ensure PZ_LOCAL_BIN is on PATH before any setup script runs
 export PATH="$PZ_LOCAL_BIN:$PATH"
 
 "$REPO_ROOT/linux/pz" ai status | jq -e '.schemaVersion == 1 and .runtime.node.available | type == "boolean"' >/dev/null
 "$REPO_ROOT/linux/pz" ai mcp status | jq -e '.schemaVersion == 1 and (.definitions | length) >= 1' >/dev/null
+# Broad sync writes only clients present on the host: simulate each one.
+mkdir -p "$XDG_CONFIG_HOME/Claude" "$HOME/.codex" "$PZ_WORKSPACE_ROOT/.vscode" "$XDG_CONFIG_HOME/Code/User" \
+    "$HOME/.cursor" "$XDG_CONFIG_HOME/zed" "$XDG_CONFIG_HOME/ai.z.zcode"
 "$REPO_ROOT/linux/pz" ai mcp sync >/dev/null
 test -f "$XDG_CONFIG_HOME/opencode/opencode.json"
-test -f "$XDG_CONFIG_HOME/claude/claude.json"
+test -f "$HOME/.claude.json"
 test -f "$XDG_CONFIG_HOME/Claude/claude_desktop_config.json"
 test -f "$HOME/.codex/config.toml"
 test -f "$PZ_WORKSPACE_ROOT/.vscode/mcp.json"
 test -f "$XDG_CONFIG_HOME/Code/User/mcp.json"
-test -f "$XDG_CONFIG_HOME/Cursor/User/mcp.json"
+test -f "$HOME/.cursor/mcp.json"
 test -f "$XDG_CONFIG_HOME/zed/settings.json"
 test -f "$XDG_CONFIG_HOME/ai.z.zcode/store.json"
 test -f "$HOME/.hermes/config.yaml"
@@ -65,7 +72,7 @@ jq -e 'has("mcpServers") | not' "$XDG_CONFIG_HOME/opencode/opencode.json" >/dev/
 jq -e '.mcp."ai-memory".url | test("^http://127.0.0.1:49374/mcp$")' "$XDG_CONFIG_HOME/opencode/opencode.json" >/dev/null
 jq -e '.servers."ai-memory".url | test("^http://127.0.0.1:49374/mcp$")' "$PZ_WORKSPACE_ROOT/.vscode/mcp.json" >/dev/null
 jq -e '.servers."ai-memory".url | test("^http://127.0.0.1:49374/mcp$")' "$XDG_CONFIG_HOME/Code/User/mcp.json" >/dev/null
-jq -e '.mcpServers."ai-memory".command == "npx"' "$XDG_CONFIG_HOME/Cursor/User/mcp.json" >/dev/null
+jq -e '.mcpServers."ai-memory".command == "npx"' "$HOME/.cursor/mcp.json" >/dev/null
 jq -e '.context_servers."ai-memory".url | test("^http://127.0.0.1:49374/mcp$")' "$XDG_CONFIG_HOME/zed/settings.json" >/dev/null
 jq -e '."mcp-storage" | fromjson | .state.config.mcp.mcpServers."ai-memory".url | test("^http://127.0.0.1:49374/mcp$")' "$XDG_CONFIG_HOME/ai.z.zcode/store.json" >/dev/null
 grep -q 'BEGIN PHASEZERO MCP ai-memory' "$HOME/.hermes/config.yaml"

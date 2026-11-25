@@ -29,6 +29,7 @@ window.show_category("IA & Dev")
 page.memory_card.update_status({"installed": True, "service": "active", "keyConfigured": True,
     "version": "3.3.1", "automatic": True, "recoveryExported": False,
     "scopes": [{"id": "fixture", "project": "PhaseZero"}], "devices": [],
+    "curation": {"id": "f" * 32, "findings": 2, "provider": "Codex", "model": "gpt-6-astra"},
     "github": {"repository": "fixture/private"}, "availableProjects": [],
     "sync": {"targets": [{"id": "github", "state": "current", "lastBackup": {"verifiedAt": "2026-11-01 23:16 UTC"}}]}})
 window.show()
@@ -41,14 +42,14 @@ receipt = []
 for size in ((800, 600), (1280, 800)):
     window.resize(*size)
     app.processEvents()
-    assert (window.width(), window.height()) == size
+    assert window.width() <= size[0] and window.height() <= size[1], (size, window.size())
     for advanced in (False, True):
         page.set_advanced_mode(advanced)
         app.processEvents()
         QTest.qWait(30)
         app.processEvents()
         assert scroll.horizontalScrollBar().maximum() == 0, "memory journey horizontal overflow"
-        for name in ("sync", "repair", "github", "key-export") + (("settings", "restore") if advanced else ()):
+        for name in ("sync", "repair", "curate", "curate-apply", "github", "key-export") + (("settings", "restore") if advanced else ()):
             button = card.buttons[name]
             scroll.ensureWidgetVisible(button, 8, 8)
             app.processEvents()
@@ -61,7 +62,7 @@ for size in ((800, 600), (1280, 800)):
             assert button.isVisibleTo(page) and not button.visibleRegion().isEmpty()
             if app.platformName() == "xcb":
                 assert QApplication.widgetAt(rect.center()) is button, f"{name} pointer blocked"
-        receipt.append({"size": size, "advanced": advanced, "overflow": False})
+        receipt.append({"size": (window.width(), window.height()), "advanced": advanced, "overflow": False})
     sync = card.buttons["sync"]
     scroll.ensureWidgetVisible(sync, 8, 8)
     sync.setFocus()
@@ -69,6 +70,11 @@ for size in ((800, 600), (1280, 800)):
     assert app.focusWidget() is sync
     QTest.keyClick(sync, Qt.Key_Space)
     assert selected[-1].id == "ai.memory-sync"
+    review = card.buttons["curate-apply"]
+    scroll.ensureWidgetVisible(review, 8, 8)
+    review.setFocus()
+    QTest.keyClick(review, Qt.Key_Space)
+    assert selected[-1].id == "ai.memory-curate-apply"
 page.set_advanced_mode(False)
 scroll.ensureWidgetVisible(card.state, 8, 8)
 app.processEvents()

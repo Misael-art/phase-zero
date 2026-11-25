@@ -41,7 +41,6 @@ antigravity-proxy|https://github.com/pedrofariasx/antigravity-proxy.git|8090|nod
 antigravity-openai-adapter|https://github.com/pedrofariasx/antigravity-openai-adapter.git|8081|node
 ollieproxy|https://github.com/pedrofariasx/ollieproxy.git|3002|node
 airlock|https://github.com/pedrofariasx/airlock.git|0|library
-unlimited-ai-proxy|https://github.com/pedrofariasx/unlimited-ai-proxy.git|8787|node
 deepsproxy|https://github.com/pedrofariasx/deepsproxy.git|3012|node
 mimo-ai-proxy|https://github.com/pedrofariasx/mimo-ai-proxy.git|3013|go
 9router|https://github.com/decolua/9router.git|20128|npm

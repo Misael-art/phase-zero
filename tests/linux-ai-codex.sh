@@ -26,10 +26,13 @@ export PATH="$PZ_LOCAL_BIN:$WORK/stub:$PATH"
 "$ROOT/linux/ai/setup-codex.sh" status | jq -e '.version == "0.156.1" and .supported and .coherent == null and .next == "linux/pz ai codex status"' >/dev/null
 "$ROOT/linux/ai/setup-codex.sh" dry-run | jq -e '.dryRun and .planned == ["keep existing codex"]' >/dev/null
 
-# 2. Below the minimum: installs latest, never a fixed old version.
-printf '#!/bin/sh\necho "codex-cli 0.10.0"\n' > "$WORK/standalone/codex"
+# 2. Below the minimum: updates through the existing install's own channel
+# (codex update). A second npm copy would compete on PATH.
+printf '#!/bin/sh\necho "$*" >> "%s/codex-update.log"\necho "codex-cli 0.10.0"\n' "$WORK" > "$WORK/standalone/codex"
 "$ROOT/linux/ai/setup-codex.sh" setup >/dev/null 2>&1
-grep -q '@openai/codex@latest' "$WORK/npm.log"
+grep -qx 'update' "$WORK/codex-update.log"
+[ ! -e "$WORK/npm.log" ] || { echo "FAIL: npm install ran beside an existing codex" >&2; exit 1; }
+[ "$(readlink "$PZ_LOCAL_BIN/codex")" = "$WORK/standalone/codex" ]
 
 # 3. Explicit force still reinstalls.
 : > "$WORK/npm.log"

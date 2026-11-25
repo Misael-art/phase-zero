@@ -448,7 +448,9 @@ class ServerPage(FriendlyServicePage):
             self._set_state("warning")
         access = payload.get("accessMode") if isinstance(payload.get("accessMode"), dict) else {}
         backup = payload.get("backupState") if isinstance(payload.get("backupState"), dict) else {}
-        self.fact_labels[0].setText(f"Perfil: {payload.get('profile') or 'nenhum'}")
+        # homelab-status.sh grava "null" como texto quando não há perfil ativo.
+        profile = str(payload.get("profile") or "")
+        self.fact_labels[0].setText(f"Perfil: {profile if profile not in {'', 'null', 'none'} else 'nenhum'}")
         self.fact_labels[1].setText(f"Aplicativos: {running_count}/{len(apps)} rodando")
         self.fact_labels[2].setText(f"Acesso: {access.get('effective') or 'local'}")
         values = (

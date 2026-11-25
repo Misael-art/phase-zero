@@ -283,6 +283,11 @@ histórico por equipamento. Conteúdo remoto sai criptografado; chave fica no co
 do sistema. Exporte recuperação antes de depender de outro host.
 [Configuração, recuperação e evidências](docs/roadmaps/ai-memory-portability-v1.md).
 
+As instruções locais mantêm o trabalho em andamento quando a memória fica
+indisponível. Agentes com acesso local consultam as práticas aprovadas em
+`pz ai memory practices`. O GitHub privado transporta os pacotes cifrados
+entre instalações. [Regras dos agentes e contingência](docs/roadmaps/ai-memory-portability-v1.md#orientação-local-e-contingência).
+
 ---
 
 ## Limites

@@ -324,14 +324,26 @@ zcode_rules_enabled() {
     [ "${PZ_INIT_ZCODE:-0}" = "1" ]
 }
 
+roo_rule_path() {
+    local rules_dir="$WORKSPACE_ROOT/.roo/rules"
+    local legacy="$WORKSPACE_ROOT/.roorules"
+    if [ -f "$legacy" ] && { [ ! -d "$rules_dir" ] || [ -z "$(find "$rules_dir" -type f -print -quit)" ]; }; then
+        printf '%s\n' "$legacy"
+    else
+        printf '%s\n' "$rules_dir/phasezero-tools.md"
+    fi
+}
+
 phasezero_targets() {
     printf '%s\t%s\t%s\n' "agents" "$WORKSPACE_ROOT/AGENTS.md" "none"
     printf '%s\t%s\t%s\n' "claude" "$WORKSPACE_ROOT/CLAUDE.md" "none"
     printf '%s\t%s\t%s\n' "gemini" "$WORKSPACE_ROOT/GEMINI.md" "none"
+    printf '%s\t%s\t%s\n' "qwen" "$WORKSPACE_ROOT/QWEN.md" "none"
     printf '%s\t%s\t%s\n' "github-copilot" "$WORKSPACE_ROOT/.github/copilot-instructions.md" "none"
     printf '%s\t%s\t%s\n' "cursor" "$WORKSPACE_ROOT/.cursor/rules/phasezero-tools.mdc" "cursor"
     printf '%s\t%s\t%s\n' "windsurf" "$WORKSPACE_ROOT/.windsurf/rules/phasezero-tools.md" "windsurf"
     printf '%s\t%s\t%s\n' "cline" "$WORKSPACE_ROOT/.clinerules/phasezero-tools.md" "none"
+    printf '%s\t%s\t%s\n' "roo" "$(roo_rule_path)" "none"
     if zcode_rules_enabled; then
         printf '%s\t%s\t%s\n' "zcode" "$WORKSPACE_ROOT/.zcode/rules/phasezero-tools.md" "none"
     fi
@@ -341,23 +353,29 @@ caveman_targets() {
     printf '%s\t%s\t%s\n' "agents" "$WORKSPACE_ROOT/AGENTS.md" "none"
     printf '%s\t%s\t%s\n' "claude" "$WORKSPACE_ROOT/CLAUDE.md" "none"
     printf '%s\t%s\t%s\n' "gemini" "$WORKSPACE_ROOT/GEMINI.md" "none"
+    printf '%s\t%s\t%s\n' "qwen" "$WORKSPACE_ROOT/QWEN.md" "none"
     printf '%s\t%s\t%s\n' "github-copilot" "$WORKSPACE_ROOT/.github/copilot-instructions.md" "none"
     printf '%s\t%s\t%s\n' "cursor" "$WORKSPACE_ROOT/.cursor/rules/caveman.mdc" "cursor"
     printf '%s\t%s\t%s\n' "windsurf" "$WORKSPACE_ROOT/.windsurf/rules/caveman.md" "windsurf"
     printf '%s\t%s\t%s\n' "cline" "$WORKSPACE_ROOT/.clinerules/caveman.md" "none"
+    printf '%s\t%s\t%s\n' "roo" "$(roo_rule_path)" "none"
     if zcode_rules_enabled; then
         printf '%s\t%s\t%s\n' "zcode" "$WORKSPACE_ROOT/.zcode/rules/caveman.md" "none"
     fi
 }
 
 rule_pairs() {
+    local roo_path
+    roo_path="$(roo_rule_path)"
     printf '%s\t%s\t%s\n' "agents" "$WORKSPACE_ROOT/AGENTS.md" "$WORKSPACE_ROOT/AGENTS.md"
     printf '%s\t%s\t%s\n' "claude" "$WORKSPACE_ROOT/CLAUDE.md" "$WORKSPACE_ROOT/CLAUDE.md"
     printf '%s\t%s\t%s\n' "gemini" "$WORKSPACE_ROOT/GEMINI.md" "$WORKSPACE_ROOT/GEMINI.md"
+    printf '%s\t%s\t%s\n' "qwen" "$WORKSPACE_ROOT/QWEN.md" "$WORKSPACE_ROOT/QWEN.md"
     printf '%s\t%s\t%s\n' "github-copilot" "$WORKSPACE_ROOT/.github/copilot-instructions.md" "$WORKSPACE_ROOT/.github/copilot-instructions.md"
     printf '%s\t%s\t%s\n' "cursor" "$WORKSPACE_ROOT/.cursor/rules/caveman.mdc" "$WORKSPACE_ROOT/.cursor/rules/phasezero-tools.mdc"
     printf '%s\t%s\t%s\n' "windsurf" "$WORKSPACE_ROOT/.windsurf/rules/caveman.md" "$WORKSPACE_ROOT/.windsurf/rules/phasezero-tools.md"
     printf '%s\t%s\t%s\n' "cline" "$WORKSPACE_ROOT/.clinerules/caveman.md" "$WORKSPACE_ROOT/.clinerules/phasezero-tools.md"
+    printf '%s\t%s\t%s\n' "roo" "$roo_path" "$roo_path"
     if zcode_rules_enabled; then
         printf '%s\t%s\t%s\n' "zcode" "$WORKSPACE_ROOT/.zcode/rules/caveman.md" "$WORKSPACE_ROOT/.zcode/rules/phasezero-tools.md"
     fi
@@ -651,7 +669,7 @@ register_project() {
             path: $path,
             injectedAt: $at,
             agents: (if $rulesApplied
-                then ["agents","claude","gemini","github-copilot","cursor","windsurf","cline","grok-build","kimi-code","zcode"]
+                then ["agents","claude","gemini","qwen","github-copilot","cursor","windsurf","cline","roo","grok-build","kimi-code","zcode"]
                 else [] end),
             ponytail: $ponytail,
             zcodeDedicatedRules: $zcode,
@@ -758,7 +776,7 @@ init_undo() {
         "$target/.codex/context-packs" "$target/.codex/ai-context" "$target/.codex" \
         "$target/.cursor/rules" "$target/.cursor" \
         "$target/.windsurf/rules" "$target/.windsurf" \
-        "$target/.clinerules" "$target/.zcode/rules" "$target/.zcode"; do
+        "$target/.clinerules" "$target/.roo/rules" "$target/.roo" "$target/.zcode/rules" "$target/.zcode"; do
         if [ -d "$dir" ]; then
             rmdir --ignore-fail-on-non-empty "$dir" 2>/dev/null
         fi

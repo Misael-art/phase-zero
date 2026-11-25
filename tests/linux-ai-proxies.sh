@@ -36,11 +36,9 @@ grep -q 'PZ_BIND_HOST' "$ROOT/linux/ai/proxy-suite.sh"
 grep -q 'unsafe dotenv variable rejected' "$ROOT/linux/ai/proxy-suite.sh"
 grep -q 'secure proxy key generation failed' "$ROOT/linux/ai/proxy-suite.sh"
 status="$("$ROOT/linux/pz" ai proxies status)"
-[ "$(jq 'length' <<< "$status")" -eq 11 ]
-jq -e 'map(.id) | index("qwen-worker-proxy") != null and index("unlimited-ai-proxy") != null' <<< "$status" >/dev/null
-jq -e '
-  .[] | select(.id == "unlimited-ai-proxy") | .kind == "node" and .port == 8787
-' <<< "$status" >/dev/null
+[ "$(jq 'length' <<< "$status")" -eq 10 ]
+# unlimited-ai-proxy saiu: o repositório upstream foi removido (HTTP 404).
+jq -e 'map(.id) | index("qwen-worker-proxy") != null and index("unlimited-ai-proxy") == null' <<< "$status" >/dev/null
 jq -e '
   .[] | select(.id == "mimo-ai-proxy") | .kind == "go" and .port == 3013
 ' <<< "$status" >/dev/null
@@ -48,11 +46,11 @@ plan="$("$ROOT/linux/pz" ai proxies plan all)"
 [ "$(grep -c '^would install ' <<< "$plan")" -eq 4 ]
 # PZ-AUD-018: one supported set for batch actions; the rest is explicit
 # preview, never an indistinct blocked batch.
-[ "$(grep -c '^preview ' <<< "$plan")" -eq 6 ]
+[ "$(grep -c '^preview ' <<< "$plan")" -eq 5 ]
 [ "$(grep -c '^blocked ' <<< "$plan")" -eq 0 ]
 grep -Eq '^would install kimiproxy .* at commit [0-9a-f]{40} ' <<< "$plan"
 auth="$("$ROOT/linux/pz" ai proxies auth all)"
-[ "$(jq 'length' <<< "$auth")" -eq 11 ]
+[ "$(jq 'length' <<< "$auth")" -eq 10 ]
 scoped_auth="$("$ROOT/linux/pz" ai proxies auth qwenproxy)"
 [ "$(jq 'length' <<< "$scoped_auth")" -eq 1 ]
 jq -e '.[0].id == "qwenproxy"' <<< "$scoped_auth" >/dev/null
@@ -102,10 +100,10 @@ DISPLAY=:0 "$ROOT/linux/pz" ai proxies auth deepsproxy \
     | jq -e '.[0].webValidation.status == "session-present"' >/dev/null
 grep -q 'done < <(selected_rows)' "$ROOT/linux/ai/proxy-suite.sh"
 
-# Consolidated snapshot for the native UI "Proxies IA" page: same 11 proxies as
+# Consolidated snapshot for the native UI "Proxies IA" page: same 10 proxies as
 # auth plus redacted IDE integration counters, in a single read-only command.
 detailed="$("$ROOT/linux/pz" ai proxies detailed-status)"
-jq -e '.schemaVersion == 1 and (.proxies | length == 11)' <<< "$detailed" >/dev/null
+jq -e '.schemaVersion == 1 and (.proxies | length == 10)' <<< "$detailed" >/dev/null
 jq -e '.proxies[] | select(.id == "deepsproxy") | .webValidation.kind == "browser-session"' <<< "$detailed" >/dev/null
 jq -e '.ide | has("envDefaults") and has("opencodeProviders") and has("continueModels") and has("zcodeProviders")' <<< "$detailed" >/dev/null
 jq -e '.ide.envDefaults == false and .ide.opencodeProviders == 0 and .ide.continueModels == 0 and .ide.zcodeProviders == 0' <<< "$detailed" >/dev/null

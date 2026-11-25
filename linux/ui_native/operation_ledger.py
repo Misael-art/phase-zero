@@ -14,7 +14,7 @@ from .platform import secure_directory, secure_file, state_dir
 
 
 ACTIVE_STATES = {"starting", "previewing", "running", "cancelling"}
-TERMINAL_STATES = {"succeeded", "failed", "cancelled", "interrupted"}
+TERMINAL_STATES = {"succeeded", "attention", "failed", "cancelled", "interrupted"}
 
 
 def utc_now() -> str:
@@ -100,11 +100,16 @@ class OperationLedger:
         exit_code: int,
         result_path: Path | None = None,
         cancelled: bool = False,
+        findings: bool = False,
     ) -> None:
         if self.current_path is None or self.current is None:
             return
         now = utc_now()
         status = "cancelled" if cancelled else "succeeded" if exit_code == 0 else "failed"
+        # A read-only diagnostic that reported problems completed its job:
+        # the findings need attention, the operation itself did not fail.
+        if status == "failed" and findings and not self.current.get("mutable"):
+            status = "attention"
         self.current.update({
             "status": status,
             "progress": 100 if status == "succeeded" else self.current.get("progress", 0),

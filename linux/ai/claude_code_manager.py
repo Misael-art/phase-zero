@@ -1012,11 +1012,23 @@ try {
             executable = parts[0]
         if executable in KNOWN_SHELL_BUILTINS:
             return "opaque", executable
+        # "$CLAUDE_PROJECT_DIR"/.claude/hooks/x.sh (formato da documentação)
+        # e $HOME/... só existem na expansão do shell do Claude Code. Sem
+        # expandir, o caminho literal nunca existe e o hook era apagado.
+        if "$" in executable:
+            expanded = os.path.expandvars(executable)
+            if "$" in expanded:
+                return "opaque", executable
+            executable = expanded
         resolved = shutil.which(executable) if "/" not in executable else str(Path(executable).expanduser())
         if not resolved or not Path(resolved).exists():
             return ("orphan" if "/" in executable else "missing-command"), executable
         if Path(executable).name in {"bash", "sh", "python", "python3", "node"} and len(parts) > 1:
             script = parts[1]
+            if "$" in script:
+                script = os.path.expandvars(script)
+                if "$" in script:
+                    return "opaque", parts[1]
             if script.startswith(("/", "~/", "./", "../")) and not Path(script).expanduser().exists():
                 return "orphan", script
         return "present", resolved

@@ -2023,3 +2023,51 @@ def test_fresh_conversation_per_turn_is_forced_once_with_a_backup(host):
     backups = list(bridge.paths.journal.glob("core-config-pre-fresh-*.json"))
     assert [item.read_bytes() for item in backups] == [original]
     assert bridge.ensure_fresh_conversation_per_turn() is False
+
+
+def test_composer_compat_unit_is_bound_to_the_launcher(host):
+    bridge, runner, _ = host
+    runner.unit_active = False
+    assert bridge.ensure_dom_compat() == "inactive"
+    assert not [call for call in runner.calls if call[0] == "systemd-run"]
+
+    original = runner.run
+    def run(args, **kwargs):
+        if args[:3] == ["systemctl", "--user", "is-active"]:
+            runner.calls.append(list(args))
+            launcher = args[3] == bridge.paths.unit_name
+            return (0, "active\n", "") if launcher else (3, "inactive\n", "")
+        return original(args, **kwargs)
+    runner.run = run
+    assert bridge.ensure_dom_compat() == "started"
+    call = next(call for call in runner.calls if call[0] == "systemd-run")
+    assert f"--unit={bridge.paths.compat_unit_name}" in call
+    assert f"BindsTo={bridge.paths.unit_name}" in call
+    assert call[-3:-1] == ["dom-compat", "--devtools-file"]
+    assert call[-1] == str(bridge.paths.launcher_data / "DevToolsActivePort")
+
+
+def test_composer_compat_pass_targets_only_chatgpt_pages(tmp_path, monkeypatch):
+    devtools = tmp_path / "DevToolsActivePort"
+    devtools.write_text("9222\n/devtools/browser/x\n")
+    pages = [{"type": "page", "url": "https://chatgpt.com/", "webSocketDebuggerUrl": "ws://127.0.0.1:9222/a"},
+             {"type": "page", "url": "file:///app/index.html", "webSocketDebuggerUrl": "ws://127.0.0.1:9222/b"},
+             {"type": "iframe", "url": "https://chatgpt.com/x", "webSocketDebuggerUrl": "ws://127.0.0.1:9222/c"},
+             {"type": "page", "url": "https://chatgpt.com/c/1", "webSocketDebuggerUrl": "ws://127.0.0.1:9222/d"}]
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def read(self): return json.dumps(pages).encode()
+    monkeypatch.setattr(bridge_module.urllib.request, "urlopen", lambda url, timeout: Response())
+    seen = []
+    def evaluate(target, script, timeout):
+        seen.append(target)
+        if target.endswith("/d"):
+            raise ValueError("DevTools fechou a conexão")
+        assert "data-chatgpt-composer" in script
+        return 1
+    monkeypatch.setattr(bridge_module, "cdp_evaluate", evaluate)
+
+    assert bridge_module.dom_compat_pass(devtools) == 1
+    assert seen == ["ws://127.0.0.1:9222/a", "ws://127.0.0.1:9222/d"]

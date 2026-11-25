@@ -1,0 +1,34 @@
+{
+  "schema": "phasezero.equivalents/v1",
+  "description": "Pacotes de perfil fora do catálogo de capabilities que têm equivalente em outro canal. Cada grupo é um único app: se um membro já existe no host, os outros não são instalados por cima.",
+  "extend": {
+    "development.vscode": {"pacman": ["code", "visual-studio-code-bin"]},
+    "gaming.heroic": {"pacman": ["heroic-games-launcher-bin", "heroic-games-launcher"]},
+    "health.ananicy": {"pacman": ["ananicy-git", "ananicy"]},
+    "security.brave": {"pacman": ["brave-browser", "brave-bin"]},
+    "development.vscodium": {"pacman": ["vscodium", "vscodium-bin"]},
+    "creative.obsidian": {"pacman": ["obsidian"]},
+    "development.postman": {"pacman": ["postman-bin"]}
+  },
+  "groups": [
+    {"id": "retroarch", "pacman": ["retroarch"], "flatpak": ["org.libretro.RetroArch"], "bin": ["retroarch"]},
+    {"id": "discord", "pacman": ["discord"], "flatpak": ["com.discordapp.Discord"], "bin": ["discord", "Discord"]},
+    {"id": "obs-studio", "pacman": ["obs-studio", "obs-studio-browser"], "flatpak": ["com.obsproject.Studio"], "bin": ["obs"]},
+    {"id": "firefox", "pacman": ["firefox"], "flatpak": ["org.mozilla.firefox"], "bin": ["firefox"]},
+    {"id": "microsoft-edge", "pacman": ["microsoft-edge-stable-bin"], "flatpak": ["com.microsoft.Edge"], "bin": ["microsoft-edge-stable", "microsoft-edge"]},
+    {"id": "protonup-qt", "pacman": ["protonup-qt", "protonup-qt-bin"], "flatpak": ["net.davidotek.pupgui2"], "bin": ["protonup-qt"]},
+    {"id": "syncthing", "pacman": ["syncthing"], "flatpak": [], "bin": ["syncthing"]},
+    {"id": "timeshift", "pacman": ["timeshift"], "flatpak": [], "bin": ["timeshift"]},
+    {"id": "ollama", "pacman": ["ollama", "ollama-rocm", "ollama-cuda", "ollama-vulkan"], "flatpak": [], "bin": ["ollama"]},
+    {"id": "github-cli", "pacman": ["github-cli"], "flatpak": [], "bin": ["gh"]},
+    {"id": "corectrl", "pacman": ["corectrl"], "flatpak": [], "bin": ["corectrl"]},
+    {"id": "onboard", "pacman": ["onboard"], "flatpak": [], "bin": ["onboard"]},
+    {"id": "waydroid", "pacman": ["waydroid"], "flatpak": [], "bin": ["waydroid"]},
+    {"id": "fastfetch", "pacman": ["fastfetch"], "flatpak": [], "bin": ["fastfetch"]},
+    {"id": "btop", "pacman": ["btop"], "flatpak": [], "bin": ["btop"]},
+    {"id": "uv", "pacman": ["uv"], "flatpak": [], "bin": ["uv"]},
+    {"id": "go", "pacman": ["go"], "flatpak": [], "bin": ["go"]},
+    {"id": "ripgrep", "pacman": ["ripgrep"], "flatpak": [], "bin": ["rg"]},
+    {"id": "podman", "pacman": ["podman"], "flatpak": [], "bin": ["podman"]}
+  ]
+}
