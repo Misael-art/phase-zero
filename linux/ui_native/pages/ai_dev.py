@@ -514,8 +514,13 @@ class AiDevPage(BasePage):
             badge.setProperty("quotaLevel", item.get("level") or "")
             parts = ["Observação vencida · use Atualizar" if item.get("freshness") == "expired" else countdown(item.get("resetsAt"), now)]
             if item.get("seenAt"):
-                parts.append(f"observado: {item['seenAt']}")
-            if item.get("source"):
+                try:
+                    seen = dt.datetime.fromisoformat(str(item["seenAt"]).replace("Z", "+00:00"))
+                    parts.append(f"observado às {seen.astimezone().strftime('%H:%M de %d/%m')}")
+                except ValueError:
+                    parts.append(f"observado: {item['seenAt']}")
+            # Origem é identificador técnico do coletor: só no modo avançado.
+            if item.get("source") and self._advanced_mode:
                 parts.append(f"origem: {item['source']}")
             if item.get("error"):
                 parts.append(str(item["error"]))

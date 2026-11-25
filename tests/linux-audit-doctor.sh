@@ -332,12 +332,77 @@ test_optional_subsystem_stays_quiet_without_config() {
     echo "ok"
 }
 
+# case 10: diagnóstico sem falsos alarmes — efivarfs ignorado, serviço
+# opcional ausente/desligado é informativo, temperatura relativa ao sensor.
+test_quiet_optional_findings() {
+    rm -rf "$MOCK_BIN"
+    stub_all_subscripts
+    mock_install_free "$(FREE_VALID)"
+    # shellcheck disable=SC2016 # mock bodies are literal scripts written to MOCK_BIN
+    mock_install_df '#!/usr/bin/env bash
+case "$1" in
+    --output=source) echo "Filesystem"; echo "/dev/sda1"; exit 0 ;;
+    --output=fstype)
+        echo "Type"
+        [ "$2" = "/sys/firmware/efi/efivars" ] && echo "efivarfs" || echo "ext4"
+        exit 0 ;;
+esac
+case "$*" in
+    *--output=source,target,size,used,pcent*)
+        echo "Filesystem      Mounted on                 Size  Used Use%"
+        echo "efivarfs        /sys/firmware/efi/efivars  148K  125K  88%"
+        echo "/dev/sda1       /                          50G   25G  50%"
+        exit 0 ;;
+esac
+echo "Filesystem      Size  Used Avail Use% Mounted on"
+echo "/dev/sda1       50G   25G   25G  50% /"
+'
+    # shellcheck disable=SC2016
+    mock_install systemctl '#!/usr/bin/env bash
+case "$1" in
+    is-active) exit 3 ;;
+    is-enabled)
+        case "$2" in
+            docker) echo "not-found"; exit 4 ;;
+            sshd) echo "disabled"; exit 1 ;;
+            NetworkManager) echo "enabled"; exit 0 ;;
+            *) echo "masked"; exit 1 ;;
+        esac ;;
+esac
+exit 3
+'
+    local zone="$TEST_SCRATCH/thermal"
+    mkdir -p "$zone"
+    echo 86000 > "$zone/temp"
+    echo critical > "$zone/trip_point_0_type"
+    echo 105000 > "$zone/trip_point_0_temp"
+    local output
+    output=$(PZ_THERMAL_ZONE="$zone" mock_run) || return 1
+    if echo "$output" | grep -q 'efivars'; then
+        echo "FAIL: efivarfs reported as disk usage" >&2; return 1
+    fi
+    if ! echo "$output" | grep -q '\[INFO\] SVC_docker'; then
+        echo "FAIL: missing docker should be INFO: $(echo "$output" | grep SVC_docker)" >&2; return 1
+    fi
+    if ! echo "$output" | grep -q '\[INFO\] SVC_sshd'; then
+        echo "FAIL: disabled sshd should be INFO: $(echo "$output" | grep SVC_sshd)" >&2; return 1
+    fi
+    if ! echo "$output" | grep -q '\[WARN\] SVC_NetworkManager'; then
+        echo "FAIL: enabled but inactive service should WARN" >&2; return 1
+    fi
+    if ! echo "$output" | grep -q '\[WARN\] CPU01: CPU temperature'; then
+        echo "FAIL: 86C below critical-10 should WARN: $(echo "$output" | grep CPU01)" >&2; return 1
+    fi
+    echo "ok"
+}
+
 # Run all
 echo "=== audit/doctor.sh engine hardening tests ==="
 for case in test_snap_not_fail test_mem_localized_error test_mem_valid_pass \
             test_pct_malformed_error test_stdout_id test_host_profile_deck_winvm06 \
             test_subsystem_never_waydroid test_subsystem_partial_waydroid \
-            test_optional_subsystem_stays_quiet_without_config; do
+            test_optional_subsystem_stays_quiet_without_config \
+            test_quiet_optional_findings; do
     printf "  case %s: " "${case#test_}"
     mock_cleanup 2>/dev/null || true
     if "$case"; then

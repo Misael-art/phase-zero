@@ -152,6 +152,7 @@ class ResultsPage(BasePage):
             "running": "Em andamento",
             "cancelling": "Cancelando",
             "succeeded": "OK",
+            "attention": "Requer atenção",
             "failed": "Falha",
             "cancelled": "Cancelada",
             "interrupted": "Interrompida",

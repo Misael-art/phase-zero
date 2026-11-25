@@ -235,3 +235,13 @@ def test_synthesized_actions_produce_real_pz_commands(monkeypatch, catalog):
     tune = tuning_action(items["tune.gaming"], True)
     program, args = command_runner.build_program(ROOT, tune, preview=False)
     assert args == ["tune", "gaming", "apply"]
+
+
+def test_install_switch_names_the_state_itself(page):
+    """"Instalado" ao lado de "Desligado" era lido como app instalado."""
+    page._absorb_capabilities(status_payload({"gaming.mangohud"}))
+    installed = card_for(page, "gaming.mangohud").install_switch
+    missing = card_for(page, "gaming.gamescope").install_switch
+    assert installed.accessibleDescription() == "Instalado"
+    assert missing.accessibleDescription() == "Não instalado"
+    assert installed.sizeHint().width() >= installed.fontMetrics().horizontalAdvance("Não instalado") + 50

@@ -51,6 +51,7 @@ from . import __version__
 from .models import ActionSpec, OperationResult
 from .platform import open_path
 from .preferences import reduced_motion
+from .health_models import HealthCheck, health_summary, parse_health_checks
 from .result_parser import guidance, is_pending_report, restart_required
 
 
@@ -511,13 +512,13 @@ class HubAppCard(QFrame):
         row = QHBoxLayout(block)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
-        label = QLabel(caption)
-        label.setObjectName("hubSwitchCaption")
         switch = SwitchControl()
+        # O próprio switch diz o estado ("Não instalado"); legenda separada
+        # ao lado de "Desligado" era lida como "Instalado" por quem escaneia.
+        switch.set_state_texts(*{"install": ("Instalado", "Não instalado"), "tune": ("Otimizado", "Padrão")}[kind])
         switch.setAccessibleName(f"{caption}: {self.item.title}")
         switch.setTristate(False)
         switch.toggled.connect(lambda checked, which=kind: self._on_toggled(which, checked))
-        row.addWidget(label, 0, Qt.AlignVCenter)
         row.addWidget(switch, 0, Qt.AlignVCenter)
         if kind == "install":
             self.install_switch = switch
@@ -541,6 +542,8 @@ class HubAppCard(QFrame):
         switch.blockSignals(True)
         switch.setChecked(bool(value))
         switch.blockSignals(False)
+        # Sinais bloqueados: atualiza texto acessível/pintura manualmente.
+        switch._state_changed(bool(value))
         switch.setProperty("syncing", False)
         switch.set_pending(False)
         # Estado desconhecido não pode parecer "desligado": o texto diz o que
@@ -908,12 +911,25 @@ class SwitchControl(QCheckBox):
         super().__init__(parent)
         self.setObjectName("largeSwitch")
         self.setCursor(Qt.PointingHandCursor)
+        self._on_text = "Ligado"
+        self._off_text = "Desligado"
+        self._label_width = 76
         self.setMinimumSize(126, 30)
         self.setAccessibleDescription("Desligado")
         self.toggled.connect(self._state_changed)
 
+    def set_state_texts(self, on: str, off: str) -> None:
+        """Name the state itself ("Instalado"/"Não instalado") instead of
+        Ligado/Desligado beside a caption, which read as two rival states."""
+        self._on_text, self._off_text = on, off
+        metrics = self.fontMetrics()
+        self._label_width = max(76, *(metrics.horizontalAdvance(text) + 8 for text in (on, off, "Aplicando…")))
+        self.setMinimumSize(self._label_width + 50, 30)
+        self._state_changed(self.isChecked())
+        self.updateGeometry()
+
     def sizeHint(self) -> QSize:
-        return QSize(126, 30)
+        return QSize(self._label_width + 50, 30)
 
     def hitButton(self, pos) -> bool:
         # paintEvent desenha trilho e rótulo por toda a largura; o hit rect
@@ -922,7 +938,7 @@ class SwitchControl(QCheckBox):
         return self.rect().contains(pos)
 
     def _state_changed(self, checked: bool) -> None:
-        self.setAccessibleDescription("Ligado" if checked else "Desligado")
+        self.setAccessibleDescription(self._on_text if checked else self._off_text)
         self.update()
 
     def set_pending(self, pending: bool) -> None:
@@ -937,9 +953,9 @@ class SwitchControl(QCheckBox):
         enabled = self.isEnabled()
         palette = self.palette()
 
-        text = "Aplicando…" if pending else "Ligado" if checked else "Desligado"
+        text = "Aplicando…" if pending else self._on_text if checked else self._off_text
         text_color = QColor("#b77900") if pending else palette.windowText().color() if enabled else palette.mid().color()
-        label_rect = QRectF(0, 0, 76, self.height())
+        label_rect = QRectF(0, 0, self._label_width, self.height())
         painter.setPen(text_color)
         painter.drawText(label_rect, Qt.AlignRight | Qt.AlignVCenter, text)
 
@@ -1349,19 +1365,9 @@ class StructuredResultView(QWidget):
             item = self.summary_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        if isinstance(value, list) and all(isinstance(item, str) for item in value):
-            counts = {"PASS": 0, "WARN": 0, "FAIL": 0, "ERROR": 0, "INFO": 0}
-            for item in value:
-                for status in counts:
-                    if item.startswith(f"[{status}]"):
-                        counts[status] += 1
-                        break
-            row = QHBoxLayout()
-            row.addWidget(StatusPill("Tudo certo", "success", str(counts["PASS"])))
-            row.addWidget(StatusPill("Avisos", "warning", str(counts["WARN"] + counts["INFO"])))
-            row.addWidget(StatusPill("Erros", "error", str(counts["FAIL"] + counts["ERROR"])))
-            row.addStretch()
-            self.summary_layout.addLayout(row)
+        checks = parse_health_checks(value)
+        if checks:
+            self._show_checks(checks)
         else:
             facts = _result_facts(value)
             if facts:
@@ -1396,8 +1402,64 @@ class StructuredResultView(QWidget):
             raw_text = json.dumps(value, ensure_ascii=False, indent=2)
         self.raw.setPlainText(raw_text[:2_000_000])
 
+    def _show_checks(self, checks: list[HealthCheck]) -> None:
+        """Counts first, then every item that needs a decision, in plain words."""
+        pills = QWidget()
+        pills.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        row = QHBoxLayout(pills)
+        row.setContentsMargins(0, 0, 0, 0)
+        # INFO é informativo (subsistema não usado): não conta como aviso,
+        # mesmo veredito da Visão geral.
+        for label, state, statuses in (
+            ("Tudo certo", "success", {"PASS"}),
+            ("Avisos", "warning", {"WARN"}),
+            ("Erros", "error", {"FAIL", "ERROR"}),
+            ("Informativos", "info", {"INFO"}),
+        ):
+            count = sum(check.status in statuses for check in checks)
+            row.addWidget(StatusPill(label, state, str(count)))
+        row.addStretch()
+        self.summary_layout.addWidget(pills)
+        attention = sorted(
+            (check for check in checks if check.needs_attention),
+            key=lambda check: 0 if check.state == "error" else 1,
+        )
+        if not attention:
+            return
+        heading = QLabel("O que revisar")
+        heading.setObjectName("sectionHeading")
+        self.summary_layout.addWidget(heading)
+        rows = QWidget()
+        rows.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        rows_layout = QVBoxLayout(rows)
+        rows_layout.setContentsMargins(0, 0, 0, 0)
+        rows_layout.setSpacing(0)
+        for check in attention:
+            item = QWidget()
+            item.setObjectName("healthCheckRow")
+            item_layout = QHBoxLayout(item)
+            item_layout.setContentsMargins(4, 6, 4, 6)
+            icon = QLabel({"warning": "⚠", "error": "✕"}.get(check.state, "i"))
+            icon.setObjectName("healthCheckIcon")
+            icon.setProperty("state", check.state)
+            icon.setAlignment(Qt.AlignCenter)
+            icon.setFixedSize(28, 28)
+            icon.setAccessibleName({"warning": "Aviso", "error": "Erro"}.get(check.state, "Informação"))
+            text = QLabel(f"<b>{_escape(check.title)}</b>" + (f" — {_escape(check.detail)}" if check.detail else ""))
+            text.setTextFormat(Qt.RichText)
+            text.setWordWrap(True)
+            item_layout.addWidget(icon)
+            item_layout.addWidget(text, 1)
+            rows_layout.addWidget(item)
+        self.summary_layout.addWidget(rows)
+        self.summary_layout.addStretch(1)
+
     def set_advanced_mode(self, enabled: bool) -> None:
         self.details_toggle.setChecked(bool(enabled))
+
+
+def _escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def sanitized_command(command: list[str]) -> str:
@@ -1824,6 +1886,12 @@ class ResultDialog(StatefulDialog):
         sev = severity or ("success" if result.ok else "error")
         title_map = {"success": "Operação concluída", "warning": "Concluído com avisos", "error": "Operação falhou"}
         title = title_map.get(sev, "Operação falhou")
+        checks = parse_health_checks(result.parsed)
+        if checks and sev != "error":
+            # O diagnóstico rodou; os achados são o resultado, não uma falha.
+            title = "Diagnóstico concluído"
+            if sev == "success" and any(check.needs_attention for check in checks):
+                sev = "warning"
         if restart_required(result.parsed):
             title = "Reinício necessário"
         super().__init__(title, sev, parent)
@@ -1841,6 +1909,8 @@ class ResultDialog(StatefulDialog):
             parts = [part for part in (human, f"Próximo passo: {nxt}" if nxt else "") if part]
             if parts:
                 message = "\n".join(parts)
+        if checks:
+            message = health_summary(checks)
         if getattr(result, "timed_out", False):
             message = (
                 "A operação passou do tempo limite e foi interrompida.\n"

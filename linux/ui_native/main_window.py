@@ -917,8 +917,11 @@ class MainWindow(QMainWindow):
         self.status_dot.style().polish(self.status_dot)
         self.registry.block_all(False)
         self.inspector.setEnabled(True)
+        # Diagnósticos que encontraram problemas terminam com aviso, não
+        # contam como falha pendente do PhaseZero.
         if not result.ok and not is_cancelled:
-            self._failure_count += 1
+            if severity == "error":
+                self._failure_count += 1
         elif not result.preview:
             # A confirmed operation that succeeded clears the pending-failure
             # badge; preview runs must not clear it (no change was applied).

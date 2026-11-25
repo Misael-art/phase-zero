@@ -217,3 +217,19 @@ def test_admin_row_buttons_present_on_page(catalog):
 @pytest.fixture(scope="module")
 def by_id_catalog(qapp, catalog):
     return {a.id: a for a in catalog}
+
+
+def test_status_facts_never_show_raw_identifiers(page):
+    payload = _payload()
+    payload["virtualKeyboard"]["provider"] = "none"
+    payload["boot"] = {"grubCfgEntry": "unknown-permission", "nextEntry": "none"}
+    payload["display"] = {"profile": "steamdeck-docked"}
+    page._on_status_ready("steamdeck.status", "", payload)
+    assert "(none)" not in page.keyboard_label.text()
+    assert page.boot_label.text() == "Não verificado — ler o GRUB exige administrador"
+    assert page.display_label.text() == "Dock (TV ou monitor)"
+    assert page.state_label.text().startswith("● Modo atual:")
+
+    payload["boot"] = {"grubCfgEntry": "present"}
+    page._on_status_ready("steamdeck.status", "", payload)
+    assert page.boot_label.text() == "Entrada GRUB presente"

@@ -135,7 +135,9 @@ while IFS=' ' read -r dev target _size _used pct; do
         /|/tmp/.mount_*|/run/user/*|/var/lib/docker/overlay2/*/merged|/var/lib/snapd/snap/*) continue ;;
     esac
     case "$(LANG=C df --output=fstype "$target" 2>/dev/null | tail -1)" in
-        squashfs|iso9660) continue ;;
+        # efivarfs guarda variáveis de firmware, não arquivos do usuário: o
+        # percentual não indica falta de espaço.
+        squashfs|iso9660|efivarfs) continue ;;
     esac
     case "$dev" in
         /dev/loop*) continue ;;
@@ -187,10 +189,33 @@ if [ -d "$pz_state_ops" ]; then
 fi
 
 header "CPU / Temperature"
-temp=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0)
+thermal_zone="${PZ_THERMAL_ZONE:-/sys/class/thermal/thermal_zone0}"
+temp=$(cat "$thermal_zone/temp" 2>/dev/null || echo 0)
 if [[ "$temp" =~ ^[0-9]+$ ]] && [ "$temp" -gt 0 ]; then
     temp_c=$((temp / 1000))
-    if [ "$temp_c" -lt 85 ]; then check CPU01 "CPU temperature < 85°C" PASS "${temp_c}°C"; else check CPU01 "CPU temperature < 85°C" FAIL "${temp_c}°C"; fi
+    # Portáteis como o Steam Deck passam de 85 °C sob carga normal; erro só
+    # perto do limite crítico declarado pelo próprio sensor.
+    crit_c=0
+    for trip_type in "$thermal_zone"/trip_point_*_type; do
+        [ -r "$trip_type" ] || continue
+        [ "$(cat "$trip_type" 2>/dev/null)" = "critical" ] || continue
+        trip_temp=$(cat "${trip_type%_type}_temp" 2>/dev/null || echo 0)
+        [[ "$trip_temp" =~ ^[0-9]+$ ]] && [ "$trip_temp" -gt 0 ] && crit_c=$((trip_temp / 1000))
+        break
+    done
+    temp_detail="${temp_c}°C"
+    fail_at=95
+    if [ "$crit_c" -gt 0 ]; then
+        temp_detail="${temp_c}°C (critical ${crit_c}°C)"
+        fail_at=$((crit_c - 10))
+    fi
+    if [ "$temp_c" -ge "$fail_at" ]; then
+        check CPU01 "CPU temperature" FAIL "$temp_detail"
+    elif [ "$temp_c" -ge 85 ]; then
+        check CPU01 "CPU temperature" WARN "$temp_detail"
+    else
+        check CPU01 "CPU temperature" PASS "$temp_detail"
+    fi
 else
     check CPU01 "CPU temperature" INFO "sensor unavailable"
 fi
@@ -215,7 +240,20 @@ fi
 
 header "Services"
 for svc in docker sshd NetworkManager bluetooth; do
-    if systemctl is-active "$svc" &>/dev/null; then check "SVC_$svc" "$svc running" PASS ""; else check "SVC_$svc" "$svc running" WARN "inactive"; fi
+    if systemctl is-active "$svc" &>/dev/null; then
+        check "SVC_$svc" "$svc running" PASS ""
+        continue
+    fi
+    # Serviço que o usuário nunca instalou ou desligou de propósito é
+    # informação, não defeito; aviso só quando deveria iniciar e não iniciou.
+    case "$(systemctl is-enabled "$svc" 2>/dev/null || true)" in
+        enabled|enabled-runtime|static|indirect|generated|alias)
+            check "SVC_$svc" "$svc running" WARN "enabled but inactive" ;;
+        disabled|masked|masked-runtime|linked|linked-runtime)
+            check "SVC_$svc" "$svc running" INFO "disabled (optional)" ;;
+        *)
+            check "SVC_$svc" "$svc running" INFO "not installed (optional)" ;;
+    esac
 done
 
 if [ "${PZ_DOCTOR_SCOPE:-full}" = "system" ]; then
