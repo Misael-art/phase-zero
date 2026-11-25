@@ -256,9 +256,22 @@ openclaw_server_json() {
         end'
 }
 
+# Claude Code speaks streamable HTTP natively; routing it through
+# `npx mcp-remote` would make the entry depend on Node.js for nothing.
+claude_server_json() {
+    jq 'if (.type == "stdio" or has("command")) then
+          {type: "stdio", command: (.command // .url), args: (.args // [])}
+          + (if has("env") then {env: .env} else {} end)
+        else
+          {type: "http", url: .url}
+          + (if has("headers") then {headers: .headers} else {} end)
+        end'
+}
+
 server_json_for_target() {
     local target="$1" json="$2"
     case "$target" in
+        claude) claude_server_json <<< "$json" ;;
         opencode) opencode_server_json <<< "$json" ;;
         vscode|vscode-user|zcode) vscode_server_json <<< "$json" ;;
         zed) zed_server_json <<< "$json" ;;
@@ -299,12 +312,19 @@ install_json_target() {
     local target="$1" name="$2" json="$3" cfg field server tmp
     cfg="$(json_target_path "$target")"
     field="$(target_field "$target")"
+    server="$(server_json_for_target "$target" "$json")"
+    # An entry that launches a missing program is a broken MCP in the client.
+    local launcher
+    launcher="$(jq -r '.command // empty' <<< "$server")"
+    if [ "$launcher" = "npx" ] && ! command -v npx >/dev/null 2>&1; then
+        pz_warn "MCP $name não aplicado em $target: o cliente precisa de npx (Node.js), ausente neste host"
+        return 0
+    fi
     if [ "$target" = "claude" ] && command -v claude >/dev/null 2>&1; then
         [ ! -f "$cfg" ] || jq empty "$cfg" >/dev/null 2>&1 || { pz_warn "$cfg is not strict JSON; skipped $target"; return 0; }
     else
         ensure_json_config "$target" || return 0
     fi
-    server="$(server_json_for_target "$target" "$json")"
     local current
     current="$(jq -c --arg field "$field" --arg name "$name" '.[$field][$name] // empty' "$cfg" 2>/dev/null || true)"
     if ! mcp_entry_ours "$cfg" "$name" "$current"; then

@@ -184,6 +184,37 @@ def test_broad_mcp_sync_skips_clients_absent_from_host(tmp_path):
                    ".config/Claude", ".config/ai.z.zcode"):
         assert not (home / absent).exists(), absent
     assert not (workspace / ".codex").exists() and not (workspace / ".vscode").exists()
-    explicit = _bash("bash linux/ai/mcp-manager.sh install ai-memory cursor", env)
+    explicit = _bash("bash linux/ai/mcp-manager.sh install ai-memory zed", env)
     assert explicit.returncode == 0, explicit.stderr
-    assert "ai-memory" in (home / ".cursor/mcp.json").read_text()
+    assert "ai-memory" in (home / ".config/zed/settings.json").read_text()
+
+
+def _absent_clients_env(tmp_path):
+    env = _sandbox_env(tmp_path)
+    env["PATH"] = "/usr/bin:/bin"
+    if any(shutil.which(name, path=env["PATH"]) for name in ("claude", "npx", "cursor")):
+        pytest.skip("host has claude/npx/cursor in /usr/bin")
+    env["PZ_WORKSPACE_ROOT"] = str(tmp_path / "workspace")
+    return env
+
+
+def test_claude_code_gets_native_http_not_npx(tmp_path):
+    env = _absent_clients_env(tmp_path)
+    home = Path(env["HOME"])
+    (home / ".claude.json").write_text("{}\n")
+    result = _bash("bash linux/ai/mcp-manager.sh install ai-memory claude", env)
+    assert result.returncode == 0, result.stderr
+    import json
+
+    entry = json.loads((home / ".claude.json").read_text())["mcpServers"]["ai-memory"]
+    assert entry == {"type": "http", "url": "http://127.0.0.1:49374/mcp"}
+
+
+def test_stdio_only_client_is_not_given_a_missing_npx(tmp_path):
+    env = _absent_clients_env(tmp_path)
+    home = Path(env["HOME"])
+    (home / ".config/Claude").mkdir(parents=True)
+    result = _bash("bash linux/ai/mcp-manager.sh install ai-memory claude-desktop", env)
+    assert result.returncode == 0, result.stderr
+    assert "npx" in result.stderr + result.stdout
+    assert not (home / ".config/Claude/claude_desktop_config.json").exists()

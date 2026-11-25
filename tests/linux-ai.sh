@@ -44,6 +44,10 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$PZ_LOCAL_BIN/hermes"
+# Clients without native HTTP MCP get `npx mcp-remote`; PhaseZero writes that
+# only when npx exists. The stub makes the fixture independent of host Node.
+printf '#!/usr/bin/env bash\necho "npx: test stub" >&2; exit 1\n' > "$PZ_LOCAL_BIN/npx"
+chmod +x "$PZ_LOCAL_BIN/npx"
 # ensure PZ_LOCAL_BIN is on PATH before any setup script runs
 export PATH="$PZ_LOCAL_BIN:$PATH"
 
