@@ -153,19 +153,19 @@ plugin_catalog() {
     cat <<'EOF'
 PowerTools|PowerTools|PowerTools|database|https://gitlab.com/NGnius/PowerTools||PowerTools|TDP, SMT, CPU/GPU power controls; needs privileged Decky service for full plugin control.
 SDH-CssLoader|CSS Loader|SDH-CssLoader|database|https://github.com/DeckThemes/SDH-CssLoader|DeckThemes/SDH-CssLoader|SDH-CssLoader,SDH-CSSLoader,CSSLoader,CssLoader|Themes and CSS customization.
-SDH-AnimationChanger|Animation Changer|SDH-AnimationChanger|database|https://github.com/DeckThemes/SDH-AnimationChanger||SDH-AnimationChanger,AnimationChanger|Boot/suspend animation customization.
+SDH-AnimationChanger|Animation Changer|SDH-AnimationChanger|database|https://github.com/TheLogicMaster/SDH-AnimationChanger||SDH-AnimationChanger,AnimationChanger|Boot/suspend animation customization.
 SDH-AudioLoader|Audio Loader|SDH-AudioLoader|database|https://github.com/DeckThemes/SDH-AudioLoader||SDH-AudioLoader,AudioLoader|Steam UI sound pack customization.
 protondb-decky|ProtonDB Badges|protondb-decky|database|https://github.com/OMGDuke/protondb-decky||protondb-decky,ProtonDBBadges|Compatibility badges in library.
 hltb-for-deck|HLTB for Deck|hltb-for-deck|database|https://github.com/SDH-Stewardship/hltb-for-deck||hltb-for-deck,HLTB-for-Deck|HowLongToBeat estimates in game pages.
 decky-steamgriddb|SteamGridDB|decky-steamgriddb|database|https://github.com/SteamGridDB/decky-steamgriddb||decky-steamgriddb,SteamGridDB|Artwork management from Game Mode.
 decky-storage-cleaner|Storage Cleaner|decky-storage-cleaner|database|https://github.com/mcarlucci/decky-storage-cleaner||decky-storage-cleaner,StorageCleaner|Shader/compatdata cleanup from Game Mode.
-decky-game-settings|Deck Settings|Deck Settings|database|https://github.com/SteamDeckHomebrew/decky-game-settings||decky-game-settings,DeckSettings|Community settings reference.
+decky-game-settings|Deck Settings|Deck Settings|database|https://github.com/DeckSettings/decky-game-settings||decky-game-settings,DeckSettings|Community settings reference.
 Bluetooth|Bluetooth|Bluetooth|database|https://github.com/Outpox/Bluetooth||Bluetooth|Bluetooth quick settings from Decky.
 vibrantDeck|vibrantDeck|vibrantDeck|database|https://github.com/libvibrant/vibrantDeck||vibrantDeck|Display vibrance/saturation controls.
 EmuDecky|EmuDecky|EmuDecky|database|https://github.com/EmuDeck/EmuDecky||EmuDecky|EmuDeck integration in Game Mode.
 decky-autoflatpaks|AutoFlatpaks|decky-autoflatpaks|database|https://github.com/jurassicplayer/decky-autoflatpaks||decky-autoflatpaks,AutoFlatpaks|Flatpak update UX from Game Mode.
-decky-ludusavi|Ludusavi|decky-ludusavi|database|https://github.com/mtkennerly/ludusavi-decky||decky-ludusavi,Ludusavi|Save backup integration.
-decky-wine-cellar|Wine Cellar|decky-wine-cellar|database|https://github.com/SteamDeckHomebrew/decky-wine-cellar||decky-wine-cellar,WineCellar|Wine/Proton management helper.
+decky-ludusavi|Ludusavi|decky-ludusavi|database|https://github.com/GedasFX/decky-ludusavi||decky-ludusavi,Ludusavi|Save backup integration.
+decky-wine-cellar|Wine Cellar|decky-wine-cellar|database|https://github.com/FlashyReese/decky-wine-cellar||decky-wine-cellar,WineCellar|Wine/Proton management helper.
 decky-lsfg-vk|Decky LSFG-VK|decky-lsfg-vk|database|https://github.com/xXJSONDeruloXx/decky-lsfg-vk|xXJSONDeruloXx/decky-lsfg-vk|decky-lsfg-vk,Decky.LSFG-VK,Decky-LSFG-VK|Requires Lossless Scaling Steam app and per-game launch option.
 NonSteamLaunchers|NonSteamLaunchers|NonSteamLaunchers|unsupported|https://github.com/moraroy/NonSteamLaunchersDecky||NonSteamLaunchers,NonSteamLaunchersDecky|No packaged Decky artifact is currently published; incomplete source snapshots are quarantined. Use PhaseZero non-Steam launcher integration.
 EOF

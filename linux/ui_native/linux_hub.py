@@ -97,6 +97,9 @@ class HubItem:
     # vira o arquivo exportado.
     source_kind: str = ""
     source_name: str = ""
+    # Presente por outro canal (pacman/AUR/meta-pacote, Flatpak do sistema,
+    # programa avulso). O PhaseZero não instala por cima nem remove.
+    external: str = ""
 
     @property
     def reversible(self) -> bool:
@@ -205,6 +208,7 @@ def build_capability_items(
             ),
             source_kind=str(source.get("kind", "")),
             source_name=str(source.get("name", "")),
+            external=str(raw.get("external") or "") if has_status else "",
         ))
     return items
 

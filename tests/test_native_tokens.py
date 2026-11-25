@@ -33,10 +33,11 @@ def test_render_qss_light_has_no_placeholders():
 
 
 def test_render_qss_preserves_accent():
-    assert DARK.accent == "#7c4dff"
-    assert LIGHT.accent == "#7c4dff"
-    assert "#7c4dff" in render_qss(DARK)
-    assert "#7c4dff" in render_qss(LIGHT)
+    # Marca teal sobre grafite: o violeta/índigo anterior lia como azul.
+    assert DARK.accent == "#2cc7b0"
+    assert LIGHT.accent == "#0f766e"
+    assert DARK.accent in render_qss(DARK)
+    assert LIGHT.accent in render_qss(LIGHT)
 
 
 def test_every_placeholder_resolves():

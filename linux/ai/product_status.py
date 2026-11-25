@@ -216,10 +216,12 @@ def normalize_payload(app_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         configuration = "unknown"
         launchable = False
 
-    # The desktop manager only inventories its own Claude/Qwen directories.
-    # A negative managed-path check cannot prove absence of external installs.
+    # The desktop manager inventories its own Claude/Qwen directories and,
+    # since it refuses to stack a second copy, reports a foreign install.
     installation = "present" if installed is True else "unknown"
     origin = "phasezero" if installed is True else "unknown"
+    if installed is not True and record.get("externalInstall"):
+        installation, origin = "present", "external"
     return _base(
         manager,
         installation=installation,

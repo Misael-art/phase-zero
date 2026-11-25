@@ -11,19 +11,67 @@ MCP_SOURCES="$PZ_ROOT/assets/mcp/servers"
 WORKSPACE_ROOT="${PZ_WORKSPACE_ROOT:-$PZ_ROOT}"
 XDG_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
 OPENCODE_CONFIG="$XDG_CONFIG/opencode/opencode.json"
-CLAUDE_CONFIG="$XDG_CONFIG/claude/claude.json"
+# Claude Code guarda MCPs de escopo usuário em ~/.claude.json (o antigo
+# ~/.config/claude/claude.json nunca foi lido pelo cliente).
+CLAUDE_CONFIG="${PZ_CLAUDE_CONFIG:-$HOME/.claude.json}"
 CLAUDE_DESKTOP_CONFIG="$XDG_CONFIG/Claude/claude_desktop_config.json"
 CODEX_CONFIG="${HOME}/.codex/config.toml"
 CODEX_PROJECT_CONFIG="${WORKSPACE_ROOT}/.codex/config.toml"
 VSCODE_WORKSPACE_MCP_CONFIG="${WORKSPACE_ROOT}/.vscode/mcp.json"
 VSCODE_USER_MCP_CONFIG="$XDG_CONFIG/Code/User/mcp.json"
-CURSOR_MCP_CONFIG="$XDG_CONFIG/Cursor/User/mcp.json"
+# Arquivo global de MCP do Cursor.
+CURSOR_MCP_CONFIG="${PZ_CURSOR_MCP_CONFIG:-$HOME/.cursor/mcp.json}"
 ZED_CONFIG="$XDG_CONFIG/zed/settings.json"
 ZCODE_STORE="$XDG_CONFIG/ai.z.zcode/store.json"
 OPENCLAW_CONFIG="${HOME}/.openclaw/config.json"
 HERMES_CONFIG="${HOME}/.hermes/config.yaml"
 AI_MEMORY_MCP_URL="${AI_MEMORY_SERVER_URL:-http://127.0.0.1:49374}/mcp"
 MCP_BACKUP_DIR="$PZ_STATE/backups/ai-mcp"
+# Entradas MCP que o PhaseZero escreveu: {"<arquivo>": {"<nome>": "<sha256>"}}.
+# Só o que está aqui (e não foi alterado depois) pode ser substituído/removido;
+# um servidor homônimo configurado pelo usuário é preservado.
+MCP_OWNED="${PZ_MCP_OWNED:-$PZ_STATE/ai-mcp-owned.json}"
+
+mcp_json_digest() {
+    jq -S -c '.' | sha256sum | awk '{print $1}'
+}
+
+mcp_owned_digest() {
+    local cfg="$1" name="$2"
+    [ -f "$MCP_OWNED" ] || return 0
+    jq -r --arg cfg "$cfg" --arg name "$name" '.[$cfg][$name] // empty' "$MCP_OWNED" 2>/dev/null || true
+}
+
+mcp_owned_set() {
+    local cfg="$1" name="$2" digest="$3" tmp
+    mkdir -p "$(dirname "$MCP_OWNED")"
+    [ -f "$MCP_OWNED" ] && jq empty "$MCP_OWNED" >/dev/null 2>&1 || echo '{}' > "$MCP_OWNED"
+    tmp="$(mktemp "$MCP_OWNED.XXXXXX")"
+    if [ -n "$digest" ]; then
+        jq --arg cfg "$cfg" --arg name "$name" --arg d "$digest" '.[$cfg][$name] = $d' "$MCP_OWNED" > "$tmp"
+    else
+        jq --arg cfg "$cfg" --arg name "$name" 'del(.[$cfg][$name]) | with_entries(select(.value != {}))' "$MCP_OWNED" > "$tmp"
+    fi
+    chmod 0600 "$tmp"
+    mv "$tmp" "$MCP_OWNED"
+}
+
+# 0 = entrada ausente ou nossa e intacta (pode escrever/remover);
+# 1 = entrada de outra origem ou editada pelo usuário (preservar).
+mcp_entry_ours() {
+    local cfg="$1" name="$2" current="$3" owned
+    [ -n "$current" ] || return 0
+    [ "${PZ_MCP_FORCE:-0}" = "1" ] && return 0
+    owned="$(mcp_owned_digest "$cfg" "$name")"
+    [ -n "$owned" ] && [ "$owned" = "$(printf '%s' "$current" | mcp_json_digest)" ]
+}
+
+# Reescreve sem trocar o inode: preserva symlink (dotfiles) e permissões.
+mcp_write_through() {
+    local tmp="$1" cfg="$2"
+    cat "$tmp" > "$cfg"
+    rm -f "$tmp"
+}
 
 backup_config() {
     local cfg="$1" label backup
@@ -240,20 +288,47 @@ ensure_json_config() {
     else
         jq --arg field "$field" '.[$field] = (if (.[$field] | type) == "object" then .[$field] else {} end)' "$cfg" > "$tmp"
     fi
-    mv "$tmp" "$cfg"
+    if cmp -s "$tmp" "$cfg"; then
+        rm -f "$tmp"
+    else
+        mcp_write_through "$tmp" "$cfg"
+    fi
 }
 
 install_json_target() {
     local target="$1" name="$2" json="$3" cfg field server tmp
     cfg="$(json_target_path "$target")"
     field="$(target_field "$target")"
-    ensure_json_config "$target" || return 0
+    if [ "$target" = "claude" ] && command -v claude >/dev/null 2>&1; then
+        [ ! -f "$cfg" ] || jq empty "$cfg" >/dev/null 2>&1 || { pz_warn "$cfg is not strict JSON; skipped $target"; return 0; }
+    else
+        ensure_json_config "$target" || return 0
+    fi
     server="$(server_json_for_target "$target" "$json")"
+    local current
+    current="$(jq -c --arg field "$field" --arg name "$name" '.[$field][$name] // empty' "$cfg" 2>/dev/null || true)"
+    if ! mcp_entry_ours "$cfg" "$name" "$current"; then
+        pz_warn "MCP $name em $cfg foi configurado fora do PhaseZero; preservado"
+        return 0
+    fi
     backup_config "$cfg"
+    if [ "$target" = "claude" ] && command -v claude >/dev/null 2>&1; then
+        # Claude Code reescreve ~/.claude.json enquanto roda; a CLI oficial
+        # evita perder a edição numa corrida.
+        [ -z "$current" ] || claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
+        if ! claude mcp add-json --scope user "$name" "$server" >/dev/null; then
+            pz_warn "claude mcp add-json falhou para $name"
+            return 0
+        fi
+        mcp_owned_set "$cfg" "$name" "$(printf '%s' "$server" | mcp_json_digest)"
+        pz_info "MCP $name installed in $target config: $cfg"
+        return 0
+    fi
     # shellcheck disable=SC2119 # intentional no-arg call: mktemp default template
     tmp="$(pz_tempfile)"
     jq --arg field "$field" --arg name "$name" --argjson server "$server" '.[$field][$name] = $server' "$cfg" > "$tmp"
-    mv "$tmp" "$cfg"
+    mcp_write_through "$tmp" "$cfg"
+    mcp_owned_set "$cfg" "$name" "$(printf '%s' "$server" | mcp_json_digest)"
     pz_info "MCP $name installed in $target config: $cfg"
 }
 
@@ -266,15 +341,29 @@ remove_json_target() {
         pz_warn "$cfg is not strict JSON; skipped $target"
         return 0
     fi
+    local current
+    current="$(jq -c --arg field "$field" --arg name "$name" '.[$field][$name] // empty' "$cfg" 2>/dev/null || true)"
+    [ -n "$current" ] || return 0
+    if ! mcp_entry_ours "$cfg" "$name" "$current"; then
+        pz_info "MCP $name em $cfg não foi escrito pelo PhaseZero (ou foi editado); preservado"
+        return 0
+    fi
     backup_config "$cfg"
+    if [ "$target" = "claude" ] && command -v claude >/dev/null 2>&1; then
+        claude mcp remove --scope user "$name" >/dev/null 2>&1 || pz_warn "claude mcp remove falhou para $name"
+        mcp_owned_set "$cfg" "$name" ""
+        pz_info "MCP $name removed from $target config: $cfg"
+        return 0
+    fi
     # shellcheck disable=SC2119 # intentional no-arg call: mktemp default template
     tmp="$(pz_tempfile)"
     if [ "$target" = "opencode" ]; then
-        jq --arg name "$name" 'del(.mcp[$name]) | del(.mcpServers)' "$cfg" > "$tmp"
+        jq --arg name "$name" 'del(.mcp[$name])' "$cfg" > "$tmp"
     else
         jq --arg field "$field" --arg name "$name" 'del(.[$field][$name])' "$cfg" > "$tmp"
     fi
-    mv "$tmp" "$cfg"
+    mcp_write_through "$tmp" "$cfg"
+    mcp_owned_set "$cfg" "$name" ""
     pz_info "MCP $name removed from $target config: $cfg"
 }
 

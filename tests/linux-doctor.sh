@@ -5,6 +5,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# Estado e log do pz ficam no temporário: o teste chama flags inválidas de
+# propósito e isso não pode aparecer no pz.log real de quem roda a suíte.
+export XDG_STATE_HOME="$TMP/state"
 set +e
 output="$(PZ_DOCTOR_SCOPE=system timeout 15 bash "$REPO_ROOT/linux/audit/doctor.sh")"
 rc=$?

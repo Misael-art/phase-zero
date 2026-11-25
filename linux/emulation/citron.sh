@@ -81,6 +81,10 @@ sync_citron_user_content() {
     ryujinx=$(pz_emulation_switch_ryujinx_paths)
 
     install -d "$(dirname "$CITRON_KEYS")" "$(dirname "$CITRON_FIRMWARE")"
+    if pz_emulation_user_link "$CITRON_KEYS" || pz_emulation_user_link "$CITRON_FIRMWARE"; then
+        pz_info "Citron: chaves/firmware apontam para uma pasta escolhida pelo usuário; preservado"
+        return 0
+    fi
     if [ -L "$CITRON_KEYS" ] || { [ -d "$CITRON_KEYS" ] && [ -z "$(ls -A "$CITRON_KEYS" 2>/dev/null)" ]; }; then
         rm -rf "$CITRON_KEYS"
     fi
@@ -127,12 +131,16 @@ sync_citron_user_content() {
 }
 
 install_citron() {
+    if pz_emulation_foreign_install Citron "$PZ_EMULATION_STATE/citron.json" \
+        --bin citron --appimage 'citron*.AppImage' --desktop-exec citron; then
+        return 0
+    fi
     local url name
     pz_emulation_ensure_layout
     configure_citron_dirs
 
     url="$(resolve_citron_url)"
-    [ -n "$url" ] || { pz_error "could not resolve Citron AppImage URL from $PZ_CITRON_RELEASE_API"; return 1; }
+    [ -n "$url" ] || { pz_error "Citron indisponível: a fonte oficial de releases não respondeu ($PZ_CITRON_RELEASE_API). Nada foi instalado; Eden é a alternativa gerenciada para Switch."; return 1; }
 
     name="$(basename "$url")"
     CITRON_APP="$PZ_APPLICATIONS_DIR/$name"
@@ -140,7 +148,7 @@ install_citron() {
     pz_info "downloading Citron AppImage: $url"
     pz_emulation_download "$url" "$CITRON_APP"
 
-    ln -sfn "$CITRON_APP" "$CITRON_LINK"
+    pz_emulation_safe_link "$CITRON_APP" "$CITRON_LINK"
     write_citron_wrapper
     write_citron_desktop
     sync_citron_user_content

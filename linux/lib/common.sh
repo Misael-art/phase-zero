@@ -1045,6 +1045,16 @@ pz_rollback() {
     pz_info "rollback complete"
 }
 
+# Equivalente já presente por outro canal (pacman/AUR/provides, Flatpak de
+# qualquer escopo, programa avulso). Imprime "canal<TAB>evidência" e retorna 0;
+# retorna 1 quando nada equivalente existe. PZ_ALLOW_DUPLICATE=1 desliga.
+pz_equivalent_present() {
+    local kind="$1" name="$2"
+    [ "${PZ_ALLOW_DUPLICATE:-0}" = "1" ] && return 1
+    command -v python3 >/dev/null 2>&1 || return 1
+    PYTHONPATH="$PZ_ROOT${PYTHONPATH:+:$PYTHONPATH}" python3 -m linux.capabilities.presence "$kind" "$name" 2>/dev/null
+}
+
 pz_run_profile() {
     local profile_file="$1"
     local profile_real profile_dir profile_name parent parent_file call_depth active_before
@@ -1257,6 +1267,11 @@ pz_run_profile() {
         fi
         while IFS= read -r pkg; do
             [ -z "$pkg" ] && continue
+            local equivalent=""
+            if equivalent="$(pz_equivalent_present pacman "$pkg")"; then
+                pz_info "skip pacman package $pkg: já presente via ${equivalent//$'\t'/ }"
+                continue
+            fi
             if [ "$dry_run" = "1" ]; then
                 pz_info "would install pacman package: $pkg"
                 continue
@@ -1276,6 +1291,11 @@ pz_run_profile() {
         fi
         while IFS= read -r pkg; do
             [ -z "$pkg" ] && continue
+            local equivalent=""
+            if equivalent="$(pz_equivalent_present pacman "$pkg")"; then
+                pz_info "skip AUR package $pkg: já presente via ${equivalent//$'\t'/ }"
+                continue
+            fi
             if [ "$dry_run" = "1" ]; then
                 pz_info "would install AUR package: $pkg"
                 continue
@@ -1295,6 +1315,10 @@ pz_run_profile() {
         fi
         while IFS= read -r pkg; do
             [ -z "$pkg" ] && continue
+            if pz_equivalent_present pacman "$pkg" >/dev/null; then
+                pz_info "skip optional package $pkg: equivalente já presente"
+                continue
+            fi
             if [ "$dry_run" = "1" ]; then
                 pz_info "would try optional pacman package: $pkg"
                 continue
@@ -1307,6 +1331,10 @@ pz_run_profile() {
         done <<< "$opt_pacman"
         while IFS= read -r pkg; do
             [ -z "$pkg" ] && continue
+            if pz_equivalent_present pacman "$pkg" >/dev/null; then
+                pz_info "skip optional AUR package $pkg: equivalente já presente"
+                continue
+            fi
             if [ "$dry_run" = "1" ]; then
                 pz_info "would try optional AUR package: $pkg"
                 continue
@@ -1336,6 +1364,11 @@ pz_run_profile() {
         fi
         while IFS= read -r pkg; do
             [ -z "$pkg" ] && continue
+            local equivalent=""
+            if equivalent="$(pz_equivalent_present flatpak "$pkg")"; then
+                pz_info "skip flatpak $pkg: já presente via ${equivalent//$'\t'/ }"
+                continue
+            fi
             if [ "$dry_run" = "1" ]; then
                 pz_info "would install flatpak package: $pkg"
                 continue
@@ -1590,18 +1623,38 @@ pz_boot_refind_install_stanza() {
 }
 
 pz_boot_refind_remove_stanza() {
-    local entry_id="${1:-}" esp
+    local entry_id="${1:-}" esp d
+    esp="$(pz_boot_esp_dir)"
     for d in "$esp/EFI/refind/entries" "/boot/EFI/refind/entries"; do
         rm -f "$d/$entry_id.conf" 2>/dev/null || true
     done
     pz_info "rEFInd stanza removed: $entry_id"
 }
 
+# Números Boot#### cujo rótulo é exatamente LABEL.
+pz_boot_efi_bootnums_by_label() {
+    local label="$1"
+    command -v efibootmgr >/dev/null 2>&1 || return 0
+    LC_ALL=C efibootmgr 2>/dev/null | awk -v label="$label" '
+        /^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/ {
+            num = substr($1, 5, 4)
+            line = $0
+            sub(/^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]\*?[ ]+/, "", line)
+            sub(/\t.*/, "", line)
+            if (line == label) print num
+        }'
+}
+
 pz_boot_efi_stub_entry() {
-    local entry_id="${1:-}" kernel="${2:-}" initrd="${3:-}" cmdline="${4:-}" esp label
+    local entry_id="${1:-}" kernel="${2:-}" initrd="${3:-}" cmdline="${4:-}" esp label num
     esp="$(pz_boot_esp_dir)"
     label="PhaseZero Windows VM"
     if command -v efibootmgr >/dev/null 2>&1; then
+        # Recriar em vez de acumular: cada instalação fazia mais uma entrada
+        # NVRAM com o mesmo nome.
+        for num in $(pz_boot_efi_bootnums_by_label "$label"); do
+            efibootmgr -q -b "$num" -B 2>/dev/null || pz_warn "não foi possível remover Boot$num antigo"
+        done
         efibootmgr -c \
             -L "$label" \
             -l "\\EFI\\$(basename "$(dirname "$kernel")")\\$(basename "$kernel")" \
@@ -1613,9 +1666,12 @@ pz_boot_efi_stub_entry() {
 }
 
 pz_boot_efi_stub_remove() {
-    local entry_id="${1:-}"
+    local entry_id="${1:-}" num
     if command -v efibootmgr >/dev/null 2>&1; then
-        efibootmgr -B -L "PhaseZero Windows VM" 2>/dev/null || true
+        # `-B -L` não apaga por rótulo; precisa do número de cada entrada.
+        for num in $(pz_boot_efi_bootnums_by_label "PhaseZero Windows VM"); do
+            efibootmgr -q -b "$num" -B 2>/dev/null || pz_warn "não foi possível remover Boot$num"
+        done
     fi
     pz_info "EFI stub NVRAM entry removed"
 }

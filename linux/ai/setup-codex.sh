@@ -35,10 +35,19 @@ install_codex() {
 }
 
 link_managed_bin() {
-    local command_name="$1" source_path="$2"
+    local command_name="$1" source_path="$2" target
     [ -x "$source_path" ] || return 0
     mkdir -p "$LOCAL_BIN"
-    ln -sfn "$source_path" "$LOCAL_BIN/$command_name"
+    target="$LOCAL_BIN/$command_name"
+    # Só reaponta um link que já era nosso (prefixo npm do PhaseZero). Um
+    # binário do instalador oficial ou um link de outra origem é preservado.
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        if [ ! -L "$target" ] || [[ "$(readlink -f "$target" 2>/dev/null)" != "$NPM_PREFIX"/* ]]; then
+            pz_warn "$target pertence a outra instalação; não foi substituído"
+            return 0
+        fi
+    fi
+    ln -sfn "$source_path" "$target"
     pz_info "linked $command_name into $LOCAL_BIN"
 }
 
@@ -66,7 +75,7 @@ status_json() {
         --argjson daemon "$daemon" --argjson coherent "$coherent" --argjson mismatch "$mismatch" \
         '{tool:"codex",installed:($version != ""),version:$version,path:$path,minimumVersion:$min,
           supported:$supported,daemon:$daemon,coherent:$coherent,requiresAttention:$mismatch,
-          planned:(if $mismatch then ["codex update", "codex app-server daemon update"] elif $keep then ["keep existing codex"] else ["npm install -g " + $pkg, "link ~/.local/bin/codex"] end),
+          planned:(if $mismatch then ["codex update", "codex app-server daemon update"] elif $keep then ["keep existing codex"] elif $version != "" then ["codex update (canal existente)"] else ["npm install -g " + $pkg, "link ~/.local/bin/codex"] end),
           next:(if $mismatch then "linux/pz updates apply codex" elif $supported and $coherent == null then "linux/pz ai codex status" elif $supported then "" else "linux/pz ai setup codex" end)}'
 }
 
@@ -95,6 +104,16 @@ setup() {
             pz_warn "Codex background service differs from CLI; run: $PZ_ROOT/linux/pz updates apply codex when active tasks can be interrupted"
         fi
         return 0
+    fi
+    if [ -n "$version" ] && [ "${PZ_CODEX_FORCE:-0}" != 1 ]; then
+        # Codex antigo já existe: atualizar pelo próprio canal evita uma
+        # segunda instalação npm competindo no PATH.
+        pz_info "Codex CLI $version below $CODEX_MIN_VERSION; updating through its own installer"
+        if timeout 600 codex update; then
+            return 0
+        fi
+        pz_error "codex update failed; existing install preserved. Update it with the tool that installed it."
+        return 1
     fi
     pz_check_deps npm
     install_codex

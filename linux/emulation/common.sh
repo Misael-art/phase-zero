@@ -524,3 +524,58 @@ Allowed:
   linux/pz emulation switch import-firmware /path/to/local/switch-firmware
 EOF
 }
+
+# --- coexistência com instalações de terceiros ------------------------------
+
+# Retorna 0 (pule a instalação) quando o app já existe por outro canal e não
+# foi o PhaseZero que o instalou (sem arquivo de estado próprio).
+pz_emulation_foreign_install() {
+    local label="$1" state="$2" hit=""
+    shift 2
+    [ -f "$state" ] && return 1
+    [ "${PZ_ALLOW_DUPLICATE:-0}" = "1" ] && return 1
+    hit="$(pz_app_already_installed "$@")" || return 1
+    pz_info "$label já instalado fora do PhaseZero (${hit//$'\t'/: }); usando a instalação existente"
+    return 0
+}
+
+# ln -sfn que não apaga um arquivo real de outro instalador (EmuDeck também
+# usa ~/Applications/Eden.AppImage, por exemplo).
+pz_emulation_safe_link() {
+    local source="$1" link="$2"
+    if [ -e "$link" ] && [ ! -L "$link" ]; then
+        pz_warn "$link é um arquivo de outra instalação; mantido sem alteração"
+        return 0
+    fi
+    ln -sfn "$source" "$link"
+}
+
+# Verdadeiro quando o caminho de chaves/firmware é um link do usuário para um
+# local próprio com conteúdo: o PhaseZero não troca a escolha dele.
+pz_emulation_user_link() {
+    local path="$1" target central="$PZ_EMULATION_ROOT/firmware/switch"
+    [ -L "$path" ] || return 1
+    target="$(readlink -f "$path" 2>/dev/null || true)"
+    [ -n "$target" ] && [ -d "$target" ] && [ -n "$(ls -A "$target" 2>/dev/null)" ] || return 1
+    case "$target" in
+        "$(readlink -f "$central" 2>/dev/null || echo "$central")"/*) return 1 ;;
+        *[Rr]yujinx*) return 1 ;;
+    esac
+    return 0
+}
+
+# URL do AppImage de um release do GitHub para a arquitetura DESTE host.
+# Releases com várias arquiteturas listam arm64 antes de x86_64; pegar o
+# primeiro baixava um binário que não executa (EmuDeck 2.7.1).
+pz_emulation_release_appimage_url() {
+    local api="$1" arch other
+    case "$(uname -m)" in
+        x86_64|amd64) arch='x86_64|amd64|x64'; other='arm64|aarch64|armhf|armv7' ;;
+        aarch64|arm64) arch='arm64|aarch64'; other='x86_64|amd64|x64|armhf|armv7' ;;
+        *) arch='.'; other='^$' ;;
+    esac
+    curl -fsSL "$api" | jq -r --arg arch "$arch" --arg other "$other" '
+        [.assets[]? | select(.name | test("AppImage$"))] as $all
+        | ([$all[] | select(.name | test($arch; "i"))] + [$all[] | select(.name | test($other; "i") | not)])
+        | map(.browser_download_url) | first // empty'
+}

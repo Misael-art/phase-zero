@@ -13,6 +13,7 @@ from .catalog import (
     BY_ID,
     CAPABILITIES,
     GROUPS,
+    PRESENCE_BINARIES,
     PROFILES,
     ROLLBACK_LABELS,
     compatibility,
@@ -87,6 +88,39 @@ def _clean_output(value: str) -> str:
     return value[-MAX_OUTPUT_CHARS:]
 
 
+# Última presença externa observada por capability (preenchida por
+# _select_source). Evita mudar a assinatura usada por plano/remoção/verify.
+_EXTERNAL: dict[str, str] = {}
+
+
+def _external_presence(capability: CapabilitySpec, provider: Provider) -> str | None:
+    """Equivalent install from another channel, or None.
+
+    Every source of the capability is asked (not only the host's preferred
+    one): a system-wide Flatpak blocks a native install of the same app and
+    vice versa. Then known executables from AUR, meta-packages, AppImages or
+    upstream scripts. Both probes live on the provider so tests inject them.
+    Presence alone never grants removal: removal still requires PhaseZero's
+    own install history.
+    """
+    probe = getattr(provider, "external", None)
+    if callable(probe):
+        for source in capability.sources:
+            found = probe(source)
+            if found:
+                return found
+    binaries = getattr(provider, "external_binaries", None)
+    if callable(binaries):
+        found = binaries(PRESENCE_BINARIES.get(capability.id, ()))
+        if found:
+            return found
+    return None
+
+
+def external_presence(capability_id: str) -> str | None:
+    return _EXTERNAL.get(capability_id)
+
+
 def _select_source(
     capability: CapabilitySpec,
     facts: HostFacts,
@@ -94,6 +128,7 @@ def _select_source(
     *,
     require_available: bool,
 ) -> tuple[SourceSpec | None, bool | None]:
+    _EXTERNAL.pop(capability.id, None)
     candidates = sources_for(capability, facts)
     for source in candidates:
         present = provider.installed(source)
@@ -103,6 +138,12 @@ def _select_source(
             # Stop on uncertainty. Trying another source could lead to a
             # duplicate install when the first package is already present.
             return source, None
+    external = _external_presence(capability, provider) if candidates else None
+    if external:
+        # Presente por outro canal: instalar duplicaria (ou conflitaria em
+        # arquivos, como keepassxc embutido num meta-pacote do BigLinux).
+        _EXTERNAL[capability.id] = external
+        return candidates[0], True
     if require_available:
         for source in candidates:
             if provider.available(source):
@@ -152,6 +193,7 @@ def catalog_payload(
                 "absent" if include_status else "unknown"
             ),
             "source": _source_dict(source),
+            "external": _EXTERNAL.get(capability.id) if include_status and applicable else None,
             "requires": list(capability.requires),
             "conflicts": list(capability.conflicts),
             "risk": capability.risk,
@@ -325,10 +367,13 @@ def create_plan(
             capability, host, package_provider, require_available=True,
         ) if applicable else (None, False)
         available = source is not None
+        external = _EXTERNAL.get(capability.id)
         status = (
             "installed" if installed is True and recipe_active else
             "configure" if installed is True else "install"
         )
+        if external and installed is True:
+            reason = f"já instalado fora do PhaseZero: {external}; nada será instalado"
         command = None
         if not applicable:
             status = "blocked"
@@ -363,6 +408,7 @@ def create_plan(
             "title": capability.title,
             "status": status,
             "reason": reason,
+            "external": external,
             "source": _source_dict(source),
             "command": _command_dict(command) if command else None,
             "spaceEstimate": space_estimate,
@@ -961,13 +1007,18 @@ def verify_removal(
         source, installed = _select_source(
             capability, host, package_provider, require_available=False,
         )
-        checks.append({
+        external = _EXTERNAL.get(capability_id)
+        check = {
             "capabilityId": capability_id,
-            "removed": not (source is not None and installed is not False),
+            # Cópia de outro canal não é a que o PhaseZero removeu.
+            "removed": bool(external) or not (source is not None and installed is not False),
             "installationState": (
                 "unknown" if installed is None else "present" if installed else "absent"
             ),
-        })
+        }
+        if external:
+            check["remainingExternal"] = external
+        checks.append(check)
     return {
         "schema": SCHEMA,
         "ok": all(check["removed"] for check in checks),

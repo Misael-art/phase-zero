@@ -18,9 +18,7 @@ HYDRA_EMULATORS_CONFIG="$HYDRA_CONFIG_DIR/emulators_config.json"
 STEAM_ROOT="${STEAM_ROOT:-$HOME/.local/share/Steam}"
 
 resolve_hydra_url() {
-    curl -fsSL "$HYDRA_RELEASE_API" |
-        jq -r '.assets[]? | select(.name | test("AppImage$")) | .browser_download_url' |
-        head -1
+    pz_emulation_release_appimage_url "$HYDRA_RELEASE_API"
 }
 
 write_hydra_policy() {
@@ -229,6 +227,10 @@ EOF
 }
 
 install_hydra() {
+    if pz_emulation_foreign_install Hydra "$PZ_EMULATION_STATE/hydra.json" \
+        --bin hydralauncher --appimage 'Hydra*.AppImage' --desktop-exec hydralauncher; then
+        return 0
+    fi
     local url
     pz_emulation_ensure_layout
     url="$(resolve_hydra_url)"

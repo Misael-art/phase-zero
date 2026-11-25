@@ -20,7 +20,10 @@ set -euo pipefail
 [ -n "${PZ_DESKTOP_SH_LOADED:-}" ] && return 0
 PZ_DESKTOP_SH_LOADED=1
 
-PZ_APPLICATIONS_DIR="${PZ_APPLICATIONS_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/applications}"
+# Pasta de lançadores .desktop. Nome próprio: PZ_APPLICATIONS_DIR é a pasta
+# de AppImages (~/Applications) no restante do projeto; reutilizar o nome
+# aqui fazia a emulação baixar AppImages para dentro do menu.
+PZ_DESKTOP_ENTRIES_DIR="${PZ_DESKTOP_ENTRIES_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/applications}"
 PZ_MENU_DIRTY_FLAG="${PZ_MENU_DIRTY_FLAG:-$PZ_STATE/desktop-menu/dirty}"
 
 # --- 1. agrupamento --------------------------------------------------------
@@ -97,7 +100,7 @@ pz_desktop_normalize_exec() {
 pz_desktop_find_foreign() {
     local name="${1:-}" exec_hint="${2:-}" dir file values entry_name entry_exec
     local -a dirs=()
-    dirs+=("$PZ_APPLICATIONS_DIR")
+    dirs+=("$PZ_DESKTOP_ENTRIES_DIR")
     dirs+=("/usr/share/applications")
     dirs+=("/var/lib/flatpak/exports/share/applications")
     dirs+=("${XDG_DATA_HOME:-$HOME/.local/share}/flatpak/exports/share/applications")
@@ -151,7 +154,8 @@ pz_app_already_installed() {
     done
 
     if [ -n "$pkg" ] && command -v pacman >/dev/null 2>&1; then
-        if pacman -Q "$pkg" >/dev/null 2>&1; then
+        # -T resolve `provides` (ex.: claude-desktop-bin fornece claude-desktop).
+        if LC_ALL=C pacman -T "$pkg" >/dev/null 2>&1; then
             printf 'pacman\t%s\n' "$pkg"
             return 0
         fi
@@ -167,17 +171,23 @@ pz_app_already_installed() {
     if [ -n "$bin" ]; then
         local resolved
         resolved="$(command -v "$bin" 2>/dev/null || true)"
-        # binário que É nosso wrapper não conta como instalação de terceiro
+        # Nosso wrapper, ou um lançador cujo alvo sumiu, não é instalação de
+        # terceiro (presence.live_executable aplica a mesma regra).
         case "$resolved" in
             "") ;;
             *"/.local/bin/phasezero-"*) ;;
-            *) printf 'binary\t%s\n' "$resolved"; return 0 ;;
+            *)
+                if PYTHONPATH="$PZ_ROOT" python3 -c 'import sys; from linux.capabilities.presence import live_executable as l; sys.exit(0 if l(sys.argv[1]) else 1)' "$resolved" 2>/dev/null; then
+                    printf 'binary\t%s\n' "$resolved"; return 0
+                fi
+                ;;
         esac
     fi
 
     if [ -n "$appimage" ]; then
         local found
-        found="$(find "$HOME/Applications" -maxdepth 1 -type f -iname "$appimage" 2>/dev/null | head -1 || true)"
+        found="$(find "$HOME/Applications" "$HOME/AppImages" "$HOME/.local/bin" "$HOME/.local/opt" \
+            -maxdepth 2 -type f -iname "$appimage" 2>/dev/null | head -1 || true)"
         if [ -n "$found" ]; then
             printf 'appimage\t%s\n' "$found"
             return 0

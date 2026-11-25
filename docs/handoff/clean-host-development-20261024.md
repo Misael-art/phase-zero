@@ -1,5 +1,62 @@
 # Continuidade PhaseZero em host limpo — 2026-10-24
 
+## Coexistência com instalações existentes e identidade visual — 24/11/2026
+
+Auditoria item a item no host `deck` (Manjaro/BigLinux, Steam Deck, pt-BR),
+sem instalar pacotes nem aplicar perfis. Achados e correções:
+
+- Catálogo (84 itens): sondas dependiam de mensagens em inglês; em pt-BR 71
+  itens ficavam "desconhecido". `LC_ALL=C` nas sondas. Presença externa
+  (`provides`, Flatpak de sistema, binário vivo) via `Provider.external` /
+  `external_binaries`; plano marca "já instalado fora do PhaseZero" e não
+  instala; remoção segue exigindo histórico próprio. Neste host: keepassxc
+  (embutido em `bigcontrolcenter-base`) e Brave (`brave-browser`). O wrapper
+  `/usr/local/bin/code` do BigLinux aponta para `/usr/bin/code` inexistente e
+  não conta como instalação.
+- Resolvedor único `linux/capabilities/presence.py` + `equivalents.json`,
+  usado por `pz_run_profile`, `pz_pkg_install` e `pz_app_already_installed`
+  (este existia sem chamadas). Perfis deixam de instalar `retroarch` sobre o
+  Flatpak, `keepassxc` com conflito de arquivo etc. `PZ_ALLOW_DUPLICATE=1`
+  mantém a saída explícita.
+- Claude Desktop/Qwen: instalação alheia (aqui `~/.local/opt/claude-desktop`
+  + `com.anthropic.Claude.desktop` de outro projeto) vira `externalInstall` e
+  a UI esconde Instalar/Atualizar.
+- Emulação: `PZ_APPLICATIONS_DIR` era sobrescrito por `desktop.sh` (AppImages
+  no diretório do menu) → `desktop.sh` usa `PZ_DESKTOP_ENTRIES_DIR`. Guard de
+  instalação alheia, link que não apaga arquivo real, links de chaves do
+  usuário preservados, AppImage pela arquitetura do host (EmuDeck 2.7.1
+  oferecia arm64 primeiro).
+- Codex antigo: `codex update` em vez de npm paralelo; link só se já era nosso.
+- MCP: registro de posse `ai-mcp-owned.json`; repair não apaga homônimos do
+  usuário; escrita preserva symlink. Claude Code via `claude mcp add-json
+  --scope user` (caminho antigo nunca era lido); Cursor em `~/.cursor/mcp.json`.
+- Hooks Claude com `$VAR` não são mais podados como órfãos.
+- Desempenho: `pz capabilities status` lia pacman/Flatpak item a item (~8 s, limite da UI 15 s); agora lê o banco uma vez (~0,2 s). `verify-removal` ignora cópia de outro canal.
+- Boot: entrada NVRAM recriada por número (antes acumulava a cada execução);
+  remoção do rEFInd usava ESP vazio; desinstalador lista todos os itens.
+- Links: 181 URLs verificadas. Corrigidos repositórios de plugins Decky/temas
+  e documentação do watcher. `unlimited-ai-proxy` saiu (upstream 404). Citron
+  sem fonte oficial alcançável (domínio sem DNS, espelho GitHub HTTP 451):
+  mensagem explícita, nada instalado. Eden v0.2.1 é a release atual.
+- Visual: tokens claro/escuro grafite + teal (contraste AA verificado), ícone
+  Ø e 37 ícones embutidos refeitos; os antigos tinham `{muted}`/`{accent}`
+  literais e apareciam pretos.
+
+Validação no host (Python 3.14.7/pytest do ambiente já provisionado do
+Fôlego, HOME/XDG isolados, TMPDIR em disco): suíte Python completa em blocos
+com pausa térmica (>85 °C) — 1.794 passaram, 0 falhas após corrigir o stub
+`pacman -T` do `conftest.py`; `tests/test_coexistence.py` novo. Shell:
+linux-ai-claude/codex/codexbar/desktop/proxies, linux-boot-recovery,
+linux-emulation*, linux-iso-boot, linux-qwen-desktop, linux-shortcuts,
+linux-steamdeck-desktop-services, linux-audit-doctor, linux-doctor e parte MCP
+de linux-ai verdes. Dry-run real de `safe-base`/`emulation-linux` pulou
+keepassxc e retroarch. Pré-existentes e não corrigidos
+aqui: `tests/linux-emulation-shared.sh` (cache de capas do Dolphin) e o passo
+OMO de `tests/linux-ai.sh` (host sem node/npm). Teardown do pytest com Qt
+offscreen ocasionalmente encerra com SIGSEGV após todos passarem, também no
+baseline. Não homologado: instalação real de pacotes/Flatpak, escrita em
+NVRAM/GRUB e cliente Claude Code lendo MCP (exigem admin ou alteram o host).
+
 ## Preferência de microfone após deriva de perfil — 06/11/2026
 
 Código `154225b3e4b7dcf4a21331e297eefe893a08b588` na branch de

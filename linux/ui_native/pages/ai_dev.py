@@ -622,11 +622,13 @@ class AiDevPage(BasePage):
             self.codex_update.setEnabled(not running and getattr(self, "_codex_mismatch", False))
         if self.codex_desktop_update is not None:
             self.codex_desktop_update.setEnabled(not running and getattr(self, "_codex_desktop_ready", False))
+        external = getattr(self, "_claude_external", False)
         if self.desktop_install is not None:
-            self.desktop_install.setVisible(installed is False)
-            self.desktop_install.setEnabled(not running and installed is False)
+            # Já existe por outro canal: não oferecer segunda cópia.
+            self.desktop_install.setVisible(installed is False and not external)
+            self.desktop_install.setEnabled(not running and installed is False and not external)
         if self.desktop_update is not None:
-            self.desktop_update.setVisible(installed is not False)
+            self.desktop_update.setVisible(installed is not False and not external)
             self.desktop_update.setEnabled(not running and installed is True)
         self.desktop_check.setEnabled(not running and installed is True and not self.status_loader.running(_CLAUDE_CHECK_ID))
         self.desktop_auto.setEnabled(not running and installed is True and self._updates_on is not None)
@@ -674,11 +676,17 @@ class AiDevPage(BasePage):
                                   f"● Codex Desktop {desktop_version} · estado da atualização desconhecido", "warning")
         claude = payload.get("claudeDesktop") if isinstance(payload.get("claudeDesktop"), dict) else {}
         installed = claude.get("installed") if isinstance(claude.get("installed"), bool) else None
+        external = str(claude.get("externalInstall") or "")
         self._claude_installed = installed
+        self._claude_external = bool(external)
         enabled = (payload.get("updater") or {}).get("timerEnabled")
         self._updates_on = enabled if isinstance(enabled, bool) else None
         if installed is None:
             self._set_label_state(self.desktop_state, "● Instalação desconhecida · use Atualizar para verificar", "warning")
+        elif not installed and external:
+            self._set_label_state(self.desktop_state,
+                                  "● Claude Desktop já instalado fora do PhaseZero · atualize pelo canal que o instalou",
+                                  "success")
         elif not installed:
             self._set_label_state(self.desktop_state, "● Claude Desktop não instalado", "info")
         elif claude.get("launcherManaged") is False:

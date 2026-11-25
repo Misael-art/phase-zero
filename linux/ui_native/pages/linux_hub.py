@@ -365,6 +365,7 @@ class LinuxHubPage(BasePage):
             if item.kind == "capability":
                 card.set_available(item.available, item.reason)
                 card.set_state(installed=item.installed)
+                card.set_external(item.external)
             elif item.installed is not None:
                 card.set_state(applied=item.installed)
         self._apply_filters()

@@ -457,15 +457,22 @@ class HubAppCard(QFrame):
 
         chips = QHBoxLayout()
         chips.setSpacing(6)
+        self._rollback_chips: list[HubChip] = []
         for label in item.rollback_labels:
             state = "success" if item.reversible else "warning"
-            chips.addWidget(HubChip(label, state, f"Como isto é desfeito: {label.lower()}."))
+            chip = HubChip(label, state, f"Como isto é desfeito: {label.lower()}.")
+            self._rollback_chips.append(chip)
+            chips.addWidget(chip)
         if item.reboot == "required":
             chips.addWidget(HubChip("Requer reiniciar", "warning", "Só passa a valer após reiniciar."))
         elif item.reboot == "recommended":
             chips.addWidget(HubChip("Reinício recomendado", "info", "Funciona melhor após reiniciar."))
         if item.risk in {"elevated", "high"}:
             chips.addWidget(HubChip("Pede privilégio", "warning", "Precisa de elevação administrativa."))
+        self._external = ""
+        self.external_chip = HubChip("Instalado fora do PhaseZero", "info")
+        self.external_chip.setVisible(False)
+        chips.addWidget(self.external_chip)
         chips.addStretch(1)
         center.addLayout(chips)
 
@@ -503,6 +510,7 @@ class HubAppCard(QFrame):
 
         if not item.available:
             self.set_available(False, item.reason)
+        self.set_external(getattr(item, "external", ""))
 
     def _switch_block(self, caption: str, kind: str) -> QWidget:
         # Legenda ao lado do switch, não acima: o switch já escreve
@@ -551,6 +559,7 @@ class HubAppCard(QFrame):
         unknown = value is None
         switch.setEnabled(not unknown and self.property("available") is not False)
         switch.setToolTip("Estado ainda não verificado" if unknown else "")
+        self._lock_external()
 
     def set_state(self, *, installed: bool | None = None, applied: bool | None = None) -> None:
         if self.install_switch is not None:
@@ -585,11 +594,33 @@ class HubAppCard(QFrame):
         if reason:
             self.reason_label.setText(reason)
         self.reason_label.setVisible(bool(reason) and not available)
+        self._lock_external()
+
+    def set_external(self, origin: str) -> None:
+        """App já presente por outro canal: mostra, mas não instala/remove."""
+        self._external = origin or ""
+        tip = (
+            f"Já instalado fora do PhaseZero ({self._external}). "
+            "Para remover ou atualizar, use quem o instalou."
+        ) if self._external else ""
+        self.external_chip.setVisible(bool(self._external))
+        # Quem instalou é quem desfaz: o meio de reversão do PhaseZero não vale.
+        for chip in getattr(self, "_rollback_chips", ()):
+            chip.setVisible(not self._external)
+        self.external_chip.setToolTip(tip)
+        self.external_chip.setAccessibleDescription(tip)
+        self._lock_external()
+
+    def _lock_external(self) -> None:
+        if getattr(self, "_external", "") and self.install_switch is not None:
+            self.install_switch.setEnabled(False)
+            self.install_switch.setToolTip(self.external_chip.toolTip())
 
     def set_busy(self, busy: bool) -> None:
         for switch in (self.install_switch, self.tune_switch):
             if switch is not None:
                 switch.setEnabled(not busy and self.property("available") is not False)
+        self._lock_external()
 
 
 class StatusPill(QFrame):

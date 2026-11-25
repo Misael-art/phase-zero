@@ -1,17 +1,17 @@
 /* PhaseZero UI - Steam Deck 1280x800 Dashboard */
 :root {
-  --bg: #0f0f14;
-  --surface: #1a1a24;
-  --surface2: #24243a;
-  --border: #2a2a44;
-  --text: #e0e0f0;
-  --text-dim: #9090b0;
-  --accent: #6c5ce7;
-  --accent-hover: #7d6ff0;
+  --bg: #17191b;
+  --surface: #212326;
+  --surface2: #2a2c30;
+  --border: #34373c;
+  --text: #eef1f2;
+  --text-dim: #a3aaad;
+  --accent: #2cc7b0;
+  --accent-hover: #45d6c0;
   --ok: #00e676;
   --warn: #ffc107;
   --blocked: #ff5252;
-  --info: #64b5f6;
+  --info: #4fd1c5;
   --font: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -82,7 +82,7 @@ tr:hover td { background: rgba(108,92,231,.05); }
   font-family: var(--font); font-size: .8rem; cursor: pointer;
   transition: all .15s;
 }
-.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary { background: var(--accent); color: #06201c; }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-secondary { background: var(--surface2); color: var(--text); }
 .btn-secondary:hover { background: var(--border); }

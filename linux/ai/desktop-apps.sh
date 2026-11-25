@@ -166,8 +166,25 @@ EOF
     chmod 0644 "$APPLICATIONS_DIR/qwen-code-desktop.desktop"
 }
 
+# Instalação gerenciada pelo PhaseZero só quando nenhum outro canal já
+# entrega o app (pacote/AUR, Flatpak, AppImage, script de outro projeto).
+# Retorna 0 quando outro canal já tem o app e a instalação deve ser pulada.
+foreign_desktop_app() {
+    local label="$1"; shift
+    local hit=""
+    hit="$(pz_app_already_installed "$@")" || return 1
+    [ "${PZ_ALLOW_DUPLICATE:-0}" = "1" ] && return 1
+    pz_info "$label já instalado fora do PhaseZero (${hit//$'\t'/: }); nada será instalado. Atualize/remova pelo canal que o instalou."
+    return 0
+}
+
 install_qwen() {
     pz_check_deps curl jq sha256sum
+    if [ ! -x "$QWEN_ROOT/current/Qwen-Code-Desktop-x86_64.AppImage" ] &&
+        foreign_desktop_app "Qwen Code Desktop" --name "Qwen Code" --bin qwen-code-desktop \
+            --pacman qwen-code-desktop --appimage 'Qwen-Code-Desktop*.AppImage' --desktop-exec qwen-code-desktop; then
+        return 0
+    fi
     [ "$(uname -m)" = "x86_64" ] || {
         pz_error "Qwen Code Desktop official AppImage supports x86_64 only"
         return 1
@@ -427,6 +444,12 @@ prune_claude_versions() {
 }
 
 install_claude() {
+    if [ -z "$(installed_claude_version || true)" ] &&
+        foreign_desktop_app "Claude Desktop" --name Claude --bin claude-desktop \
+            --pacman claude-desktop --flatpak com.anthropic.Claude \
+            --appimage 'Claude*.AppImage' --desktop-exec claude-desktop; then
+        return 0
+    fi
     pz_check_deps bsdtar curl gpg gpgv jq sha256sum
     local work deb ar_dir extracted stage final current_link installed
     work="$(mktemp -d)"
@@ -850,7 +873,20 @@ desktop_status() {
         qwen_version="$(jq -r '.version // empty' "$QWEN_STATE" 2>/dev/null || true)"
         qwen_sha256="$(jq -r '.sha256 // empty' "$QWEN_STATE" 2>/dev/null || true)"
     fi
+    local claude_external="" qwen_external=""
+    if [ ! -x "$CLAUDE_ROOT/current/app/claude-desktop" ]; then
+        claude_external="$(pz_app_already_installed --name Claude --bin claude-desktop \
+            --pacman claude-desktop --flatpak com.anthropic.Claude --appimage 'Claude*.AppImage' \
+            --desktop-exec claude-desktop 2>/dev/null || true)"
+    fi
+    if [ ! -x "$QWEN_ROOT/current/Qwen-Code-Desktop-x86_64.AppImage" ]; then
+        qwen_external="$(pz_app_already_installed --name "Qwen Code" --bin qwen-code-desktop \
+            --pacman qwen-code-desktop --appimage 'Qwen-Code-Desktop*.AppImage' \
+            --desktop-exec qwen-code-desktop 2>/dev/null || true)"
+    fi
     jq -n \
+        --arg claudeExternal "${claude_external//$'\t'/: }" \
+        --arg qwenExternal "${qwen_external//$'\t'/: }" \
         --arg claudeVersion "$claude_version" \
         --arg claudeBinary "$CLAUDE_ROOT/current/app/claude-desktop" \
         --arg claudeLauncher "$LOCAL_BIN/claude-desktop" \
@@ -888,7 +924,8 @@ desktop_status() {
             desktopEntry: $claudeDesktopEntry,
             desktopEntryOk: $claudeDesktopEntryOk,
             source: "official-anthropic-apt",
-            userScoped: true
+            userScoped: true,
+            externalInstall: (if $claudeExternal == "" then null else $claudeExternal end)
           },
           qwenCodeDesktop: {
             installed: $qwenInstalled,
@@ -899,7 +936,8 @@ desktop_status() {
             configDir: $qwenConfigDir,
             source: "official-qwen-github-release",
             userScoped: true,
-            secretsManaged: false
+            secretsManaged: false,
+            externalInstall: (if $qwenExternal == "" then null else $qwenExternal end)
           },
           codexDesktop: {
             installedVersion: $codexInstalled,

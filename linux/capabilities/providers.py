@@ -6,9 +6,24 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 from .models import SourceSpec
 from .platform import HostFacts
+
+
+def _c_locale_env() -> dict[str, str]:
+    """Probes parse package-manager text; force untranslated messages.
+
+    On a pt-BR host `pacman -Q` says "não foi encontrado" and Flatpak says
+    "não instalado"; matching only English markers turned 71 of 84 catalog
+    items into "unknown" and blocked every switch.
+    """
+    env = dict(os.environ)
+    env["LC_ALL"] = "C"
+    env["LANG"] = "C"
+    env["LANGUAGE"] = ""
+    return env
 
 
 @dataclass(frozen=True)
@@ -31,19 +46,86 @@ class Provider:
             return self.facts.flatpak and self.facts.flathub
         return source.kind == "package" and self.facts.package_family != "unknown"
 
+    def _flatpak_apps(self, scope: str) -> set[str] | None:
+        """App IDs of one Flatpak installation, listed once per provider.
+
+        One `flatpak info` per catalog item cost ~10 s for 84 items, close
+        to the UI status budget. None when the listing itself failed.
+        """
+        cache = self.__dict__.setdefault("_flatpak_cache", {})
+        if scope not in cache:
+            listed: set[str] | None = None
+            if shutil.which("flatpak"):
+                try:
+                    result = subprocess.run(
+                        ["flatpak", "list", f"--{scope}", "--app", "--columns=application"],
+                        capture_output=True, text=True, timeout=20, check=False,
+                        env=_c_locale_env(),
+                    )
+                    if result.returncode == 0:
+                        listed = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+                except (OSError, subprocess.TimeoutExpired):
+                    listed = None
+            cache[scope] = listed
+        return cache[scope]
+
+    def _arch_db(self) -> tuple[set[str], set[str]] | None:
+        """(installed names, provided names) from pacman, read once.
+
+        One `pacman -Q`/`-T` per item reloads the whole database (~66 ms
+        each, ~8 s for the catalog). `pacman -Qq` once plus the local
+        database's %PROVIDES% gives the same answers.
+        """
+        cache = self.__dict__.setdefault("_arch_cache", {})
+        if "db" not in cache:
+            cache["db"] = None
+            if self.facts.package_family == "arch" and shutil.which("pacman"):
+                try:
+                    result = subprocess.run(
+                        ["pacman", "-Qq"], capture_output=True, text=True,
+                        timeout=30, check=False, env=_c_locale_env(),
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    result = None
+                local = Path(os.environ.get("PZ_PACMAN_LOCAL_DB", "/var/lib/pacman/local"))
+                if result is not None and result.returncode == 0 and local.is_dir():
+                    installed = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+                    provided: set[str] = set()
+                    for desc in local.glob("*/desc"):
+                        try:
+                            lines = desc.read_text(encoding="utf-8", errors="replace").splitlines()
+                        except OSError:
+                            continue
+                        if "%PROVIDES%" not in lines:
+                            continue
+                        for entry in lines[lines.index("%PROVIDES%") + 1:]:
+                            if not entry.strip():
+                                break
+                            provided.add(re.split(r"[<>=]", entry.strip(), maxsplit=1)[0])
+                    cache["db"] = (installed, provided)
+        return cache["db"]
+
     def installed(self, source: SourceSpec) -> bool | None:
         """Return package presence, absence, or unknown on probe failure.
 
         A failed package-manager query must never be treated as proof that an
         app is absent: that can prompt a duplicate install or misleading CTA.
         """
+        if source.kind == "package" and self.facts.package_family == "arch":
+            db = self._arch_db()
+            if db is not None:
+                return source.name in db[0]
+        if source.kind == "flatpak":
+            apps = self._flatpak_apps("user")
+            if apps is not None:
+                return source.name in apps
         command = self._query(source)
         if command is None:
             return None
         try:
             result = subprocess.run(
                 command, capture_output=True, text=True,
-                timeout=15, check=False,
+                timeout=15, check=False, env=_c_locale_env(),
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
@@ -58,6 +140,59 @@ class Provider:
             return False
         return None
 
+    def external(self, source: SourceSpec) -> str | None:
+        """Describe an equivalent install this exact source probe misses.
+
+        `installed()` stays exact because removal ownership depends on it.
+        This answers a different question: would installing the source
+        duplicate something the host already has? Covers packages that
+        satisfy the name through `provides` (libreoffice-still, nodejs-lts-*,
+        rustup) and Flatpaks installed system-wide.
+        """
+        try:
+            if source.kind == "flatpak":
+                apps = self._flatpak_apps("system")
+                return f"Flatpak do sistema ({source.name})" if apps and source.name in apps else None
+            if source.kind != "package" or self.facts.package_family not in source.distros:
+                return None
+            family = self.facts.package_family
+            db = self._arch_db() if family == "arch" else None
+            if db is not None:
+                installed, provided = db
+                if source.name in installed or source.name not in provided:
+                    return None
+                return f"pacote que fornece {source.name}"
+            if family == "arch" and shutil.which("pacman"):
+                result = subprocess.run(
+                    ["pacman", "-T", source.name], capture_output=True, text=True,
+                    timeout=15, check=False, env=_c_locale_env(),
+                )
+                if result.returncode != 0:
+                    return None
+                owner = subprocess.run(
+                    ["pacman", "-Qq", "--", source.name], capture_output=True, text=True,
+                    timeout=15, check=False, env=_c_locale_env(),
+                )
+                return None if owner.returncode == 0 else f"pacote que fornece {source.name}"
+            if family in {"fedora", "suse", "rpm-ostree"} and shutil.which("rpm"):
+                result = subprocess.run(
+                    ["rpm", "-q", "--whatprovides", source.name], capture_output=True,
+                    text=True, timeout=15, check=False, env=_c_locale_env(),
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return f"pacote {result.stdout.split()[0]}"
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return None
+
+    def external_binaries(self, names) -> str | None:
+        """Live executable for any of NAMES (wrappers whose target vanished
+        and PhaseZero's own launchers do not count)."""
+        from .presence import binary_presence
+
+        found = binary_presence(list(names))
+        return f"programa {found}" if found else None
+
     def available(self, source: SourceSpec) -> bool:
         if source.kind == "flatpak":
             return self.facts.flathub
@@ -67,7 +202,7 @@ class Provider:
         try:
             return subprocess.run(
                 command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                timeout=30, check=False,
+                timeout=30, check=False, env=_c_locale_env(),
             ).returncode == 0
         except (OSError, subprocess.TimeoutExpired):
             return False

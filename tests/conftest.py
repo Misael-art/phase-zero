@@ -283,7 +283,13 @@ def host_sandbox(tmp_path: Path) -> HostSandbox:
             f'  grep -qxF -- "${{2:-}}" "{installed_db}" 2>/dev/null && exit 0\n'
             "  exit 1\n"
             "fi\n"
-            "exit 0\n",
+            # pacman -T (dependência satisfeita, inclusive por provides):
+            # 0 quando presente, 127 quando não — como o pacman real.
+            + (f'if [ "${{1:-}}" = "-T" ]; then\n'
+               f'  grep -qxF -- "${{2:-}}" "{installed_db}" 2>/dev/null && exit 0\n'
+               "  exit 127\n"
+               "fi\n" if name == "pacman" else "")
+            + "exit 0\n",
             encoding="utf-8",
         )
         (stub_bin / name).chmod(0o755)

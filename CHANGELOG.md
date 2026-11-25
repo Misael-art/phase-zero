@@ -6,6 +6,21 @@ As versões seguem a data de build em `version.json`.
 ## [Unreleased]
 
 ### Corrigido
+- **Instalação por cima de apps existentes.** Catálogo, perfis e instaladores passam a consultar um resolvedor único (`linux/capabilities/presence.py`): pacote que fornece o nome (`provides`), Flatpak de usuário ou sistema, programa avulso válido e atalho `.desktop` de outro instalador contam como app presente. Nada é instalado por cima; remoção continua restrita ao que o PhaseZero instalou. Brave nativo, keepassxc embutido no BigLinux, RetroArch Flatpak e Claude Desktop de outro instalador deixam de ganhar segunda cópia.
+- **Estado "desconhecido" em host pt-BR.** Sondas de pacman/Flatpak rodam com mensagens não traduzidas; 71 de 84 itens do catálogo ficavam bloqueados como não verificados.
+- **Status do catálogo lento.** Leitura única do banco do pacman (com `provides`) e das listas Flatpak por escopo: `pz capabilities status` cai de ~8 s para ~0,2 s, longe do limite de 15 s da UI.
+- **Teste do doctor gravava no log real.** `tests/linux-doctor.sh` isola `XDG_STATE_HOME`.
+- **AppImages de emulação dentro do menu.** `desktop.sh` reutilizava `PZ_APPLICATIONS_DIR` para a pasta de atalhos; Eden/Citron/Hydra/EmuDeck baixavam para `~/.local/share/applications`. Voltam a `~/Applications`, sem apagar `Eden.AppImage`/`Citron.AppImage` reais de outro instalador nem trocar o link de chaves escolhido pelo usuário.
+- **EmuDeck baixava AppImage arm64 em x86_64.** Releases multi-arquitetura agora escolhem o binário da arquitetura do host.
+- **Codex sobrescrevia o binário oficial.** Versão antiga existente é atualizada com `codex update`; o link em `~/.local/bin` só é trocado quando já era do PhaseZero.
+- **MCP apagava servidores do usuário.** Instalar/reparar só altera entradas que o PhaseZero escreveu (registro por hash); homônimas configuradas à mão são preservadas. Escrita mantém symlink/permissões. Claude Code usa `claude mcp add-json --scope user` (o arquivo antigo `~/.config/claude/claude.json` nunca era lido); Cursor usa `~/.cursor/mcp.json`.
+- **Hooks do Claude removidos por engano.** Comandos com `$CLAUDE_PROJECT_DIR`/variáveis não são mais tratados como órfãos.
+- **Entradas de boot duplicadas.** Entrada NVRAM "PhaseZero Windows VM" é recriada em vez de acumulada, e a remoção apaga por número; remoção do rEFInd usava ESP vazio. Desinstalação lista todos os itens de boot.
+- **Links quebrados.** Repositórios de plugins Decky/temas atualizados; proxy experimental com upstream removido saiu do catálogo; Citron informa que a fonte oficial está fora do ar.
+
+### Alterado
+- **Nova identidade visual.** Grafite neutro com destaque teal nos temas claro e escuro (gate WCAG AA mantido); ícone do app redesenhado (Ø) e 37 ícones embutidos refeitos — os anteriores tinham marcadores de cor não renderizados e apareciam como quadrados pretos.
+
 - **Codex Web: "ChatGPT model 6 could not be selected and verified".** Upstream v6.1.17 falha na verificação do modelo ao reutilizar conversa retida (miuuyy/codex-chatgpt-web#956). Preparar/Atualizar passa a ligar `experimentalFreshConversationPerTurn` (chat novo por turno), com backup da configuração no journal; launcher reinicia só sem Codex do perfil aberto.
 - **Log da VM Windows inundado.** Consulta de estado deixava de dimensionar uma VM real, mas gravava o aviso de RAM mínima a cada atualização da UI. Aviso agora só aparece em planejar, instalar ou iniciar.
 - **Retenção do instalador por usuário.** Limpeza automática considera somente releases e backups com nomenclatura de versão do instalador; pastas de recuperação de outros componentes ficam preservadas.

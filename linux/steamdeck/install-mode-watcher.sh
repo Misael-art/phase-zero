@@ -19,7 +19,7 @@ mode_watcher_unit() {
     cat <<EOF
 [Unit]
 Description=PhaseZero Steam Deck mode watcher
-Documentation=https://github.com/anomalyco/PhaseZero
+Documentation=https://github.com/Misael-art/phase-zero
 After=graphical-session.target
 PartOf=graphical-session.target
 
