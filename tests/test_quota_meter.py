@@ -291,3 +291,18 @@ def test_profile_failure_drops_old_plan_and_org_metadata_invalidates_cache(env):
     assert qm.claude_profile(env, 'fixture', NOW, fail, True) == {}
     assert calls == [1]
     assert not qm.cache_file(env).with_name('quota-meter-claude-profile.json').exists()
+
+
+def test_claude_desktop_account_without_cli_login_is_listed_with_a_next_step(env):
+    (Path(env['XDG_CONFIG_HOME']) / 'Claude').mkdir(parents=True)
+    credentials = Path(env['HOME']) / '.claude/.credentials.json'
+    credentials.parent.mkdir()
+    credentials.write_text(json.dumps({'mcpOAuth': {'plugin:x|1': {'accessToken': ''}}}))
+
+    def fetch(url, headers):
+        raise AssertionError('no token, no request')
+
+    item = qm.claude_meter(env, NOW, fetch, use_cache=False)
+    assert item['id'] == 'claude:default' and item['remaining'] is None
+    assert '/login' in item['error']
+    assert any(m['provider'] == 'claude' for m in qm.collect(env, NOW, fetch))

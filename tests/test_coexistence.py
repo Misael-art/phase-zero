@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -163,3 +164,26 @@ def test_mcp_repair_preserves_user_server_with_catalog_name(tmp_path):
     servers = json.loads(target.read_text())["mcp"]
     assert servers["context7"]["command"] == ["mine"]
     assert "sentry" not in servers
+
+
+def test_broad_mcp_sync_skips_clients_absent_from_host(tmp_path):
+    env = _sandbox_env(tmp_path)
+    home = Path(env["HOME"])
+    env["PATH"] = "/usr/bin:/bin"
+    clients = ("claude", "codex", "opencode", "cursor", "zed", "zeditor", "hermes")
+    if any(shutil.which(name, path=env["PATH"]) for name in clients):
+        pytest.skip("host has an AI client in /usr/bin; presence would be real")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    env["PZ_WORKSPACE_ROOT"] = str(workspace)
+    (home / ".config/opencode").mkdir(parents=True)
+    result = _bash("bash linux/ai/mcp-manager.sh sync", env)
+    assert result.returncode == 0, result.stderr
+    assert "ai-memory" in (home / ".config/opencode/opencode.json").read_text()
+    for absent in (".cursor", ".hermes", ".codex", ".claude.json", ".config/zed", ".config/Code",
+                   ".config/Claude", ".config/ai.z.zcode"):
+        assert not (home / absent).exists(), absent
+    assert not (workspace / ".codex").exists() and not (workspace / ".vscode").exists()
+    explicit = _bash("bash linux/ai/mcp-manager.sh install ai-memory cursor", env)
+    assert explicit.returncode == 0, explicit.stderr
+    assert "ai-memory" in (home / ".cursor/mcp.json").read_text()

@@ -349,6 +349,13 @@ def claude_meter(env: dict[str, str], now: dt.datetime,
     oauth = (credentials or {}).get("claudeAiOauth") if isinstance(credentials, dict) else None
     if not isinstance(oauth, dict) or not oauth.get("accessToken"):
         clear_claude_cache(env)
+        # Claude Desktop keeps its sign-in encrypted and lends it to the Claude
+        # Code sessions it starts; that token is not readable here. Say so
+        # instead of dropping the account from the list.
+        if (env_path(env, "XDG_CONFIG_HOME", ".config") / "Claude").is_dir():
+            return meter("claude:default", "Claude (Code + Desktop)", "claude", CLAUDE_COLOR, [],
+                         error="conta do Claude Desktop não é legível fora do app; para medir aqui, "
+                               "rode claude no terminal e faça /login uma vez")
         return None
     expires = oauth.get("expiresAt")
     if isinstance(expires, (int, float)) and expires / 1000 <= now.timestamp():

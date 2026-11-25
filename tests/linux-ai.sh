@@ -49,6 +49,9 @@ export PATH="$PZ_LOCAL_BIN:$PATH"
 
 "$REPO_ROOT/linux/pz" ai status | jq -e '.schemaVersion == 1 and .runtime.node.available | type == "boolean"' >/dev/null
 "$REPO_ROOT/linux/pz" ai mcp status | jq -e '.schemaVersion == 1 and (.definitions | length) >= 1' >/dev/null
+# Broad sync writes only clients present on the host: simulate each one.
+mkdir -p "$XDG_CONFIG_HOME/Claude" "$HOME/.codex" "$PZ_WORKSPACE_ROOT/.vscode" "$XDG_CONFIG_HOME/Code/User" \
+    "$HOME/.cursor" "$XDG_CONFIG_HOME/zed" "$XDG_CONFIG_HOME/ai.z.zcode"
 "$REPO_ROOT/linux/pz" ai mcp sync >/dev/null
 test -f "$XDG_CONFIG_HOME/opencode/opencode.json"
 test -f "$HOME/.claude.json"

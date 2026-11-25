@@ -671,12 +671,38 @@ remove_zcode_target() {
     pz_info "MCP $name removed from zcode store: $ZCODE_STORE"
 }
 
+# A broad sync only touches clients that already exist on this host. Writing a
+# config for an absent client creates dot-directories (~/.cursor, ~/.hermes,
+# ~/.config/zed, ...) the user never asked for. An explicit target still writes.
+target_present() {
+    case "$1" in
+        opencode) command -v opencode >/dev/null 2>&1 || [ -d "$XDG_CONFIG/opencode" ] ;;
+        claude) command -v claude >/dev/null 2>&1 || [ -f "$CLAUDE_CONFIG" ] ;;
+        claude-desktop) [ -d "$(dirname "$CLAUDE_DESKTOP_CONFIG")" ] ;;
+        codex) command -v codex >/dev/null 2>&1 || [ -d "$(dirname "$CODEX_CONFIG")" ] ;;
+        codex-project) [ -d "$(dirname "$CODEX_PROJECT_CONFIG")" ] ;;
+        vscode) [ -d "$(dirname "$VSCODE_WORKSPACE_MCP_CONFIG")" ] ;;
+        vscode-user) [ -d "$(dirname "$VSCODE_USER_MCP_CONFIG")" ] ;;
+        cursor) command -v cursor >/dev/null 2>&1 || [ -d "$(dirname "$CURSOR_MCP_CONFIG")" ] ;;
+        zed) command -v zed >/dev/null 2>&1 || command -v zeditor >/dev/null 2>&1 || [ -d "$(dirname "$ZED_CONFIG")" ] ;;
+        zcode) [ -d "$(dirname "$ZCODE_STORE")" ] ;;
+        hermes) command -v hermes >/dev/null 2>&1 || [ -d "$(dirname "$HERMES_CONFIG")" ] ;;
+        *) return 0 ;;
+    esac
+}
+
 target_list() {
-    local target="${1:-all}"
+    local target="${1:-all}" t
     case "$target" in
         # Do not adopt or rewrite an externally installed OpenClaw during broad MCP sync.
         # Operators can still select openclaw explicitly for an intentional MCP change.
-        all) printf '%s\n' opencode claude claude-desktop codex codex-project vscode vscode-user cursor zed zcode hermes ;;
+        all)
+            for t in opencode claude claude-desktop codex codex-project vscode vscode-user cursor zed zcode hermes; do
+                if [ "${PZ_MCP_ALL_TARGETS:-0}" = 1 ] || target_present "$t"; then
+                    printf '%s\n' "$t"
+                fi
+            done
+            ;;
         opencode|claude|claude-desktop|codex|codex-project|vscode|vscode-user|copilot|cursor|zed|zcode|hermes|openclaw) printf '%s\n' "$target" ;;
         *) pz_error "unknown MCP target: $target"; return 1 ;;
     esac
